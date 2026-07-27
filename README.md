@@ -55,3 +55,7 @@ PYTHONPATH=src uv run python -m cli --apk path/to/uncrackable1.apk --justificati
 ## Reporting results back
 
 Since dynamic/integration testing only happens on this reference environment (ADR-0007), the report and logs from a run are often the only artifact the developer sees — please share the full `outputs/analysis/{hash}/` directory (or at minimum the generated report + logs) when reporting back issues or results, not just a pass/fail summary.
+
+## For the collaborator
+
+Each phase has a dedicated handoff doc under `docs/plans/handoff/phase-N-handoff.md` — what to run, what to actually check, and what to send back. Start there, not with guesswork. Latest: [`docs/plans/handoff/phase-1-handoff.md`](docs/plans/handoff/phase-1-handoff.md).

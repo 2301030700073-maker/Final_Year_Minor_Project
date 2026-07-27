@@ -66,7 +66,9 @@ Commit messages and code, including comments, read the way an engineer would nat
 
 ## Phase handoff convention
 
-A phase isn't finished until its collaborator handoff doc exists at `docs/plans/handoff/phase-N-handoff.md`. It covers: what changed, the exact commands to run in order, what to actually look for and verify (not just "run it and see"), what success looks like versus a real problem, which specific files/values are provisional and need the collaborator's real-world confirmation, and exactly what to report back. README.md's "For the collaborator" section points here. This exists because the dev/test environment split (ADR-0007) means the collaborator is the only one who can verify most of what actually matters, and a vague "let me know how it goes" wastes their time figuring out what to check.
+A phase isn't finished until its collaborator handoff doc exists at `docs/plans/handoff/phase-N-handoff.md`, **and** a verification bundle script exists (or is reused/extended) at `scripts/collect_verification_bundle.py` that the handoff doc tells the collaborator to run. The doc covers: what changed, what to actually look for and verify (not just "run it and see"), what success looks like versus a real problem, which specific files/values are provisional and need the collaborator's real-world confirmation, and how to push the results back. README.md's "For the collaborator" section points here.
+
+This exists because the dev/test environment split (ADR-0007) means the collaborator is the only one who can verify most of what actually matters, and two failure modes are both unacceptable: a vague "let me know how it goes" that wastes their time figuring out what to check, and a vague "it's all green" reply that gives nobody anything to actually verify. The bundle script exists specifically to close the second gap - a status update should mean "here's the bundle," not "trust me." **A relayed verbal confirmation is not evidence and is not sufficient to consider a phase's real-world claims (detection accuracy, bypass success) confirmed - only a pushed bundle/report is**, however good the news sounds.
 
 ## Working agreement
 

@@ -113,10 +113,12 @@ A `failed` status halts the pipeline with the full `StageResult` printed/logged 
 ## CLI shape
 
 ```
-python -m cli run --apk path/to/target.apk --justification ACADEMIC_TRAINING_TARGET [--skip-dynamic] [--device <serial>]
+python -m cli --apk path/to/target.apk --justification ACADEMIC_TRAINING_TARGET [--skip-dynamic] [--device <serial>]
 ```
 
-`--justification` is required (FR-8.1) — the CLI refuses to run without it, writing the corresponding `audit_log` entry (FR-8.2) before any analysis stage begins.
+(Typer collapses to a bare command when there's only one registered - no `run` subcommand needed while Phase 1 only has one thing to do; this un-collapses automatically if a later phase adds a second command, no restructuring required.)
+
+`--justification` is required (FR-8.1) — the CLI refuses to run without it, writing the corresponding audit log entry (FR-8.2) before any analysis stage begins (in implementation, this happens right after ingestion resolves the real APK hash, so the audit entry can reference it - ingestion itself isn't gated, since hashing/metadata extraction is identification, not analysis).
 
 ## Testing approach
 

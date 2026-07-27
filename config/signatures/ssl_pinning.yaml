@@ -1,0 +1,39 @@
+# SSL/TLS pinning signatures for Phase 1 (UnCrackable1).
+# Starter set, provisional pending the Step 0 manual spike - Step 0 also
+# needs to confirm whether UnCrackable1 implements certificate pinning
+# at all (its documented behavior is mainly root/debugger detection plus
+# an encrypted secret; a NEITHER/Inconclusive result for this category
+# is a legitimate, correct outcome, not evidence something's broken).
+
+- id: okhttp_certificate_pinner
+  category: ssl
+  weight: 0.5
+  pattern_type: class_reference
+  patterns:
+    - "okhttp3.CertificatePinner"
+  evidence_type: bytecode_class
+
+- id: custom_trustmanager_checkservertrusted
+  category: ssl
+  weight: 0.4
+  pattern_type: regex
+  patterns:
+    - 'X509TrustManager'
+    - 'checkServerTrusted'
+  evidence_type: bytecode_string
+
+- id: network_security_config_pinset
+  category: ssl
+  weight: 0.5
+  pattern_type: regex
+  patterns:
+    - "<pin-set"
+  evidence_type: resource_xml
+
+- id: certificate_pin_hash_literal
+  category: ssl
+  weight: 0.3
+  pattern_type: regex
+  patterns:
+    - 'sha256/[A-Za-z0-9+/]{20,}={0,2}'
+  evidence_type: bytecode_string

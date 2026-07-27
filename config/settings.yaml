@@ -1,0 +1,15 @@
+# Paths, thresholds, model routing (model routing unused until Phase 5+)
+
+thresholds:
+  root: 0.7
+  ssl: 0.7
+
+signatures:
+  root_detection: config/signatures/root_detection.yaml
+  ssl_pinning: config/signatures/ssl_pinning.yaml
+
+outputs:
+  apks: outputs/apks
+  analysis: outputs/analysis
+  reports: outputs/reports
+  audit_log: outputs/audit_log.jsonl

@@ -1,0 +1,48 @@
+# Root-detection signatures for Phase 1 (UnCrackable1).
+# Starter set, provisional pending the Step 0 manual spike
+# (docs/plans/research/phase0-uncrackable1-manual-findings.md) -
+# weights and patterns get corrected as data-only changes once that
+# lands, per NFR-13. Do not treat these as confirmed findings yet.
+
+- id: root_su_binary_paths
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "/system/bin/su"
+    - "/system/xbin/su"
+    - "/sbin/su"
+  evidence_type: bytecode_string
+
+- id: root_build_tags_test_keys
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "test-keys"
+  evidence_type: bytecode_string
+
+- id: root_runtime_exec_su
+  category: root
+  weight: 0.3
+  pattern_type: regex
+  patterns:
+    - 'Runtime\.getRuntime\(\)\.exec\(.*su.*\)'
+  evidence_type: bytecode_string
+
+- id: rootbeer_framework
+  category: root
+  weight: 0.5
+  pattern_type: class_reference
+  patterns:
+    - "com.scottyab.rootbeer"
+  evidence_type: bytecode_class
+
+- id: su_management_apps
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "com.noshufou.android.su"
+    - "eu.chainfire.supersu"
+  evidence_type: bytecode_string

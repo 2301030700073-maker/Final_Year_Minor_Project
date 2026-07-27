@@ -48,7 +48,7 @@ Frida requires root. Use a Google APIs (not Google Play) x86_64 system image if 
 uv run python -m cli run --apk path/to/uncrackable1.apk --justification ACADEMIC_TRAINING_TARGET
 ```
 
-`--justification` is required — the CLI will refuse to run without it (ADR-0005). Output lands in `outputs/analysis/{sha256}/`, including the generated report.
+`--justification` is required — the CLI will refuse to run without it (ADR-0005). Analysis artifacts land in `outputs/analysis/{sha256}/`; the generated report lands in `outputs/reports/`; the audit log is appended to `outputs/audit_log.jsonl`.
 
 ## Reporting results back
 

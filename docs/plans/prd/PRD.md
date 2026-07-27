@@ -28,7 +28,7 @@ Validate end-to-end against OWASP UnCrackable Level 1, 2, and 3. Evolve, once th
 
 (Full detail in `docs/plans/architecture/high-level-architecture.md`.)
 
-- **Phase 1**: one command against UnCrackable1 produces a report confirming root-detection and SSL-pinning both detected (with file/line evidence) and both bypassed (with programmatic, not eyeballed, confirmation) — fully automated, no mocks, no placeholders.
+- **Phase 1**: one command against UnCrackable1 produces a report where whichever protections a manual spike (Phase 0) empirically confirms are actually present in the app are detected with file/line evidence and bypassed with programmatic, not eyeballed, confirmation — fully automated, no mocks, no placeholders. UnCrackable1's exact composition (root/debugger detection is near-certain; whether it implements real certificate pinning is not yet confirmed) is verified empirically, not assumed — a category that turns out absent correctly reports `NEITHER`/`Inconclusive` for it, which is a pass, not a failure (ADR-0006).
 - **Phase 2**: the same pipeline, extended only by added signature/script/success-check data (not rewritten orchestration logic), handles UnCrackable2's native/JNI-based pinning.
 - **Phase 3**: further extended to handle UnCrackable3's anti-Frida/anti-instrumentation detection, including explicitly handling "app self-terminated because it detected instrumentation" as a first-class outcome.
 - **Phase 4**: SQLite-backed, unit-tested, calibration-instrumented (real precision/recall numbers from accumulated runs), with an honest, explicit limitations section in every report.

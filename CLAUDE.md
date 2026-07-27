@@ -66,4 +66,4 @@ Commit messages and code, including comments, read the way an engineer would nat
 
 ## Working agreement
 
-This project runs through the standard cycle: research/brainstorm → spec → plan → implement → collaborator tests on reference hardware → feedback → iterate. Don't skip the spec/plan steps for "just this one small thing" — see `docs/adr/` for why that discipline was chosen deliberately over moving fast.
+This project runs through the standard cycle: research/brainstorm → spec → plan → implement → collaborator tests on reference hardware → feedback → iterate. Don't skip the spec/plan steps for "just this one small thing" — see `docs/plans/adr/` for why that discipline was chosen deliberately over moving fast.

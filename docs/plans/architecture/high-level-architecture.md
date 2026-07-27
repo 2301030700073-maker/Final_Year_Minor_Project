@@ -15,19 +15,19 @@ Nothing downstream — reports, confidence scores, the calibration corpus, the t
 
 ## Authorization and audit (cross-cutting, present from Phase 1)
 
-Every invocation requires `--justification` (`OWN_APP` / `CTF` / `AUTHORIZED_ENGAGEMENT:<id>` / `ACADEMIC_TRAINING_TARGET`; defaults to the last for UnCrackable1-3 runs). Every run writes an immutable `audit_log` record: timestamp, APK hash, justification, operator identity, tool version, and the exact git commit hash of the codebase at run time — the commit hash doubles as a reproducibility anchor. Append-only, never edited or deleted. See ADR-0005.
+Every invocation requires `--justification` (`OWN_APP` / `CTF` / `AUTHORIZED_ENGAGEMENT:<id>` / `ACADEMIC_TRAINING_TARGET`) — there is no default; the CLI refuses to run without an explicit value, including for UnCrackable1-3 runs. Every run writes an immutable audit record: timestamp, APK hash, justification, operator identity, tool version, and the exact git commit hash of the codebase at run time — the commit hash doubles as a reproducibility anchor. Append-only, never edited or deleted. Recorded as a flat JSONL file from Phase 1 onward; migrated into a SQL `audit_log` table when Phase 4 introduces SQLite (see below). See ADR-0005.
 
 ## Data model
 
-On top of the baseline `projects / applications / analyses / findings / evidence / logs / reports` tables:
+On top of the baseline `projects / applications / analyses / findings / evidence / logs / reports` tables, all part of the SQLite schema introduced at Phase 4 (Phase 1-3 storage is flat JSON, not a database — see `low-level-design-core-phases-1-4.md`):
 
-- `hypotheses` — class/method/symbol, category, hook point, predicted indicator, model + prompt version, confidence, rationale, status (proposed/verified/rejected). [Phase 6]
-- `bypass_techniques` — name, category, script + hash, provenance (source analysis, generating model, verifying run), status (candidate/trusted/rejected), human reviewer + timestamp. [Phase 7]
-- `calibration_runs` — per-category predicted confidence vs. empirical outcome, tied to an eval-set version. [Phase 1 instrumentation, Phase 4 formalized]
-- `audit_log` — as described above. [Phase 1]
+- `hypotheses` — class/method/symbol, category, hook point, predicted indicator, model + prompt version, confidence, rationale, status (proposed/verified/rejected). [populated from Phase 6]
+- `bypass_techniques` — name, category, script + hash, provenance (source analysis, generating model, verifying run), status (candidate/trusted/rejected), human reviewer + timestamp. [populated from Phase 7]
+- `calibration_runs` — per-category predicted confidence vs. empirical outcome, tied to an eval-set version. [recorded as flat JSON from Phase 1, migrated here at Phase 4]
+- `audit_log` — as described above. [recorded as a flat JSONL file from Phase 1, migrated here at Phase 4]
 - `knowledge_corpus` — indexed documents (MASTG techniques, prior findings, trusted technique library) with a corpus version, so every retrieval is reproducible to "which knowledge snapshot produced this." [Phase 5]
 
-These tables exist in the schema from Phase 1 — empty until their owning phase populates them. An unpopulated table is not a placeholder implementation; a fabricated row in one would be.
+The full schema — baseline tables plus all of the above — exists from Phase 4 onward; before that, everything is flat JSON/JSONL, migrated wholesale at that point. An unpopulated table is not a placeholder implementation; a fabricated row in one would be.
 
 ## Phases, in dependency order
 

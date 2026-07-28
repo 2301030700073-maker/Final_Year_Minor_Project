@@ -5,9 +5,8 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import frida
-
 from common import Action, StageResult
+from dynamic.device import setup_frida_connection
 
 SCRIPT_DIR = Path(__file__).parent / "scripts"
 
@@ -19,7 +18,7 @@ SCRIPTS_BY_ACTION = {
 
 
 def attach(device_serial: str, package_name: str):
-    device = frida.get_device(device_serial)
+    device = setup_frida_connection(device_serial)
     pid = device.spawn([package_name])
     session = device.attach(pid)
     return device, session, pid

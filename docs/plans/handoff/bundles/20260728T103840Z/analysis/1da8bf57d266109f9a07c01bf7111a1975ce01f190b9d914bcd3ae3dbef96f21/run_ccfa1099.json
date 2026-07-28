@@ -1,0 +1,112 @@
+{
+  "classification": {
+    "action": "NEITHER",
+    "root": {
+      "confidence": 0.2,
+      "detected": false,
+      "evidence": [
+        {
+          "signature_id": "root_build_tags_test_keys",
+          "file": "sources/sg/vantagepoint/a/c.java",
+          "line_or_offset": 19,
+          "matched_text": "test-keys"
+        }
+      ]
+    },
+    "ssl": {
+      "confidence": 0.0,
+      "detected": false,
+      "evidence": []
+    },
+    "threshold": 0.7
+  },
+  "verification": null,
+  "correlation": null,
+  "stage_results": [
+    {
+      "stage": "ingest",
+      "status": "success",
+      "evidence": {
+        "hashes": {
+          "sha256": "1da8bf57d266109f9a07c01bf7111a1975ce01f190b9d914bcd3ae3dbef96f21",
+          "sha1": "85a5cf85a6b31cd020ee9d4a55b805a8dc6770cc",
+          "md5": "6aa29e071a3e12f5122a3cfe2354a53c"
+        },
+        "size_bytes": 66651,
+        "package": {
+          "package_name": "owasp.mstg.uncrackable1",
+          "version_code": "1",
+          "version_name": "1.0",
+          "min_sdk": "19",
+          "target_sdk": "28",
+          "permissions": []
+        },
+        "signer": {
+          "v1_verified": true,
+          "v2_verified": true,
+          "v3_verified": false,
+          "certificate_dn": "CN=Jeroen Willemsen, OU=OMTG, O=OWASP, L=Amsterdam, C=NL",
+          "certificate_sha256": "cbe68ab87d64341c3fc78119dc1229e8aa86f93fdb2c33aa61252fd491485b1d"
+        }
+      },
+      "error": null,
+      "duration_ms": 122
+    },
+    {
+      "stage": "audit",
+      "status": "success",
+      "evidence": {
+        "timestamp": "2026-07-27T16:51:14.129112+00:00",
+        "apk_hash": "1da8bf57d266109f9a07c01bf7111a1975ce01f190b9d914bcd3ae3dbef96f21",
+        "justification": "ACADEMIC_TRAINING_TARGET",
+        "operator": "unknown",
+        "tool_version": "0.1.0",
+        "git_commit": "f0a09db6e65cd0b7d1b6313ab0a901ceab072bd9"
+      },
+      "error": null,
+      "duration_ms": 0
+    },
+    {
+      "stage": "decompile",
+      "status": "success",
+      "evidence": {
+        "jadx_output": "outputs/analysis/1da8bf57d266109f9a07c01bf7111a1975ce01f190b9d914bcd3ae3dbef96f21/jadx",
+        "apktool_output": "outputs/analysis/1da8bf57d266109f9a07c01bf7111a1975ce01f190b9d914bcd3ae3dbef96f21/apktool",
+        "manifest_path": "outputs/analysis/1da8bf57d266109f9a07c01bf7111a1975ce01f190b9d914bcd3ae3dbef96f21/apktool/AndroidManifest.xml",
+        "cached": true
+      },
+      "error": null,
+      "duration_ms": 0
+    },
+    {
+      "stage": "static_scan",
+      "status": "success",
+      "evidence": {},
+      "error": null,
+      "duration_ms": 3
+    },
+    {
+      "stage": "manifest_parse",
+      "status": "success",
+      "evidence": {},
+      "error": null,
+      "duration_ms": 0
+    },
+    {
+      "stage": "decision_engine",
+      "status": "success",
+      "evidence": {},
+      "error": null,
+      "duration_ms": 0
+    },
+    {
+      "stage": "dynamic",
+      "status": "skipped",
+      "evidence": {
+        "reason": "NEITHER classification - no bypass technique to apply"
+      },
+      "error": null,
+      "duration_ms": 0
+    }
+  ]
+}

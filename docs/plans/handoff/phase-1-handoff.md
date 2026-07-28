@@ -34,7 +34,7 @@ This is the part that matters most right now.
 uv run python scripts/collect_verification_bundle.py --apk /path/to/uncrackable1.apk --justification ACADEMIC_TRAINING_TARGET
 ```
 
-This one command: records your tool versions (aapt2/apksigner/jadx/apktool/adb/frida) and whether each was even found, checks `adb devices`/`frida-ps -U` connectivity, runs `uv run pytest tests/unit` and captures the full output, then runs the real CLI against your APK and captures its full console output plus a copy of the generated report. Everything lands in `docs/plans/handoff/bundles/{timestamp}/`, with a `SUMMARY.md` at the top giving the short version.
+This one command: records your tool versions (aapt2/apksigner/jadx/apktool/adb/frida) and whether each was even found, checks `adb devices`/`frida-ps -U` connectivity, runs `uv run pytest tests/unit` and captures the full output, then runs the real CLI against your APK (dynamic/Frida stage included by default - don't pass `--skip-dynamic` unless you have a specific reason to) and captures its full console output, a copy of the generated report, and the complete decompiled evidence (`jadx`/`apktool` output, `metadata.json`, `run_*.json`) under `analysis/<apk_hash>/`. Everything lands in `docs/plans/handoff/bundles/{timestamp}/`, with a `SUMMARY.md` at the top giving the short version.
 
 If you'd rather check environment/tests only first (e.g., before a real device is ready), omit `--apk` and it'll skip the pipeline run.
 

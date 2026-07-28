@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import subprocess
@@ -25,6 +26,14 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BUNDLE_ROOT = REPO_ROOT / "docs" / "plans" / "handoff" / "bundles"
+
+
+def _sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _run(cmd: list[str], timeout: int = 60) -> dict:
@@ -115,6 +124,7 @@ def write_summary(bundle_dir: Path, environment: dict, test_result: dict, pipeli
         )
         lines.append("- Full console output: `cli_output.txt`")
         lines.append("- Copied reports (if any): `reports/`")
+        lines.append("- Full decompiled evidence + metadata + run results (if the run got that far): `analysis/<apk_hash>/`")
     (bundle_dir / "SUMMARY.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -151,6 +161,18 @@ def main() -> int:
             bundle_reports_dir.mkdir(exist_ok=True)
             for report_file in reports_dir.glob("*.md"):
                 shutil.copy(report_file, bundle_reports_dir / report_file.name)
+
+        # Pull in the full decompiled evidence (jadx sources, apktool output,
+        # metadata.json, run_*.json) so a mismatch between what a signature
+        # expects and what the real app contains can be diagnosed directly
+        # from the pushed bundle - no separate "please paste the code" round
+        # trip needed.
+        apk_hash = _sha256_of(Path(args.apk))
+        analysis_dir = REPO_ROOT / "outputs" / "analysis" / apk_hash
+        if analysis_dir.exists():
+            shutil.copytree(analysis_dir, bundle_dir / "analysis" / apk_hash, dirs_exist_ok=True)
+        else:
+            print(f"  (note: expected {analysis_dir} from this run but it doesn't exist - ingest may have failed before producing it)")
     else:
         print("No --apk given - skipping the real pipeline run (environment + tests only).")
 

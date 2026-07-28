@@ -254,6 +254,56 @@ A unified check confirmed every project component works:
 
 ---
 
+## 7. Cross-Check: All 3 Uncrackable Levels
+
+Tested all 3 OWASP Uncrackable APKs against the pipeline:
+
+| APK | Ingest | Decompile | Scan | Decision | Signature hit |
+|---|---|---|---|---|---|
+| Level 1 | ✅ 225ms | ✅ 0ms | ✅ 8ms | NEITHER | `test-keys` at c.java:19 (0.20) |
+| Level 2 | ✅ 158ms | ✅ 12.3s | ✅ 179ms | NEITHER | `test-keys` at b.java:19 (0.20) |
+| Level 3 | ✅ 163ms | ✅ 13.2s | ✅ 399ms | NEITHER | `test-keys` at RootDetection.java:19 (0.20) |
+
+All 3 pipelines ran end-to-end. All detected root signatures at confidence 0.20
+(below 0.70 threshold → NEITHER). Dynamic stage correctly skipped.
+
+---
+
+## 8. Environment Verification Script
+
+Created `scripts/check_environment.py` — single-command health check.
+
+| # | Section | What it checks |
+|---|---|---|
+| 1 | System & Python | Python 3.11+, WSL2 detection |
+| 2 | Python deps | `uv sync` |
+| 3 | Android toolchain | JDK, adb, jadx, apktool, frida, objection, mitmproxy, aapt2, readelf, strings |
+| 4 | ADB & Emulator | Device connected, root (Magisk), frida-server running |
+| 5 | Frida WSL→Windows bridge | Relay connection via `setup_frida_connection()` |
+| 6 | Project components | Unit tests (40/40), signatures (5 root, 4 SSL), CLI, report generator |
+
+**`--fix` mode** auto-starts:
+- Android ADB server (`adb start-server`)
+- Windows ADB server with `-a` flag (0.0.0.0:5037 for WSL reachability)
+- frida-server on emulator (`su -c 'nohup /data/local/tmp/frida-server &'`)
+- Frida WSL relay (auto-started by `setup_frida_connection()`)
+
+Result: **21/22 checks passed** (objection is optional, not in pyproject.toml)
+
+---
+
+## 9. Final Push
+
+Full project pushed — 3 commits:
+
+| Commit | Description | Files |
+|---|---|---|
+| `0f56dcb` | WSL Frida bridge + execution docs + Level 1 APK | 5 files |
+| `6688930` | Uncrackable Level 2 & 3 test APKs | 2 files |
+| `1cf0253` | Full analysis outputs (all 3 levels) | 5,059 files |
+
+---
+
 ## Summary
 
 | Area | Status |
@@ -266,16 +316,20 @@ A unified check confirmed every project component works:
 | magisk root confirmed | ✅ |
 | ADB → emulator connectivity | ✅ |
 | **Frida from WSL → emulator** | **✅ Auto-detected via Windows Python relay** |
-| Code changes applied | ✅ `device.py` (rewritten) + `frida_runner.py` (1 line) + `scripts/frida_relay.py` (new) |
-| End-to-end pipeline | ✅ ingest → audit → decompile → scan → classify → report |
-| APK download & test | ✅ Uncrackable Level 1 analyzed |
+| End-to-end pipeline | ✅ All 3 Uncrackable levels analyzed |
+| Env check script | ✅ `scripts/check_environment.py --fix` (21/22 checks) |
+| Full project pushed | ✅ 3 commits, all files including outputs |
 
 ### Files changed this session
 
 | File | Change type |
 |---|---|
-| `src/dynamic/device.py` | Rewritten — WSL detection + ADB forward + Windows Python relay auto-start |
-| `src/dynamic/frida_runner.py` | 1 line — `frida.get_device()` → `setup_frida_connection()` |
+| `src/dynamic/device.py` | **Rewritten** — WSL detection + ADB forward + Windows Python relay auto-start |
+| `src/dynamic/frida_runner.py` | **1 line** — `frida.get_device()` → `setup_frida_connection()` |
 | `scripts/frida_relay.py` | **New** — Python TCP relay for Windows (bridges WSL↔Windows ADB) |
-| `docs/execution_changes/session-2026-07-28-wsl-setup-and-frida-bridge.md` | This file |
-| `APK_Test/UnCrackable-Level1.apk` | **New** — Test APK for end-to-end validation |
+| `scripts/check_environment.py` | **New** — Health check script with `--fix` auto-start mode |
+| `docs/execution_changes/session-2026-07-28-wsl-setup-and-frida-bridge.md` | **This file** — full session documentation |
+| `APK_Test/UnCrackable-Level1.apk` | **New** — Test APK for Level 1 |
+| `APK_Test/UnCrackable-Level2.apk` | **New** — Test APK for Level 2 |
+| `APK_Test/UnCrackable-Level3.apk` | **New** — Test APK for Level 3 |
+| `outputs/` | **New** — Full analysis artifacts (jadx/apktool decompile, reports, run metadata) |

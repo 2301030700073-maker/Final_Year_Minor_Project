@@ -34,10 +34,10 @@ config/
     root_detection.yaml
     ssl_pinning.yaml
     anti_frida.yaml                  # [Phase 3]
-outputs/
-  apks/{hash}/
-  analysis/{hash}/
-  reports/
+outputs/                                # gitignored entirely - local/ephemeral, never `git add`ed
+  apks/{hash}/                          # directly; the verification bundle script is the only
+  analysis/{hash}/                      # sanctioned path evidence takes into git (see CONTRIBUTING.md)
+  reports/{hash}/
 tests/
   unit/
   fixtures/

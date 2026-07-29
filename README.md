@@ -52,7 +52,7 @@ PYTHONPATH=src uv run python -m cli --apk APK_Test/UnCrackable-Level1.apk --just
 
 (Typer collapses to a bare command when there's only one - no `run` subcommand needed yet. `--help` shows the full option list, including `--skip-dynamic` and `--device`.)
 
-`--justification` is required — the CLI will refuse to run without it (ADR-0005). Analysis artifacts land in `outputs/analysis/{sha256}/`; the generated report lands in `outputs/reports/`; the audit log is appended to `outputs/audit_log.jsonl`.
+`--justification` is required — the CLI will refuse to run without it (ADR-0005). Analysis artifacts land in `outputs/analysis/{sha256}/`; the generated report lands in `outputs/reports/{sha256}/`; the audit log is appended to `outputs/audit_log.jsonl`. `outputs/` is entirely local and gitignored — never `git add` anything under it directly; the verification bundle script (below) is the only sanctioned way evidence gets committed.
 
 ## Reporting results back
 

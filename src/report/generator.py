@@ -72,9 +72,9 @@ def generate_report(
     stage_results: list[StageResult],
     output_dir: Path,
 ) -> Path:
-    output_dir = Path(output_dir)
+    output_dir = Path(output_dir) / apk_hash
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = output_dir / f"{apk_hash}_{run_id}.md"
+    report_path = output_dir / f"{run_id}.md"
 
     content = TEMPLATE.render(
         run_id=run_id,

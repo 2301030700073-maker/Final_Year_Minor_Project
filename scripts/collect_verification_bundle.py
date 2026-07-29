@@ -123,7 +123,7 @@ def write_summary(bundle_dir: Path, environment: dict, test_result: dict, pipeli
             f"({'succeeded' if pipeline_result['exit_code'] == 0 else 'FAILED - see cli_output.txt'})"
         )
         lines.append("- Full console output: `cli_output.txt`")
-        lines.append("- Copied reports (if any): `reports/`")
+        lines.append("- Copied reports (if any): `reports/<apk_hash>/`")
         lines.append("- Full decompiled evidence + metadata + run results (if the run got that far): `analysis/<apk_hash>/`")
     (bundle_dir / "SUMMARY.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -155,19 +155,22 @@ def main() -> int:
         (bundle_dir / "cli_output.txt").write_text(
             pipeline_result["stdout"] + "\n" + pipeline_result["stderr"], encoding="utf-8"
         )
-        reports_dir = REPO_ROOT / "outputs" / "reports"
+        # Scoped to this specific APK's hash - outputs/reports/ and
+        # outputs/analysis/ both accumulate across every APK and every run
+        # ever done locally; a bundle should only ever contain evidence for
+        # what this invocation actually analyzed, not everything lying
+        # around in the working directory.
+        apk_hash = _sha256_of(Path(args.apk))
+
+        reports_dir = REPO_ROOT / "outputs" / "reports" / apk_hash
         if reports_dir.exists():
-            bundle_reports_dir = bundle_dir / "reports"
-            bundle_reports_dir.mkdir(exist_ok=True)
-            for report_file in reports_dir.glob("*.md"):
-                shutil.copy(report_file, bundle_reports_dir / report_file.name)
+            shutil.copytree(reports_dir, bundle_dir / "reports" / apk_hash, dirs_exist_ok=True)
 
         # Pull in the full decompiled evidence (jadx sources, apktool output,
         # metadata.json, run_*.json) so a mismatch between what a signature
         # expects and what the real app contains can be diagnosed directly
         # from the pushed bundle - no separate "please paste the code" round
         # trip needed.
-        apk_hash = _sha256_of(Path(args.apk))
         analysis_dir = REPO_ROOT / "outputs" / "analysis" / apk_hash
         if analysis_dir.exists():
             shutil.copytree(analysis_dir, bundle_dir / "analysis" / apk_hash, dirs_exist_ok=True)

@@ -30,7 +30,8 @@ def test_generate_report_writes_file_with_expected_content(tmp_path):
     )
 
     assert report_path.exists()
-    assert report_path.name == "abc123_run1.md"
+    assert report_path.name == "run1.md"
+    assert report_path.parent.name == "abc123"  # nested by APK hash, mirrors outputs/analysis/{hash}/
     content = report_path.read_text(encoding="utf-8")
     assert "owasp.mstg.uncrackable1" in content
     assert "ROOT_ONLY" in content

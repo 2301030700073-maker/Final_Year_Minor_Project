@@ -4,6 +4,7 @@
 # Usage:
 #   bash run.sh                              # Phase 1 (Level 1) full run
 #   bash run.sh --target uncrackable2        # Phase 2 (Level 2) full run
+#   bash run.sh --target uncrackable3        # Phase 3 (Level 3) full run
 #   bash run.sh --skip-pipeline              # only setup, skip the pipeline
 #   bash run.sh --check-only                 # just verify environment
 # ─────────────────────────────────────────────────────────────
@@ -132,7 +133,8 @@ fi
 case "$TARGET" in
   uncrackable1) APK_FILE="APK_Test/UnCrackable-Level1.apk"; PKG="owasp.mstg.uncrackable1" ;;
   uncrackable2) APK_FILE="APK_Test/UnCrackable-Level2.apk"; PKG="owasp.mstg.uncrackable2" ;;
-  *) echo "  $FAIL Unknown target: $TARGET (use uncrackable1 or uncrackable2)"; exit 1 ;;
+  uncrackable3) APK_FILE="APK_Test/UnCrackable-Level3.apk"; PKG="owasp.mstg.uncrackable3" ;;
+  *) echo "  $FAIL Unknown target: $TARGET (use uncrackable1, uncrackable2, or uncrackable3)"; exit 1 ;;
 esac
 echo "  $INFO  Target: $TARGET ($APK_FILE)"
 

@@ -29,6 +29,7 @@ from dynamic import device
 from dynamic import frida_runner
 from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
 from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
+from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
 from ingest.metadata import ingest
 from report.generator import generate_report
 from static.decision_engine import classify
@@ -48,6 +49,7 @@ AUDIT_LOG_PATH = OUTPUTS_ROOT / "audit_log.jsonl"
 SUCCESS_CHECKS = {
     "uncrackable1": UnCrackable1SuccessCheck(),
     "uncrackable2": UnCrackable2SuccessCheck(),
+    "uncrackable3": UnCrackable3SuccessCheck(),
 }
 
 

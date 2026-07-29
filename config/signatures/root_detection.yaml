@@ -25,6 +25,16 @@
 # signature here - it's neither root-detection nor SSL-pinning, and
 # folding it into this category's confidence score would misrepresent
 # what's actually being measured (see docs/plans/handoff/phase-2-handoff.md).
+#
+# Phase 3 (UnCrackable3): the same three checks reappear again, still
+# byte-for-byte identical, now in sg/vantagepoint/util/RootDetection.java
+# as checkRoot1/checkRoot2/checkRoot3 - zero new signature entries needed.
+# Empirically confirmed at 0.80 confidence (ROOT_ONLY) on a real baseline
+# run against this exact APK - see
+# docs/plans/handoff/bundles/20260729T163713Z/. This app also has a
+# CRC32-based anti-tampering check (MainActivity.verifyLibs()) - same as
+# Phase 2's anti-debug poll, deliberately NOT a signature here either, see
+# docs/plans/handoff/phase-3-handoff.md.
 
 - id: root_su_binary_paths
   category: root

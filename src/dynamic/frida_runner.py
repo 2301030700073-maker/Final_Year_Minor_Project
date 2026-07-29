@@ -30,6 +30,11 @@ SCRIPTS_BY_TARGET_ACTION: dict[str, dict[Action, list[str]]] = {
         Action.SSL_ONLY: ["ssl_pinning_bypass_v1.js"],
         Action.BOTH: ["root_bypass_uncrackable2.js", "ssl_pinning_bypass_v1.js"],
     },
+    "uncrackable3": {
+        Action.ROOT_ONLY: ["root_bypass_uncrackable3.js"],
+        Action.SSL_ONLY: ["ssl_pinning_bypass_v1.js"],
+        Action.BOTH: ["root_bypass_uncrackable3.js", "ssl_pinning_bypass_v1.js"],
+    },
 }
 
 

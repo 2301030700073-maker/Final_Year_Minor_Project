@@ -174,7 +174,6 @@ def run(
     else:
         serial = device.discover_device(device_serial)
         package_name = ingest_result.evidence["package"]["package_name"]
-        device.clear_logcat(serial)
         device.install_apk(serial, apk)
         dynamic_stage = frida_runner.run_dynamic_stage(serial, package_name, classification.action)
         stage_results.append(dynamic_stage)
@@ -182,6 +181,7 @@ def run(
         if dynamic_stage.status == "failed":
             _halt(stage_results)
         if dynamic_stage.status == "success":
+            device.clear_logcat(serial)
             logcat_output = device.capture_logcat(serial)
             frida_log = "\n".join(str(m) for m in dynamic_stage.evidence.get("frida_messages", []))
             success_check = SUCCESS_CHECKS[target]

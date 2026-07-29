@@ -11,6 +11,22 @@ Engineering principles (why the architecture is shaped the way it is, what's non
 
 Both sides can propose changes to any file. Neither side merges silently without the other seeing what changed — that's what the git protocol below is for.
 
+## Collaborator's responsibilities, explicitly
+
+**Does:**
+- Keeps the reference environment working — toolchain, emulator/device, `frida-server` — including fixing environment-specific problems directly when they're clearly about the environment, not the core detection logic (the Frida relay bridge is a real example of this working as intended).
+- Pulls when told there's new work, and starts from the current phase's handoff doc, not guesswork.
+- Runs exactly the commands that doc lists.
+- Places test target APKs under `APK_Test/` (the convention already in use) so paths in commands and docs stay consistent for both sides.
+- Pushes real output — the verification bundle, findings docs, reports — never just a verbal summary.
+- Follows the same fetch/merge/push procedure as everyone else if a push gets rejected.
+
+**Does not:**
+- Decide or redesign the core architecture, signatures, or detection logic — that's decided on the primary developer side, informed by the evidence provided.
+- Report status verbally as if that were sufficient evidence on its own.
+- Force-push, rewrite history, or resolve a real content conflict unilaterally — flag it instead.
+- Need to produce a deep diagnosis of *why* something didn't match. Nice to have if there's time (that was the original intent of the Step 0 manual spike), but not required — pushing real raw evidence is enough; the analysis happens on the primary developer side.
+
 ## Git workflow
 
 **Before starting any new work:**
@@ -39,7 +55,11 @@ git merge origin/main -m "Merge <what the incoming commits are>"
 git push
 ```
 
+This procedure is **the same for both sides** — whoever hits the rejection runs it, no handoff needed, no waiting for the other side to do it for you. The only escalation rule: if `git merge` reports *actual* conflicts (same lines, same file, changed on both sides — hasn't happened yet, every divergence so far has been disjoint files), stop and flag it rather than guessing at a resolution. Mechanical merge, proceed and push. Real conflict, don't pick a side blind.
+
 **Never**: force-push to `main`, rewrite already-pushed commit history, or resolve a rejected push by discarding either side's commits instead of merging them.
+
+**Branches**: default is direct commits to `main`, small and frequent — this project runs on a tight prove-it-and-push loop, and batching work into a long-lived branch delays exactly the feedback that loop depends on. The one exception: if either side is about to do something large and genuinely risky that would leave the repo broken partway through (a big refactor, something that needs several commits before it's usable again), use a short-lived branch for just that piece and merge it back the moment it's done — not something left open for days.
 
 **Commit messages**: explain *why*, not just *what* — every commit in this repo so far follows that pattern; keep doing it. No AI/tool attribution in commits or code comments (see `CLAUDE.md`).
 

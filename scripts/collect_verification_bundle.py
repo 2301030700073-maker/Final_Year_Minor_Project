@@ -10,7 +10,7 @@ silently skipped (same rule as the pipeline itself: NFR-1, NFR-7).
 
 Usage:
     uv run python scripts/collect_verification_bundle.py
-    uv run python scripts/collect_verification_bundle.py --apk path/to/uncrackable1.apk --justification ACADEMIC_TRAINING_TARGET
+    uv run python scripts/collect_verification_bundle.py --apk APK_Test/UnCrackable-Level1.apk --justification ACADEMIC_TRAINING_TARGET
 """
 
 from __future__ import annotations

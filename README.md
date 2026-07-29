@@ -44,8 +44,10 @@ Frida requires root. Use a Google APIs (not Google Play) x86_64 system image if 
 
 ## 5. Run an analysis
 
+Test target APKs live under `APK_Test/` (e.g. `APK_Test/UnCrackable-Level1.apk`) — keep them there so paths stay consistent across commands, docs, and bundles.
+
 ```bash
-PYTHONPATH=src uv run python -m cli --apk path/to/uncrackable1.apk --justification ACADEMIC_TRAINING_TARGET
+PYTHONPATH=src uv run python -m cli --apk APK_Test/UnCrackable-Level1.apk --justification ACADEMIC_TRAINING_TARGET
 ```
 
 (Typer collapses to a bare command when there's only one - no `run` subcommand needed yet. `--help` shows the full option list, including `--skip-dynamic` and `--device`.)

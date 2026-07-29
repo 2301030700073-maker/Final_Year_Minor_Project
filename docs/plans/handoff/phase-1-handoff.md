@@ -23,8 +23,8 @@ uv sync
 
 1. Decompile UnCrackable1 by hand (skip if you still have last round's output):
    ```bash
-   jadx -d /tmp/uc1_jadx uncrackable1.apk
-   apktool d -o /tmp/uc1_apktool uncrackable1.apk
+   jadx -d /tmp/uc1_jadx APK_Test/UnCrackable-Level1.apk
+   apktool d -o /tmp/uc1_apktool APK_Test/UnCrackable-Level1.apk
    ```
 2. Find the actual root-detection code in the decompiled sources. What are the real class/method names? What does it actually check — su paths, `Build.TAGS`, a library like RootBeer, something else entirely?
 3. Check whether UnCrackable1 implements real SSL/TLS pinning at all (OkHttp `CertificatePinner`, a custom `TrustManager`, or a `network_security_config.xml` with a `<pin-set>`). **It's a legitimate, expected possibility that it doesn't** — root/debugger detection plus an encrypted secret is the commonly-documented behavior; pinning may not be part of it. If it's absent, say so plainly — that's a correct `NEITHER`/`Inconclusive` result for that category, not evidence something's broken.
@@ -35,7 +35,7 @@ uv sync
 ## 3. Run the verification bundle script (this replaces manually running and reporting each check)
 
 ```bash
-uv run python scripts/collect_verification_bundle.py --apk /path/to/uncrackable1.apk --justification ACADEMIC_TRAINING_TARGET
+uv run python scripts/collect_verification_bundle.py --apk APK_Test/UnCrackable-Level1.apk --justification ACADEMIC_TRAINING_TARGET
 ```
 
 This one command: records your tool versions (aapt2/apksigner/jadx/apktool/adb/frida) and whether each was even found, checks `adb devices`/`frida-ps -U` connectivity, runs `uv run pytest tests/unit` and captures the full output, then runs the real CLI against your APK (dynamic/Frida stage included by default - don't pass `--skip-dynamic` unless you have a specific reason to) and captures its full console output, a copy of the generated report, and the complete decompiled evidence (`jadx`/`apktool` output, `metadata.json`, `run_*.json`) under `analysis/<apk_hash>/`. Everything lands in `docs/plans/handoff/bundles/{timestamp}/`, with a `SUMMARY.md` at the top giving the short version.

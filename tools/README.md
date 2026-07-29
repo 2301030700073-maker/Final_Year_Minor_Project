@@ -5,8 +5,7 @@ ensure reproducible builds and avoid re-downloading.
 
 | File | Size | Purpose |
 |------|------|---------|
-| `frida-server-16.7.19-x86_64` | 109 MB | Frida server for Android x86_64 emulator (required for dynamic bypass). Version pinned to match frida<17 in pyproject.toml. |
-| `frida-server-17.16.4-x86_64` | 107 MB | Frida server 17.x (kept for reference; not used with current pipeline). |
+| `download_frida_server.sh` | — | Downloads matching frida-server from GitHub (exceeds GitHub's 100 MB file limit). Run `bash tools/download_frida_server.sh` before first use. |
 | `debug.keystore` | 2.7 KB | Android debug signing key for patched APKs. **⚠️ Contains private keys — do not use for production.** |
 | `adb_wrapper.sh` | 106 B | WSL2→Windows ADB bridge: calls `adb.exe` from Windows SDK. |
 | `zipalign_location.txt` | 104 B | Documents location of `zipalign.exe` in Windows Android SDK build-tools. |

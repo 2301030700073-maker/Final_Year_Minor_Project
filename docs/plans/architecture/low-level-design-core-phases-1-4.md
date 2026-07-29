@@ -45,6 +45,10 @@ pyproject.toml                        # uv-managed
 uv.lock
 ```
 
+## WSL2 → Windows Frida bridge (added after real testing on the reference machine)
+
+Windows' ADB server and a Windows-managed emulator's `frida-server` are both only reachable on Windows' own `127.0.0.1`, which WSL2 cannot address directly, and `netsh portproxy` conflicts with `adb forward`. `device.py` resolves this with a small relay: `adb forward` sets up a Windows-local listener, a Python relay process (`scripts/frida_relay.py`) is started on Windows (via `Start-Process` from WSL2) bridging that listener to a port reachable from WSL2 over the Windows host IP, and Frida connects through `add_remote_device()` to that relay instead of `frida.get_device()` directly. `device.setup_frida_connection()` is a no-op passthrough to `frida.get_device()` on native Linux - this whole bridge only activates when actually running under WSL2. Real bugs found and fixed in the first version of this (verified by direct testing, not assumed): a hardcoded personal-machine fallback where Windows-user-directory detection should instead fail loudly; `Get-Process`-based cleanup that never actually matched anything since `CommandLine` isn't populated without elevation (needs `Get-CimInstance Win32_Process` instead); a blind `sleep(3)` replaced with an actual poll-until-listening check.
+
 ## Signature YAML schema
 
 ```yaml

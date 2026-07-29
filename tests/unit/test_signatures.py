@@ -51,6 +51,53 @@ def test_scan_no_matches_gives_zero_confidence_and_no_evidence(tmp_path):
     assert evidence.root_evidence == []
 
 
+def test_scan_matches_real_uncrackable1_root_detection_code(tmp_path):
+    """Regression test using the actual decompiled UnCrackable1 source
+    (sg/vantagepoint/a/c.java), pulled from a real collaborator run and
+    quoted verbatim - not a synthetic approximation. Before
+    root_su_via_path_env_check / root_known_indicator_files were added,
+    this scored only 0.20 (test-keys alone) against real UnCrackable1,
+    well under threshold. This test locks in that the fix actually
+    clears 0.7 against the real code, not just a hand-crafted sample."""
+    (tmp_path / "c.java").write_text(
+        "public class c {\n"
+        "    public static boolean a() {\n"
+        "        for (String str : System.getenv(\"PATH\").split(\":\")) {\n"
+        "            if (new File(str, \"su\").exists()) { return true; }\n"
+        "        }\n"
+        "        return false;\n"
+        "    }\n"
+        "    public static boolean b() {\n"
+        "        String str = Build.TAGS;\n"
+        "        return str != null && str.contains(\"test-keys\");\n"
+        "    }\n"
+        "    public static boolean c() {\n"
+        "        for (String str : new String[]{\"/system/app/Superuser.apk\", \"/system/xbin/daemonsu\",\n"
+        "            \"/system/etc/init.d/99SuperSUDaemon\", \"/system/bin/.ext/.su\", \"/system/etc/.has_su_daemon\",\n"
+        "            \"/system/etc/.installed_su_daemon\", \"/dev/com.koushikdutta.superuser.daemon/\"}) {\n"
+        "            if (new File(str).exists()) { return true; }\n"
+        "        }\n"
+        "        return false;\n"
+        "    }\n"
+        "}\n"
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+
+    evidence = scan(tmp_path, signatures)
+
+    assert evidence.root_confidence >= 0.7, (
+        f"real UnCrackable1 root-detection code only scored {evidence.root_confidence}, "
+        f"below the 0.7 threshold - would still misclassify as NEITHER"
+    )
+    matched_ids = {e.signature_id for e in evidence.root_evidence}
+    assert "root_build_tags_test_keys" in matched_ids
+    assert "root_su_via_path_env_check" in matched_ids
+    assert "root_known_indicator_files" in matched_ids
+    # the old literal-path signature correctly still doesn't fire - this app
+    # never has the literal string "/system/bin/su" in its bytecode
+    assert "root_su_binary_paths" not in matched_ids
+
+
 def test_scan_records_correct_line_number(tmp_path):
     (tmp_path / "sub").mkdir()
     file_path = tmp_path / "sub" / "Check.java"

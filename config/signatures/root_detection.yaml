@@ -1,8 +1,19 @@
 # Root-detection signatures for Phase 1 (UnCrackable1).
-# Starter set, provisional pending the Step 0 manual spike
-# (docs/plans/research/phase0-uncrackable1-manual-findings.md) -
-# weights and patterns get corrected as data-only changes once that
-# lands, per NFR-13. Do not treat these as confirmed findings yet.
+#
+# root_su_binary_paths, root_build_tags_test_keys, root_runtime_exec_su,
+# rootbeer_framework, and su_management_apps were the original starter
+# set. root_su_via_path_env_check and root_known_indicator_files were
+# added after reading the real decompiled UnCrackable1 source pulled
+# from a collaborator run (sg/vantagepoint/a/c.java) - the app's actual
+# su-path check builds the path dynamically at runtime
+# (`new File(str, "su").exists()` over a PATH split), so the literal
+# string "/system/bin/su" never appears in the bytecode; a separate
+# check tests a hardcoded array of 7 known root-indicator file paths
+# that had no corresponding signature at all before this. Both new
+# patterns are quoted verbatim against the real code, not guessed.
+# The remaining empirical gate is a real pipeline re-run confirming
+# this flips the classification to ROOT_ONLY as predicted - update this
+# comment once that's confirmed.
 
 - id: root_su_binary_paths
   category: root
@@ -45,4 +56,26 @@
   patterns:
     - "com.noshufou.android.su"
     - "eu.chainfire.supersu"
+  evidence_type: bytecode_string
+
+- id: root_su_via_path_env_check
+  category: root
+  weight: 0.3
+  pattern_type: regex
+  patterns:
+    - 'new File\([^,]+,\s*"su"\)\.exists\(\)'
+  evidence_type: bytecode_string
+
+- id: root_known_indicator_files
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "/system/app/Superuser.apk"
+    - "/system/xbin/daemonsu"
+    - "/system/etc/init.d/99SuperSUDaemon"
+    - "/system/bin/.ext/.su"
+    - "/system/etc/.has_su_daemon"
+    - "/system/etc/.installed_su_daemon"
+    - "/dev/com.koushikdutta.superuser.daemon/"
   evidence_type: bytecode_string

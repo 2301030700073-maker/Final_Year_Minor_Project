@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import shutil
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -82,6 +82,25 @@ def _adb_wrapper_path() -> str:
 _RELAY_SCRIPT_SOURCE = Path(__file__).resolve().parent.parent.parent / "scripts" / "frida_relay.py"
 
 
+def _wait_for_relay(host: str, port: int, timeout: float = 10.0) -> None:
+    """Poll until the relay is actually accepting connections. Replaces a
+    blind sleep, which was flaky under load and gave no real signal that
+    the relay came up before Frida tried to use it."""
+    deadline = time.monotonic() + timeout
+    last_error: OSError | None = None
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.2)
+    raise RuntimeError(
+        f"Frida relay never started listening on {host}:{port} within {timeout}s "
+        f"(last connection error: {last_error})"
+    )
+
+
 def _start_relay(adb_cmd: str) -> int:
     """Start the Windows Python relay and set up ADB forwarding.
 
@@ -94,37 +113,52 @@ def _start_relay(adb_cmd: str) -> int:
         raise RuntimeError("Could not determine Windows host IP from WSL")
 
     # 1. Set up ADB forward (listener on Windows 127.0.0.1:{ADB_FORWARD_PORT})
-    subprocess.run(
+    forward_result = subprocess.run(
         [adb_cmd, "forward", f"tcp:{_ADB_FORWARD_PORT}", "tcp:27042"],
         capture_output=True, text=True, timeout=15,
     )
+    if forward_result.returncode != 0:
+        raise RuntimeError(
+            f"'adb forward tcp:{_ADB_FORWARD_PORT} tcp:27042' failed "
+            f"(exit {forward_result.returncode}): {forward_result.stderr.strip()}"
+        )
 
     # 2. Kill any leftover relay on Windows
     _stop_relay()
 
-    # 3. Copy the relay script to a Windows-accessible path
+    # 3. Copy the relay script to a Windows-accessible path. Windows python.exe
+    # can't resolve a raw WSL path (/home/... or similar) at all, so there's
+    # no working fallback if the Windows user directory can't be found -
+    # fail loudly here instead of deferring to a confusing failure later.
     win_script = Path("/mnt/c/Users") / _find_windows_user() / "AppData/Local/Temp/frida_relay.py"
-    if win_script.parent.is_dir():
-        import shutil as _shutil
-        _shutil.copy2(_RELAY_SCRIPT_SOURCE, str(win_script))
-        script_arg = str(win_script).replace("/mnt/c/", "C:\\").replace("/", "\\")
-    else:
-        script_arg = str(_RELAY_SCRIPT_SOURCE)  # fallback (may fail)
+    win_script.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(_RELAY_SCRIPT_SOURCE, str(win_script))
+    script_arg = str(win_script).replace("/mnt/c/", "C:\\").replace("/", "\\")
 
-    # 4. Start the Python relay on Windows
-    args = f'python "{script_arg}" {_FRIDA_RELAY_PORT} 127.0.0.1 {_ADB_FORWARD_PORT}'
+    # 4. Start the Python relay on Windows. The path is double-quoted inside
+    # the -ArgumentList string so Windows command-line parsing treats it as
+    # one token even if the Windows username contains a space.
+    ps_command = (
+        f'Start-Process -WindowStyle Hidden python -ArgumentList '
+        f'\'"{script_arg}" {_FRIDA_RELAY_PORT} 127.0.0.1 {_ADB_FORWARD_PORT}\''
+    )
     _RELAY_PROC = subprocess.Popen(
-        ["powershell.exe", "-Command",
-         f'Start-Process -WindowStyle Hidden python -ArgumentList \'{script_arg} {_FRIDA_RELAY_PORT} 127.0.0.1 {_ADB_FORWARD_PORT}\''],
+        ["powershell.exe", "-Command", ps_command],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
-    time.sleep(3)  # wait for relay to bind
+    _wait_for_relay(win_ip, _FRIDA_RELAY_PORT)
 
     return win_ip
 
 
 def _stop_relay() -> None:
-    """Kill any running Frida relay on Windows."""
+    """Kill any running Frida relay on Windows.
+
+    Uses Get-CimInstance, not Get-Process - plain Get-Process does not
+    populate CommandLine without elevation, which made the previous
+    Where-Object CommandLine filter match nothing, every time, silently
+    leaking orphaned relay processes (confirmed by direct testing).
+    """
     global _RELAY_PROC
     if _RELAY_PROC is not None:
         try:
@@ -132,24 +166,32 @@ def _stop_relay() -> None:
         except OSError:
             pass
         _RELAY_PROC = None
-    # Kill any lingering Python process running the relay
     subprocess.run(
         ["powershell.exe", "-Command",
-         "Get-Process python | Where-Object CommandLine -Match 'frida_relay' | Stop-Process -Force"],
+         "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+         "Where-Object { $_.CommandLine -match 'frida_relay' } | "
+         "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
         capture_output=True, text=True, timeout=10,
     )
 
 
 def _find_windows_user() -> str:
-    """Return the first non-special Windows user directory under /mnt/c/Users."""
+    """Return the first non-special Windows user directory under /mnt/c/Users.
+
+    Raises loudly if none can be found - a guessed/hardcoded fallback here
+    would silently point at the wrong path on any machine but the one it
+    was written on (NFR-7: fail loudly, never guess)."""
     users_dir = Path("/mnt/c/Users")
     if not users_dir.is_dir():
-        return "Divyang"  # fallback
+        raise RuntimeError("/mnt/c/Users not found - is this actually running under WSL2?")
     for d in sorted(users_dir.iterdir()):
         if d.is_dir() and d.name not in ("All Users", "Default", "Default User",
                                           "desktop.ini", "Public"):
             return d.name
-    return "Divyang"
+    raise RuntimeError(
+        "No user directory found under /mnt/c/Users (only default/system entries) - "
+        "the Frida relay bridge needs a real Windows user profile to copy itself into"
+    )
 
 
 # ---------------------------------------------------------------------------

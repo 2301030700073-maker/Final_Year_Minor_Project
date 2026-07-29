@@ -1,0 +1,1 @@
+zipalign symlink target: /mnt/c/Users/Divyang/AppData/Local/Android/Sdk/build-tools/36.1.0/zipalign.exe

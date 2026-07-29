@@ -1,0 +1,194 @@
+2026-07-27 16:37:01,698 INFO    
+Checking for a newer version of objection...
+
+2026-07-27 16:37:01,699 DEBUG   
+Starting new HTTPS connection (1): api.github.com:443
+
+2026-07-27 16:37:02,809 DEBUG   
+https://api.github.com:443 "GET /repos/sensepost/objection/releases/latest HTTP/1.1" 200 None
+
+2026-07-29 05:43:27,755 INFO    
+Checking for a newer version of objection...
+
+2026-07-29 05:43:27,756 DEBUG   
+Starting new HTTPS connection (1): api.github.com:443
+
+2026-07-29 05:43:28,359 DEBUG   
+https://api.github.com:443 "GET /repos/sensepost/objection/releases/latest HTTP/1.1" 200 909
+
+2026-07-29 05:43:39,947 DEBUG   
+Starting new HTTPS connection (1): api.github.com:443
+
+2026-07-29 05:43:40,592 DEBUG   
+https://api.github.com:443 "GET /repos/frida/frida/releases/latest HTTP/1.1" 200 None
+
+2026-07-29 05:43:40,651 INFO    
+Using latest Github gadget version: 17.16.4
+
+2026-07-29 05:43:40,651 INFO    
+Remote FridaGadget version is v17.16.4, local is v0. Downloading...
+
+2026-07-29 05:43:40,651 DEBUG   
+Starting new HTTPS connection (1): api.github.com:443
+
+2026-07-29 05:43:41,270 DEBUG   
+https://api.github.com:443 "GET /repos/frida/frida/releases/tags/17.16.4 HTTP/1.1" 200 None
+
+2026-07-29 05:43:41,354 INFO    
+Downloading from: https://github.com/frida/frida/releases/download/17.16.4/frida-gadget-17.16.4-android-x86_64.so.xz
+
+2026-07-29 05:43:41,355 DEBUG   
+Starting new HTTPS connection (1): github.com:443
+
+2026-07-29 05:43:41,924 DEBUG   
+https://github.com:443 "GET /frida/frida/releases/download/17.16.4/frida-gadget-17.16.4-android-x86_64.so.xz HTTP/1.1" 302 0
+
+2026-07-29 05:43:41,925 DEBUG   
+Starting new HTTPS connection (1): release-assets.githubusercontent.com:443
+
+2026-07-29 05:43:42,309 DEBUG   
+https://release-assets.githubusercontent.com:443 "GET /github-production-release-asset/9405122/bba2489b-75e4-40c5-939a-c115a9ccdb66?sp=r&sv=2018-11-09&sr=b&spr=https&se=2026-07-29T06%3A18%3A24Z&rscd=attachment%3B+filename%3Dfrida-gadget-17.16.4-android-x86_64.so.xz&rsct=application%2Foctet-stream&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2026-07-29T05%3A18%3A22Z&ske=2026-07-29T06%3A18%3A24Z&sks=b&skv=2018-11-09&sig=98suL%2FNgjWM6nfkHpqIJ57bdLV0SgyiA9UBQLTRmNH8%3D&jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmVsZWFzZS1hc3NldHMuZ2l0aHVidXNlcmNvbnRlbnQuY29tIiwia2V5Ijoia2V5MSIsImV4cCI6MTc4NTMwNDEyMywibmJmIjoxNzg1MzAzODIzLCJwYXRoIjoicmVsZWFzZWFzc2V0cHJvZHVjdGlvbi5ibG9iLmNvcmUud2luZG93cy5uZXQifQ.sx51LCpRumMbkSL2PiXli6VFnyBz7CeL7mbK4v5Xb3k&response-content-disposition=attachment%3B%20filename%3Dfrida-gadget-17.16.4-android-x86_64.so.xz&response-content-type=application%2Foctet-stream HTTP/1.1" 200 7427276
+
+2026-07-29 05:43:42,309 INFO    
+Downloading x86_64 library to /home/ubuntu/.objection/android/x86_64/libfrida-gadget.so.xz...
+
+2026-07-29 05:43:42,875 INFO    
+Unpacking /home/ubuntu/.objection/android/x86_64/libfrida-gadget.so.xz...
+
+2026-07-29 05:43:43,209 INFO    
+Cleaning up downloaded archives...
+
+2026-07-29 05:43:43,210 INFO    
+Patcher will be using Gadget version: 17.16.4
+
+2026-07-29 05:43:43,261 INFO    
+Unable to find zipalign. Install it with: apt install zipalign (Kali Linux) before continuing.
+
+2026-07-29 05:43:43,262 INFO    
+Not cleaning up temporary files
+
+2026-07-29 05:44:13,373 DEBUG   
+Starting new HTTPS connection (1): api.github.com:443
+
+2026-07-29 05:44:13,631 DEBUG   
+https://api.github.com:443 "GET /repos/frida/frida/releases/latest HTTP/1.1" 200 25862
+
+2026-07-29 05:44:13,693 INFO    
+Using latest Github gadget version: 17.16.4
+
+2026-07-29 05:44:13,693 INFO    
+Patcher will be using Gadget version: 17.16.4
+
+2026-07-29 05:44:13,740 INFO    
+Detected apktool version as: 3.0.1
+
+2026-07-29 05:44:13,740 INFO    
+Running apktool empty-framework-dir...
+
+2026-07-29 05:44:13,784 INFO    
+Apktool 3.0.1 - a tool for reengineering Android apk files
+with smali 3.0.9-dev and baksmali 3.0.9-dev
+Copyright 2010 Ryszard Wiśniewski <brut.alll@gmail.com>
+Copyright 2010 Connor Tumbleson <connor.tumbleson@gmail.com>
+
+General options:
+ -q,--quiet     Suppress normal output.
+ -v,--verbose   Increase output verbosity.
+
+apktool d|decode [options] <apk-file>
+ -a,--all-src              Decode all sources in the apk (includes unknown dex files).
+ -f,--force                Force delete destination directory.
+ -j,--jobs <num>           Set the number of jobs to execute in parallel to <num>.
+ -l,--lib <package:file>   Use shared library <package> located in <file>.
+                           Can be specified multiple times.
+ -o,--output <dir>         Output decoded files to <dir>. (default: apk.out)
+ -p,--frame-path <dir>     Use framework files located in <dir>.
+ -r,--no-res               Do not decode resources.
+ -s,--no-src               Do not decode sources.
+ -t,--frame-tag <tag>      Use framework files tagged with <tag>.
+
+apktool b|build [options] <apk-dir>
+ -f,--force                Skip changes detection and build all files.
+ -j,--jobs <num>           Set the number of jobs to execute in parallel to <num>.
+ -l,--lib <package:file>   Use shared library <package> located in <file>.
+                           Can be specified multiple times.
+ -o,--output <file>        Output the built apk to <file>. (default: dist/name.apk)
+ -p,--frame-path <dir>     Use framework files located in <dir>.
+
+apktool if|install-framework [options] <apk-file>
+ -p,--frame-path <dir>   Set the path for framework files to <dir>.
+ -t,--frame-tag <tag>    Suffix framework files with <tag>.
+
+apktool h|help
+
+apktool v|version
+
+For additional info, see: https://apktool.org
+For smali/baksmali info, see: https://github.com/google/smali
+
+2026-07-29 05:44:13,784 INFO    
+Unpacking APK_Test/UnCrackable-Level1.apk
+
+2026-07-29 05:44:25,800 INFO    
+App does not have android.permission.INTERNET, attempting to patch the AndroidManifest.xml...
+
+2026-07-29 05:44:25,800 INFO    
+Injecting permission: android.permission.INTERNET
+
+2026-07-29 05:44:25,800 INFO    
+Writing new Android manifest...
+
+2026-07-29 05:44:25,800 INFO    
+Setting debug flag to true
+
+2026-07-29 05:44:25,800 INFO    
+Writing new Android manifest...
+
+2026-07-29 05:44:25,800 INFO    
+Target class not specified, searching for launchable activity instead...
+
+2026-07-29 05:44:25,800 INFO    
+Reading smali from: /tmp/tmphqw7qrjf.apktemp/smali/sg/vantagepoint/uncrackable1/MainActivity.smali
+
+2026-07-29 05:44:25,801 INFO    
+Injecting loadLibrary call at line: 5
+
+2026-07-29 05:44:25,801 INFO    
+Attempting to fix the constructors .locals count
+
+2026-07-29 05:44:25,801 INFO    
+Current locals value is 0, updating to 1:
+
+2026-07-29 05:44:25,801 INFO    
+Writing patched smali back to: /tmp/tmphqw7qrjf.apktemp/smali/sg/vantagepoint/uncrackable1/MainActivity.smali
+
+2026-07-29 05:44:25,801 INFO    
+Creating library path: /tmp/tmphqw7qrjf.apktemp/lib/x86_64
+
+2026-07-29 05:44:25,801 INFO    
+Copying Frida gadget to libs path...
+
+2026-07-29 05:44:25,811 INFO    
+Rebuilding the APK with the frida-gadget loaded...
+
+2026-07-29 05:44:26,710 INFO    
+Built new APK with injected loadLibrary and frida-gadget
+
+2026-07-29 05:44:26,710 INFO    
+Performing zipalign
+
+2026-07-29 05:44:26,936 INFO    
+Zipalign completed
+
+2026-07-29 05:44:26,937 INFO    
+Signing new APK.
+
+2026-07-29 05:44:27,197 INFO    
+Signed the new APK
+
+2026-07-29 05:44:27,197 INFO    
+Copying final apk from /tmp/tmphqw7qrjf.apktemp.aligned.objection.apk to APK_Test/UnCrackable-Level1.objection.apk in current directory...
+
+2026-07-29 05:44:27,202 INFO    
+Cleaning up temp files...
+

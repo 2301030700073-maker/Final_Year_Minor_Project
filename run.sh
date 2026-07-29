@@ -141,12 +141,13 @@ if $ALL_OK && ! $SKIP_PIPELINE && ! $CHECK_ONLY; then
     echo "─── 9. Verify results ───"
     LATEST=$(ls -td docs/plans/handoff/bundles/*/ 2>/dev/null | head -1)
     if [ -n "$LATEST" ]; then
-        LATEST_REPORT=$(ls -t "$LATEST/reports/"*/ 2>/dev/null | head -1)
-        if [ -n "$LATEST_REPORT" ]; then
+        LATEST_REPORT=$(find "$LATEST/reports/" -name "*.md" -type f 2>/dev/null | sort -r | head -1)
+        if [ -n "$LATEST_REPORT" ] && [ -f "$LATEST_REPORT" ]; then
             BYPASSED=$(grep -c "Root bypassed: True" "$LATEST_REPORT" 2>/dev/null || echo "0")
             MATCHES=$(grep -c "Matches: True" "$LATEST_REPORT" 2>/dev/null || echo "0")
             echo "  $( [ "$BYPASSED" != "0" ] && echo "$PASS" || echo "$FAIL" )  Root bypassed: $( [ "$BYPASSED" != "0" ] && echo 'True' || echo 'False' )"
             echo "  $( [ "$MATCHES" != "0" ] && echo "$PASS" || echo "$FAIL" )  Correlation: $( [ "$MATCHES" != "0" ] && echo 'True' || echo 'False' )"
+            grep -E "hook_fired_c\.|hooks_installed" "$LATEST_REPORT" 2>/dev/null | sed 's/^/  /'
         else
             echo "  $INFO  No report file found for verification"
         fi

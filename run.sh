@@ -2,16 +2,24 @@
 # ─────────────────────────────────────────────────────────────
 # One-command Phase 1 runner: check, fix, execute, verify.
 # Usage:
-#   bash run.sh                    # full run with auto-fix
-#   bash run.sh --skip-pipeline    # only setup, skip the pipeline
-#   bash run.sh --check-only       # just verify environment
+#   bash run.sh                              # Phase 1 (Level 1) full run
+#   bash run.sh --target uncrackable2        # Phase 2 (Level 2) full run
+#   bash run.sh --skip-pipeline              # only setup, skip the pipeline
+#   bash run.sh --check-only                 # just verify environment
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 cd "$(dirname "$0")"
 
 PASS="✅"; FAIL="❌"; FIX="🔧"; INFO="ℹ️"
-SKIP_PIPELINE=false; CHECK_ONLY=false
-for arg in "$@"; do [ "$arg" = "--skip-pipeline" ] && SKIP_PIPELINE=true; [ "$arg" = "--check-only" ] && CHECK_ONLY=true; done
+SKIP_PIPELINE=false; CHECK_ONLY=false; TARGET="uncrackable1"
+for arg in "$@"; do
+  case "$arg" in
+    --skip-pipeline) SKIP_PIPELINE=true ;;
+    --check-only) CHECK_ONLY=true ;;
+    --target=*) TARGET="${arg#*=}" ;;
+    --target) TARGET="${2:-uncrackable1}" ;;
+  esac
+done
 
 echo ""
 echo "══════════════════════════════════════════════════"
@@ -115,13 +123,21 @@ if $ALL_OK; then
     }
 fi
 
+# Map target to APK filename and package name
+case "$TARGET" in
+  uncrackable1) APK_FILE="APK_Test/UnCrackable-Level1.apk"; PKG="owasp.mstg.uncrackable1" ;;
+  uncrackable2) APK_FILE="APK_Test/UnCrackable-Level2.apk"; PKG="owasp.mstg.uncrackable2" ;;
+  *) echo "  $FAIL Unknown target: $TARGET (use uncrackable1 or uncrackable2)"; exit 1 ;;
+esac
+echo "  $INFO  Target: $TARGET ($APK_FILE)"
+
 # ── Step 7: Install APK ──
 if $ALL_OK && ! $CHECK_ONLY; then
     echo ""
     echo "─── 7. Install APK ───"
-    adb install -r APK_Test/UnCrackable-Level1.apk 2>/dev/null && echo "  $PASS  APK installed" || {
-        adb uninstall owasp.mstg.uncrackable1 2>/dev/null || true
-        adb install -r APK_Test/UnCrackable-Level1.apk 2>/dev/null && echo "  $PASS  APK installed (clean)" || {
+    adb install -r "$APK_FILE" 2>/dev/null && echo "  $PASS  APK installed" || {
+        adb uninstall "$PKG" 2>/dev/null || true
+        adb install -r "$APK_FILE" 2>/dev/null && echo "  $PASS  APK installed (clean)" || {
             echo "  $FAIL  APK install failed"
             ALL_OK=false
         }
@@ -134,8 +150,9 @@ if $ALL_OK && ! $SKIP_PIPELINE && ! $CHECK_ONLY; then
     echo "─── 8. Run pipeline ───"
     uv sync 2>/dev/null
     python -u scripts/collect_verification_bundle.py \
-        --apk APK_Test/UnCrackable-Level1.apk \
-        --justification ACADEMIC_TRAINING_TARGET 2>&1
+        --apk "$APK_FILE" \
+        --justification ACADEMIC_TRAINING_TARGET \
+        --target "$TARGET" 2>&1
 
     echo ""
     echo "─── 9. Verify results ───"

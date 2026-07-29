@@ -300,6 +300,18 @@ b.a → False
 
 ---
 
+### Running Phase 2 (Level 2)
+```bash
+bash run.sh --target uncrackable2
+```
+Or manually:
+```bash
+uv run python scripts/collect_verification_bundle.py \
+    --apk APK_Test/UnCrackable-Level2.apk \
+    --justification ACADEMIC_TRAINING_TARGET \
+    --target uncrackable2
+```
+
 ## Step 8 — Push Results
 
 ```bash

@@ -12,12 +12,17 @@ cd "$(dirname "$0")"
 
 PASS="✅"; FAIL="❌"; FIX="🔧"; INFO="ℹ️"
 SKIP_PIPELINE=false; CHECK_ONLY=false; TARGET="uncrackable1"
-for arg in "$@"; do
-  case "$arg" in
-    --skip-pipeline) SKIP_PIPELINE=true ;;
-    --check-only) CHECK_ONLY=true ;;
-    --target=*) TARGET="${arg#*=}" ;;
-    --target) TARGET="${2:-uncrackable1}" ;;
+# A `for arg in "$@"` loop can't consume a following word as a flag's value -
+# "--target uncrackable2" only worked before when --target happened to be
+# the very first argument (it was reading the script's fixed $2, not "the
+# word after whichever arg the loop is on"). A while/shift loop can.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip-pipeline) SKIP_PIPELINE=true; shift ;;
+    --check-only) CHECK_ONLY=true; shift ;;
+    --target=*) TARGET="${1#*=}"; shift ;;
+    --target) TARGET="${2:-uncrackable1}"; shift; [[ $# -gt 0 ]] && shift ;;
+    *) shift ;;
   esac
 done
 

@@ -255,10 +255,12 @@ def install_apk(serial: str, apk_path: Path) -> None:
         [adb, "-s", serial, "install", "-r", str(apk_path)],
         capture_output=True, text=True, check=True,
     )
-    # Clear logcat so the dynamic-bypass verification reads only
-    # fresh entries from this run, not stale ones from prior runs.
-    subprocess.run([adb, "-s", serial, "logcat", "-c"],
-                   capture_output=True, timeout=10)
+
+
+def clear_logcat(serial: str) -> None:
+    """Clear logcat buffer so the upcoming dynamic-stage capture reads only fresh entries."""
+    adb = _require_adb()
+    subprocess.run([adb, "-s", serial, "logcat", "-c"], capture_output=True, timeout=10)
 
 
 def verify_installed(serial: str, package_name: str) -> bool:

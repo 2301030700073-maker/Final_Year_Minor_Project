@@ -174,6 +174,7 @@ def run(
     else:
         serial = device.discover_device(device_serial)
         package_name = ingest_result.evidence["package"]["package_name"]
+        device.clear_logcat(serial)
         device.install_apk(serial, apk)
         dynamic_stage = frida_runner.run_dynamic_stage(serial, package_name, classification.action)
         stage_results.append(dynamic_stage)

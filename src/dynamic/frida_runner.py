@@ -10,10 +10,26 @@ from dynamic.device import setup_frida_connection
 
 SCRIPT_DIR = Path(__file__).parent / "scripts"
 
-SCRIPTS_BY_ACTION = {
-    Action.ROOT_ONLY: ["root_bypass_v1.js"],
-    Action.SSL_ONLY: ["ssl_pinning_bypass_v1.js"],
-    Action.BOTH: ["root_bypass_v1.js", "ssl_pinning_bypass_v1.js"],
+# Keyed by target, not just action - UnCrackable1 and UnCrackable2 need
+# different scripts for the same ROOT_ONLY action, since their root-check
+# code lives in differently-named classes (confirmed against real
+# decompiled sources, see docs/plans/handoff/phase-2-handoff.md).
+SCRIPTS_BY_TARGET_ACTION: dict[str, dict[Action, list[str]]] = {
+    "uncrackable1": {
+        Action.ROOT_ONLY: ["root_bypass_v1.js"],
+        Action.SSL_ONLY: ["ssl_pinning_bypass_v1.js"],
+        Action.BOTH: ["root_bypass_v1.js", "ssl_pinning_bypass_v1.js"],
+    },
+    "uncrackable2": {
+        # ssl_pinning_bypass_v1.js hooks generic OkHttp/conscrypt classes,
+        # nothing sg.vantagepoint-specific, so it's genuinely reusable as-is.
+        # Filled in for SSL_ONLY/BOTH even though the real APK only ever
+        # classifies ROOT_ONLY, so a KeyError isn't waiting on a future
+        # reclassification.
+        Action.ROOT_ONLY: ["root_bypass_uncrackable2.js"],
+        Action.SSL_ONLY: ["ssl_pinning_bypass_v1.js"],
+        Action.BOTH: ["root_bypass_uncrackable2.js", "ssl_pinning_bypass_v1.js"],
+    },
 }
 
 
@@ -33,7 +49,10 @@ def load_script(session, script_name: str, on_message=None):
     return script
 
 
-def run_dynamic_stage(device_serial: str, package_name: str, action: Action, settle_seconds: int = 5) -> StageResult:
+def run_dynamic_stage(
+    device_serial: str, package_name: str, action: Action,
+    target: str = "uncrackable1", settle_seconds: int = 5,
+) -> StageResult:
     start = time.monotonic()
     messages: list[dict] = []
     try:
@@ -44,7 +63,7 @@ def run_dynamic_stage(device_serial: str, package_name: str, action: Action, set
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
-        script_names = SCRIPTS_BY_ACTION[action]
+        script_names = SCRIPTS_BY_TARGET_ACTION[target][action]
         device, session, pid = attach(device_serial, package_name)
 
         def on_message(message, data):
@@ -58,7 +77,7 @@ def run_dynamic_stage(device_serial: str, package_name: str, action: Action, set
 
         return StageResult(
             stage="dynamic", status="success",
-            evidence={"scripts_applied": script_names, "pid": pid, "frida_messages": messages},
+            evidence={"scripts_applied": script_names, "pid": pid, "frida_messages": messages, "target": target},
             duration_ms=int((time.monotonic() - start) * 1000),
         )
     except Exception as exc:

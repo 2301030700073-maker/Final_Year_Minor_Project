@@ -28,6 +28,7 @@ from dynamic import correlation as correlation_module
 from dynamic import device
 from dynamic import frida_runner
 from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
+from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
 from ingest.metadata import ingest
 from report.generator import generate_report
 from static.decision_engine import classify
@@ -46,6 +47,7 @@ AUDIT_LOG_PATH = OUTPUTS_ROOT / "audit_log.jsonl"
 
 SUCCESS_CHECKS = {
     "uncrackable1": UnCrackable1SuccessCheck(),
+    "uncrackable2": UnCrackable2SuccessCheck(),
 }
 
 
@@ -97,7 +99,10 @@ def run(
     ),
     skip_dynamic: bool = typer.Option(False, "--skip-dynamic", help="Skip the dynamic analysis stage"),
     device_serial: Optional[str] = typer.Option(None, "--device", help="Specific device/emulator serial"),
-    target: str = typer.Option("uncrackable1", "--target", help="Which success-check module to use"),
+    target: str = typer.Option(
+        "uncrackable1", "--target",
+        help="Which target app this run is analyzing - selects both the Frida bypass script and the success-check module",
+    ),
 ):
     stage_results: list[StageResult] = []
     run_id = uuid.uuid4().hex[:8]
@@ -175,7 +180,7 @@ def run(
         serial = device.discover_device(device_serial)
         package_name = ingest_result.evidence["package"]["package_name"]
         device.install_apk(serial, apk)
-        dynamic_stage = frida_runner.run_dynamic_stage(serial, package_name, classification.action)
+        dynamic_stage = frida_runner.run_dynamic_stage(serial, package_name, classification.action, target=target)
         stage_results.append(dynamic_stage)
         _print_stage(dynamic_stage)
         if dynamic_stage.status == "failed":

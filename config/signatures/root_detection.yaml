@@ -11,9 +11,20 @@
 # check tests a hardcoded array of 7 known root-indicator file paths
 # that had no corresponding signature at all before this. Both new
 # patterns are quoted verbatim against the real code, not guessed.
-# The remaining empirical gate is a real pipeline re-run confirming
-# this flips the classification to ROOT_ONLY as predicted - update this
-# comment once that's confirmed.
+# The empirical gate was confirmed in round 2: a real pipeline re-run
+# flipped classification to ROOT_ONLY at 0.80 confidence, consistently
+# across runs.
+#
+# Phase 2 (UnCrackable2): the same three checks reappear byte-for-byte
+# identical in sg/vantagepoint/a/b.java (just a different class name -
+# same PATH-split su lookup / test-keys / 7-path indicator array) -
+# confirmed against the real decompiled source. Zero new signature
+# entries needed, since matching here is content-based, not tied to any
+# class name. UnCrackable2's genuinely new anti-debugging check (a
+# background Debug.isDebuggerConnected() poll) is deliberately NOT a
+# signature here - it's neither root-detection nor SSL-pinning, and
+# folding it into this category's confidence score would misrepresent
+# what's actually being measured (see docs/plans/handoff/phase-2-handoff.md).
 
 - id: root_su_binary_paths
   category: root

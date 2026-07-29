@@ -98,6 +98,59 @@ def test_scan_matches_real_uncrackable1_root_detection_code(tmp_path):
     assert "root_su_binary_paths" not in matched_ids
 
 
+def test_scan_matches_real_uncrackable2_root_detection_code(tmp_path):
+    """Regression test using the actual decompiled UnCrackable2 source
+    (sg/vantagepoint/a/b.java), quoted verbatim from a real local jadx run -
+    not a synthetic approximation. The three checks are byte-for-byte
+    identical to Level 1's c.java, just under a different class name. Locks
+    in that the existing signatures need zero changes to cover a second
+    target, since matching here is content-based, not tied to any class
+    name."""
+    (tmp_path / "b.java").write_text(
+        "package sg.vantagepoint.a;\n"
+        "\n"
+        "import android.os.Build;\n"
+        "import java.io.File;\n"
+        "\n"
+        "public class b {\n"
+        "    public static boolean a() {\n"
+        "        for (String str : System.getenv(\"PATH\").split(\":\")) {\n"
+        "            if (new File(str, \"su\").exists()) {\n"
+        "                return true;\n"
+        "            }\n"
+        "        }\n"
+        "        return false;\n"
+        "    }\n"
+        "\n"
+        "    public static boolean b() {\n"
+        "        String str = Build.TAGS;\n"
+        "        return str != null && str.contains(\"test-keys\");\n"
+        "    }\n"
+        "\n"
+        "    public static boolean c() {\n"
+        "        for (String str : new String[]{\"/system/app/Superuser.apk\", \"/system/xbin/daemonsu\", \"/system/etc/init.d/99SuperSUDaemon\", \"/system/bin/.ext/.su\", \"/system/etc/.has_su_daemon\", \"/system/etc/.installed_su_daemon\", \"/dev/com.koushikdutta.superuser.daemon/\"}) {\n"
+        "            if (new File(str).exists()) {\n"
+        "                return true;\n"
+        "            }\n"
+        "        }\n"
+        "        return false;\n"
+        "    }\n"
+        "}\n"
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+
+    evidence = scan(tmp_path, signatures)
+
+    assert evidence.root_confidence >= 0.7, (
+        f"real UnCrackable2 root-detection code only scored {evidence.root_confidence}, "
+        f"below the 0.7 threshold - existing signatures don't actually generalize"
+    )
+    matched_ids = {e.signature_id for e in evidence.root_evidence}
+    assert "root_build_tags_test_keys" in matched_ids
+    assert "root_su_via_path_env_check" in matched_ids
+    assert "root_known_indicator_files" in matched_ids
+
+
 def test_scan_records_correct_line_number(tmp_path):
     (tmp_path / "sub").mkdir()
     file_path = tmp_path / "sub" / "Check.java"

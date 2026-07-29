@@ -40,7 +40,7 @@ These were arrived at deliberately, after critiquing an earlier, over-scoped ver
 
 Code is written and version-controlled wherever this repo is checked out. **The authoritative execution and test environment is the collaborator's machine**: WSL2 Ubuntu 24.04, 4 vCPU / 11 GB RAM allocated, RTX 5070 GPU, ~930 GB free. That hardware profile is what the resource-fit analysis in the architecture doc targets — it is not necessarily the profile of whichever machine this code is edited on.
 
-Workflow: develop and commit here → push → collaborator pulls → runs the pipeline (including all Frida/emulator/dynamic work) on their WSL2 environment → reports results and issues back → iterate. See ADR-0007 for the full reasoning.
+See ADR-0007 for the full reasoning, and `CONTRIBUTING.md` for the actual step-by-step collaboration protocol (roles, git workflow, the phase-handoff loop, communication rules) — that's the canonical source for *how* the two sides coordinate; this section stays focused on *why* the split exists and what it means for how code gets written.
 
 Practical consequence for how code gets written: pure-Python logic (signature matching, decision engine, calibration, report generation) must be unit-testable anywhere with fixture data, with **no assumption that the Android toolchain is locally present**. Anything that shells out to jadx/apktool/adb/frida/mitmproxy is only exercised for real on the reference WSL2 environment — such code must fail loudly and clearly if those binaries are missing, never silently no-op.
 
@@ -66,10 +66,8 @@ Commit messages and code, including comments, read the way an engineer would nat
 
 ## Phase handoff convention
 
-A phase isn't finished until its collaborator handoff doc exists at `docs/plans/handoff/phase-N-handoff.md`, **and** a verification bundle script exists (or is reused/extended) at `scripts/collect_verification_bundle.py` that the handoff doc tells the collaborator to run. The doc covers: what changed, what to actually look for and verify (not just "run it and see"), what success looks like versus a real problem, which specific files/values are provisional and need the collaborator's real-world confirmation, and how to push the results back. README.md's "For the collaborator" section points here.
-
-This exists because the dev/test environment split (ADR-0007) means the collaborator is the only one who can verify most of what actually matters, and two failure modes are both unacceptable: a vague "let me know how it goes" that wastes their time figuring out what to check, and a vague "it's all green" reply that gives nobody anything to actually verify. The bundle script exists specifically to close the second gap - a status update should mean "here's the bundle," not "trust me." **A relayed verbal confirmation is not evidence and is not sufficient to consider a phase's real-world claims (detection accuracy, bypass success) confirmed - only a pushed bundle/report is**, however good the news sounds.
+A phase isn't finished until its collaborator handoff doc exists at `docs/plans/handoff/phase-N-handoff.md` and a matching verification bundle script exists at `scripts/collect_verification_bundle.py`. Full protocol — including the non-negotiable rule that **a relayed verbal confirmation is not evidence; only a pushed bundle/report is** — lives in `CONTRIBUTING.md`. Don't duplicate that here; update it there if it needs to change.
 
 ## Working agreement
 
-This project runs through the standard cycle: research/brainstorm → spec → plan → implement → collaborator tests on reference hardware → feedback → iterate. Don't skip the spec/plan steps for "just this one small thing" — see `docs/plans/adr/` for why that discipline was chosen deliberately over moving fast.
+This project runs through the standard cycle: research/brainstorm → spec → plan → implement → collaborator tests on reference hardware → feedback → iterate. Don't skip the spec/plan steps for "just this one small thing" — see `docs/plans/adr/` for why that discipline was chosen deliberately over moving fast. For the cross-collaborator mechanics of that cycle (git protocol, roles, communication), see `CONTRIBUTING.md`.

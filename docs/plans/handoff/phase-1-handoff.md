@@ -4,7 +4,13 @@
 
 An automated pipeline that ingests an APK, statically scans it for root-detection and SSL-pinning indicators (deterministic signature matching, no AI), classifies it as ROOT_ONLY/SSL_ONLY/BOTH/NEITHER, then attempts a Frida-based bypass and programmatically checks whether it actually worked. Target: OWASP UnCrackable Level 1.
 
-**The code and 40 unit tests are done and verified on the dev machine — but nothing here has touched a real APK or real Android toolchain yet, since that machine doesn't have either.** That's your part. The signature weights, the two Frida bypass scripts, and the success-check patterns are honest best-effort guesses based on how UnCrackable1 is generally documented to behave — not confirmed facts. Treat everything below as "verify this," not "this is known to work."
+## Status as of the last push (round 2)
+
+Your first real run (all 4 `run_*.json` in the pushed bundle) correctly came back `NEITHER` — not a bug, an honest signal. Root confidence was only 0.20 (just `test-keys` matched), well under the 0.7 threshold. Root cause traced directly against the real decompiled code you pushed (`sg/vantagepoint/a/c.java`): the su-path check builds the path dynamically at runtime rather than using a literal string, and a second real check (a 7-path indicator-file array) had no signature at all. Both are now added to `config/signatures/root_detection.yaml`, verified locally against that exact real code before pushing (new confidence: 0.8). SSL confirmed correct as-is — this app has no networking code anywhere, so `NEITHER` for SSL is ground truth, not something to fix.
+
+Also reviewed and fixed 4 real bugs in the Frida relay bridge you built for the WSL2→Windows connection (`src/dynamic/device.py`) — see the commit `15001f4` message for specifics if you want the detail. One is worth knowing before you rely on it again: cleanup was silently failing to kill the old relay process every time (confirmed by direct testing), now fixed.
+
+**What's still open, and is the actual point of this round**: the dynamic/Frida bypass path has never run even once — every prior run hit `NEITHER` first, and the pipeline correctly refuses to attempt a bypass when static found nothing to bypass. Now that static should say `ROOT_ONLY`, this is the first real test of whether the bypass itself actually works. Also still open: `docs/plans/research/phase0-uncrackable1-manual-findings.md` doesn't exist yet — the signature fix above came from reading the real code you already pushed, not from a written-up manual spike, so if you have a few minutes to skim `sg/vantagepoint/a/c.java` yourself and confirm (or correct) that read, that's the actual Step 0 deliverable, still worth doing for the record.
 
 ## 1. Pull
 
@@ -13,11 +19,9 @@ git pull
 uv sync
 ```
 
-## 2. The manual spike (do this before trusting the automated run — can't be scripted, needs a human reading code)
+## 2. The manual spike (still worth finishing for the record, even though the signature fix already happened)
 
-This is the part that matters most right now.
-
-1. Decompile UnCrackable1 by hand:
+1. Decompile UnCrackable1 by hand (skip if you still have last round's output):
    ```bash
    jadx -d /tmp/uc1_jadx uncrackable1.apk
    apktool d -o /tmp/uc1_apktool uncrackable1.apk
@@ -38,9 +42,9 @@ This one command: records your tool versions (aapt2/apksigner/jadx/apktool/adb/f
 
 If you'd rather check environment/tests only first (e.g., before a real device is ready), omit `--apk` and it'll skip the pipeline run.
 
-Look at `SUMMARY.md` yourself before pushing — specifically:
-- Did every tool actually get `found`? If something's `**NOT FOUND**`, fix that first.
-- Did the real pipeline run's `Decision:` (visible in `cli_output.txt`) match what you found by hand in step 2? A mismatch is the real signal that `config/signatures/*.yaml` needs correcting — not a bug, just data to fix.
+Look at `SUMMARY.md` yourself before pushing — specifically, this round:
+- Does `cli_output.txt` now say `Decision: ROOT_ONLY`? If it's still `NEITHER` or something else, the fix didn't take as expected — flag that specifically rather than re-guessing at more signatures.
+- Did the dynamic stage actually run this time (not `skipped`)? What did it report — did the bypass get programmatically confirmed, or did it fail? Either outcome is useful data; a clean failure with a clear error is far more useful than no attempt at all.
 - Open the copied report under `reports/` — does the evidence it cites (file/line/matched text) actually correspond to real code you saw?
 
 ## 4. If something's off

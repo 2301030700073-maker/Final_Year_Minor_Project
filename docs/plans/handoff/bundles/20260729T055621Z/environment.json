@@ -1,0 +1,89 @@
+{
+  "timestamp_utc": "2026-07-29T05:56:21.265879+00:00",
+  "git_commit": {
+    "command": "git rev-parse HEAD",
+    "found": true,
+    "exit_code": 0,
+    "stdout": "5994f76a8907552298e476bb7aee84907d5c845a\n",
+    "stderr": ""
+  },
+  "git_status_porcelain": {
+    "command": "git status --porcelain",
+    "found": true,
+    "exit_code": 0,
+    "stdout": " M scripts/collect_verification_bundle.py\n?? APK_Test/UnCrackable-Level1-debuggable.apk\n?? APK_Test/UnCrackable-Level1.objection.apk\n?? docs/plans/handoff/bundles/20260729T042203Z/\n?? docs/plans/handoff/bundles/20260729T042520Z/\n?? docs/plans/handoff/bundles/20260729T043207Z/\n?? docs/plans/handoff/bundles/20260729T055133Z/\n?? docs/plans/research/\n",
+    "stderr": ""
+  },
+  "python_version": {
+    "command": "/home/ubuntu/Testing/Final_Year_Minor_Project/.venv/bin/python3 --version",
+    "found": true,
+    "exit_code": 0,
+    "stdout": "Python 3.12.3\n",
+    "stderr": ""
+  },
+  "uv_version": {
+    "command": "uv --version",
+    "found": true,
+    "exit_code": 0,
+    "stdout": "uv 0.11.29 (x86_64-unknown-linux-gnu)\n",
+    "stderr": ""
+  },
+  "tool_versions": {
+    "aapt2": {
+      "command": "aapt2 version",
+      "found": true,
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "Android Asset Packaging Tool (aapt) 2.19-debian\n"
+    },
+    "apksigner": {
+      "command": "apksigner --version",
+      "found": true,
+      "exit_code": 0,
+      "stdout": "0.9\n",
+      "stderr": ""
+    },
+    "jadx": {
+      "command": "jadx --version",
+      "found": true,
+      "exit_code": 0,
+      "stdout": "1.5.1\n",
+      "stderr": ""
+    },
+    "apktool": {
+      "command": "apktool --version",
+      "found": true,
+      "exit_code": 0,
+      "stdout": "3.0.1\n",
+      "stderr": ""
+    },
+    "adb": {
+      "command": "adb version",
+      "found": true,
+      "exit_code": 0,
+      "stdout": "Android Debug Bridge version 1.0.41\nVersion 37.0.0-14910828\nInstalled as C:\\Users\\Divyang\\Downloads\\platform-tools-latest-windows\\platform-tools\\adb.exe\nRunning on Windows 10.0.26200\n",
+      "stderr": ""
+    },
+    "frida": {
+      "command": "frida --version",
+      "found": true,
+      "exit_code": 0,
+      "stdout": "17.16.4\n",
+      "stderr": ""
+    }
+  },
+  "adb_devices": {
+    "command": "adb devices",
+    "found": true,
+    "exit_code": 0,
+    "stdout": "List of devices attached\nemulator-5554\tdevice\n\n",
+    "stderr": ""
+  },
+  "frida_ps_dash_U": {
+    "command": "timeout 3 frida-ps -U",
+    "found": true,
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+}

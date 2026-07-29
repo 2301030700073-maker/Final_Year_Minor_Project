@@ -1,0 +1,45 @@
+OK  ingest  (108ms)
+OK  audit  (0ms)
+OK  decompile  (0ms)
+OK  static_scan  (3ms)
+OK  manifest_parse  (0ms)
+OK  decision_engine  (0ms)
+Decision: ROOT_ONLY
+
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+│ /home/ubuntu/Testing/Final_Year_Minor_Project/src/cli.py:177 in run          │
+│                                                                              │
+│   174 │   else:                                                              │
+│   175 │   │   serial = device.discover_device(device_serial)                 │
+│   176 │   │   package_name =                                                 │
+│       ingest_result.evidence["package"]["package_name"]                      │
+│ ❱ 177 │   │   device.install_apk(serial, apk)                                │
+│   178 │   │   dynamic_stage = frida_runner.run_dynamic_stage(serial,         │
+│       package_name, classification.action)                                   │
+│   179 │   │   stage_results.append(dynamic_stage)                            │
+│   180 │   │   _print_stage(dynamic_stage)                                    │
+│                                                                              │
+│ /home/ubuntu/Testing/Final_Year_Minor_Project/src/dynamic/device.py:254 in   │
+│ install_apk                                                                  │
+│                                                                              │
+│   251                                                                        │
+│   252 def install_apk(serial: str, apk_path: Path) -> None:                  │
+│   253 │   adb = _require_adb()                                               │
+│ ❱ 254 │   subprocess.run(                                                    │
+│   255 │   │   [adb, "-s", serial, "install", "-r", str(apk_path)],           │
+│   256 │   │   capture_output=True, text=True, check=True,                    │
+│   257 │   )                                                                  │
+│                                                                              │
+│ /usr/lib/python3.12/subprocess.py:571 in run                                 │
+│                                                                              │
+│    568 │   │   │   raise                                                     │
+│    569 │   │   retcode = process.poll()                                      │
+│    570 │   │   if check and retcode:                                         │
+│ ❱  571 │   │   │   raise CalledProcessError(retcode, process.args,           │
+│    572 │   │   │   │   │   │   │   │   │    output=stdout, stderr=stderr)    │
+│    573 │   return CompletedProcess(process.args, retcode, stdout, stderr)    │
+│    574                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+CalledProcessError: Command '['/home/ubuntu/.local/bin/adb', '-s', 
+'emulator-5556', 'install', '-r', 'APK_Test/UnCrackable-Level1.apk']' returned 
+non-zero exit status 1.

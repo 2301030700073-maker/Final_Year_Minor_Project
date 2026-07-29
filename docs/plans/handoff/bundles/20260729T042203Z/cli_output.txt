@@ -1,0 +1,31 @@
+OK  ingest  (137ms)
+OK  audit  (0ms)
+OK  decompile  (10411ms)
+OK  static_scan  (3ms)
+OK  manifest_parse  (0ms)
+OK  decision_engine  (0ms)
+Decision: ROOT_ONLY
+
+╭───────────────────────────────────────── Traceback (most recent call last) ──────────────────────────────────────────╮
+│ /home/ubuntu/Testing/Final_Year_Minor_Project/src/cli.py:175 in run                                                  │
+│                                                                                                                      │
+│   172 │   │   stage_results.append(dynamic_stage)                                                                    │
+│   173 │   │   _print_stage(dynamic_stage)                                                                            │
+│   174 │   else:                                                                                                      │
+│ ❱ 175 │   │   serial = device.discover_device(device_serial)                                                         │
+│   176 │   │   package_name = ingest_result.evidence["package"]["package_name"]                                       │
+│   177 │   │   device.install_apk(serial, apk)                                                                        │
+│   178 │   │   dynamic_stage = frida_runner.run_dynamic_stage(serial, package_name, classification.action)            │
+│                                                                                                                      │
+│ /home/ubuntu/Testing/Final_Year_Minor_Project/src/dynamic/device.py:245 in discover_device                           │
+│                                                                                                                      │
+│   242 │   │   │   raise RuntimeError(f"requested device serial '{serial}' not found among connected devices")        │
+│   243 │   │   return serial                                                                                          │
+│   244 │   if not lines:                                                                                              │
+│ ❱ 245 │   │   raise RuntimeError(                                                                                    │
+│   246 │   │   │   "no connected device/emulator found via 'adb devices' - "                                          │
+│   247 │   │   │   "pass --skip-dynamic to skip this stage, or connect a rooted device/emulator"                      │
+│   248 │   │   )                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+RuntimeError: no connected device/emulator found via 'adb devices' - pass --skip-dynamic to skip this stage, or connect 
+a rooted device/emulator

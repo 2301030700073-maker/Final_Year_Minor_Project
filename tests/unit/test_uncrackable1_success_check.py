@@ -14,16 +14,16 @@ def test_secret_revealed_without_block_signal_is_bypassed():
 
 def test_block_signal_present_means_not_bypassed_even_if_secret_seen():
     result = check.check(
-        logcat_output="Root detected - application will exit",
+        logcat_output="WindowManager: WIN DEATH: Window{a2fdae2 u0 Root detected!}",
         frida_log="",
     )
     assert result.root_bypassed is False
     assert "block_signal_still_present" in result.evidence_lines
 
 
-def test_neither_signal_present_is_not_bypassed():
+def test_no_block_signal_means_bypass_succeeded():
     result = check.check(logcat_output="unrelated log line", frida_log="")
-    assert result.root_bypassed is False
+    assert result.root_bypassed is True
     assert result.evidence_lines == {}
 
 

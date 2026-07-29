@@ -2,7 +2,7 @@
 __pycache__/
 *.pyc
 .env
-outputs/
+# outputs/ — removed from gitignore; generated artifacts are part of the deliverable
 *.db
 .pytest_cache/
 *.objection.apk

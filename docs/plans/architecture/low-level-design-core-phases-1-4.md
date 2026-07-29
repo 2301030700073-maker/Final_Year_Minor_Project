@@ -33,7 +33,8 @@ config/
   signatures/
     root_detection.yaml
     ssl_pinning.yaml
-    anti_frida.yaml                  # [Phase 3]
+    # anti_frida.yaml planned here for [Phase 3] - not created; real Phase 3
+    # work needed zero new signature files (see docs/plans/handoff/phase-3-handoff.md)
 outputs/                                # gitignored entirely - local/ephemeral, never `git add`ed
   apks/{hash}/                          # directly; the verification bundle script is the only
   analysis/{hash}/                      # sanctioned path evidence takes into git (see CONTRIBUTING.md)

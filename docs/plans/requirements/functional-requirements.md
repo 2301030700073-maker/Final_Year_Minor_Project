@@ -11,8 +11,8 @@ Grouped by capability area; phase mapping in brackets. See `docs/plans/architect
 - FR-2.1: Decompile the APK via jadx and apktool, caching output by hash.
 - FR-2.2: Match decompiled sources, resources, and manifest against a YAML-defined signature set for root-detection indicators; each match records signature ID, file, line/offset, and matched text.
 - FR-2.3: Same as FR-2.2 for SSL/TLS pinning indicators.
-- FR-2.4 [Phase 2]: Extract native `.so` exported symbols (readelf) and match against native-specific signatures.
-- FR-2.5 [Phase 3]: Match against anti-Frida/anti-debug indicators (tracerpid checks, ptrace self-attach, frida-server process/port scanning patterns).
+- FR-2.4 [Phase 2] - **not needed, confirmed by real work**: originally "extract native `.so` exported symbols (readelf) and match against native-specific signatures." UnCrackable2's root-detection turned out fully Java-visible; revised here rather than silently dropped. See `docs/plans/handoff/phase-2-handoff.md`.
+- FR-2.5 [Phase 3] - **not needed, confirmed by real work**: originally "match against anti-Frida/anti-debug indicators (tracerpid checks, ptrace self-attach, frida-server process/port scanning patterns)." A full-tree grep of UnCrackable3's real decompiled source for these patterns found none. See `docs/plans/handoff/phase-3-handoff.md`.
 - FR-2.6: Every signature match contributes a configurable weight to a per-category (root/ssl) confidence score, capped at 1.0.
 
 ## FR-3 — Decision Engine [Phase 1]

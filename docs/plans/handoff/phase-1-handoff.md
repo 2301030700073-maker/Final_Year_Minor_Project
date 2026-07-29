@@ -4,13 +4,22 @@
 
 An automated pipeline that ingests an APK, statically scans it for root-detection and SSL-pinning indicators (deterministic signature matching, no AI), classifies it as ROOT_ONLY/SSL_ONLY/BOTH/NEITHER, then attempts a Frida-based bypass and programmatically checks whether it actually worked. Target: OWASP UnCrackable Level 1.
 
-## Status as of the last push (round 2)
+## Status as of round 3
 
-Your first real run (all 4 `run_*.json` in the pushed bundle) correctly came back `NEITHER` — not a bug, an honest signal. Root confidence was only 0.20 (just `test-keys` matched), well under the 0.7 threshold. Root cause traced directly against the real decompiled code you pushed (`sg/vantagepoint/a/c.java`): the su-path check builds the path dynamically at runtime rather than using a literal string, and a second real check (a 7-path indicator-file array) had no signature at all. Both are now added to `config/signatures/root_detection.yaml`, verified locally against that exact real code before pushing (new confidence: 0.8). SSL confirmed correct as-is — this app has no networking code anywhere, so `NEITHER` for SSL is ground truth, not something to fix.
+Round 2 confirmed the signature fix was correct (consistent `ROOT_ONLY`, 0.80 confidence, across every run) and got a real dynamic bypass working end-to-end for the first time — genuine progress, and real debugging work on your end to get there (the `frida<17` pin, the `userdebug`/`google_apis` emulator requirement, the bypass-script rewrite hooking the real check methods directly). Thank you for pushing through that.
 
-Also reviewed and fixed 4 real bugs in the Frida relay bridge you built for the WSL2→Windows connection (`src/dynamic/device.py`) — see the commit `15001f4` message for specifics if you want the detail. One is worth knowing before you rely on it again: cleanup was silently failing to kill the old relay process every time (confirmed by direct testing), now fixed.
+Two things from that round needed fixing before this is actually solid, both done now:
 
-**What's still open, and is the actual point of this round**: the dynamic/Frida bypass path has never run even once — every prior run hit `NEITHER` first, and the pipeline correctly refuses to attempt a bypass when static found nothing to bypass. Now that static should say `ROOT_ONLY`, this is the first real test of whether the bypass itself actually works. Also still open: `docs/plans/research/phase0-uncrackable1-manual-findings.md` doesn't exist yet — the signature fix above came from reading the real code you already pushed, not from a written-up manual spike, so if you have a few minutes to skim `sg/vantagepoint/a/c.java` yourself and confirm (or correct) that read, that's the actual Step 0 deliverable, still worth doing for the record.
+1. **The success-check verification logic was too weak.** It had changed to treat "no block signal" as sufficient proof of a bypass — but that flip-flopped `True`/`False` across runs with byte-for-byte identical Frida hook evidence, because of a logcat timing race (see below). Fixed: `src/dynamic/success_checks/uncrackable1.py` now requires the Frida script's own per-hook `forced_result` firing confirmation (real evidence the bypass had a runtime effect) as the primary signal, not just absence of a block signal. If hooks fire **and** a block signal still shows up, that's now reported as an explicit `anomaly` in `evidence_lines` — both signals kept, never silently resolved either way. **If you see an `anomaly` key in a future run, that's the known logcat race below resurfacing, not a new bug** — worth a note back to us either way, but not a surprise.
+2. **A handful of smaller bugs**, all fixed: `clear_logcat()` now fails loudly instead of silently on an adb error (same class of bug that took two attempts to find last round); the `Java.available` poll in `root_bypass_v1.js` is now bounded (15s) with an explicit failure message instead of retrying forever silently; `collect_verification_bundle.py`'s `frida-ps -U` check now has a real timeout instead of potentially hanging on WSL2 with no USB device attached; and the `_find_windows_user` test that was failing on your machine (`/mnt/c/Users` genuinely exists on real WSL2, unlike this dev machine) is now environment-agnostic.
+
+**Known, deliberately not fixed this round**: the logcat clear/capture race itself. The clear now happens right before capture (your fix from round 2), which is correct in principle, but `run_dynamic_stage()`'s own settle window still runs *before* that clear — so a stale signal from that window can still occasionally survive. Two real runs with byte-for-byte identical Frida evidence produced opposite verdicts because of exactly this. The real fix is timestamp-based capture (`adb logcat -d -T '<timestamp>'` instead of clear-then-dump) instead of relocating the clear again — bigger change, deliberately deferred rather than touching the dynamic pipeline further right after it just started working. The redesigned success-check (point 1 above) is deliberately robust to this in the meantime — it reports the contradiction instead of guessing.
+
+**Also new this round**: `tools/objection_cache/`'s 26.5MB gadget binary is no longer committed raw — it's gitignored now, with `tools/download_frida_gadget.sh` added (mirrors `download_frida_server.sh`) to fetch it locally. Your existing local copy is untouched; run the script if you ever need to regenerate it from a fresh clone.
+
+**Not touched, on purpose**: the `outputs/` gitignore question from your `e5855ee` commit — the user wants to discuss that with you directly rather than have it flip again in a doc. Nothing in this round changes `.gitignore`'s `outputs/` line or any currently-committed `outputs/` files.
+
+**Still open**: `docs/plans/research/phase0-uncrackable1-manual-findings.md` still doesn't exist — the signature fix came from reading the real code you pushed, not a written-up manual spike. Worth doing for the record when you have a few minutes, not blocking.
 
 ## 1. Pull
 
@@ -43,9 +52,9 @@ This one command: records your tool versions (aapt2/apksigner/jadx/apktool/adb/f
 If you'd rather check environment/tests only first (e.g., before a real device is ready), omit `--apk` and it'll skip the pipeline run.
 
 Look at `SUMMARY.md` yourself before pushing — specifically, this round:
-- Does `cli_output.txt` now say `Decision: ROOT_ONLY`? If it's still `NEITHER` or something else, the fix didn't take as expected — flag that specifically rather than re-guessing at more signatures.
-- Did the dynamic stage actually run this time (not `skipped`)? What did it report — did the bypass get programmatically confirmed, or did it fail? Either outcome is useful data; a clean failure with a clear error is far more useful than no attempt at all.
-- Open the copied report under `reports/` — does the evidence it cites (file/line/matched text) actually correspond to real code you saw?
+- Does `cli_output.txt` still say `Decision: ROOT_ONLY`? Should be unchanged from round 2.
+- Did the dynamic stage run, and what does the report's evidence show now — `hook_fired_c.a`/`c.b`/`c.c` present (the bypass had a real runtime effect) and `root_bypassed: true`? Or `hooks_not_confirmed` (hooks never fired — a real problem, not the old flip-flop)? Or `anomaly` (the known logcat race noted above — expected, not new)?
+- Open the copied report under `reports/<apk_hash>/` — does the evidence it cites (file/line/matched text, hook confirmations) actually correspond to real code/behavior you saw?
 
 ## 4. If something's off
 

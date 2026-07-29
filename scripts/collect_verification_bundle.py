@@ -70,7 +70,7 @@ def collect_environment() -> dict:
             "frida": _run(["frida", "--version"]),
         },
         "adb_devices": _run(["adb", "devices"]),
-        "frida_ps_dash_U": _run(["timeout", "3", "frida-ps", "-U"]),
+        "frida_ps_dash_U": _run(["timeout", "3", "frida-ps", "-U"], timeout=5),
     }
 
 

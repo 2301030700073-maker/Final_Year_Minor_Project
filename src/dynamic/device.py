@@ -130,7 +130,7 @@ def _start_relay(adb_cmd: str) -> int:
     # can't resolve a raw WSL path (/home/... or similar) at all, so there's
     # no working fallback if the Windows user directory can't be found -
     # fail loudly here instead of deferring to a confusing failure later.
-    win_script = Path("/mnt/c/Users") / _find_windows_user() / "AppData/Local/Temp/frida_relay.py"
+    win_script = WINDOWS_USERS_DIR / _find_windows_user() / "AppData/Local/Temp/frida_relay.py"
     win_script.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(_RELAY_SCRIPT_SOURCE, str(win_script))
     script_arg = str(win_script).replace("/mnt/c/", "C:\\").replace("/", "\\")
@@ -175,21 +175,27 @@ def _stop_relay() -> None:
     )
 
 
-def _find_windows_user() -> str:
-    """Return the first non-special Windows user directory under /mnt/c/Users.
+WINDOWS_USERS_DIR = Path("/mnt/c/Users")
+_SPECIAL_ENTRIES = ("All Users", "Default", "Default User", "desktop.ini", "Public")
 
-    Raises loudly if none can be found - a guessed/hardcoded fallback here
+
+def _find_windows_user(users_dir: Path = WINDOWS_USERS_DIR) -> str:
+    """Return the first non-special Windows user directory under `users_dir`.
+
+    `users_dir` defaults to the real /mnt/c/Users on the reference WSL2
+    machine; overridable so tests can exercise both failure branches
+    deterministically without depending on whether /mnt/c/Users happens to
+    exist on whichever machine runs the test suite (it does on real WSL2,
+    it doesn't on this dev machine - a guessed/hardcoded fallback here
     would silently point at the wrong path on any machine but the one it
-    was written on (NFR-7: fail loudly, never guess)."""
-    users_dir = Path("/mnt/c/Users")
+    was written on; NFR-7: fail loudly, never guess)."""
     if not users_dir.is_dir():
-        raise RuntimeError("/mnt/c/Users not found - is this actually running under WSL2?")
+        raise RuntimeError(f"{users_dir.as_posix()} not found - is this actually running under WSL2?")
     for d in sorted(users_dir.iterdir()):
-        if d.is_dir() and d.name not in ("All Users", "Default", "Default User",
-                                          "desktop.ini", "Public"):
+        if d.is_dir() and d.name not in _SPECIAL_ENTRIES:
             return d.name
     raise RuntimeError(
-        "No user directory found under /mnt/c/Users (only default/system entries) - "
+        f"No user directory found under {users_dir.as_posix()} (only default/system entries) - "
         "the Frida relay bridge needs a real Windows user profile to copy itself into"
     )
 
@@ -260,7 +266,10 @@ def install_apk(serial: str, apk_path: Path) -> None:
 def clear_logcat(serial: str) -> None:
     """Clear logcat buffer so the upcoming dynamic-stage capture reads only fresh entries."""
     adb = _require_adb()
-    subprocess.run([adb, "-s", serial, "logcat", "-c"], capture_output=True, timeout=10)
+    subprocess.run(
+        [adb, "-s", serial, "logcat", "-c"],
+        capture_output=True, text=True, check=True, timeout=10,
+    )
 
 
 def verify_installed(serial: str, package_name: str) -> bool:

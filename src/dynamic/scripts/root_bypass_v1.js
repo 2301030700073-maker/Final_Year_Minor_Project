@@ -2,9 +2,24 @@
 // Hooks the three static root-check methods directly on
 // sg.vantagepoint.a.c, plus the debug-build check.
 
+var JAVA_POLL_INTERVAL_MS = 50;
+var JAVA_POLL_TIMEOUT_MS = 15000; // generous margin for emulator/cold-start jitter
+var _javaPollStartedAt = null;
+
 function hook_root_checks() {
     if (typeof Java === 'undefined' || !Java.available) {
-        setTimeout(hook_root_checks, 50);
+        if (_javaPollStartedAt === null) {
+            _javaPollStartedAt = Date.now();
+        }
+        if (Date.now() - _javaPollStartedAt >= JAVA_POLL_TIMEOUT_MS) {
+            send({
+                hook: "java_bridge",
+                status: "failed",
+                error: "Java.available never became true within " + JAVA_POLL_TIMEOUT_MS + "ms"
+            });
+            return; // stop retrying - surfaces as a real failure, not a silent hang
+        }
+        setTimeout(hook_root_checks, JAVA_POLL_INTERVAL_MS);
         return;
     }
     Java.perform(function () {

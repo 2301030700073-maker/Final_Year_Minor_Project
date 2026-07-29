@@ -1,0 +1,45 @@
+OK  ingest  (184ms)
+OK  audit  (0ms)
+OK  decompile  (14328ms)
+OK  static_scan  (470ms)
+OK  manifest_parse  (0ms)
+OK  decision_engine  (0ms)
+Decision: ROOT_ONLY
+OK  dynamic  (6634ms)
+
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+│ /home/ubuntu/Testing/Final_Year_Minor_Project/src/cli.py:184 in run          │
+│                                                                              │
+│   181 │   │   if dynamic_stage.status == "failed":                           │
+│   182 │   │   │   _halt(stage_results)                                       │
+│   183 │   │   if dynamic_stage.status == "success":                          │
+│ ❱ 184 │   │   │   device.clear_logcat(serial)                                │
+│   185 │   │   │   logcat_output = device.capture_logcat(serial)              │
+│   186 │   │   │   frida_log = "\n".join(str(m) for m in                      │
+│       dynamic_stage.evidence.get("frida_messages", []))                      │
+│   187 │   │   │   success_check = SUCCESS_CHECKS[target]                     │
+│                                                                              │
+│ /home/ubuntu/Testing/Final_Year_Minor_Project/src/dynamic/device.py:269 in   │
+│ clear_logcat                                                                 │
+│                                                                              │
+│   266 def clear_logcat(serial: str) -> None:                                 │
+│   267 │   """Clear logcat buffer so the upcoming dynamic-stage capture reads │
+│       only fresh entries."""                                                 │
+│   268 │   adb = _require_adb()                                               │
+│ ❱ 269 │   subprocess.run(                                                    │
+│   270 │   │   [adb, "-s", serial, "logcat", "-c"],                           │
+│   271 │   │   capture_output=True, text=True, check=True, timeout=10,        │
+│   272 │   )                                                                  │
+│                                                                              │
+│ /usr/lib/python3.12/subprocess.py:571 in run                                 │
+│                                                                              │
+│    568 │   │   │   raise                                                     │
+│    569 │   │   retcode = process.poll()                                      │
+│    570 │   │   if check and retcode:                                         │
+│ ❱  571 │   │   │   raise CalledProcessError(retcode, process.args,           │
+│    572 │   │   │   │   │   │   │   │   │    output=stdout, stderr=stderr)    │
+│    573 │   return CompletedProcess(process.args, retcode, stdout, stderr)    │
+│    574                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+CalledProcessError: Command '['/home/ubuntu/.local/bin/adb', '-s', 
+'emulator-5554', 'logcat', '-c']' returned non-zero exit status 1.

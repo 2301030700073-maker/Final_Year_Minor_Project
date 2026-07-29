@@ -141,10 +141,15 @@ if $ALL_OK && ! $SKIP_PIPELINE && ! $CHECK_ONLY; then
     echo "─── 9. Verify results ───"
     LATEST=$(ls -td docs/plans/handoff/bundles/*/ 2>/dev/null | head -1)
     if [ -n "$LATEST" ]; then
-        BYPASSED=$(grep -c "Root bypassed: True" "$LATEST/reports/"*/ 2>/dev/null || echo "0")
-        MATCHES=$(grep -c "Matches: True" "$LATEST/reports/"*/ 2>/dev/null || echo "0")
-        echo "  $( [ "$BYPASSED" -gt 0 ] && echo "$PASS" || echo "$FAIL" )  Root bypassed: $( [ "$BYPASSED" -gt 0 ] && echo 'True' || echo 'False' )"
-        echo "  $( [ "$MATCHES" -gt 0 ] && echo "$PASS" || echo "$FAIL" )  Correlation: $( [ "$MATCHES" -gt 0 ] && echo 'True' || echo 'False' )"
+        LATEST_REPORT=$(ls -t "$LATEST/reports/"*/ 2>/dev/null | head -1)
+        if [ -n "$LATEST_REPORT" ]; then
+            BYPASSED=$(grep -c "Root bypassed: True" "$LATEST_REPORT" 2>/dev/null || echo "0")
+            MATCHES=$(grep -c "Matches: True" "$LATEST_REPORT" 2>/dev/null || echo "0")
+            echo "  $( [ "$BYPASSED" != "0" ] && echo "$PASS" || echo "$FAIL" )  Root bypassed: $( [ "$BYPASSED" != "0" ] && echo 'True' || echo 'False' )"
+            echo "  $( [ "$MATCHES" != "0" ] && echo "$PASS" || echo "$FAIL" )  Correlation: $( [ "$MATCHES" != "0" ] && echo 'True' || echo 'False' )"
+        else
+            echo "  $INFO  No report file found for verification"
+        fi
         echo "  $INFO  Report: $LATEST"
     fi
     echo ""

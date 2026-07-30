@@ -312,6 +312,22 @@ uv run python scripts/collect_verification_bundle.py \
     --target uncrackable2
 ```
 
+### Testing Negative Controls (NEITHER classification)
+To verify the pipeline correctly classifies apps WITHOUT root detection or SSL pinning:
+```bash
+# Use a simple system app like Contacts as a negative control
+python -u scripts/collect_verification_bundle.py \
+    --apk APK_Test/contacts.apk \
+    --justification ACADEMIC_TRAINING_TARGET \
+    --target uncrackable1
+```
+Expected: `Decision: NEITHER` with root confidence 0.00 and SSL confidence 0.00.
+
+> ⚠️ **Known jadx limitation:** Production apps with R8/ProGuard obfuscation or multi-dex
+> packaging may fail at the decompile stage. The pipeline handles this gracefully by halting
+> with a clear error, but it means not all APKs can be analyzed. Simple system apps and
+> OWASP UnCrackable levels work reliably.
+
 ## Step 8 — Push Results
 
 ```bash

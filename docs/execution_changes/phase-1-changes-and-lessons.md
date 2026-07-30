@@ -397,4 +397,36 @@ grep "Exit code: 0" docs/plans/handoff/bundles/*/SUMMARY.md  # present
 | `.gitignore` | Added `*.objection.apk`, `*-debuggable.apk` | Test artifacts not for commit |
 | `docs/execution_changes/phase-1-changes-and-lessons.md` | This file | Full reference |
 | `docs/plans/handoff/quickstart-phase1.md` | Step-by-step run guide | Prevent re-debugging |
+
+---
+
+## Post-Phase 3 Findings
+
+### jadx Limitation: Production/Modern APKs May Fail Decompilation
+
+| | |
+|---|---|
+| **What** | `jadx` fails on modern R8/ProGuard-obfuscated or multi-dex APKs |
+| **Tested with** | F-Droid (12MB), Root Checker (12MB) — both failed at decompile stage |
+| **What works** | Small/medium apps without heavy obfuscation (Contacts app: 9.9MB, decompiled and analyzed successfully) |
+
+**Impact:** The pipeline's `decompile` stage is a bottleneck for production apps. `jadx` is a static analysis tool with no dynamic unpacking capability.
+
+**Next time:** For Phase 4, consider:
+- Using `jeb` or `Ghidra` as a fallback decompiler
+- Adding a pre-check: if `jadx` fails, log the error clearly and suggest alternatives
+- Testing with known simple APKs first before attempting production targets
+
+### Negative Control Test: Contacts App = NEITHER ✅
+
+Tested the Android Contacts system app (pulled from emulator, 9.9MB) as a negative control. Result:
+
+| Check | Value |
+|-------|-------|
+| Root confidence | 0.00 |
+| SSL confidence | 0.00 |
+| Decision | `NEITHER` |
+| Correlation | N/A (no bypass attempted) |
+
+This proves the pipeline correctly classifies apps with no root detection or SSL pinning as `NEITHER`, not as a false-positive `ROOT_ONLY` or `SSL_ONLY`.
 | `docs/plans/research/phase0-uncrackable1-manual-findings.md` | New file | Manual decompilation record |

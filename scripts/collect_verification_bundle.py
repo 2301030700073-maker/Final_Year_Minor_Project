@@ -191,16 +191,6 @@ def main() -> int:
     test_result = run_unit_tests()
     (bundle_dir / "pytest_output.txt").write_text(test_result["stdout"] + "\n" + test_result["stderr"], encoding="utf-8")
 
-    # Runs regardless of --apk - calibration is about every run ever
-    # persisted, not just this invocation's target, and it's cheap (pure
-    # Python + SQLite, no Android toolchain).
-    print("Computing calibration report...")
-    calibration_result = run_calibration_report()
-    (bundle_dir / "calibration_report_output.txt").write_text(
-        calibration_result["stdout"] + "\n" + calibration_result["stderr"], encoding="utf-8"
-    )
-    export_calibration_snapshot(bundle_dir)
-
     pipeline_result = None
     if args.apk:
         print(f"Running the real pipeline against {args.apk} ...")
@@ -231,6 +221,17 @@ def main() -> int:
             print(f"  (note: expected {analysis_dir} from this run but it doesn't exist - ingest may have failed before producing it)")
     else:
         print("No --apk given - skipping the real pipeline run (environment + tests only).")
+
+    # Runs after the pipeline block above (not before it) so this
+    # invocation's own fresh run is actually reflected in the numbers -
+    # running it earlier meant every bundle's snapshot only ever showed
+    # prior runs, never its own.
+    print("Computing calibration report...")
+    calibration_result = run_calibration_report()
+    (bundle_dir / "calibration_report_output.txt").write_text(
+        calibration_result["stdout"] + "\n" + calibration_result["stderr"], encoding="utf-8"
+    )
+    export_calibration_snapshot(bundle_dir)
 
     write_summary(bundle_dir, environment, test_result, pipeline_result)
 

@@ -458,6 +458,6 @@ This failure is distinct from the jadx issues above — it was a malformed APK, 
 |---|---|
 | **App** | PropertyGuru real-estate app (151MB, production React Native app) |
 | **Result** | Failed at `decompile` — jadx exit status 1 (too large, native libs, obfuscated) |
-| **Pattern** | 5th consecutive production app to fail at jadx. Only Contacts (AOSP, 9.9MB) works. |
+| **Pattern** | 4th jadx failure (5th overall including aapt2 ingest failure — minimal.apk never reached jadx). Only Contacts (AOSP, 9.9MB) works. |
 
 **Conclusion:** jadx cannot handle production Android apps reliably. This is a structural limitation of the decompile stage. Phase 4 should evaluate jadx alternatives (JEB, Ghidra) or accept this as a documented constraint.

@@ -1,0 +1,89 @@
+package j$.util;
+
+import defpackage.A3;
+import java.util.NoSuchElementException;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
+
+/* loaded from: classes2.dex */
+public final class Optional<T> {
+    private static final Optional b = new Optional();
+    private final Object a;
+
+    private Optional() {
+        this.a = null;
+    }
+
+    private Optional(Object obj) {
+        this.a = Objects.requireNonNull(obj);
+    }
+
+    public static <T> Optional<T> empty() {
+        return b;
+    }
+
+    public static <T> Optional<T> of(T t) {
+        return new Optional<>(t);
+    }
+
+    public static <T> Optional<T> ofNullable(T t) {
+        return t == null ? empty() : of(t);
+    }
+
+    public final Object a() {
+        Object obj = this.a;
+        if (obj != null) {
+            return obj;
+        }
+        throw new NoSuchElementException("No value present");
+    }
+
+    public final boolean b() {
+        return this.a != null;
+    }
+
+    public final boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj instanceof Optional) {
+            return Objects.equals(this.a, ((Optional) obj).a);
+        }
+        return false;
+    }
+
+    public Optional<T> filter(Predicate<? super T> predicate) {
+        Objects.requireNonNull(predicate);
+        if (b() && !predicate.test((Object) this.a)) {
+            return empty();
+        }
+        return this;
+    }
+
+    public final int hashCode() {
+        return Objects.hashCode(this.a);
+    }
+
+    public void ifPresent(Consumer<? super T> consumer) {
+        A3 a3 = (Object) this.a;
+        if (a3 != null) {
+            consumer.accept(a3);
+        }
+    }
+
+    public <U> Optional<U> map(Function<? super T, ? extends U> function) {
+        Objects.requireNonNull(function);
+        return !b() ? empty() : ofNullable(function.apply((Object) this.a));
+    }
+
+    public T orElse(T t) {
+        T t2 = (T) this.a;
+        return t2 != null ? t2 : t;
+    }
+
+    public final String toString() {
+        Object obj = this.a;
+        return obj != null ? String.format("Optional[%s]", obj) : "Optional.empty";
+    }
+}

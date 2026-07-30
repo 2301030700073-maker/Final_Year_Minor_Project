@@ -1,0 +1,37 @@
+{
+  "hashes": {
+    "sha256": "62c208dd6f9e23b6e39da1eefaf86a13393d1ea300055b15ecfc3b8d1a5b65f8",
+    "sha1": "aa3089d5ae64b1011922d650f33df107de1da900",
+    "md5": "d1b6cb4e80e46cc17692a5f1c30896e0"
+  },
+  "size_bytes": 11948738,
+  "package": {
+    "package_name": "com.joeykrim.rootcheck",
+    "version_code": "206",
+    "version_name": "6.5.11",
+    "min_sdk": "21",
+    "target_sdk": "35",
+    "permissions": [
+      "android.permission.INTERNET",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.WAKE_LOCK",
+      "com.google.android.c2dm.permission.RECEIVE",
+      "com.google.android.gms.permission.AD_ID",
+      "android.permission.ACCESS_ADSERVICES_AD_ID",
+      "android.permission.ACCESS_ADSERVICES_ATTRIBUTION",
+      "android.permission.ACCESS_ADSERVICES_TOPICS",
+      "com.android.vending.BILLING",
+      "com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE",
+      "android.permission.FOREGROUND_SERVICE",
+      "com.joeykrim.rootcheck.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+    ]
+  },
+  "signer": {
+    "v1_verified": true,
+    "v2_verified": true,
+    "v3_verified": false,
+    "certificate_dn": "O=joeykrim",
+    "certificate_sha256": "268c5fbdcf8360049f9b17a064274d7c69625725680befc680046bb306a32f80"
+  }
+}

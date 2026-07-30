@@ -1,0 +1,81 @@
+package defpackage;
+
+import android.accounts.Account;
+import android.os.Parcel;
+import android.os.Parcelable;
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.android.gms.auth.api.signin.internal.GoogleSignInOptionsExtensionParcelable;
+import com.google.android.gms.common.api.Scope;
+import com.google.android.gms.common.internal.safeparcel.SafeParcelReader;
+import java.util.ArrayList;
+import java.util.HashMap;
+
+/* renamed from: xO, reason: case insensitive filesystem */
+/* loaded from: classes.dex */
+public final class C3977xO implements Parcelable.Creator {
+    @Override // android.os.Parcelable.Creator
+    public final Object createFromParcel(Parcel parcel) {
+        int validateObjectHeader = SafeParcelReader.validateObjectHeader(parcel);
+        ArrayList<GoogleSignInOptionsExtensionParcelable> arrayList = null;
+        ArrayList arrayList2 = null;
+        Account account = null;
+        String str = null;
+        String str2 = null;
+        String str3 = null;
+        int i = 0;
+        boolean z = false;
+        boolean z2 = false;
+        boolean z3 = false;
+        while (parcel.dataPosition() < validateObjectHeader) {
+            int readHeader = SafeParcelReader.readHeader(parcel);
+            switch (SafeParcelReader.getFieldId(readHeader)) {
+                case 1:
+                    i = SafeParcelReader.readInt(parcel, readHeader);
+                    break;
+                case 2:
+                    arrayList2 = SafeParcelReader.createTypedList(parcel, readHeader, Scope.CREATOR);
+                    break;
+                case 3:
+                    account = (Account) SafeParcelReader.createParcelable(parcel, readHeader, Account.CREATOR);
+                    break;
+                case 4:
+                    z = SafeParcelReader.readBoolean(parcel, readHeader);
+                    break;
+                case 5:
+                    z2 = SafeParcelReader.readBoolean(parcel, readHeader);
+                    break;
+                case 6:
+                    z3 = SafeParcelReader.readBoolean(parcel, readHeader);
+                    break;
+                case 7:
+                    str = SafeParcelReader.createString(parcel, readHeader);
+                    break;
+                case 8:
+                    str2 = SafeParcelReader.createString(parcel, readHeader);
+                    break;
+                case 9:
+                    arrayList = SafeParcelReader.createTypedList(parcel, readHeader, GoogleSignInOptionsExtensionParcelable.CREATOR);
+                    break;
+                case 10:
+                    str3 = SafeParcelReader.createString(parcel, readHeader);
+                    break;
+                default:
+                    SafeParcelReader.skipUnknownField(parcel, readHeader);
+                    break;
+            }
+        }
+        SafeParcelReader.ensureAtEnd(parcel, validateObjectHeader);
+        HashMap hashMap = new HashMap();
+        if (arrayList != null) {
+            for (GoogleSignInOptionsExtensionParcelable googleSignInOptionsExtensionParcelable : arrayList) {
+                hashMap.put(Integer.valueOf(googleSignInOptionsExtensionParcelable.f10171new), googleSignInOptionsExtensionParcelable);
+            }
+        }
+        return new GoogleSignInOptions(i, arrayList2, account, z, z2, z3, str, str2, hashMap, str3);
+    }
+
+    @Override // android.os.Parcelable.Creator
+    public final /* synthetic */ Object[] newArray(int i) {
+        return new GoogleSignInOptions[i];
+    }
+}

@@ -1,0 +1,62 @@
+package com.google.android.exoplayer2.extractor.metadata.scte35;
+
+import android.os.Parcel;
+import android.os.Parcelable;
+import com.facebook.ads.redexgen.core.C1600Vk;
+import com.facebook.ads.redexgen.core.C1602Vm;
+import com.facebook.ads.redexgen.core.C2070fq;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+/* loaded from: assets/audience_network.dex */
+public final class SpliceScheduleCommand extends SpliceCommand {
+    public static String[] A01 = {"QtCZ3YM", "h34NOf9W6vgpobdLQ2oGlEh05TjGRd7m", "HvhGWd1zJYSEGXxl6D7A0DxUnFFCta", "DqPYtjv5NIQ4Rwx", "Z6grTdzpxvdSgrPYmiY2M1", "jLJejEC7jURSysz", "qxEadMmv1usOIAslWwQ5UJE1rpyJ7pzm", "kgSDNEp"};
+    public static final Parcelable.Creator<SpliceScheduleCommand> CREATOR = new C1600Vk();
+    public final List<C1602Vm> A00;
+
+    public SpliceScheduleCommand(Parcel parcel) {
+        C1602Vm A00;
+        int readInt = parcel.readInt();
+        ArrayList arrayList = new ArrayList(readInt);
+        for (int i = 0; i < readInt; i++) {
+            A00 = C1602Vm.A00(parcel);
+            arrayList.add(A00);
+        }
+        this.A00 = Collections.unmodifiableList(arrayList);
+    }
+
+    public /* synthetic */ SpliceScheduleCommand(Parcel parcel, C1600Vk c1600Vk) {
+        this(parcel);
+    }
+
+    public SpliceScheduleCommand(List<C1602Vm> list) {
+        this.A00 = Collections.unmodifiableList(list);
+    }
+
+    public static SpliceScheduleCommand A00(C2070fq c2070fq) {
+        C1602Vm A02;
+        int A0I = c2070fq.A0I();
+        ArrayList arrayList = new ArrayList(A0I);
+        for (int i = 0; i < A0I; i++) {
+            A02 = C1602Vm.A02(c2070fq);
+            arrayList.add(A02);
+        }
+        return new SpliceScheduleCommand(arrayList);
+    }
+
+    @Override // android.os.Parcelable
+    public final void writeToParcel(Parcel parcel, int i) {
+        int size = this.A00.size();
+        parcel.writeInt(size);
+        for (int i2 = 0; i2 < size; i2++) {
+            C1602Vm c1602Vm = this.A00.get(i2);
+            int i3 = A01[1].charAt(17);
+            if (i3 != 50) {
+                throw new RuntimeException();
+            }
+            A01[1] = "yGcUZN1necDQ6oeU22cionB2weilnTqD";
+            c1602Vm.A04(parcel);
+        }
+    }
+}

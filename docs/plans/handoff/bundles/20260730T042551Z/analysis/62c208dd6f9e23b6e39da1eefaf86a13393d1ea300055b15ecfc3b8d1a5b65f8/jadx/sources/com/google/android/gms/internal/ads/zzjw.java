@@ -1,0 +1,18 @@
+package com.google.android.gms.internal.ads;
+
+import java.util.List;
+
+/* loaded from: classes.dex */
+final class zzjw {
+    private final List zza;
+    private final int zzb;
+    private final long zzc;
+    private final zzwb zzd;
+
+    public /* synthetic */ zzjw(List list, zzwb zzwbVar, int i, long j, zzkb zzkbVar) {
+        this.zza = list;
+        this.zzd = zzwbVar;
+        this.zzb = i;
+        this.zzc = j;
+    }
+}

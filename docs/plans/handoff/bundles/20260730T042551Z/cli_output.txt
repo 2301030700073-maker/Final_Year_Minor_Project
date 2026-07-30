@@ -1,0 +1,8 @@
+OK  ingest  (387ms)
+OK  audit  (0ms)
+FAILED  decompile  (16336ms)
+    Command '['/usr/local/bin/jadx', '-d', 
+'outputs/analysis/62c208dd6f9e23b6e39da1eefaf86a13393d1ea300055b15ecfc3b8d1a5b65
+f8/jadx', 'APK_Test/rootcheck.apk']' returned non-zero exit status 1.
+Pipeline halted - see the failed stage above.
+

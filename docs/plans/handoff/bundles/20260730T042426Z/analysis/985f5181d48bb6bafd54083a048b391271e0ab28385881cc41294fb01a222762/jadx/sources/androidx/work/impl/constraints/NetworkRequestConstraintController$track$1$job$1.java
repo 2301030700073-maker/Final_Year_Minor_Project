@@ -1,0 +1,70 @@
+package androidx.work.impl.constraints;
+
+import androidx.work.Logger;
+import androidx.work.impl.constraints.ConstraintsState;
+import kotlin.ResultKt;
+import kotlin.Unit;
+import kotlin.coroutines.Continuation;
+import kotlin.coroutines.intrinsics.IntrinsicsKt;
+import kotlin.coroutines.jvm.internal.SuspendLambda;
+import kotlin.jvm.functions.Function2;
+import kotlinx.coroutines.CoroutineScope;
+import kotlinx.coroutines.DelayKt;
+import kotlinx.coroutines.channels.ProducerScope;
+
+/* compiled from: WorkConstraintsTracker.kt */
+/* loaded from: classes.dex */
+final class NetworkRequestConstraintController$track$1$job$1 extends SuspendLambda implements Function2 {
+    final /* synthetic */ ProducerScope $$this$callbackFlow;
+    int label;
+    final /* synthetic */ NetworkRequestConstraintController this$0;
+
+    /* JADX WARN: 'super' call moved to the top of the method (can break code semantics) */
+    NetworkRequestConstraintController$track$1$job$1(NetworkRequestConstraintController networkRequestConstraintController, ProducerScope producerScope, Continuation continuation) {
+        super(2, continuation);
+        this.this$0 = networkRequestConstraintController;
+        this.$$this$callbackFlow = producerScope;
+    }
+
+    @Override // kotlin.coroutines.jvm.internal.BaseContinuationImpl
+    public final Continuation create(Object obj, Continuation continuation) {
+        return new NetworkRequestConstraintController$track$1$job$1(this.this$0, this.$$this$callbackFlow, continuation);
+    }
+
+    @Override // kotlin.jvm.functions.Function2
+    public final Object invoke(CoroutineScope coroutineScope, Continuation continuation) {
+        return ((NetworkRequestConstraintController$track$1$job$1) create(coroutineScope, continuation)).invokeSuspend(Unit.INSTANCE);
+    }
+
+    @Override // kotlin.coroutines.jvm.internal.BaseContinuationImpl
+    public final Object invokeSuspend(Object obj) {
+        long j;
+        String str;
+        long j2;
+        Object coroutine_suspended = IntrinsicsKt.getCOROUTINE_SUSPENDED();
+        int i = this.label;
+        if (i == 0) {
+            ResultKt.throwOnFailure(obj);
+            j = this.this$0.timeoutMs;
+            this.label = 1;
+            if (DelayKt.delay(j, this) == coroutine_suspended) {
+                return coroutine_suspended;
+            }
+        } else {
+            if (i != 1) {
+                throw new IllegalStateException("call to 'resume' before 'invoke' with coroutine");
+            }
+            ResultKt.throwOnFailure(obj);
+        }
+        Logger logger = Logger.get();
+        str = WorkConstraintsTrackerKt.TAG;
+        StringBuilder sb = new StringBuilder();
+        sb.append("NetworkRequestConstraintController didn't receive neither  onCapabilitiesChanged/onLost callback, sending `ConstraintsNotMet` after ");
+        j2 = this.this$0.timeoutMs;
+        sb.append(j2);
+        sb.append(" ms");
+        logger.debug(str, sb.toString());
+        this.$$this$callbackFlow.mo2833trySendJP2dKIU(new ConstraintsState.ConstraintsNotMet(7));
+        return Unit.INSTANCE;
+    }
+}

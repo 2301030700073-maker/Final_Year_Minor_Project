@@ -1,0 +1,50 @@
+package com.google.android.gms.internal.ads;
+
+import defpackage.V1;
+import j$.util.Objects;
+
+/* loaded from: classes.dex */
+public final class zzggf extends zzgeu {
+    private final int zza;
+    private final int zzb = 12;
+    private final int zzc = 16;
+    private final zzggd zzd;
+
+    public /* synthetic */ zzggf(int i, int i2, int i3, zzggd zzggdVar, zzgge zzggeVar) {
+        this.zza = i;
+        this.zzd = zzggdVar;
+    }
+
+    public static zzggc zzc() {
+        return new zzggc(null);
+    }
+
+    public final boolean equals(Object obj) {
+        if (!(obj instanceof zzggf)) {
+            return false;
+        }
+        zzggf zzggfVar = (zzggf) obj;
+        return zzggfVar.zza == this.zza && zzggfVar.zzd == this.zzd;
+    }
+
+    public final int hashCode() {
+        return Objects.hash(zzggf.class, Integer.valueOf(this.zza), 12, 16, this.zzd);
+    }
+
+    public final String toString() {
+        return V1.m2506this(V1.m2493break("AesGcm Parameters (variant: ", String.valueOf(this.zzd), ", 12-byte IV, 16-byte tag, and "), this.zza, "-byte key)");
+    }
+
+    @Override // com.google.android.gms.internal.ads.zzgek
+    public final boolean zza() {
+        return this.zzd != zzggd.zzc;
+    }
+
+    public final int zzb() {
+        return this.zza;
+    }
+
+    public final zzggd zzd() {
+        return this.zzd;
+    }
+}

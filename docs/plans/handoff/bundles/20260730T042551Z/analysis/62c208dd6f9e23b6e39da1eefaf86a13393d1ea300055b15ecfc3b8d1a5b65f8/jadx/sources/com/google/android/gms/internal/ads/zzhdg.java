@@ -1,0 +1,50 @@
+package com.google.android.gms.internal.ads;
+
+import com.facebook.appevents.codeless.internal.Constants;
+import com.google.android.gms.common.ConnectionResult;
+
+/* loaded from: classes.dex */
+final class zzhdg implements zzgxx {
+    static final zzgxx zza = new zzhdg();
+
+    private zzhdg() {
+    }
+
+    @Override // com.google.android.gms.internal.ads.zzgxx
+    public final boolean zza(int i) {
+        switch (i) {
+            case 0:
+            case 1:
+            case 2:
+            case 3:
+            case 4:
+            case 5:
+            case 6:
+            case 7:
+            case 8:
+            case 9:
+            case 10:
+            case 11:
+            case 12:
+            case 13:
+            case 14:
+            case 15:
+            case 16:
+            case 17:
+            case 18:
+            case 19:
+            case 20:
+            case 21:
+            case 22:
+            case ConnectionResult.API_DISABLED /* 23 */:
+            case ConnectionResult.API_DISABLED_FOR_CONNECTION /* 24 */:
+            case Constants.MAX_TREE_DEPTH /* 25 */:
+            case 26:
+            case 27:
+            case 28:
+                return true;
+            default:
+                return false;
+        }
+    }
+}

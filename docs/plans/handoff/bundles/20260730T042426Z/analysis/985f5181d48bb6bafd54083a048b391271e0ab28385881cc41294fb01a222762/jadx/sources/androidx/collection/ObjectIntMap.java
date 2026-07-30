@@ -1,0 +1,214 @@
+package androidx.collection;
+
+import androidx.collection.internal.ContainerHelpersKt;
+import ch.qos.logback.core.CoreConstants;
+import java.util.NoSuchElementException;
+import kotlin.jvm.internal.DefaultConstructorMarker;
+import kotlin.jvm.internal.Intrinsics;
+
+/* compiled from: ObjectIntMap.kt */
+/* loaded from: classes.dex */
+public abstract class ObjectIntMap {
+    public int _capacity;
+    public int _size;
+    public Object[] keys;
+    public long[] metadata;
+    public int[] values;
+
+    public /* synthetic */ ObjectIntMap(DefaultConstructorMarker defaultConstructorMarker) {
+        this();
+    }
+
+    private ObjectIntMap() {
+        this.metadata = ScatterMapKt.EmptyGroup;
+        this.keys = ContainerHelpersKt.EMPTY_OBJECTS;
+        this.values = IntSetKt.getEmptyIntArray();
+    }
+
+    public final int getCapacity() {
+        return this._capacity;
+    }
+
+    public final int getSize() {
+        return this._size;
+    }
+
+    public final boolean isEmpty() {
+        return this._size == 0;
+    }
+
+    public final boolean isNotEmpty() {
+        return this._size != 0;
+    }
+
+    public final int get(Object obj) {
+        int findKeyIndex = findKeyIndex(obj);
+        if (findKeyIndex < 0) {
+            throw new NoSuchElementException("There is no key " + obj + " in the map");
+        }
+        return this.values[findKeyIndex];
+    }
+
+    public final int getOrDefault(Object obj, int i) {
+        int findKeyIndex = findKeyIndex(obj);
+        return findKeyIndex >= 0 ? this.values[findKeyIndex] : i;
+    }
+
+    public int hashCode() {
+        Object[] objArr = this.keys;
+        int[] iArr = this.values;
+        long[] jArr = this.metadata;
+        int length = jArr.length - 2;
+        int i = 0;
+        if (length >= 0) {
+            int i2 = 0;
+            int i3 = 0;
+            while (true) {
+                long j = jArr[i2];
+                if ((((~j) << 7) & j & (-9187201950435737472L)) != -9187201950435737472L) {
+                    int i4 = 8 - ((~(i2 - length)) >>> 31);
+                    for (int i5 = 0; i5 < i4; i5++) {
+                        if ((255 & j) < 128) {
+                            int i6 = (i2 << 3) + i5;
+                            Object obj = objArr[i6];
+                            i3 += iArr[i6] ^ (obj != null ? obj.hashCode() : 0);
+                        }
+                        j >>= 8;
+                    }
+                    if (i4 != 8) {
+                        return i3;
+                    }
+                }
+                if (i2 == length) {
+                    i = i3;
+                    break;
+                }
+                i2++;
+            }
+        }
+        return i;
+    }
+
+    public boolean equals(Object obj) {
+        if (obj == this) {
+            return true;
+        }
+        if (!(obj instanceof ObjectIntMap)) {
+            return false;
+        }
+        ObjectIntMap objectIntMap = (ObjectIntMap) obj;
+        if (objectIntMap.getSize() != getSize()) {
+            return false;
+        }
+        Object[] objArr = this.keys;
+        int[] iArr = this.values;
+        long[] jArr = this.metadata;
+        int length = jArr.length - 2;
+        if (length >= 0) {
+            int i = 0;
+            while (true) {
+                long j = jArr[i];
+                if ((((~j) << 7) & j & (-9187201950435737472L)) != -9187201950435737472L) {
+                    int i2 = 8 - ((~(i - length)) >>> 31);
+                    for (int i3 = 0; i3 < i2; i3++) {
+                        if ((255 & j) < 128) {
+                            int i4 = (i << 3) + i3;
+                            if (iArr[i4] != objectIntMap.get(objArr[i4])) {
+                                return false;
+                            }
+                        }
+                        j >>= 8;
+                    }
+                    if (i2 != 8) {
+                        break;
+                    }
+                }
+                if (i == length) {
+                    break;
+                }
+                i++;
+            }
+        }
+        return true;
+    }
+
+    public String toString() {
+        if (isEmpty()) {
+            return "{}";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(CoreConstants.CURLY_LEFT);
+        Object[] objArr = this.keys;
+        int[] iArr = this.values;
+        long[] jArr = this.metadata;
+        int length = jArr.length - 2;
+        if (length >= 0) {
+            int i = 0;
+            int i2 = 0;
+            while (true) {
+                long j = jArr[i];
+                if ((((~j) << 7) & j & (-9187201950435737472L)) != -9187201950435737472L) {
+                    int i3 = 8 - ((~(i - length)) >>> 31);
+                    for (int i4 = 0; i4 < i3; i4++) {
+                        if ((255 & j) < 128) {
+                            int i5 = (i << 3) + i4;
+                            Object obj = objArr[i5];
+                            int i6 = iArr[i5];
+                            if (obj == this) {
+                                obj = "(this)";
+                            }
+                            sb.append(obj);
+                            sb.append("=");
+                            sb.append(i6);
+                            i2++;
+                            if (i2 < this._size) {
+                                sb.append(CoreConstants.COMMA_CHAR);
+                                sb.append(' ');
+                            }
+                        }
+                        j >>= 8;
+                    }
+                    if (i3 != 8) {
+                        break;
+                    }
+                }
+                if (i == length) {
+                    break;
+                }
+                i++;
+            }
+        }
+        sb.append(CoreConstants.CURLY_RIGHT);
+        String sb2 = sb.toString();
+        Intrinsics.checkNotNullExpressionValue(sb2, "s.append('}').toString()");
+        return sb2;
+    }
+
+    public final int findKeyIndex(Object obj) {
+        int i = 0;
+        int hashCode = (obj != null ? obj.hashCode() : 0) * (-862048943);
+        int i2 = hashCode ^ (hashCode << 16);
+        int i3 = i2 & 127;
+        int i4 = this._capacity;
+        int i5 = i2 >>> 7;
+        while (true) {
+            int i6 = i5 & i4;
+            long[] jArr = this.metadata;
+            int i7 = i6 >> 3;
+            int i8 = (i6 & 7) << 3;
+            long j = ((jArr[i7 + 1] << (64 - i8)) & ((-i8) >> 63)) | (jArr[i7] >>> i8);
+            long j2 = (i3 * 72340172838076673L) ^ j;
+            for (long j3 = (~j2) & (j2 - 72340172838076673L) & (-9187201950435737472L); j3 != 0; j3 &= j3 - 1) {
+                int numberOfTrailingZeros = ((Long.numberOfTrailingZeros(j3) >> 3) + i6) & i4;
+                if (Intrinsics.areEqual(this.keys[numberOfTrailingZeros], obj)) {
+                    return numberOfTrailingZeros;
+                }
+            }
+            if ((j & ((~j) << 6) & (-9187201950435737472L)) != 0) {
+                return -1;
+            }
+            i += 8;
+            i5 = i6 + i;
+        }
+    }
+}

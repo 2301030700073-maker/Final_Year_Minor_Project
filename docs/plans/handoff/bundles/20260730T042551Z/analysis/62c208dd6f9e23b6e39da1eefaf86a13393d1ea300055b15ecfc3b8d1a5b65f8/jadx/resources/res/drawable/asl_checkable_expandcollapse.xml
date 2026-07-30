@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<animated-selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/expanded"
+        android:drawable="@drawable/vd_checkable_expandcollapse_expanded"
+        android:state_activated="true"/>
+    <item
+        android:id="@+id/collapsed"
+        android:drawable="@drawable/vd_checkable_expandcollapse_collapsed"/>
+    <transition
+        android:drawable="@drawable/avd_checkable_expandcollapse_collapsed_to_expanded"
+        android:toId="@+id/expanded"
+        android:fromId="@+id/collapsed"/>
+    <transition
+        android:drawable="@drawable/avd_checkable_expandcollapse_expanded_to_collapsed"
+        android:toId="@+id/collapsed"
+        android:fromId="@+id/expanded"/>
+</animated-selector>

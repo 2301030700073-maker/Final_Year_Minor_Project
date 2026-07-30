@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:id="@+id/globalRootLinLayout"
+    android:background="@color/windowBackground"
+    android:paddingLeft="8dp"
+    android:paddingTop="4dp"
+    android:paddingRight="8dp"
+    android:paddingBottom="8dp"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/swipeContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+        <androidx.recyclerview.widget.RecyclerView
+            android:scrollbarSize="3dp"
+            android:scrollbarThumbVertical="@color/grey400"
+            android:id="@+id/globalRootRecyclerView"
+            android:scrollbars="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"/>
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+</LinearLayout>

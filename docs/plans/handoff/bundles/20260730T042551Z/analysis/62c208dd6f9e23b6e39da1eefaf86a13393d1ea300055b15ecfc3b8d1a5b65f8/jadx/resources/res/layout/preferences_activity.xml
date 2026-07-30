@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:orientation="vertical"
+    android:id="@+id/settingsLLOverall"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    <androidx.coordinatorlayout.widget.CoordinatorLayout
+        android:orientation="vertical"
+        android:id="@+id/mainCoordinatorLayout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_weight="1">
+        <com.google.android.material.appbar.AppBarLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <androidx.appcompat.widget.Toolbar
+                android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar"
+                android:id="@+id/toolbar"
+                android:background="@color/colorPrimary"
+                android:layout_width="match_parent"
+                android:layout_height="?attr/actionBarSize"
+                app:navigationContentDescription="@string/abc_action_bar_up_description"
+                app:navigationIcon="?attr/homeAsUpIndicator"
+                app:popupTheme="@style/NV.PopupTheme"/>
+        </com.google.android.material.appbar.AppBarLayout>
+        <ListView
+            android:scrollbarSize="3dp"
+            android:scrollbarThumbVertical="@color/grey400"
+            android:id="@android:id/list"
+            android:scrollbars="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:layout_behavior="@string/appbar_scrolling_view_behavior"/>
+    </androidx.coordinatorlayout.widget.CoordinatorLayout>
+</LinearLayout>

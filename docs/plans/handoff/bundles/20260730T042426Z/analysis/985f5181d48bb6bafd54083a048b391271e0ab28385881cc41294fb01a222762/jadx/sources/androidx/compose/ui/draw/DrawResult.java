@@ -1,0 +1,17 @@
+package androidx.compose.ui.draw;
+
+import kotlin.jvm.functions.Function1;
+
+/* compiled from: DrawModifier.kt */
+/* loaded from: classes.dex */
+public final class DrawResult {
+    private Function1 block;
+
+    public DrawResult(Function1 function1) {
+        this.block = function1;
+    }
+
+    public final Function1 getBlock$ui_release() {
+        return this.block;
+    }
+}

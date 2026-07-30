@@ -1,0 +1,47 @@
+package com.google.android.gms.internal.ads;
+
+import android.app.Activity;
+
+/* loaded from: classes.dex */
+final class zzeaz extends zzebw {
+    private Activity zza;
+    private com.google.android.gms.ads.internal.overlay.zzm zzb;
+    private String zzc;
+    private String zzd;
+
+    @Override // com.google.android.gms.internal.ads.zzebw
+    public final zzebw zza(Activity activity) {
+        if (activity == null) {
+            throw new NullPointerException("Null activity");
+        }
+        this.zza = activity;
+        return this;
+    }
+
+    @Override // com.google.android.gms.internal.ads.zzebw
+    public final zzebw zzb(com.google.android.gms.ads.internal.overlay.zzm zzmVar) {
+        this.zzb = zzmVar;
+        return this;
+    }
+
+    @Override // com.google.android.gms.internal.ads.zzebw
+    public final zzebw zzc(String str) {
+        this.zzc = str;
+        return this;
+    }
+
+    @Override // com.google.android.gms.internal.ads.zzebw
+    public final zzebw zzd(String str) {
+        this.zzd = str;
+        return this;
+    }
+
+    @Override // com.google.android.gms.internal.ads.zzebw
+    public final zzebx zze() {
+        Activity activity = this.zza;
+        if (activity != null) {
+            return new zzebb(activity, this.zzb, this.zzc, this.zzd, null);
+        }
+        throw new IllegalStateException("Missing required properties: activity");
+    }
+}

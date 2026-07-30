@@ -1,0 +1,6 @@
+package defpackage;
+
+/* renamed from: i, reason: case insensitive filesystem */
+/* loaded from: classes.dex */
+public final /* synthetic */ class C2901i {
+}

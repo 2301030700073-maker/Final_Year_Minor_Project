@@ -1,0 +1,12 @@
+package androidx.compose.ui.layout;
+
+import androidx.compose.ui.Modifier;
+import kotlin.jvm.functions.Function1;
+
+/* compiled from: OnRemeasuredModifier.kt */
+/* loaded from: classes.dex */
+public abstract class OnRemeasuredModifierKt {
+    public static final Modifier onSizeChanged(Modifier modifier, Function1 function1) {
+        return modifier.then(new OnSizeChangedModifier(function1));
+    }
+}

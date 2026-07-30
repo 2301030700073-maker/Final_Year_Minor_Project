@@ -1,0 +1,85 @@
+package com.google.android.gms.internal.ads;
+
+import android.os.Looper;
+import android.os.SystemClock;
+import java.io.IOException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+
+/* loaded from: classes.dex */
+public final class zzyy {
+    public static final zzyr zza = new zzyr(2, -9223372036854775807L, null);
+    public static final zzyr zzb = new zzyr(3, -9223372036854775807L, null);
+    private final zzzg zzc;
+    private zzys zzd;
+    private IOException zze;
+
+    public zzyy(String str) {
+        final String str2 = "ExoPlayer:Loader:ProgressiveMediaPeriod";
+        this.zzc = zzze.zza(Executors.newSingleThreadExecutor(new ThreadFactory(str2) { // from class: com.google.android.gms.internal.ads.zzeg
+            public final /* synthetic */ String zza = "ExoPlayer:Loader:ProgressiveMediaPeriod";
+
+            @Override // java.util.concurrent.ThreadFactory
+            public final Thread newThread(Runnable runnable) {
+                return new Thread(runnable, this.zza);
+            }
+        }), new zzdb() { // from class: com.google.android.gms.internal.ads.zzyp
+            @Override // com.google.android.gms.internal.ads.zzdb
+            public final void zza(Object obj) {
+                ((ExecutorService) obj).shutdown();
+            }
+        });
+    }
+
+    public static zzyr zzb(boolean z, long j) {
+        return new zzyr(z ? 1 : 0, j, null);
+    }
+
+    public final long zza(zzyt zzytVar, zzyq zzyqVar, int i) {
+        Looper myLooper = Looper.myLooper();
+        zzcw.zzb(myLooper);
+        this.zze = null;
+        long elapsedRealtime = SystemClock.elapsedRealtime();
+        new zzys(this, myLooper, zzytVar, zzyqVar, i, elapsedRealtime).zzc(0L);
+        return elapsedRealtime;
+    }
+
+    public final void zzg() {
+        zzys zzysVar = this.zzd;
+        zzcw.zzb(zzysVar);
+        zzysVar.zza(false);
+    }
+
+    public final void zzh() {
+        this.zze = null;
+    }
+
+    public final void zzi(int i) {
+        IOException iOException = this.zze;
+        if (iOException != null) {
+            throw iOException;
+        }
+        zzys zzysVar = this.zzd;
+        if (zzysVar != null) {
+            zzysVar.zzb(i);
+        }
+    }
+
+    public final void zzj(zzyu zzyuVar) {
+        zzys zzysVar = this.zzd;
+        if (zzysVar != null) {
+            zzysVar.zza(true);
+        }
+        this.zzc.execute(new zzyv(zzyuVar));
+        this.zzc.zza();
+    }
+
+    public final boolean zzk() {
+        return this.zze != null;
+    }
+
+    public final boolean zzl() {
+        return this.zzd != null;
+    }
+}

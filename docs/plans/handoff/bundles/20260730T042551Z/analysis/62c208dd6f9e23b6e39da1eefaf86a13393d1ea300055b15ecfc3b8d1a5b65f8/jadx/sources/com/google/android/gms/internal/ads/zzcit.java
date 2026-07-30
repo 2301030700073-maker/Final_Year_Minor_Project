@@ -1,0 +1,123 @@
+package com.google.android.gms.internal.ads;
+
+/* loaded from: classes.dex */
+final class zzcit implements zzcqg {
+    private final zzcih zza;
+    private final zzcip zzb;
+    private final zzhfa zzc;
+    private final zzhfa zzd;
+    private final zzhfa zze;
+    private final zzhfa zzf;
+    private final zzhfa zzg;
+    private final zzhfa zzh;
+    private final zzhfa zzi;
+    private final zzhfa zzj;
+    private final zzhfa zzk;
+    private final zzhfa zzl;
+    private final zzhfa zzm;
+    private final zzhfa zzn;
+    private final zzhfa zzo;
+    private final zzhfa zzp;
+    private final zzhfa zzq;
+    private final zzhfa zzr;
+    private final zzhfa zzs;
+    private final zzhfa zzt;
+
+    public /* synthetic */ zzcit(zzcih zzcihVar, zzcip zzcipVar, zzcrp zzcrpVar, zzcqh zzcqhVar, zzcjm zzcjmVar) {
+        zzhfa zzhfaVar;
+        zzhfa zzhfaVar2;
+        zzhfa zzhfaVar3;
+        zzhfa zzhfaVar4;
+        zzhfa zzhfaVar5;
+        zzhfa zzhfaVar6;
+        zzhfa zzhfaVar7;
+        zzhfa zzhfaVar8;
+        zzhfa zzhfaVar9;
+        zzhfa zzhfaVar10;
+        zzhfa zzhfaVar11;
+        zzhfa zzhfaVar12;
+        zzhfa zzhfaVar13;
+        zzhfa zzhfaVar14;
+        zzhfa zzhfaVar15;
+        zzhfa zzhfaVar16;
+        zzhfa zzhfaVar17;
+        this.zza = zzcihVar;
+        this.zzb = zzcipVar;
+        zzcrt zzcrtVar = new zzcrt(zzcrpVar);
+        this.zzc = zzcrtVar;
+        zzcrq zzcrqVar = new zzcrq(zzcrpVar);
+        this.zzd = zzcrqVar;
+        zzhfe zza = zzhff.zza(0, 2);
+        zzhfaVar = zzcipVar.zzdk;
+        zza.zza(zzhfaVar);
+        zzhfaVar2 = zzcipVar.zzdl;
+        zza.zza(zzhfaVar2);
+        zzhff zzc = zza.zzc();
+        this.zze = zzc;
+        zzhfa zzc2 = zzheq.zzc(new zzcwt(zzc));
+        this.zzf = zzc2;
+        zzhfe zza2 = zzhff.zza(4, 4);
+        zzhfaVar3 = zzcipVar.zzdC;
+        zza2.zzb(zzhfaVar3);
+        zzhfaVar4 = zzcipVar.zzdD;
+        zza2.zza(zzhfaVar4);
+        zzhfaVar5 = zzcipVar.zzdE;
+        zza2.zzb(zzhfaVar5);
+        zzhfaVar6 = zzcipVar.zzdF;
+        zza2.zzb(zzhfaVar6);
+        zzhfaVar7 = zzcipVar.zzdQ;
+        zza2.zza(zzhfaVar7);
+        zzhfaVar8 = zzcipVar.zzdR;
+        zza2.zza(zzhfaVar8);
+        zzhfaVar9 = zzcipVar.zzdS;
+        zza2.zza(zzhfaVar9);
+        zzhfaVar10 = zzcipVar.zzdG;
+        zza2.zzb(zzhfaVar10);
+        zzhff zzc3 = zza2.zzc();
+        this.zzg = zzc3;
+        zzhfa zzc4 = zzheq.zzc(new zzcxg(zzc3));
+        this.zzh = zzc4;
+        zzcrr zzcrrVar = new zzcrr(zzcrpVar);
+        this.zzi = zzcrrVar;
+        zzcrs zzcrsVar = new zzcrs(zzcrpVar);
+        this.zzj = zzcrsVar;
+        zzhfaVar11 = zzcipVar.zzbZ;
+        zzhfaVar12 = zzcipVar.zzp;
+        zzcvn zzcvnVar = new zzcvn(zzcrqVar, zzcrrVar, zzhfaVar11, zzcrsVar, zzhfaVar12);
+        this.zzk = zzcvnVar;
+        zzhfa zzc5 = zzheq.zzc(zzdae.zza());
+        this.zzl = zzc5;
+        zzhfe zza3 = zzhff.zza(1, 1);
+        zzhfaVar13 = zzcipVar.zzdU;
+        zza3.zza(zzhfaVar13);
+        zzhfaVar14 = zzcipVar.zzdV;
+        zza3.zzb(zzhfaVar14);
+        zzhff zzc6 = zza3.zzc();
+        this.zzm = zzc6;
+        zzcxk zzcxkVar = new zzcxk(zzc6);
+        this.zzn = zzcxkVar;
+        zzhfe zza4 = zzhff.zza(0, 1);
+        zzhfaVar15 = zzcipVar.zzdz;
+        zza4.zza(zzhfaVar15);
+        zzhff zzc7 = zza4.zzc();
+        this.zzo = zzc7;
+        zzhfa zzc8 = zzheq.zzc(new zzddi(zzc7));
+        this.zzp = zzc8;
+        zzhfaVar16 = zzcipVar.zzdT;
+        zzctf zzctfVar = new zzctf(zzcrtVar, zzcrqVar, zzc2, zzc4, zzhfaVar16, zzcvnVar, zzc5, zzcxkVar, zzc8);
+        this.zzq = zzctfVar;
+        zzcqj zzcqjVar = new zzcqj(zzcqhVar);
+        this.zzr = zzcqjVar;
+        zzcqi zzcqiVar = new zzcqi(zzcqhVar);
+        this.zzs = zzcqiVar;
+        zzhfaVar17 = zzcihVar.zzc;
+        this.zzt = zzheq.zzc(new zzcqk(zzctfVar, zzcqjVar, zzcqiVar, zzhfaVar17));
+    }
+
+    @Override // com.google.android.gms.internal.ads.zzcqg
+    public final zzcom zza() {
+        zzcqf zzcqfVar = (zzcqf) this.zzt.zzb();
+        zzhez.zzb(zzcqfVar);
+        return zzcqfVar;
+    }
+}

@@ -1,0 +1,13 @@
+OK  ingest  (432ms)
+OK  audit  (0ms)
+OK  decompile  (39ms)
+OK  static_scan  (1563ms)
+OK  manifest_parse  (0ms)
+OK  decision_engine  (0ms)
+Decision: NEITHER
+SKIPPED  dynamic  (0ms)
+
+Report: 
+outputs/reports/5fc85732e9824bba2947460a52b50e107e1167128d876ff64230767acf7169cb
+/268b8e43.md
+

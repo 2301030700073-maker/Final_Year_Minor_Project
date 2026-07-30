@@ -1,0 +1,23 @@
+{
+  "hashes": {
+    "sha256": "4c7980ef1f6cc29508f38417c2a5b5b7721eeb4a3d7f00a0c1a08f5192fa6ddd",
+    "sha1": "f9b4d88a7e0c99f3007579622be9255ca26833ff",
+    "md5": "f9f31bfe8df27eb74cdb8f14fd7c85df"
+  },
+  "size_bytes": 901022,
+  "package": {
+    "package_name": "owasp.mstg.uncrackable2",
+    "version_code": "1",
+    "version_name": "1.0",
+    "min_sdk": "19",
+    "target_sdk": "28",
+    "permissions": []
+  },
+  "signer": {
+    "v1_verified": true,
+    "v2_verified": true,
+    "v3_verified": false,
+    "certificate_dn": "CN=Jeroen Willemsen, OU=OMTG, O=OWASP, L=Amsterdam, C=NL",
+    "certificate_sha256": "cbe68ab87d64341c3fc78119dc1229e8aa86f93fdb2c33aa61252fd491485b1d"
+  }
+}

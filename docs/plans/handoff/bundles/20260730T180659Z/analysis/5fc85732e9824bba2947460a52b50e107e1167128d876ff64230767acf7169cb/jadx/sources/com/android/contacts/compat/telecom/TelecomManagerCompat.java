@@ -1,0 +1,20 @@
+package com.android.contacts.compat.telecom;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.telecom.TelecomManager;
+import com.android.contacts.compat.CompatUtils;
+
+/* loaded from: classes.dex */
+public class TelecomManagerCompat {
+    public static void placeCall(Activity activity, TelecomManager telecomManager, Intent intent) {
+        if (activity == null || telecomManager == null || intent == null) {
+            return;
+        }
+        if (CompatUtils.isMarshmallowCompatible()) {
+            telecomManager.placeCall(intent.getData(), intent.getExtras());
+        } else {
+            activity.startActivityForResult(intent, 0);
+        }
+    }
+}

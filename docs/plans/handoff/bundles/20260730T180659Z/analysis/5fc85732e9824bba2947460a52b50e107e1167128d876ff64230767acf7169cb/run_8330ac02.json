@@ -1,0 +1,130 @@
+{
+  "classification": {
+    "action": "NEITHER",
+    "root": {
+      "confidence": 0.0,
+      "detected": false,
+      "evidence": []
+    },
+    "ssl": {
+      "confidence": 0.0,
+      "detected": false,
+      "evidence": []
+    },
+    "threshold": 0.7
+  },
+  "verification": null,
+  "correlation": null,
+  "stage_results": [
+    {
+      "stage": "ingest",
+      "status": "success",
+      "evidence": {
+        "hashes": {
+          "sha256": "5fc85732e9824bba2947460a52b50e107e1167128d876ff64230767acf7169cb",
+          "sha1": "8169b75a1c90edc67766bdec35230b665fd8aad5",
+          "md5": "bb11f46560a6b8577afa2c0361fc101d"
+        },
+        "size_bytes": 10364670,
+        "package": {
+          "package_name": "com.android.contacts",
+          "version_code": "10731",
+          "version_name": "1.7.31",
+          "min_sdk": "21",
+          "target_sdk": "29",
+          "permissions": [
+            "android.permission.READ_CONTACTS",
+            "android.permission.WRITE_CONTACTS",
+            "android.permission.GET_ACCOUNTS",
+            "android.permission.GET_ACCOUNTS_PRIVILEGED",
+            "android.permission.MANAGE_ACCOUNTS",
+            "android.permission.ACCESS_NETWORK_STATE",
+            "android.permission.CALL_PHONE",
+            "android.permission.READ_PROFILE",
+            "android.permission.WRITE_PROFILE",
+            "android.permission.INTERNET",
+            "android.permission.NFC",
+            "android.permission.READ_PHONE_STATE",
+            "android.permission.WAKE_LOCK",
+            "android.permission.WRITE_SETTINGS",
+            "android.permission.USE_CREDENTIALS",
+            "android.permission.VIBRATE",
+            "android.permission.READ_SYNC_SETTINGS",
+            "android.permission.READ_EXTERNAL_STORAGE",
+            "com.android.launcher.permission.INSTALL_SHORTCUT",
+            "android.permission.WRITE_SYNC_SETTINGS",
+            "android.permission.READ_SYNC_STATS",
+            "android.permission.RECEIVE_BOOT_COMPLETED",
+            "android.permission.FOREGROUND_SERVICE",
+            "android.permission.HIDE_NON_SYSTEM_OVERLAY_WINDOWS"
+          ]
+        },
+        "signer": {
+          "v1_verified": true,
+          "v2_verified": true,
+          "v3_verified": true,
+          "certificate_dn": "EMAILADDRESS=android@android.com, CN=Android, OU=Android, O=Android, L=Mountain View, ST=California, C=US",
+          "certificate_sha256": "6e433e476ed0789ce76adcf03e39bd034e100a2ea9995471f157f57e37d46a35"
+        }
+      },
+      "error": null,
+      "duration_ms": 453
+    },
+    {
+      "stage": "audit",
+      "status": "success",
+      "evidence": {
+        "timestamp": "2026-07-30T06:10:13.325722+00:00",
+        "apk_hash": "5fc85732e9824bba2947460a52b50e107e1167128d876ff64230767acf7169cb",
+        "justification": "ACADEMIC_TRAINING_TARGET",
+        "operator": "2301030700073-maker",
+        "tool_version": "0.1.0",
+        "git_commit": "316a6e66b1c59790749c81d2344ca71643347f7c"
+      },
+      "error": null,
+      "duration_ms": 0
+    },
+    {
+      "stage": "decompile",
+      "status": "success",
+      "evidence": {
+        "jadx_output": "outputs/analysis/5fc85732e9824bba2947460a52b50e107e1167128d876ff64230767acf7169cb/jadx",
+        "apktool_output": "outputs/analysis/5fc85732e9824bba2947460a52b50e107e1167128d876ff64230767acf7169cb/apktool",
+        "manifest_path": "outputs/analysis/5fc85732e9824bba2947460a52b50e107e1167128d876ff64230767acf7169cb/apktool/AndroidManifest.xml",
+        "cached": true
+      },
+      "error": null,
+      "duration_ms": 0
+    },
+    {
+      "stage": "static_scan",
+      "status": "success",
+      "evidence": {},
+      "error": null,
+      "duration_ms": 1507
+    },
+    {
+      "stage": "manifest_parse",
+      "status": "success",
+      "evidence": {},
+      "error": null,
+      "duration_ms": 0
+    },
+    {
+      "stage": "decision_engine",
+      "status": "success",
+      "evidence": {},
+      "error": null,
+      "duration_ms": 0
+    },
+    {
+      "stage": "dynamic",
+      "status": "skipped",
+      "evidence": {
+        "reason": "NEITHER classification - no bypass technique to apply"
+      },
+      "error": null,
+      "duration_ms": 0
+    }
+  ]
+}

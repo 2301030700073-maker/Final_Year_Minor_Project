@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:launcher="http://schemas.android.com/apk/res-auto"
+    android:gravity="center_horizontal"
+    android:layout_gravity="center_vertical"
+    android:orientation="vertical"
+    android:id="@+id/smartspace_content"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:animateLayoutChanges="true">
+    <com.google.android.apps.nexuslauncher.graphics.IcuDateTextView
+        android:textSize="@dimen/smartspace_title_size_3x3"
+        android:gravity="center_horizontal"
+        android:id="@+id/clock"
+        android:background="@drawable/bg_smartspace"
+        android:paddingLeft="10dp"
+        android:paddingRight="10dp"
+        android:visibility="visible"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:maxLines="2"
+        style="@style/SmartspaceTextHeadline"/>
+    <com.google.android.apps.nexuslauncher.graphics.DoubleShadowTextView
+        android:textSize="@dimen/smartspace_subtitle_weather_size_3x3"
+        android:gravity="center_horizontal"
+        android:id="@+id/subtitle_weather_text"
+        android:background="@drawable/bg_smartspace"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:paddingStart="8dp"
+        launcher:leadIconMargin="4dp"
+        launcher:leadIconSize="@dimen/smartspace_weather_icon_size_3x3"
+        style="@style/SmartspaceTextTitle"/>
+</LinearLayout>

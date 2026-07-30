@@ -1,0 +1,5 @@
+FAILED  ingest  (3ms)
+    Command '['/usr/bin/aapt2', 'dump', 'badging', 'APK_Test/minimal.apk']' 
+returned non-zero exit status 1.
+Pipeline halted - see the failed stage above.
+

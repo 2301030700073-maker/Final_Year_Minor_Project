@@ -1,0 +1,8 @@
+package b.b.g;
+
+import android.widget.AdapterView;
+import android.widget.HorizontalScrollView;
+
+/* loaded from: classes.dex */
+public class G0 extends HorizontalScrollView implements AdapterView.OnItemSelectedListener {
+}

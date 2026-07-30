@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.android.quickstep.views.TaskMenuView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:background="@drawable/task_menu_bg"
+    android:paddingBottom="@dimen/task_card_menu_shadow_height"
+    android:visibility="invisible"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:animateLayoutChanges="true">
+    <com.android.quickstep.views.IconView
+        android:layout_gravity="top|center_horizontal"
+        android:id="@+id/task_icon"
+        android:focusable="false"
+        android:layout_width="@dimen/task_thumbnail_icon_size"
+        android:layout_height="@dimen/task_thumbnail_icon_size"
+        android:layout_marginBottom="@dimen/deep_shortcut_drawable_padding"
+        android:importantForAccessibility="no"/>
+    <TextView
+        android:textSize="12sp"
+        android:gravity="center_horizontal"
+        android:id="@+id/task_name"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"/>
+    <LinearLayout
+        android:id="@+id/menu_option_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:divider="@drawable/all_apps_divider"
+        android:showDividers="beginning"
+        android:paddingStart="@dimen/task_card_menu_horizontal_padding"
+        android:paddingEnd="@dimen/task_card_menu_horizontal_padding"
+        style="@style/TaskMenu"/>
+</com.android.quickstep.views.TaskMenuView>

@@ -1,0 +1,89 @@
+{
+  "timestamp_utc": "2026-07-30T06:13:20.238988+00:00",
+  "git_commit": {
+    "command": "git rev-parse HEAD",
+    "found": true,
+    "exit_code": 0,
+    "stdout": "74ac8bafca055dcebfe3f38fba3b8e3c2ec15336\n",
+    "stderr": ""
+  },
+  "git_status_porcelain": {
+    "command": "git status --porcelain",
+    "found": true,
+    "exit_code": 0,
+    "stdout": "?? APK_Test/minimal.apk\n",
+    "stderr": ""
+  },
+  "python_version": {
+    "command": "/home/ubuntu/Testing/Final_Year_Minor_Project/.venv/bin/python --version",
+    "found": true,
+    "exit_code": 0,
+    "stdout": "Python 3.12.3\n",
+    "stderr": ""
+  },
+  "uv_version": {
+    "command": "uv --version",
+    "found": true,
+    "exit_code": 0,
+    "stdout": "uv 0.11.29 (x86_64-unknown-linux-gnu)\n",
+    "stderr": ""
+  },
+  "tool_versions": {
+    "aapt2": {
+      "command": "aapt2 version",
+      "found": true,
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "Android Asset Packaging Tool (aapt) 2.19-debian\n"
+    },
+    "apksigner": {
+      "command": "apksigner --version",
+      "found": true,
+      "exit_code": 0,
+      "stdout": "0.9\n",
+      "stderr": ""
+    },
+    "jadx": {
+      "command": "jadx --version",
+      "found": true,
+      "exit_code": 0,
+      "stdout": "1.5.1\n",
+      "stderr": ""
+    },
+    "apktool": {
+      "command": "apktool --version",
+      "found": true,
+      "exit_code": 0,
+      "stdout": "3.0.1\n",
+      "stderr": ""
+    },
+    "adb": {
+      "command": "adb version",
+      "found": true,
+      "exit_code": 0,
+      "stdout": "Android Debug Bridge version 1.0.41\nVersion 37.0.0-14910828\nInstalled as C:\\Users\\Divyang\\Downloads\\platform-tools-latest-windows\\platform-tools\\adb.exe\nRunning on Windows 10.0.26200\n",
+      "stderr": ""
+    },
+    "frida": {
+      "command": "frida --version",
+      "found": true,
+      "exit_code": 0,
+      "stdout": "16.7.19\n",
+      "stderr": ""
+    }
+  },
+  "adb_devices": {
+    "command": "adb devices",
+    "found": true,
+    "exit_code": 0,
+    "stdout": "List of devices attached\nemulator-5554\tdevice\n\n",
+    "stderr": ""
+  },
+  "frida_ps_dash_U": {
+    "command": "timeout 3 frida-ps -U",
+    "found": true,
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+}

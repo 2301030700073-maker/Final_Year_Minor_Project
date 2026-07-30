@@ -1,0 +1,172 @@
+package rnauthenticator.authenticator.network.model.request;
+
+import androidx.autofill.HintConstants;
+import com.facebook.appevents.iap.InAppPurchaseConstants;
+import kotlin.Metadata;
+import kotlin.jvm.JvmStatic;
+import kotlin.jvm.internal.DefaultConstructorMarker;
+import kotlin.jvm.internal.Intrinsics;
+import kotlinx.serialization.KSerializer;
+import kotlinx.serialization.Serializable;
+import kotlinx.serialization.descriptors.SerialDescriptor;
+import kotlinx.serialization.encoding.CompositeEncoder;
+import kotlinx.serialization.internal.PluginExceptionsKt;
+import kotlinx.serialization.internal.SerializationConstructorMarker;
+
+/* compiled from: RegistrationData.kt */
+@Metadata(d1 = {"\u0000>\n\u0002\u0018\u0002\n\u0002\u0010\u0000\n\u0000\n\u0002\u0010\u000e\n\u0002\b\u0007\n\u0002\u0010\b\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u000e\n\u0002\u0010\u000b\n\u0002\b\u0004\n\u0002\u0010\u0002\n\u0002\b\u0002\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0004\b\u0081\b\u0018\u0000 )2\u00020\u0001:\u0002()B/\u0012\u0006\u0010\u0002\u001a\u00020\u0003\u0012\u0006\u0010\u0004\u001a\u00020\u0003\u0012\u0006\u0010\u0005\u001a\u00020\u0003\u0012\u0006\u0010\u0006\u001a\u00020\u0003\u0012\u0006\u0010\u0007\u001a\u00020\u0003¢\u0006\u0004\b\b\u0010\tBM\b\u0010\u0012\u0006\u0010\n\u001a\u00020\u000b\u0012\b\u0010\u0002\u001a\u0004\u0018\u00010\u0003\u0012\b\u0010\u0004\u001a\u0004\u0018\u00010\u0003\u0012\b\u0010\u0005\u001a\u0004\u0018\u00010\u0003\u0012\b\u0010\u0006\u001a\u0004\u0018\u00010\u0003\u0012\b\u0010\u0007\u001a\u0004\u0018\u00010\u0003\u0012\b\u0010\f\u001a\u0004\u0018\u00010\r¢\u0006\u0004\b\b\u0010\u000eJ\t\u0010\u0015\u001a\u00020\u0003HÆ\u0003J\t\u0010\u0016\u001a\u00020\u0003HÆ\u0003J\t\u0010\u0017\u001a\u00020\u0003HÆ\u0003J\t\u0010\u0018\u001a\u00020\u0003HÆ\u0003J\t\u0010\u0019\u001a\u00020\u0003HÆ\u0003J;\u0010\u001a\u001a\u00020\u00002\b\b\u0002\u0010\u0002\u001a\u00020\u00032\b\b\u0002\u0010\u0004\u001a\u00020\u00032\b\b\u0002\u0010\u0005\u001a\u00020\u00032\b\b\u0002\u0010\u0006\u001a\u00020\u00032\b\b\u0002\u0010\u0007\u001a\u00020\u0003HÆ\u0001J\u0013\u0010\u001b\u001a\u00020\u001c2\b\u0010\u001d\u001a\u0004\u0018\u00010\u0001HÖ\u0003J\t\u0010\u001e\u001a\u00020\u000bHÖ\u0001J\t\u0010\u001f\u001a\u00020\u0003HÖ\u0001J%\u0010 \u001a\u00020!2\u0006\u0010\"\u001a\u00020\u00002\u0006\u0010#\u001a\u00020$2\u0006\u0010%\u001a\u00020&H\u0001¢\u0006\u0002\b'R\u0011\u0010\u0002\u001a\u00020\u0003¢\u0006\b\n\u0000\u001a\u0004\b\u000f\u0010\u0010R\u0011\u0010\u0004\u001a\u00020\u0003¢\u0006\b\n\u0000\u001a\u0004\b\u0011\u0010\u0010R\u0011\u0010\u0005\u001a\u00020\u0003¢\u0006\b\n\u0000\u001a\u0004\b\u0012\u0010\u0010R\u0011\u0010\u0006\u001a\u00020\u0003¢\u0006\b\n\u0000\u001a\u0004\b\u0013\u0010\u0010R\u0011\u0010\u0007\u001a\u00020\u0003¢\u0006\b\n\u0000\u001a\u0004\b\u0014\u0010\u0010¨\u0006*"}, d2 = {"Lrnauthenticator/authenticator/network/model/request/RegistrationData;", "", "email", "", HintConstants.AUTOFILL_HINT_PASSWORD, "locale", "redirectUrl", "responseType", "<init>", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V", "seen0", "", "serializationConstructorMarker", "Lkotlinx/serialization/internal/SerializationConstructorMarker;", "(ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlinx/serialization/internal/SerializationConstructorMarker;)V", "getEmail", "()Ljava/lang/String;", "getPassword", "getLocale", "getRedirectUrl", "getResponseType", "component1", "component2", "component3", "component4", "component5", "copy", "equals", "", "other", "hashCode", InAppPurchaseConstants.METHOD_TO_STRING, "write$Self", "", "self", "output", "Lkotlinx/serialization/encoding/CompositeEncoder;", "serialDesc", "Lkotlinx/serialization/descriptors/SerialDescriptor;", "write$Self$propertyguru_react_native_authenticator_release", "$serializer", "Companion", "propertyguru_react-native-authenticator_release"}, k = 1, mv = {2, 0, 0}, xi = 48)
+@Serializable
+/* loaded from: classes3.dex */
+public final /* data */ class RegistrationData {
+
+    /* renamed from: Companion, reason: from kotlin metadata */
+    public static final Companion INSTANCE = new Companion(null);
+    private final String email;
+    private final String locale;
+    private final String password;
+    private final String redirectUrl;
+    private final String responseType;
+
+    public static /* synthetic */ RegistrationData copy$default(RegistrationData registrationData, String str, String str2, String str3, String str4, String str5, int i, Object obj) {
+        if ((i & 1) != 0) {
+            str = registrationData.email;
+        }
+        if ((i & 2) != 0) {
+            str2 = registrationData.password;
+        }
+        String str6 = str2;
+        if ((i & 4) != 0) {
+            str3 = registrationData.locale;
+        }
+        String str7 = str3;
+        if ((i & 8) != 0) {
+            str4 = registrationData.redirectUrl;
+        }
+        String str8 = str4;
+        if ((i & 16) != 0) {
+            str5 = registrationData.responseType;
+        }
+        return registrationData.copy(str, str6, str7, str8, str5);
+    }
+
+    /* renamed from: component1, reason: from getter */
+    public final String getEmail() {
+        return this.email;
+    }
+
+    /* renamed from: component2, reason: from getter */
+    public final String getPassword() {
+        return this.password;
+    }
+
+    /* renamed from: component3, reason: from getter */
+    public final String getLocale() {
+        return this.locale;
+    }
+
+    /* renamed from: component4, reason: from getter */
+    public final String getRedirectUrl() {
+        return this.redirectUrl;
+    }
+
+    /* renamed from: component5, reason: from getter */
+    public final String getResponseType() {
+        return this.responseType;
+    }
+
+    public final RegistrationData copy(String email, String password, String locale, String redirectUrl, String responseType) {
+        Intrinsics.checkNotNullParameter(email, "email");
+        Intrinsics.checkNotNullParameter(password, "password");
+        Intrinsics.checkNotNullParameter(locale, "locale");
+        Intrinsics.checkNotNullParameter(redirectUrl, "redirectUrl");
+        Intrinsics.checkNotNullParameter(responseType, "responseType");
+        return new RegistrationData(email, password, locale, redirectUrl, responseType);
+    }
+
+    public boolean equals(Object other) {
+        if (this == other) {
+            return true;
+        }
+        if (!(other instanceof RegistrationData)) {
+            return false;
+        }
+        RegistrationData registrationData = (RegistrationData) other;
+        return Intrinsics.areEqual(this.email, registrationData.email) && Intrinsics.areEqual(this.password, registrationData.password) && Intrinsics.areEqual(this.locale, registrationData.locale) && Intrinsics.areEqual(this.redirectUrl, registrationData.redirectUrl) && Intrinsics.areEqual(this.responseType, registrationData.responseType);
+    }
+
+    public int hashCode() {
+        return (((((((this.email.hashCode() * 31) + this.password.hashCode()) * 31) + this.locale.hashCode()) * 31) + this.redirectUrl.hashCode()) * 31) + this.responseType.hashCode();
+    }
+
+    public String toString() {
+        return "RegistrationData(email=" + this.email + ", password=" + this.password + ", locale=" + this.locale + ", redirectUrl=" + this.redirectUrl + ", responseType=" + this.responseType + ")";
+    }
+
+    /* compiled from: RegistrationData.kt */
+    @Metadata(d1 = {"\u0000\u0016\n\u0002\u0018\u0002\n\u0002\u0010\u0000\n\u0002\b\u0003\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0000\b\u0086\u0003\u0018\u00002\u00020\u0001B\t\b\u0002¢\u0006\u0004\b\u0002\u0010\u0003J\f\u0010\u0004\u001a\b\u0012\u0004\u0012\u00020\u00060\u0005¨\u0006\u0007"}, d2 = {"Lrnauthenticator/authenticator/network/model/request/RegistrationData$Companion;", "", "<init>", "()V", "serializer", "Lkotlinx/serialization/KSerializer;", "Lrnauthenticator/authenticator/network/model/request/RegistrationData;", "propertyguru_react-native-authenticator_release"}, k = 1, mv = {2, 0, 0}, xi = 48)
+    public static final class Companion {
+        private Companion() {
+        }
+
+        public /* synthetic */ Companion(DefaultConstructorMarker defaultConstructorMarker) {
+            this();
+        }
+
+        public final KSerializer<RegistrationData> serializer() {
+            return RegistrationData$$serializer.INSTANCE;
+        }
+    }
+
+    public /* synthetic */ RegistrationData(int i, String str, String str2, String str3, String str4, String str5, SerializationConstructorMarker serializationConstructorMarker) {
+        if (31 != (i & 31)) {
+            PluginExceptionsKt.throwMissingFieldException(i, 31, RegistrationData$$serializer.INSTANCE.getDescriptor());
+        }
+        this.email = str;
+        this.password = str2;
+        this.locale = str3;
+        this.redirectUrl = str4;
+        this.responseType = str5;
+    }
+
+    @JvmStatic
+    public static final /* synthetic */ void write$Self$propertyguru_react_native_authenticator_release(RegistrationData self, CompositeEncoder output, SerialDescriptor serialDesc) {
+        output.encodeStringElement(serialDesc, 0, self.email);
+        output.encodeStringElement(serialDesc, 1, self.password);
+        output.encodeStringElement(serialDesc, 2, self.locale);
+        output.encodeStringElement(serialDesc, 3, self.redirectUrl);
+        output.encodeStringElement(serialDesc, 4, self.responseType);
+    }
+
+    public RegistrationData(String email, String password, String locale, String redirectUrl, String responseType) {
+        Intrinsics.checkNotNullParameter(email, "email");
+        Intrinsics.checkNotNullParameter(password, "password");
+        Intrinsics.checkNotNullParameter(locale, "locale");
+        Intrinsics.checkNotNullParameter(redirectUrl, "redirectUrl");
+        Intrinsics.checkNotNullParameter(responseType, "responseType");
+        this.email = email;
+        this.password = password;
+        this.locale = locale;
+        this.redirectUrl = redirectUrl;
+        this.responseType = responseType;
+    }
+
+    public final String getEmail() {
+        return this.email;
+    }
+
+    public final String getPassword() {
+        return this.password;
+    }
+
+    public final String getLocale() {
+        return this.locale;
+    }
+
+    public final String getRedirectUrl() {
+        return this.redirectUrl;
+    }
+
+    public final String getResponseType() {
+        return this.responseType;
+    }
+}

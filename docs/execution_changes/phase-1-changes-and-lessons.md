@@ -461,3 +461,27 @@ This failure is distinct from the jadx issues above — it was a malformed APK, 
 | **Pattern** | 4th jadx failure (5th overall including aapt2 ingest failure — minimal.apk never reached jadx). Only Contacts (AOSP, 9.9MB) works. |
 
 **Conclusion:** jadx cannot handle production Android apps reliably. This is a structural limitation of the decompile stage. Phase 4 should evaluate jadx alternatives (JEB, Ghidra) or accept this as a documented constraint.
+
+---
+
+## Post-Phase 4 Results (Calibration + Partial Decompile)
+
+| Metric | Value |
+|--------|-------|
+| **Tests** | 131/131 passing (up from 87) |
+| **Tier 2 root precision/recall/F1** | 1.00 at n=4 |
+| **Tier 2 SSL** | N/A (no SSL-positive targets yet) |
+| **Partial decompile** | PropertyGuru: 27,720 Java files from 151MB APB, 33 errors tolerated |
+| **Limitations** | Now documented in every report |
+
+### Key Discovery: PropertyGuru (First Production App)
+
+| | |
+|---|---|
+| **App** | PropertyGuru real-estate app (151MB, React Native) |
+| **Result** | **BOTH** (root 1.00, SSL 0.90) — first production app to run end-to-end |
+| **Static** | Detected root checking from Sentry, Firebase Crashlytics, Expo SDKs; SSL pinning from OkHttp/network-security-config |
+| **Dynamic** | Not bypassed (hooks target UnCrackable classes, not PropertyGuru's) |
+| **Partial decompile** | jadx processed 20,571 classes with 33 errors (0.16%) — pipeline now accepts partial output |
+
+The collaborator's partial-decompile fix (`78bcf0e35`) was critical: previously jadx's 33 errors (0.16% failure rate) would have caused a total pipeline halt, discarding 27,720 successfully decompiled Java files. Now the pipeline continues with a `decompile_completeness: "partial"` marker and scans whatever decompiled.

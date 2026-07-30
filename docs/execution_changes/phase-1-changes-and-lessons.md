@@ -429,4 +429,15 @@ Tested the Android Contacts system app (pulled from emulator, 9.9MB) as a negati
 | Correlation | N/A (no bypass attempted) |
 
 This proves the pipeline correctly classifies apps with no root detection or SSL pinning as `NEITHER`, not as a false-positive `ROOT_ONLY` or `SSL_ONLY`.
-| `docs/plans/research/phase0-uncrackable1-manual-findings.md` | New file | Manual decompilation record |
+
+### Second Negative Control: Launcher App — Failed (jadx Limitation)
+
+| | |
+|---|---|
+| **App** | Nexus Launcher (pulled from emulator, 8MB) |
+| **Result** | Failed at `decompile` stage — jadx exit status 1 |
+| **Root cause** | Production/obfuscated system apps cannot be decompiled by `jadx` |
+
+This confirms the jadx limitation is consistent: modern Android apps with R8/ProGuard obfuscation, multi-dex, or resource optimization regularly fail decompilation. Simple apps without heavy obfuscation (like AOSP Contacts) work reliably. This is a known blocker for Phase 4 calibration.
+
+**Recommendation for Phase 4:** Evaluate alternative decompilers (JEB, Ghidra) or pre-filter APKs by checking if `jadx` can process them before committing to a full pipeline run.

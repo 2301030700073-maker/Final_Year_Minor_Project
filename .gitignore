@@ -2,8 +2,6 @@
 __pycache__/
 *.pyc
 .env
-outputs/
-*.db
 .pytest_cache/
 *.objection.apk
 *-debuggable.apk

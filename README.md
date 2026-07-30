@@ -60,7 +60,7 @@ Computes precision/recall/F1 and a confidence-calibration curve against every ac
 PYTHONPATH=src uv run python -m cli calibration-report
 ```
 
-`--justification` is required — the CLI will refuse to run without it (ADR-0005). Analysis artifacts land in `outputs/analysis/{sha256}/`; the generated report lands in `outputs/reports/{sha256}/`; the audit log is appended to `outputs/audit_log.jsonl`. `outputs/` is entirely local and gitignored — never `git add` anything under it directly; the verification bundle script (below) is the only sanctioned way evidence gets committed.
+`--justification` is required — the CLI will refuse to run without it (ADR-0005). Analysis artifacts land in `outputs/analysis/{sha256}/`; the generated report lands in `outputs/reports/{sha256}/`; the audit log is appended to `outputs/audit_log.jsonl`. `outputs/` can be committed directly (no longer gitignored) - see `CONTRIBUTING.md`'s Ground Rules for why that restriction was dropped. The verification bundle script (below) is still the recommended way to push a specific run's evidence as a clean, timestamped snapshot.
 
 ## Reporting results back
 

@@ -441,3 +441,13 @@ This proves the pipeline correctly classifies apps with no root detection or SSL
 This confirms the jadx limitation is consistent: modern Android apps with R8/ProGuard obfuscation, multi-dex, or resource optimization regularly fail decompilation. Simple apps without heavy obfuscation (like AOSP Contacts) work reliably. This is a known blocker for Phase 4 calibration.
 
 **Recommendation for Phase 4:** Evaluate alternative decompilers (JEB, Ghidra) or pre-filter APKs by checking if `jadx` can process them before committing to a full pipeline run.
+
+### Previously Undocumented: Minimal APK Failed at Ingest (aapt2)
+
+| | |
+|---|---|
+| **App** | Minimal hand-built APK (975 bytes, unsigned) |
+| **Result** | Failed at `ingest` stage — `aapt2 dump badging` returned exit 1 |
+| **Root cause** | Unsigned APK with no binary-compiled AndroidManifest.xml |
+
+This failure is distinct from the jadx issues above — it was a malformed APK, not a decompiler limitation. Documented here for completeness.

@@ -195,6 +195,13 @@ def run(
             verification = success_check.check(logcat_output, frida_log)
             correlation_result = correlation_module.correlate(classification, verification)
 
+    # dynamic_stage.evidence["reason"] already distinguishes "operator passed
+    # --skip-dynamic" from "NEITHER classification - no bypass technique to
+    # apply" (see frida_runner.run_dynamic_stage) - surfaced in the report
+    # rather than collapsed into one hardcoded string, so a negative-control
+    # run doesn't misleadingly look like someone chose to skip verification.
+    dynamic_skip_reason = dynamic_stage.evidence.get("reason", "skipped") if dynamic_stage.status == "skipped" else None
+
     # --- report ---
     report_path = generate_report(
         run_id=run_id,
@@ -203,6 +210,7 @@ def run(
         metadata=ingest_result.evidence,
         classification=classification,
         verification=verification,
+        dynamic_skip_reason=dynamic_skip_reason,
         correlation=correlation_result,
         stage_results=stage_results,
         output_dir=REPORTS_ROOT,

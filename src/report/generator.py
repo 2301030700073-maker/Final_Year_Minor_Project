@@ -34,8 +34,8 @@ TEMPLATE = Template("""\
 {% endfor %}
 ## Dynamic Verification
 
-- Root bypassed: {{ verification.root_bypassed if verification else "not run (--skip-dynamic)" }}
-- SSL bypassed: {{ verification.ssl_bypassed if verification else "not run (--skip-dynamic)" }}
+- Root bypassed: {{ verification.root_bypassed if verification else "not run (" ~ (dynamic_skip_reason or "reason unknown") ~ ")" }}
+- SSL bypassed: {{ verification.ssl_bypassed if verification else "not run (" ~ (dynamic_skip_reason or "reason unknown") ~ ")" }}
 {% if verification -%}
 {% for key, value in verification.evidence_lines.items() -%}
 - {{ key }}: `{{ value }}`
@@ -71,6 +71,7 @@ def generate_report(
     correlation: CorrelationResult | None,
     stage_results: list[StageResult],
     output_dir: Path,
+    dynamic_skip_reason: str | None = None,
 ) -> Path:
     output_dir = Path(output_dir) / apk_hash
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -82,6 +83,7 @@ def generate_report(
         metadata=_as_attrdict(metadata),
         classification=classification,
         verification=verification,
+        dynamic_skip_reason=dynamic_skip_reason,
         correlation=correlation,
         stage_results=stage_results,
     )

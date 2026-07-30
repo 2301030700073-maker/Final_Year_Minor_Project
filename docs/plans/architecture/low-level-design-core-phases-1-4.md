@@ -10,9 +10,11 @@ src/
   ingest/
     metadata.py                # hash, size, aapt2 dump, signer/cert info
   static/
-    decompile.py                # runs jadx + apktool, caches output by APK hash
+    decompile.py                # runs jadx + apktool, caches output by APK hash - Phase 4 tolerates
+                                 # a jadx crash that still wrote real .java output (see decompile_status.json sidecar)
     signatures.py               # loads YAML rules, matches against decompiled sources
-    native.py                   # readelf/strings/symbol matching [Phase 2+]
+    # native.py planned here for [Phase 2+] - not created; real Phase 2/3 work
+    # needed zero native/.so analysis (see docs/plans/handoff/phase-2-handoff.md)
     manifest.py                 # AndroidManifest.xml parsing
     decision_engine.py          # weighted confidence -> ROOT_ONLY/SSL_ONLY/BOTH/NEITHER
   dynamic/
@@ -22,14 +24,25 @@ src/
     success_checks/              # per-target verification: uncrackable1.py, uncrackable2.py, uncrackable3.py
     correlation.py                # static vs. dynamic comparison
   report/
-    generator.py                  # markdown/HTML report from findings + evidence
+    generator.py                  # markdown/HTML report per run (FR-6.1) + limitations section (FR-6.2);
+                                   # also the cross-run calibration report (FR-9.2)
   storage/
-    db.py                          # SQLAlchemy models + session [from Phase 4]
-    schema.py
+    db.py                          # SQLAlchemy models (2 tables: apks, runs) + engine setup [from Phase 4] -
+                                    # no separate schema.py, too small to earn a second file yet (ADR-0002);
+                                    # not the full 7-table schema high-level-architecture.md previews for
+                                    # Phases 5-7 - those tables have nothing to populate them yet
+    results.py                     # stable save/load interface (NFR-14) - cli.py's call sites are unchanged
+                                    # from the Phase 1-3 flat-JSON version
+  calibration/                     # [Phase 4] two-tier precision/recall/F1 against config/ground_truth.yaml
+    types.py                        # RunRow, GroundTruthEntry - dependency-free, no SQLAlchemy
+    outcomes.py                     # Tier1Outcome/Tier2Outcome bucket definitions - the correctness-critical file
+    ground_truth.py                  # loads/validates config/ground_truth.yaml
+    report.py                       # compute_calibration_report() - pure, fixture-testable
   audit/
     attestation.py                  # CLI justification capture + audit_log write
 config/
   settings.yaml                     # paths, thresholds, model routing (unused until Phase 5+)
+  ground_truth.yaml                  # [Phase 4] independently-sourced Tier 2 calibration ground truth
   signatures/
     root_detection.yaml
     ssl_pinning.yaml
@@ -38,7 +51,9 @@ config/
 outputs/                                # gitignored entirely - local/ephemeral, never `git add`ed
   apks/{hash}/                          # directly; the verification bundle script is the only
   analysis/{hash}/                      # sanctioned path evidence takes into git (see CONTRIBUTING.md)
+    results.db                          # [Phase 4] SQLite - apks + runs tables
   reports/{hash}/
+  reports/calibration/{timestamp}.md    # [Phase 4] cross-run calibration report
 tests/
   unit/
   fixtures/
@@ -118,12 +133,13 @@ A `failed` status halts the pipeline with the full `StageResult` printed/logged 
 ## CLI shape
 
 ```
-python -m cli --apk path/to/target.apk --justification ACADEMIC_TRAINING_TARGET [--skip-dynamic] [--device <serial>]
+python -m cli run --apk path/to/target.apk --justification ACADEMIC_TRAINING_TARGET [--skip-dynamic] [--device <serial>] [--target <name>]
+python -m cli calibration-report [--ground-truth path/to/ground_truth.yaml]
 ```
 
-(Typer collapses to a bare command when there's only one registered - no `run` subcommand needed while Phase 1 only has one thing to do; this un-collapses automatically if a later phase adds a second command, no restructuring required.)
+Phase 4 added the second command (FR-9.2) - Typer's single-command auto-collapse (true for Phases 1-3, when `run` was the only registered command) stopped applying the moment `calibration-report` was added, which broke every hardcoded bare-command invocation that assumed it (`scripts/collect_verification_bundle.py`, `README.md` - both fixed alongside this doc). Revised here rather than left to silently mislead, per this project's evidence-over-assertion discipline.
 
-`--justification` is required (FR-8.1) — the CLI refuses to run without it, writing the corresponding audit log entry (FR-8.2) before any analysis stage begins (in implementation, this happens right after ingestion resolves the real APK hash, so the audit entry can reference it - ingestion itself isn't gated, since hashing/metadata extraction is identification, not analysis).
+`--justification` is required on `run` (FR-8.1) - the CLI refuses to run without it, writing the corresponding audit log entry (FR-8.2) before any analysis stage begins (in implementation, this happens right after ingestion resolves the real APK hash, so the audit entry can reference it - ingestion itself isn't gated, since hashing/metadata extraction is identification, not analysis). `calibration-report` takes neither `--apk` nor `--justification` - it reports over an already-audited historical corpus, not a fresh act of analysis.
 
 ## Testing approach
 

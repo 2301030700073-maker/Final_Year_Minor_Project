@@ -1,4 +1,4 @@
-from common import Action, CategoryVerdict, ClassificationResult, Evidence
+from common import Action, CategoryVerdict, ClassificationResult, Evidence, StageResult
 from report.generator import generate_report
 
 
@@ -86,3 +86,58 @@ def test_generate_report_falls_back_when_no_skip_reason_given(tmp_path):
 
     content = report_path.read_text(encoding="utf-8")
     assert "not run (reason unknown)" in content
+
+
+def test_generate_report_limitations_section_present_and_specific(tmp_path):
+    report_path = generate_report(
+        run_id="run4", apk_hash="jkl012", timestamp="2026-07-30T12:00:00",
+        metadata={"hashes": {"sha256": "jkl012"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "## Limitations" in content
+    assert "signature-based" in content.lower()
+    assert "PropertyGuru" in content
+    assert "does not generalize to unseen apps" in content
+
+
+def test_generate_report_flags_partial_decompile_prominently(tmp_path):
+    stage_results = [StageResult(
+        stage="decompile", status="success",
+        evidence={"decompile_completeness": "partial", "jadx_exit_code": 1, "jadx_file_count": 1563},
+        duration_ms=500,
+    )]
+
+    report_path = generate_report(
+        run_id="run5", apk_hash="mno345", timestamp="2026-07-30T12:00:00",
+        metadata={"hashes": {"sha256": "mno345"}, "package": {"package_name": "com.propertyguru"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=stage_results, output_dir=tmp_path,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "CAUTION" in content
+    assert "PARTIAL" in content
+    assert "1563" in content
+    assert "lower bound" in content.lower()
+
+
+def test_generate_report_complete_decompile_shows_no_caution_badge(tmp_path):
+    stage_results = [StageResult(
+        stage="decompile", status="success",
+        evidence={"decompile_completeness": "complete", "jadx_exit_code": 0, "jadx_file_count": 42},
+        duration_ms=500,
+    )]
+
+    report_path = generate_report(
+        run_id="run6", apk_hash="pqr678", timestamp="2026-07-30T12:00:00",
+        metadata={"hashes": {"sha256": "pqr678"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=stage_results, output_dir=tmp_path,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "CAUTION" not in content
+    assert "completed successfully (42 source files)" in content

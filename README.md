@@ -47,10 +47,18 @@ Frida requires root. Use a Google APIs (not Google Play) x86_64 system image if 
 Test target APKs live under `APK_Test/` (e.g. `APK_Test/UnCrackable-Level1.apk`) — keep them there so paths stay consistent across commands, docs, and bundles.
 
 ```bash
-PYTHONPATH=src uv run python -m cli --apk APK_Test/UnCrackable-Level1.apk --justification ACADEMIC_TRAINING_TARGET
+PYTHONPATH=src uv run python -m cli run --apk APK_Test/UnCrackable-Level1.apk --justification ACADEMIC_TRAINING_TARGET
 ```
 
-(Typer collapses to a bare command when there's only one - no `run` subcommand needed yet. `--help` shows the full option list, including `--skip-dynamic` and `--device`.)
+(`--help` shows the full option list, including `--skip-dynamic`, `--device`, and `--target`.)
+
+## 6. Calibration report (Phase 4)
+
+Computes precision/recall/F1 and a confidence-calibration curve against every accumulated run, against a small independently-sourced ground-truth registry (`config/ground_truth.yaml`) - see ADR-0006 and `docs/plans/handoff/phase-4-handoff.md`. Reports over an already-audited historical corpus, so it takes no `--apk`/`--justification`:
+
+```bash
+PYTHONPATH=src uv run python -m cli calibration-report
+```
 
 `--justification` is required — the CLI will refuse to run without it (ADR-0005). Analysis artifacts land in `outputs/analysis/{sha256}/`; the generated report lands in `outputs/reports/{sha256}/`; the audit log is appended to `outputs/audit_log.jsonl`. `outputs/` is entirely local and gitignored — never `git add` anything under it directly; the verification bundle script (below) is the only sanctioned way evidence gets committed.
 
@@ -60,6 +68,6 @@ Since dynamic/integration testing only happens on this reference environment (AD
 
 ## For the collaborator
 
-Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first — roles, the git workflow (specifically what to do when a push gets rejected, which will happen), and how status gets communicated. Then, each phase has a dedicated handoff doc under `docs/plans/handoff/phase-N-handoff.md` — what to run, what to actually check, and what to send back. Latest: [`docs/plans/handoff/phase-3-handoff.md`](docs/plans/handoff/phase-3-handoff.md).
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first — roles, the git workflow (specifically what to do when a push gets rejected, which will happen), and how status gets communicated. Then, each phase has a dedicated handoff doc under `docs/plans/handoff/phase-N-handoff.md` — what to run, what to actually check, and what to send back. Latest: [`docs/plans/handoff/phase-4-handoff.md`](docs/plans/handoff/phase-4-handoff.md).
 
 Each handoff doc points you at `uv run python scripts/collect_verification_bundle.py`, which collects tool versions, unit test results, and a real pipeline run into one pushable bundle under `docs/plans/handoff/bundles/` — run that and push the result rather than just reporting back verbally.

@@ -19,7 +19,7 @@ Every invocation requires `--justification` (`OWN_APP` / `CTF` / `AUTHORIZED_ENG
 
 ## Data model
 
-On top of the baseline `projects / applications / analyses / findings / evidence / logs / reports` tables, all part of the SQLite schema introduced at Phase 4 (Phase 1-3 storage is flat JSON, not a database — see `low-level-design-core-phases-1-4.md`):
+**Revised after real Phase 4 work, see below** - originally previewed a "baseline `projects / applications / analyses / findings / evidence / logs / reports` tables" schema, all migrated wholesale at Phase 4:
 
 - `hypotheses` — class/method/symbol, category, hook point, predicted indicator, model + prompt version, confidence, rationale, status (proposed/verified/rejected). [populated from Phase 6]
 - `bypass_techniques` — name, category, script + hash, provenance (source analysis, generating model, verifying run), status (candidate/trusted/rejected), human reviewer + timestamp. [populated from Phase 7]
@@ -27,7 +27,7 @@ On top of the baseline `projects / applications / analyses / findings / evidence
 - `audit_log` — as described above. [recorded as a flat JSONL file from Phase 1, migrated here at Phase 4]
 - `knowledge_corpus` — indexed documents (MASTG techniques, prior findings, trusted technique library) with a corpus version, so every retrieval is reproducible to "which knowledge snapshot produced this." [Phase 5]
 
-The full schema — baseline tables plus all of the above — exists from Phase 4 onward; before that, everything is flat JSON/JSONL, migrated wholesale at that point. An unpopulated table is not a placeholder implementation; a fabricated row in one would be.
+**What Phase 4 actually built**: a lean **two-table** schema (`apks`, `runs` — see `low-level-design-core-phases-1-4.md`), directly isomorphic to the JSON shapes it replaces, not the 7-table baseline above. `hypotheses`/`bypass_techniques`/`knowledge_corpus` remain correctly out of scope until Phases 5-7 actually populate them (building them now with nothing to put in them would be exactly the premature design ADR-0002/ADR-0003 argue against) - that part of the original plan holds. Two things don't: there is no separate `calibration_runs` table - calibration data is computed by querying `runs`' own promoted columns (`root_confidence`/`root_detected`/`root_bypassed`, etc.) directly, with the actual precision/recall/F1 analysis living in a plain, dependency-free Python module (`src/calibration/`), not a database table at all. And `audit_log` was **not** migrated to SQL this round - a real, deliberate scope decision (the append-only JSONL already satisfies the immutable-audit-trail property a mutable table would need extra care to preserve), not a silent drop; revisit if a real need for SQL-queryable audit history shows up. An unpopulated table is not a placeholder implementation; a fabricated row in one would be - that principle is unchanged.
 
 ## Phases, in dependency order
 

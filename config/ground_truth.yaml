@@ -1,0 +1,53 @@
+# Tier 2 calibration ground truth (FR-9.2, ADR-0006) - independently
+# established, NEVER derived from this pipeline's own live predictions.
+#
+# Asymmetric evidentiary bar (see src/calibration/ground_truth.py):
+# - `false` (absence) may ONLY come from independent verification - reading
+#   the real decompiled source, confirming no OkHttp/TrustManager/network-
+#   security-config anywhere, or well-established knowledge of a stock app.
+# - `true` (presence) may come from the same independent sourcing, OR a
+#   genuine bypassed=True result from a real run (that's real empirical
+#   proof, not circular the way reusing `detected` would be).
+# - A category can be omitted/null when not yet independently established -
+#   never force a value just to fill the field.
+#
+# Every entry requires a `source` citation - loading rejects any entry
+# without one (see ground_truth.py's load_ground_truth()).
+
+1da8bf57d266109f9a07c01bf7111a1975ce01f190b9d914bcd3ae3dbef96f21:  # UnCrackable1
+  root: true
+  ssl: false
+  source: >
+    Root: sg/vantagepoint/a/c.java read directly (PATH-split su lookup,
+    Build.TAGS test-keys check, 7-path indicator-file array) - real code,
+    plus a genuine bypassed=True dynamic confirmation (all three hooks
+    fired, docs/plans/handoff/bundles/20260729T163534Z). SSL: full-tree
+    grep for OkHttp/TrustManager/network-security-config found nothing -
+    docs/plans/handoff/phase-1-handoff.md.
+
+4c7980ef1f6cc29508f38417c2a5b5b7721eeb4a3d7f00a0c1a08f5192fa6ddd:  # UnCrackable2
+  root: true
+  ssl: false
+  source: >
+    Root: sg/vantagepoint/a/b.java read directly, byte-for-byte identical
+    logic to UnCrackable1's c.java, plus a genuine bypassed=True dynamic
+    confirmation (docs/plans/handoff/bundles/20260729T163412Z). SSL:
+    confirmed absent by the same grep - docs/plans/handoff/phase-2-handoff.md.
+
+6827f776b7d2844342711be6f13695ae8d1a5f209fc0072dbaf8b85e2fcff4b7:  # UnCrackable3
+  root: true
+  ssl: false
+  source: >
+    Root: sg/vantagepoint/util/RootDetection.java read directly, same
+    three checks again, plus a genuine bypassed=True dynamic confirmation,
+    reproduced twice (docs/plans/handoff/bundles/20260730T024659Z and
+    20260730T025301Z). SSL: confirmed absent - docs/plans/handoff/phase-3-handoff.md.
+
+5fc85732e9824bba2947460a52b50e107e1167128d876ff64230767acf7169cb:  # com.android.contacts (negative control)
+  root: false
+  ssl: false
+  source: >
+    A real AOSP Contacts app (com.android.contacts v1.7.31) - well-
+    established that a stock system Contacts app implements neither root-
+    detection nor certificate pinning. Empirically confirmed a clean
+    0.00/0.00 confidence result - docs/plans/handoff/bundles/20260730T042612Z.

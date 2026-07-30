@@ -1,11 +1,22 @@
-"""Flat-JSON persistence for Phase 1 (FR-7.1). Becomes SQLite at Phase 4 - db.py/schema.py are Phase-4-only."""
+"""SQLite-backed persistence (FR-7.1). Same public interface as Phase 1-3's
+flat-JSON version - this module is the stable boundary NFR-14 requires,
+db.py's models/engine are the swappable internals behind it. cli.py's
+existing save_metadata/existing_metadata/save_run call sites need no
+changes.
+"""
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, is_dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from calibration.types import RunRow
+from storage.db import ApkRecord, DB_FILENAME, RunRecord, get_engine
 
 
 def _to_serializable(obj):
@@ -22,23 +33,112 @@ def _to_serializable(obj):
 
 def existing_metadata(analysis_root: Path, apk_hash: str) -> dict | None:
     """FR-1.3: re-running against an already-ingested APK references the existing record."""
-    path = Path(analysis_root) / apk_hash / "metadata.json"
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return None
+    with Session(get_engine(analysis_root)) as session:
+        record = session.get(ApkRecord, apk_hash)
+        return record.raw_metadata if record else None
 
 
 def save_metadata(analysis_root: Path, apk_hash: str, metadata: dict) -> Path:
-    target_dir = Path(analysis_root) / apk_hash
-    target_dir.mkdir(parents=True, exist_ok=True)
-    path = target_dir / "metadata.json"
-    path.write_text(json.dumps(_to_serializable(metadata), indent=2), encoding="utf-8")
-    return path
+    metadata = _to_serializable(metadata)
+    hashes = metadata.get("hashes") or {}
+    package = metadata.get("package") or {}
+    signer = metadata.get("signer") or {}
+
+    with Session(get_engine(analysis_root)) as session:
+        record = session.get(ApkRecord, apk_hash)
+        if record is None:
+            record = ApkRecord(sha256=apk_hash, first_ingested_at=datetime.now(timezone.utc).isoformat())
+            session.add(record)
+        record.sha1 = hashes.get("sha1")
+        record.md5 = hashes.get("md5")
+        record.size_bytes = metadata.get("size_bytes")
+        record.package_name = package.get("package_name")
+        record.version_name = package.get("version_name")
+        record.version_code = package.get("version_code")
+        record.min_sdk = package.get("min_sdk")
+        record.target_sdk = package.get("target_sdk")
+        record.signer_v1_verified = signer.get("v1_verified")
+        record.signer_v2_verified = signer.get("v2_verified")
+        record.signer_v3_verified = signer.get("v3_verified")
+        record.certificate_sha256 = signer.get("certificate_sha256")
+        record.raw_metadata = metadata
+        session.commit()
+
+    return Path(analysis_root) / DB_FILENAME
 
 
 def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) -> Path:
-    target_dir = Path(analysis_root) / apk_hash
-    target_dir.mkdir(parents=True, exist_ok=True)
-    path = target_dir / f"run_{run_id}.json"
-    path.write_text(json.dumps(_to_serializable(run_data), indent=2), encoding="utf-8")
-    return path
+    run_data = _to_serializable(run_data)
+    classification = run_data.get("classification") or {}
+    verification = run_data.get("verification")  # None if dynamic stage skipped - kept as None, not coerced to {}
+    correlation = run_data.get("correlation")
+    stage_results = run_data.get("stage_results") or []
+
+    root = classification.get("root") or {}
+    ssl = classification.get("ssl") or {}
+    # Safe-.get() views only - verification/correlation themselves stay
+    # None (not coerced to {}) for what actually gets persisted below, so
+    # "dynamic stage skipped" round-trips as a real NULL, not an empty dict.
+    verification_fields = verification or {}
+    correlation_fields = correlation or {}
+
+    decompile_stage = next((s for s in stage_results if s.get("stage") == "decompile"), {})
+    decompile_evidence = decompile_stage.get("evidence") or {}
+    dynamic_stage = next((s for s in stage_results if s.get("stage") == "dynamic"), {})
+    dynamic_evidence = dynamic_stage.get("evidence") or {}
+
+    evidence_lines = verification_fields.get("evidence_lines") or {}
+
+    with Session(get_engine(analysis_root)) as session:
+        session.merge(RunRecord(
+            run_id=run_id,
+            apk_sha256=apk_hash,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            action=classification.get("action"),
+            threshold=classification.get("threshold"),
+            root_confidence=root.get("confidence"),
+            root_detected=root.get("detected"),
+            ssl_confidence=ssl.get("confidence"),
+            ssl_detected=ssl.get("detected"),
+            dynamic_status=dynamic_stage.get("status"),
+            dynamic_skip_reason=dynamic_evidence.get("reason"),
+            root_bypassed=verification_fields.get("root_bypassed"),
+            ssl_bypassed=verification_fields.get("ssl_bypassed"),
+            anomaly_flagged="anomaly" in evidence_lines,
+            correlation_matches=correlation_fields.get("matches"),
+            decompile_completeness=decompile_evidence.get("decompile_completeness", "unknown"),
+            jadx_file_count=decompile_evidence.get("jadx_file_count"),
+            jadx_exit_code=decompile_evidence.get("jadx_exit_code"),
+            git_commit=run_data.get("git_commit"),
+            target=run_data.get("target"),
+            classification_json=classification,
+            verification_json=verification,
+            correlation_json=correlation,
+            stage_results_json=stage_results,
+        ))
+        session.commit()
+
+    return Path(analysis_root) / DB_FILENAME
+
+
+def load_runs_for_calibration(analysis_root: Path) -> list[RunRow]:
+    """The only place that translates SQLAlchemy RunRecord rows into
+    calibration's plain, dependency-free RunRow dataclass (FR-9.1) - keeps
+    src/calibration/ ignorant of SQLAlchemy entirely."""
+    with Session(get_engine(analysis_root)) as session:
+        records = session.scalars(select(RunRecord)).all()
+        return [
+            RunRow(
+                apk_hash=r.apk_sha256,
+                run_id=r.run_id,
+                action=r.action,
+                root_confidence=r.root_confidence,
+                root_detected=r.root_detected,
+                root_bypassed=r.root_bypassed,
+                ssl_confidence=r.ssl_confidence,
+                ssl_detected=r.ssl_detected,
+                ssl_bypassed=r.ssl_bypassed,
+                decompile_completeness=r.decompile_completeness,
+            )
+            for r in records
+        ]

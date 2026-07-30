@@ -21,8 +21,12 @@ from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from audit.attestation import record_authorization
+from calibration.ground_truth import DEFAULT_PATH as DEFAULT_GROUND_TRUTH_PATH
+from calibration.ground_truth import load_ground_truth
+from calibration.report import compute_calibration_report
 from common import Action, StageResult, VerificationResult
 from dynamic import correlation as correlation_module
 from dynamic import device
@@ -31,12 +35,12 @@ from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
 from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
 from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
 from ingest.metadata import ingest
-from report.generator import generate_report
+from report.generator import generate_calibration_report, generate_report
 from static.decision_engine import classify
 from static.decompile import decompile
 from static.manifest import parse_manifest
 from static.signatures import load_signatures, scan
-from storage.results import save_metadata, save_run
+from storage.results import load_runs_for_calibration, save_metadata, save_run
 
 app = typer.Typer()
 console = Console()
@@ -44,6 +48,7 @@ console = Console()
 OUTPUTS_ROOT = Path("outputs")
 ANALYSIS_ROOT = OUTPUTS_ROOT / "analysis"
 REPORTS_ROOT = OUTPUTS_ROOT / "reports"
+CALIBRATION_REPORTS_ROOT = OUTPUTS_ROOT / "reports" / "calibration"
 AUDIT_LOG_PATH = OUTPUTS_ROOT / "audit_log.jsonl"
 
 SUCCESS_CHECKS = {
@@ -92,7 +97,7 @@ def _halt(stage_results: list[StageResult]) -> None:
     raise typer.Exit(code=1)
 
 
-@app.command()
+@app.command("run")
 def run(
     apk: Path = typer.Option(..., "--apk", exists=True, help="Path to the APK to analyze"),
     justification: str = typer.Option(
@@ -220,9 +225,51 @@ def run(
         "verification": verification,
         "correlation": correlation_result,
         "stage_results": stage_results,
+        "git_commit": git_commit,
+        "target": target,
     })
 
     console.print(f"\n[bold green]Report: {report_path}[/bold green]")
+
+
+@app.command("calibration-report")
+def calibration_report(
+    ground_truth: Path = typer.Option(
+        DEFAULT_GROUND_TRUTH_PATH, "--ground-truth",
+        help="Path to the independently-sourced ground-truth registry",
+    ),
+):
+    """Compute precision/recall/F1 and a confidence-calibration curve
+    against every accumulated run (FR-9.2, ADR-0006). Reports over an
+    already-audited historical corpus, not a fresh analysis act - no
+    --apk/--justification, unlike `run`."""
+    runs = load_runs_for_calibration(ANALYSIS_ROOT)
+    gt_entries = load_ground_truth(ground_truth)
+    report = compute_calibration_report(
+        runs, gt_entries,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        ground_truth_commit=_git_commit_hash(),
+    )
+
+    def _fmt(rate: float | None) -> str:
+        return f"{rate:.2f}" if rate is not None else "N/A"
+
+    table = Table(title="Calibration Summary")
+    for column in ("Category", "Tier 1 confirmation", "Tier 2 precision", "Tier 2 recall", "Tier 2 F1", "n"):
+        table.add_column(column)
+    for category in ("root", "ssl"):
+        t1, t2 = report.tier1[category], report.tier2[category]
+        table.add_row(
+            category,
+            f"{_fmt(t1.confirmation_rate.rate)} ({t1.confirmed}/{t1.confirmed + t1.not_confirmed})",
+            _fmt(t2.precision.rate), _fmt(t2.recall.rate), _fmt(t2.f1), str(t2.n),
+        )
+    console.print(table)
+    if report.skeleton_warning:
+        console.print(f"[yellow]{report.skeleton_warning}[/yellow]")
+
+    output_path = generate_calibration_report(report, CALIBRATION_REPORTS_ROOT)
+    console.print(f"\n[bold green]Calibration report: {output_path}[/bold green]")
 
 
 if __name__ == "__main__":

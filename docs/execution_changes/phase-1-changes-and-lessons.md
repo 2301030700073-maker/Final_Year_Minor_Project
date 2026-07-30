@@ -451,3 +451,13 @@ This confirms the jadx limitation is consistent: modern Android apps with R8/Pro
 | **Root cause** | Unsigned APK with no binary-compiled AndroidManifest.xml |
 
 This failure is distinct from the jadx issues above — it was a malformed APK, not a decompiler limitation. Documented here for completeness.
+
+### Fifth Negative Control Attempt: PropertyGuru (151MB) — jadx Failed
+
+| | |
+|---|---|
+| **App** | PropertyGuru real-estate app (151MB, production React Native app) |
+| **Result** | Failed at `decompile` — jadx exit status 1 (too large, native libs, obfuscated) |
+| **Pattern** | 5th consecutive production app to fail at jadx. Only Contacts (AOSP, 9.9MB) works. |
+
+**Conclusion:** jadx cannot handle production Android apps reliably. This is a structural limitation of the decompile stage. Phase 4 should evaluate jadx alternatives (JEB, Ghidra) or accept this as a documented constraint.

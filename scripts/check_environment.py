@@ -186,10 +186,20 @@ else:
     check("Device connected", False)
 
 if serial:
-    # Root check
-    r = run([adb_wrapper or "adb", "-s", serial, "shell", "su -c 'id 2>&1'"])
-    rooted = r and "root" in (r.stdout or "")
-    check("Root access (Magisk)", rooted)
+    # Root check: prefer `adb shell id` (works when adbd is already root, and
+    # returns immediately). Only fall back to `su` when adbd is not root, and
+    # treat a hang/timeout as "not root" instead of crashing the whole script.
+    r = run([adb_wrapper or "adb", "-s", serial, "shell", "id"])
+    rooted = bool(r) and "uid=0" in (r.stdout or "")
+    if not rooted:
+        try:
+            r = run([adb_wrapper or "adb", "-s", serial, "shell", "su -c 'id 2>&1'"])
+            rooted = bool(r) and "uid=0" in (r.stdout or "")
+        except Exception:
+            rooted = False
+    # When adbd runs as root, no `su` prefix is needed for commands.
+    su_prefix = "" if rooted else "su -c "
+    check("Root access (uid 0)", rooted)
 
     # frida-server — auto-start in --fix mode
     r = run([adb_wrapper or "adb", "-s", serial, "shell", "ps -A | grep frida-server"])
@@ -199,7 +209,7 @@ if serial:
             print("       Starting frida-server on device...")
             subprocess.Popen(
                 [adb_wrapper or "adb", "-s", serial, "shell",
-                 "su -c 'nohup /data/local/tmp/frida-server > /dev/null 2>&1 &'"],
+                 f"{su_prefix}nohup /data/local/tmp/frida-server > /dev/null 2>&1 &"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             time.sleep(3)

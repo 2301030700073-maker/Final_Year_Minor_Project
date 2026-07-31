@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import subprocess
 import time
 from pathlib import Path
 
 from common import Action, StageResult
-from dynamic.device import setup_frida_connection
+from dynamic.device import _require_adb, setup_frida_connection
 
 SCRIPT_DIR = Path(__file__).parent / "scripts"
 
@@ -35,6 +36,16 @@ SCRIPTS_BY_TARGET_ACTION: dict[str, dict[Action, list[str]]] = {
         Action.SSL_ONLY: ["ssl_pinning_bypass_v1.js"],
         Action.BOTH: ["root_bypass_uncrackable3.js", "ssl_pinning_bypass_v1.js"],
     },
+    "AndroGoat": {
+        # Real app, not an UnCrackable target: root detection lives in
+        # owasp.sat.agoat classes (no bypass script authored), but its SSL
+        # pinning is plain OkHttp CertificatePinner for owasp.org, which
+        # ssl_pinning_bypass_v1.js hooks generically (nothing agoat-specific).
+        # Pinning is button-triggered - UI_ACTIONS_BY_TARGET navigates to
+        # TrafficActivity and taps the CERTIFICATE PINNING button.
+        Action.SSL_ONLY: ["ssl_pinning_bypass_v1.js"],
+        Action.BOTH: ["ssl_pinning_bypass_v1.js"],
+    },
 }
 
 
@@ -52,6 +63,41 @@ def load_script(session, script_name: str, on_message=None):
         script.on("message", on_message)
     script.load()
     return script
+
+
+# Target-specific UI actions to reach/trigger a bypass after resume.
+# AndroGoat's pinning runs from the CERTIFICATE PINNING button in
+# TrafficActivity (bounds [53,1167][1387,1335] on the reference emulator,
+# 1440x2872), which is not the launcher activity - so navigate to it and tap
+# it; without this the CertificatePinner.check hook never fires. Tuple forms:
+# ("am_start", "<component>"), ("sleep", seconds), ("tap", x, y).
+UI_ACTIONS_BY_TARGET: dict[str, list[tuple]] = {
+    "AndroGoat": [
+        ("am_start", "owasp.sat.agoat/.TrafficActivity"),
+        ("sleep", 2.0),
+        ("tap", 720, 1251),
+    ],
+}
+
+
+def _run_ui_action(serial: str, action: tuple) -> None:
+    """Run one target-specific UI action via adb. Best-effort: a UI step
+    failing shouldn't crash the whole dynamic stage, but it also can't be
+    silent - the stage result's evidence captures whether it ran."""
+    adb = _require_adb()
+    kind = action[0]
+    if kind == "am_start":
+        subprocess.run(
+            [adb, "-s", serial, "shell", "am", "start", "-n", action[1]],
+            capture_output=True, text=True, timeout=15,
+        )
+    elif kind == "tap":
+        subprocess.run(
+            [adb, "-s", serial, "shell", "input", "tap", str(action[1]), str(action[2])],
+            capture_output=True, text=True, timeout=15,
+        )
+    elif kind == "sleep":
+        time.sleep(action[1])
 
 
 def run_dynamic_stage(
@@ -95,6 +141,9 @@ def run_dynamic_stage(
             load_script(session, name, on_message)
 
         device.resume(pid)
+        time.sleep(1.0)  # let the launcher activity draw before any UI action
+        for action in UI_ACTIONS_BY_TARGET.get(target, ()):
+            _run_ui_action(device_serial, action)
         time.sleep(settle_seconds)  # let the app run past its check points
 
         return StageResult(

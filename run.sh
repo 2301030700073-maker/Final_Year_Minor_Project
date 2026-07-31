@@ -65,11 +65,14 @@ fi
 # ── Step 3: Frida version must be 16.x ──
 echo ""
 echo "─── 3. Frida version (must be 16.x) ───"
-FRIDA_VER=$(frida --version 2>/dev/null || echo "not found")
+# The pipeline runs under the uv-locked frida client, not whatever `frida` is
+# on PATH (which can be a mismatched 17.x system install). Validate the client
+# the run actually uses so the version check and the server comparison line up.
+FRIDA_VER=$(uv run frida --version 2>/dev/null || echo "not found")
 if echo "$FRIDA_VER" | grep -q "^16\."; then
-    echo "  $PASS  frida $FRIDA_VER"
+    echo "  $PASS  frida $FRIDA_VER (uv-locked client)"
 else
-    echo "  $FAIL  frida $FRIDA_VER (need 16.x)"
+    echo "  $FAIL  frida $FRIDA_VER (need 16.x, uv-locked client)"
     echo "         Fix: uv add 'frida<17'"
     ALL_OK=false
 fi

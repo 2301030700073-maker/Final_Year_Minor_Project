@@ -149,3 +149,78 @@ Bundles: `20260731T121305Z` (AndroGoat), `20260731T121900Z` (RS_CertPinning), `2
 - Implement a real SSL bypass success-check so Tier-1 SSL can move off `N/A`.
 - Register a *fully-decompiling* SSL pinner, or revisit the partial-decompile Tier-2 exclusion, to validate Tier-2 SSL.
 - AndroGoat + RS_CertPinning now stand as the canonical SSL positives; Vapour/Tutanota as SSL negatives; Conversations as a weak-positive (custom TrustManager, not pinning) data point.
+
+---
+
+## Session update — 2026-07-31 (SSL pin-digest signature + AndroGoat dynamic bypass implemented)
+
+This session implemented the two open SSL items above. Deterministic-core-only; no Phases 5-7. `155/155` unit tests pass.
+
+### Open items closed this session
+- **"Decide whether a single definitive pinning signal (netsec pin-set) should carry enough weight to cross DETECTED"** — resolved by making the NSC pin format *visible*, not by weight-gaming. The `<pin-set>` alone was capped at 0.50 because the actual NSC pin digests (`<pin digest="SHA-256">…`) were invisible to the only hash signature (which matches OkHttp's `sha256/…` form). A new signature makes the real pins count; RS_CertPinning now scores 0.80 → **SSL DETECTED**. `DEFAULT_THRESHOLD` (0.7) and every other weight are untouched.
+- **"Implement a real SSL bypass success-check so Tier-1 SSL can move off N/A"** — implemented a hook-firing SSL success check for AndroGoat. Calibration Tier-1 SSL is now **1.00 (1/1)** (was `N/A (0/0)`).
+- **(partial)** SSL Tier-2 N/A is now *explained* in the report rather than appearing as a bare `N/A` (all `ssl:true` observations so far partial-decompile and are excluded by design).
+
+### What changed (file → reason → outcome → proof)
+
+1. **`config/signatures/ssl_pinning.yaml`** — added `network_security_config_pin_digest` (weight 0.3, regex `digest="SHA-256">[A-Za-z0-9+/]{20,}={0,2}`).
+   - *Reason:* NSC pins are `<pin digest="SHA-256">base64</pin>`; `certificate_pin_hash_literal` only matches OkHttp's `sha256/…` form, so a netsec-only pinner's real pins never counted.
+   - *Outcome:* RS_CertPinning 0.50 → **0.80 DETECTED** (pinset 0.5 + pin-digest 0.3), matching ground truth `ssl:true`. No false positives introduced (6 negative controls unchanged).
+   - *Proof:* `outputs/reports/bea63726…/1847d175.md`; `tests/unit/test_signatures.py::test_scan_matches_network_security_config_pinning`.
+
+2. **`src/dynamic/frida_runner.py`** — wired `AndroGoat` → `ssl_pinning_bypass_v1.js` for `SSL_ONLY`/`BOTH`; added target-specific UI action (navigate to `TrafficActivity`, tap `CERTIFICATE PINNING` @720,1251).
+   - *Reason:* AndroGoat's pinning is OkHttp `CertificatePinner` (already hooked generically) but is **button-triggered** in a non-launcher activity; `device.spawn` alone never fires the hook.
+   - *Outcome:* the pin hook fires on `owasp.org` at runtime; SSL dynamically verified.
+   - *Proof:* `UI_ACTIONS_BY_TARGET["AndroGoat"]`; on-device run report `7e330f5d.md`.
+
+3. **`src/dynamic/success_checks/androgoat.py`** (new) + registered in `src/cli.py` `SUCCESS_CHECKS` — confirms SSL when the `CertificatePinner.check` hook fires (the established hook-fired standard), with the doPinning `Log.v("Response",…)` line as bonus evidence.
+   - *Outcome:* `ssl_bypassed=True` on a real run → calibration Tier-1 SSL **1.00 (1/1)**.
+   - *Proof:* report `7e330f5d.md` (`SSL bypassed: True`, `hook_fired_certificate_pinner_check`); `tests/unit/test_androgoat_success_check.py`.
+
+4. **`src/cli.py`** — added a Tier-2 N/A annotation: when a category's Tier 2 is N/A *and* partial-decompile exclusions exist, the report states why.
+   - *Reason:* SSL Tier-2 N/A is the honest result of the partial-decompile exclusion, not a missing computation; a bare N/A reads like a bug.
+   - *Outcome:* report explains the exclusion.
+   - *Proof:* `calibration-report` output (Note line for ssl).
+
+5. **Tooling fixes** — `run.sh` Step 3 now checks `uv run frida` (the uv-locked 16.7.19) not PATH `frida` (17.x); `scripts/check_environment.py` root check tries `adb shell id` before `su` (which hung on a rooted adbd); removed the unreferenced objection-flow files (`download_frida_gadget.sh`, `debug.keystore`, `zipalign_location.txt`) and their `tools/README.md` rows.
+   - *Reasons:* run.sh falsely failed its own version check against a mismatched PATH frida; the env script hung on `su`; the objection files had zero references anywhere (grep-verified).
+   - *Outcomes:* `run.sh --check-only` passes all checks; `check_environment.py` no longer hangs (20/21, root+frida+relay green); repo leaner.
+   - *Proof:* `run.sh --check-only` output; `check_environment.py` output; `git status`.
+
+### Results — before → after
+
+| Metric | Before | After |
+|---|---|---|
+| SSL Tier-1 confirmation | `N/A (0/0)` | **`1.00 (1/1)`** |
+| RS_CertPinning static SSL | 0.50 Inconclusive / NEITHER | **0.80 DETECTED (SSL_ONLY)** |
+| Unit tests | 150 | **155** |
+| `run.sh --check-only` | failed Step 3 (PATH frida 17.x) | all checks pass |
+| `check_environment.py` | hung on `su` | completes, root+frida+relay green |
+| SSL Tier-2 | N/A | N/A (now **explained**: all `ssl:true` obs are partial-decompile exclusions) |
+
+### Reproduce (reference machine)
+```bash
+# 1. Unit suite (no toolchain)
+uv run pytest tests/unit
+
+# 2. RS_CertPinning now SSL_DETECTED
+PYTHONPATH=src uv run python -m cli run --apk APK_Test/RS_CertPinning.apk --target RS_CertPinning --justification ACADEMIC_TRAINING_TARGET
+
+# 3. AndroGoat SSL dynamic bypass → SSL bypassed True (needs emulator + frida + network)
+PYTHONPATH=src uv run python -m cli run --apk APK_Test/AndroGoat.apk --target AndroGoat --justification ACADEMIC_TRAINING_TARGET
+
+# 4. Calibration → ssl Tier-1 1.00 (1/1), Tier-2 N/A annotated
+PYTHONPATH=src uv run python -m cli calibration-report
+```
+Note: step 3 requires the emulator to have outbound network — the reference emulator's NAT was broken and required a Windows-side fix before `owasp.org` became reachable; without a reachable pinned host the pin hook cannot fire (that limitation is environmental, not a code gap).
+
+### Proofs appendix
+
+| Claim | Artifact |
+|---|---|
+| RS_CertPinning SSL DETECTED 0.80 | `outputs/reports/bea63726d7025d2bb8f81bf7f94fa096a9f86090d724086f3640c3957536f232/1847d175.md` |
+| AndroGoat SSL bypassed True | `outputs/reports/a47a8b0d…/7e330f5d.md` (`hook_fired_certificate_pinner_check`) |
+| Calibration ssl 1.00 (1/1) | `PYTHONPATH=src uv run python -m cli calibration-report` |
+| NSC pin-digest regression test | `tests/unit/test_signatures.py::test_scan_matches_network_security_config_pinning` |
+| AndroGoat success-check tests | `tests/unit/test_androgoat_success_check.py` |
+| 155 tests pass | `uv run pytest tests/unit` |

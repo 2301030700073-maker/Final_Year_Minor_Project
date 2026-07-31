@@ -31,6 +31,7 @@ from common import Action, StageResult, VerificationResult
 from dynamic import correlation as correlation_module
 from dynamic import device
 from dynamic import frida_runner
+from dynamic.success_checks.androgoat import AndroGoatSuccessCheck
 from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
 from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
 from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
@@ -55,6 +56,7 @@ SUCCESS_CHECKS = {
     "uncrackable1": UnCrackable1SuccessCheck(),
     "uncrackable2": UnCrackable2SuccessCheck(),
     "uncrackable3": UnCrackable3SuccessCheck(),
+    "AndroGoat": AndroGoatSuccessCheck(),
 }
 
 
@@ -297,6 +299,22 @@ def calibration_report(
     console.print(table)
     if report.skeleton_warning:
         console.print(f"[yellow]{report.skeleton_warning}[/yellow]")
+
+    # A bare "N/A" Tier 2 reads like a missing computation, but here it can be
+    # the honest result of the decompile-completeness exclusion (report.py): a
+    # detected verdict from a partial decompile isn't trustworthy either way,
+    # so partial-decompile observations are dropped from Tier 2. When that
+    # leaves a category with no TP/FP/FN to measure against, say so explicitly.
+    for category in ("root", "ssl"):
+        excluded = report.excluded_partial_decompile.get(category, 0)
+        if report.tier2[category].precision.rate is None and excluded:
+            console.print(
+                f"[yellow]Note: {category} Tier 2 is N/A - {excluded} ground-truth "
+                f"observation(s) were excluded as partial decompiles; a Tier-2 "
+                f"verdict needs an {category}:true target that decompiles "
+                f"completely, otherwise there is no true-positive to measure "
+                f"precision/recall against.[/yellow]"
+            )
 
     output_path = generate_calibration_report(report, CALIBRATION_REPORTS_ROOT)
     console.print(f"\n[bold green]Calibration report: {output_path}[/bold green]")

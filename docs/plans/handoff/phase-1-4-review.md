@@ -97,3 +97,14 @@ Facts verified on the reference machine after this review was written; the revie
 - **All four SSL signatures are now validated on genuine code** (SSL detection path proven to fire — see `phase-4-handoff.md` "Latest verification session"): AndroGoat (okhttp + pin-hash, SSL DETECTED 0.80), RS_CertPinning (netsec pin-set, 0.50), Conversations (custom TrustManager, 0.30).
 - **Ground truth now has its first `ssl: true` entries** (AndroGoat, RS_CertPinning) plus InsecureBankv2 root — see `phase-4-handoff.md`.
 - **PropertyGuru re-decompiled successfully this session** (27,720 files, partial, exit 1) — it no longer "fails outright"; the report template's stale claim was corrected (`src/report/generator.py`).
+
+## Gaps addressed — 2026-07-31 (see `phase-4-handoff.md` "Session update" for full detail)
+
+Changes made to the deterministic core since this review; deterministic-only, no Phases 5-7. `155/155` unit tests pass.
+
+- **G13 (SSL dynamic verification does not exist) — RESOLVED.** Added `success_checks/androgoat.py` (hook-firing confirmation, the same standard as the root checks) and wired `AndroGoat` into `frida_runner.py` `SCRIPTS_BY_TARGET_ACTION` + a target-specific UI-tap step. Outcome: AndroGoat SSL **dynamically CONFIRMED**; calibration Tier-1 SSL **`1.00 (1/1)`** (was `N/A (0/0)`). Proof: report `a47a8b0d…/7e330f5d.md`; `tests/unit/test_androgoat_success_check.py`.
+- **G7 (SSL signature coverage: netsec) — PARTIALLY ADDRESSED.** Added `network_security_config_pin_digest` (`config/signatures/ssl_pinning.yaml`): NSC pins are `<pin digest="SHA-256">…`, invisible to the OkHttp-only `certificate_pin_hash_literal`, so a netsec-only pinner was capped at 0.50. Now RS_CertPinning scores **0.80 → SSL DETECTED**. Remaining G7 items (Magisk, libsu, Play Integrity, TrustKit, OkHttp `Set<Pin>`, trust-anchors) still open. Proof: report `bea63726…/1847d175.md`; `test_scan_matches_network_security_config_pinning`.
+- **G16/G19 (Tier-2 N/A + partial-decompile exclusion) — annotated.** `cli.py` now explains a category's Tier-2 N/A when partial-decompile exclusions are the cause, instead of a bare N/A. The exclusion itself is unchanged (correct by design); `ssl:true` observations all partial-decompile, so SSL Tier-2 remains N/A-by-design until a fully-decompiling SSL pinner is registered.
+- **Tooling** — `run.sh` Step 3 checks the uv-locked frida client (not PATH frida, which falsely failed); `check_environment.py` root check no longer hangs on `su` when adbd is already root; unreferenced objection-flow files removed (`download_frida_gadget.sh`, `debug.keystore`, `zipalign_location.txt`).
+
+Open items carried forward (unchanged): G1-G6, G8-G12, G14-G15, G17-G18, G20-G22, and the remaining G7 coverage gaps.

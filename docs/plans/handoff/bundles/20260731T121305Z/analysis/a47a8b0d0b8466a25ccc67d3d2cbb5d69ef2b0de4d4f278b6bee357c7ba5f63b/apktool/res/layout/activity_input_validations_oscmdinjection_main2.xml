@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:orientation="vertical" android:background="@android:color/white" android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="15.0dp" android:layout_marginTop="5.0dp" android:layout_marginRight="15.0dp" android:text="@string/SQLiHint" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="15.0dp" android:layout_marginTop="5.0dp" android:layout_marginRight="15.0dp" android:text="IP Address" />
+    <EditText android:id="@id/ip" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginLeft="15.0dp" android:layout_marginTop="5.0dp" android:layout_marginRight="15.0dp" />
+    <Button android:textSize="20.0dp" android:textColor="@android:color/white" android:id="@id/run" android:background="@android:color/black" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginLeft="15.0dp" android:layout_marginTop="5.0dp" android:layout_marginRight="15.0dp" android:text="Run" />
+    <TextView android:id="@id/result" android:layout_width="match_parent" android:layout_height="match_parent" android:layout_marginLeft="15.0dp" android:layout_marginTop="5.0dp" android:layout_marginRight="15.0dp" android:hint="Output comes here" />
+</LinearLayout>

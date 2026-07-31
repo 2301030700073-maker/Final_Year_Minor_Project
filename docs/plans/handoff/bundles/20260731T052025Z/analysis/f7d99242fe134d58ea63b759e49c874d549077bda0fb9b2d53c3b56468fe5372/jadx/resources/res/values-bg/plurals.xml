@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Всеки час</item>
+        <item quantity="other">Всеки %d час</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Всяка минута</item>
+        <item quantity="other">Всяка %d минута</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 съобшение</item>
+        <item quantity="other">%d съобщения</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Наистина ли желаете да изтриете това съобщение?</item>
+        <item quantity="other">Наистина ли желаете да изтриете %1$d съобщения?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Наистина ли желаете да преместите това съобщение в папката за спам?</item>
+        <item quantity="other">Наистина ли желаете да преместите тези %1$d съобщения в папката за спам?</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d ново съобщение</item>
+        <item quantity="other">%d нови съобщения</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">Изтегляне на %d реултат</item>
+        <item quantity="other">Изтегляне на %d резултата</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">Изтегляне на %1$d от %2$d резултат</item>
+        <item quantity="other">Изтегляне на %1$d от %2$d резултата</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">За да можете да използвате профила &quot;%s&quot; трябва да предоставите паролата на сървъра.</item>
+        <item quantity="other">За да можете да използвате профила &quot;%s&quot; трябва да предоставите паролите на сървъра.</item>
+    </plurals>
+</resources>

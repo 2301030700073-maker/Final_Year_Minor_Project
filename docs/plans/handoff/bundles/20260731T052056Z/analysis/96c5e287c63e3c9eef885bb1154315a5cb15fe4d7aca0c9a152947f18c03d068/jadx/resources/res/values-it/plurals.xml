@@ -1,0 +1,271 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="one">%d giorno</item>
+        <item quantity="other">%d giorni</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="one">modifica il mese scorso</item>
+        <item quantity="other">modifiche il mese scorso</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="one">modifica questo mese</item>
+        <item quantity="other">modifiche questo mese</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="one">Modifica</item>
+        <item quantity="other">Modifiche</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_views">
+        <item quantity="one">Visualizzazione delle voci che hai modificato</item>
+        <item quantity="other">Visualizzazioni delle voci che hai modificato</item>
+    </plurals>
+    <plurals name="activity_tab_impact_thanks">
+        <item quantity="one">grazie</item>
+        <item quantity="other">grazie</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="one">L&apos;anno scorso</item>
+        <item quantity="other">%d anni fa</item>
+    </plurals>
+    <plurals name="donation_reminders_text_articles">
+        <item quantity="one">%d voce</item>
+        <item quantity="other">%d voci</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s byte</item>
+        <item quantity="other">%s byte</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d modifica dal %2$s (%3$s)</item>
+        <item quantity="other">%1$d modifiche dal %2$s (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">%1$d di 1 voce disponibile offline, %3$.2f MB</item>
+        <item quantity="other">%1$d di %2$d voci disponibili offline, %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">%1$d di 1 voce disponibile offline</item>
+        <item quantity="other">%1$d di %2$d voci disponibili offline</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 voce, %2$.2f MB</item>
+        <item quantity="other">%1$d voci, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 voce</item>
+        <item quantity="other">%d voci</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d nuova notifica</item>
+        <item quantity="other">%d nuove notifiche</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d selezionato</item>
+        <item quantity="other">%d selezionati</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Notifica archiviata</item>
+        <item quantity="other">%d notifiche archiviate</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Scaricamento voce</item>
+        <item quantity="other">Scaricamento voci</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">%1$d voce rimanente</item>
+        <item quantity="other">%1$d voci rimanenti</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Sincronizzazione dell&apos;elenco di lettura</item>
+        <item quantity="other">Sincronizzazione degli elenchi di lettura</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">%1$d elenco rimanente</item>
+        <item quantity="other">%1$d elenchi rimanenti</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">Sincronizzando %1$d elenco…</item>
+        <item quantity="other">Sincronizzando %1$d elenchi……</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Scaricamento di %1$d voce…</item>
+        <item quantity="other">Scaricamento di %1$d voci…</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 segnata come letta</item>
+        <item quantity="other">%d segnate come lette</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 segnata come non letta</item>
+        <item quantity="other">%d segnate come non lette</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d filtro</item>
+        <item quantity="other">%d filtri</item>
+    </plurals>
+    <plurals name="on_this_day_game_stats_games_played">
+        <item quantity="one">Partita giocata</item>
+        <item quantity="other">Partite giocate</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d modifica dal %2$s</item>
+        <item quantity="other">%1$d modifiche dal %2$s</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d filtro</item>
+        <item quantity="other">%d filtri</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final">
+        <item quantity="one">%1$d di %2$d</item>
+        <item quantity="other">%1$d di %2$d</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final_large">
+        <item quantity="one">%1$d di %2$d giorno</item>
+        <item quantity="other">%1$d di %2$d giorni</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Questa voce non sarà più disponibile offline.</item>
+        <item quantity="other">Queste voci non saranno più disponibili offline.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Questa voce ora è disponibile offline.</item>
+        <item quantity="other">Queste voci ora sono disponibili offline.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d voce rimossa dall&apos;elenco</item>
+        <item quantity="other">%d voci rimosse dall&apos;elenco</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d voce rimossa da %2$s</item>
+        <item quantity="other">%1$d voci rimosse da %2$s</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">Sei sicuro di voler eliminare l&apos;elenco di lettura %d?</item>
+        <item quantity="other">Sei sicuro di voler eliminare gli elenchi di lettura %d?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">Esportazione elenco di lettura fallita</item>
+        <item quantity="other">Esportazione elenchi di lettura fallita</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Elenco di lettura importato</item>
+        <item quantity="other">Elenchi di lettura importati</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d elenco cancellato</item>
+        <item quantity="other">%d elenchi cancellati</item>
+    </plurals>
+    <plurals name="recommended_reading_list_interest_pick_selected_articles">
+        <item quantity="one">%d selezionato</item>
+        <item quantity="other">%d selezionati</item>
+    </plurals>
+    <plurals name="recommended_reading_list_page_subtitle_articles">
+        <item quantity="one">• %d voce</item>
+        <item quantity="other">• %d voci</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 risultato</item>
+        <item quantity="other">%d risultati</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">Hai aggiunto %d carattere</item>
+        <item quantity="other">Hai aggiunto %d caratteri</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Contributo</item>
+        <item quantity="other">Contributi</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 contributo</item>
+        <item quantity="other">%d contributi</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s carattere</item>
+        <item quantity="other">%1$s caratteri</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Visto una volta negli ultimi 30 giorni.</item>
+        <item quantity="other">Visto %s volte negli ultimi 30 giorni.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">Modifica</item>
+        <item quantity="other">Modifiche</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d giorno</item>
+        <item quantity="other">%d giorni</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">Hai aggiunto %d etichetta</item>
+        <item quantity="other">Hai aggiunto %d etichette</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">Hai rimosso %d carattere</item>
+        <item quantity="other">Hai rimosso %d caratteri</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s etichetta</item>
+        <item quantity="other">%1$s etichette</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Nascondi risposta</item>
+        <item quantity="other">Nascondi risposte (%d)</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Mostra risposta</item>
+        <item quantity="other">Mostra risposte (%d)</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">Sei sicuro di voler cancellare il messaggio dall&apos;elenco?</item>
+        <item quantity="other">Sei sicuro di voler cancellare i messaggi dall&apos;elenco?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">Il messaggio è stato cancellato</item>
+        <item quantity="other">I messaggi sono stati cancellati</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">L&apos;account temporaneo %1$s è stato creato dopo la pubblicazione della tua modifica. Scadrà tra %2$d giorno.</item>
+        <item quantity="other">L&apos;account temporaneo %1$s è stato creato dopo la pubblicazione della tua modifica. Scadrà tra %2$d giorni.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">L&apos;account scadrà tra %d giorno.</item>
+        <item quantity="other">L&apos;account scadrà tra %d giorni.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">ieri</item>
+        <item quantity="other">%d giorni fa</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d filtro</item>
+        <item quantity="other">%d filtri</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Rimuovere la lingua selezionata?</item>
+        <item quantity="other">Rimuovere le lingue selezionate?</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_first">
+        <item quantity="one">Wikipedia aveva %,d voce</item>
+        <item quantity="other">Wikipedia aveva %,d voci</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_headline">
+        <item quantity="one">%,d byte aggiunto</item>
+        <item quantity="other">%,d byte aggiunti</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_headline">
+        <item quantity="one">Hai modificato %s volta</item>
+        <item quantity="other">Hai modificato %s volte</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_first">
+        <item quantity="one">Le persone hanno trascorso circa %,d ora</item>
+        <item quantity="other">Le persone hanno trascorso circa %,d ore</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_headline">
+        <item quantity="one">Abbiamo trascorso %,d ore a leggere</item>
+        <item quantity="other">Abbiamo trascorso %,d ore a leggere</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_headline">
+        <item quantity="one">La tua voce principale</item>
+        <item quantity="other">Le tue voci principali</item>
+    </plurals>
+</resources>

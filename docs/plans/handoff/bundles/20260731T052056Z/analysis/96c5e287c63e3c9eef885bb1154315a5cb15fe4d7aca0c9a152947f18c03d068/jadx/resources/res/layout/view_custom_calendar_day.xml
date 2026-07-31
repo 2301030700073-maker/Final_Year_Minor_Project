@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:gravity="center"
+    android:layout_width="40dp"
+    android:layout_height="40dp">
+    <ImageView
+        android:id="@+id/day_circle_background"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        app:srcCompat="@drawable/shape_circle"
+        app:tint="?attr/progressive_color"/>
+    <TextView
+        android:textSize="12sp"
+        android:textStyle="normal"
+        android:textColor="?attr/primary_color"
+        android:id="@+id/day_text"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fontFamily="sans-serif"
+        style="@style/TextViewCentered"/>
+</FrameLayout>

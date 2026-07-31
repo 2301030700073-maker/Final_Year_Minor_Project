@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout android:gravity="center" android:layout_width="40.0dp" android:layout_height="40.0dp"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <ImageView android:id="@id/day_circle_background" android:visibility="gone" android:layout_width="match_parent" android:layout_height="match_parent" android:contentDescription="@null" app:srcCompat="@drawable/shape_circle" app:tint="?progressive_color" />
+    <TextView android:textSize="12.0sp" android:textStyle="normal" android:textColor="?primary_color" android:id="@id/day_text" android:background="?android:selectableItemBackgroundBorderless" android:layout_width="match_parent" android:layout_height="match_parent" android:fontFamily="sans-serif" style="@style/TextViewCentered" />
+</FrameLayout>

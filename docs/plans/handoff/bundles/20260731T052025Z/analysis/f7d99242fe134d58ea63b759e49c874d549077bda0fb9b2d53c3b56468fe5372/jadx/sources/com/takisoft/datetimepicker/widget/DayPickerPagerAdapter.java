@@ -1,0 +1,88 @@
+package com.takisoft.datetimepicker.widget;
+
+import android.content.Context;
+import android.content.res.ColorStateList;
+import android.util.SparseArray;
+import android.view.LayoutInflater;
+import android.view.View;
+import androidx.viewpager.widget.PagerAdapter;
+import androidx.viewpager.widget.ViewPager;
+import com.fsck.k9.R;
+import com.takisoft.datetimepicker.widget.DayPickerView;
+import java.util.Calendar;
+import okhttp3.ConnectionPool;
+
+/* compiled from: r8-map-id-0bf79158388e53a51ca0182ea2539bd0412421e50b81f5daf687f0d2f9d1b594 */
+/* loaded from: classes.dex */
+public final class DayPickerPagerAdapter extends PagerAdapter {
+    public int mCount;
+    public ColorStateList mDayHighlightColor;
+    public int mDayOfWeekTextAppearance;
+    public ColorStateList mDaySelectorColor;
+    public int mDayTextAppearance;
+    public int mFirstDayOfWeek;
+    public final LayoutInflater mInflater;
+    public int mMonthTextAppearance;
+    public DayPickerView.AnonymousClass1 mOnDaySelectedListener;
+    public final Calendar mMinDate = Calendar.getInstance();
+    public final Calendar mMaxDate = Calendar.getInstance();
+    public final SparseArray mItems = new SparseArray();
+    public Calendar mSelectedDay = null;
+    public final ConnectionPool mOnDayClickListener = new ConnectionPool(21, this);
+    public final int mLayoutResId = R.layout.date_picker_month_item_material;
+    public final int mCalendarViewId = R.id.month_view;
+
+    /* compiled from: r8-map-id-0bf79158388e53a51ca0182ea2539bd0412421e50b81f5daf687f0d2f9d1b594 */
+    public final class ViewHolder {
+        public final SimpleMonthView calendar;
+        public final View container;
+        public final int position;
+
+        public ViewHolder(int i, View view, SimpleMonthView simpleMonthView) {
+            this.position = i;
+            this.container = view;
+            this.calendar = simpleMonthView;
+        }
+    }
+
+    public DayPickerPagerAdapter(Context context) {
+        this.mInflater = LayoutInflater.from(context);
+    }
+
+    @Override // androidx.viewpager.widget.PagerAdapter
+    public final void destroyItem(ViewPager viewPager, int i, Object obj) {
+        viewPager.removeView(((ViewHolder) obj).container);
+        this.mItems.remove(i);
+    }
+
+    public final int getPositionForDay(Calendar calendar) {
+        if (calendar == null) {
+            return -1;
+        }
+        int i = calendar.get(1);
+        Calendar calendar2 = this.mMinDate;
+        return ((i - calendar2.get(1)) * 12) + (calendar.get(2) - calendar2.get(2));
+    }
+
+    public final void setSelectedDay(Calendar calendar) {
+        ViewHolder viewHolder;
+        ViewHolder viewHolder2;
+        int positionForDay = getPositionForDay(this.mSelectedDay);
+        int positionForDay2 = getPositionForDay(calendar);
+        SparseArray sparseArray = this.mItems;
+        if (positionForDay != positionForDay2 && positionForDay >= 0 && (viewHolder2 = (ViewHolder) sparseArray.get(positionForDay, null)) != null) {
+            SimpleMonthView simpleMonthView = viewHolder2.calendar;
+            simpleMonthView.mActivatedDay = -1;
+            simpleMonthView.mTouchHelper.invalidateRoot();
+            simpleMonthView.invalidate();
+        }
+        if (positionForDay2 >= 0 && (viewHolder = (ViewHolder) sparseArray.get(positionForDay2, null)) != null) {
+            int i = calendar.get(5);
+            SimpleMonthView simpleMonthView2 = viewHolder.calendar;
+            simpleMonthView2.mActivatedDay = i;
+            simpleMonthView2.mTouchHelper.invalidateRoot();
+            simpleMonthView2.invalidate();
+        }
+        this.mSelectedDay = calendar;
+    }
+}

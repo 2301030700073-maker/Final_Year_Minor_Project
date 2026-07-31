@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="diff_years">
+        <item quantity="one">Oʻtgan yili</item>
+        <item quantity="other">%d yil oldin</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s bayt</item>
+        <item quantity="other">%s bayt</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%2$s (%3$s)dan buyon %1$d ta tahrir</item>
+        <item quantity="other">%2$s (%3$s)dan buyon %1$d ta tahrir</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">%1$d tadan 1 ta maqola oflayn, %3$.2f MB</item>
+        <item quantity="other">"%1$d 
+tadan %2$d ta maqola oflayndir, %3$.2f MB"</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">%1$d tadan 1 ta maqola oflaynda mavjud</item>
+        <item quantity="other">%1$d tadan %2$d ta maqola oflaynda mavjud</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 ta maqola, %2$.2f MB</item>
+        <item quantity="other">%1$d ta maqola, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 ta maqola</item>
+        <item quantity="other">%d ta maqola</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d ta yangi bildirishnoma</item>
+        <item quantity="other">%d ta yangi bildirishnoma</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d ta tanlandi</item>
+        <item quantity="other">%d ta tanlangan</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">bildirishnoma arxivlandi</item>
+        <item quantity="other">%d ta bildirishnoma arixvlandi</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Maqolani yuklab olish</item>
+        <item quantity="other">Maqolalarni yuklab olish</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">%1$d ta maqola qoldi</item>
+        <item quantity="other">%1$d ta maqola qoldi</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Roʻyxatni sinxronlash</item>
+        <item quantity="other">Roʻyxatni sinxronlash</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">%1$d ta roʻyxat qoldi</item>
+        <item quantity="other">%1$d ta roʻyxat qoldi</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">%1$d ta roʻyxatni sinxronlash…</item>
+        <item quantity="other">%1$d ta roʻyxatni sinxronlash…</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">%1$d ta maqolani yuklab olish…</item>
+        <item quantity="other">%1$d ta maqolani yuklab olish…</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 ta oʻqilgan kabi belgilandi</item>
+        <item quantity="other">%d tasi oʻqilgan kabi belgilandi</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 tasi oʻqilmagan</item>
+        <item quantity="other">%d tasi oʻqilmagan</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d ta filtr</item>
+        <item quantity="other">%d ta filtr</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%2$s dan buyon %1$d ta tahrir</item>
+        <item quantity="other">%2$s dan buyon %1$d ta tahrir</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d ta filtr</item>
+        <item quantity="other">%d ta filtr</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Ushbu maqola bundan buyon oflayn tarzida mavjud emas.</item>
+        <item quantity="other">Bu maqoladan bunday buyon oflayn tarzida oʻqish imkoni yoʻq.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Ushbu maqola endi oflayn tarzda mavjud boʻladi.</item>
+        <item quantity="other">Bu maqolani oflayn tarzda ham oʻqisa boʻladi.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d ta maqola roʻyxatdan oʻchirildi</item>
+        <item quantity="other">%d ta maqola roʻyxatdan oʻchirldi</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d ta maqola %2$s dan oʻchirildi</item>
+        <item quantity="other">%1$d ta maqola %2$s dan oʻchirildi</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">%d ta roʻyxat oʻchirib tashlansinmi?</item>
+        <item quantity="other">%d ta roʻyxat oʻchirilsinmi?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">1 ta oʻqish roʻyxatini eksport qilib boʻlmadi</item>
+        <item quantity="other">Oʻqish roʻyxatlarini eksport qilib boʻlmadi</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Oʻqish roʻyxati import qilindi</item>
+        <item quantity="other">Oʻqish roʻyxatlari import qilindi</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d ta roʻyxat oʻchirildi</item>
+        <item quantity="other">%d tasi oʻchirildi</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 ta natija</item>
+        <item quantity="other">%d ta natija</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">%d ta belgi qoʻshdingiz</item>
+        <item quantity="other">%d ta belgi qoʻshdingiz</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Hissa</item>
+        <item quantity="other">Hissalar</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 ta hissa</item>
+        <item quantity="other">%d ta hissa</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s ta belgi</item>
+        <item quantity="other">%1$s ta belgi</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Soʻnggi 30 kun ichida bir marta koʻrilgan.</item>
+        <item quantity="other">Soʻnggi 30 kun ichida %s marta koʻrilgan.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d kun</item>
+        <item quantity="other">%d kun</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">%d ta teg qoʻshgansiz</item>
+        <item quantity="other">%d ta teg qoʻshgansiz</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">%d ta belgini oʻchirib tashladingiz</item>
+        <item quantity="other">%d ta belgini oʻchirib tashladingiz</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s ta teg</item>
+        <item quantity="other">%1$s ta teg</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Javoblarni yashirish</item>
+        <item quantity="other">(%d) ta javobni yashirish</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Javobni koʻrsatish</item>
+        <item quantity="other">(%d) ta javobni koʻrsatish</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">Roʻyxatdan ushbu xabar oʻchirilsinmi?</item>
+        <item quantity="other">Roʻyxatdan ushbu xabarlar oʻchirilsinmi?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">Xabar oʻchirildi</item>
+        <item quantity="other">Xabarlar oʻchirildi</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">kecha</item>
+        <item quantity="other">%d kun oldin</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d ta filtr</item>
+        <item quantity="other">%d ta filtr</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Tanlangan tilni olib tashlaysizmi?</item>
+        <item quantity="other">Tanlangan tillarni olib tashlaysizmi?</item>
+    </plurals>
+</resources>

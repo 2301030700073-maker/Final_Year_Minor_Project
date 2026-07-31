@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView android:layout_width="match_parent" android:layout_height="wrap_content"
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <LinearLayout android:orientation="vertical" android:paddingLeft="20.0dp" android:paddingTop="20.0dp" android:paddingRight="20.0dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingHorizontal="20.0dp">
+        <TextView android:textColor="?primary_color" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="4.0dp" android:text="@string/feed_language_variants_removal_dialog_title" style="@style/H2" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/feed_language_variants_removal_dialog_message" style="@style/P" />
+        <View android:background="?border_color" android:layout_width="match_parent" android:layout_height="0.5dp" android:layout_marginTop="12.0dp" />
+        <RadioGroup android:id="@id/radioGroup" android:layout_width="match_parent" android:layout_height="wrap_content" />
+    </LinearLayout>
+</ScrollView>

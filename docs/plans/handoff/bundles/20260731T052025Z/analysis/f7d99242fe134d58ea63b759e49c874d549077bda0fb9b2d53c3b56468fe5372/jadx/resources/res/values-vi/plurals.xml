@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="other">Mỗi %d giờ</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="other">Mỗi %d phút</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="other">%d tin nhắn</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="other">Bạn có thực sự muốn xóa %1$d tin nhắn?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="other">Bạn có thực sự muốn chuyển %1$d tin nhắn đến thư mục spam?</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="other">%d thư mới</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="other">Đang lấy %d kết quả</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="other">Đang lấy %1$d của %2$d kết quả</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="other">Để có thể sử dụng tài khoản &quot;%s&quot; bạn cần cung cấp mật khẩu máy chủ.</item>
+    </plurals>
+</resources>

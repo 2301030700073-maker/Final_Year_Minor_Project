@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="days">
+        <item quantity="one">%d ദിവസം</item>
+        <item quantity="other">%d ദിവസങ്ങൾ</item>
+    </plurals>
+    <plurals name="exo_controls_fastforward_by_amount_description">
+        <item quantity="one">വേഗത്തിൽ %d സെക്കൻഡ് മുന്നോട്ട് നീക്കുക</item>
+        <item quantity="other">വേഗത്തിൽ %d സെക്കൻഡ് മുന്നോട്ട് നീക്കുക</item>
+    </plurals>
+    <plurals name="exo_controls_rewind_by_amount_description">
+        <item quantity="one">%d സെക്കൻഡ് പിന്നോട്ട് നീക്കുക</item>
+        <item quantity="other">%d സെക്കൻഡ് പിന്നോട്ട് നീക്കുക</item>
+    </plurals>
+    <plurals name="feed_group_dialog_selection_count">
+        <item quantity="one">%d തിരഞ്ഞെടുത്തു</item>
+        <item quantity="other">%d തെരഞ്ഞെടുത്തു</item>
+    </plurals>
+    <plurals name="hours">
+        <item quantity="one">%d മണിക്കൂർ</item>
+        <item quantity="other">%d മണിക്കൂറുകൾ</item>
+    </plurals>
+    <plurals name="listening">
+        <item quantity="one">%s കേൾവിക്കാരൻ</item>
+        <item quantity="other">%s കേൾവിക്കാർ</item>
+    </plurals>
+    <plurals name="minutes">
+        <item quantity="one">%d മിനിറ്റ്</item>
+        <item quantity="other">%d മിനിറ്റുകൾ</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d പുതിയ അറിയിപ്പ്</item>
+        <item quantity="other">%d പുതിയ അറിയിപ്പുകൾ</item>
+    </plurals>
+    <plurals name="seconds">
+        <item quantity="one">%d സെക്കൻഡ്</item>
+        <item quantity="other">%d സെക്കൻഡുകൾ</item>
+    </plurals>
+    <plurals name="subscribers">
+        <item quantity="one">%s സബ്ക്രൈബർ</item>
+        <item quantity="other">%s സബ്ക്രൈബറുകൾ</item>
+    </plurals>
+    <plurals name="videos">
+        <item quantity="one">%s വീഡിയോ</item>
+        <item quantity="other">%s വീഡിയോകൾ</item>
+    </plurals>
+    <plurals name="views">
+        <item quantity="one">%s കാഴ്ച</item>
+        <item quantity="other">%s കാഴ്ചകൾ</item>
+    </plurals>
+    <plurals name="watching">
+        <item quantity="one">%s കാണുന്നു</item>
+        <item quantity="other">%s പേർ കാണുന്നു</item>
+    </plurals>
+</resources>

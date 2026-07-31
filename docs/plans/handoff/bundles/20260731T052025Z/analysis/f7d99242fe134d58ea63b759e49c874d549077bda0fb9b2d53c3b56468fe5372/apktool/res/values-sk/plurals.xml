@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Každú hodinu</item>
+        <item quantity="few">Každé %d hodiny</item>
+        <item quantity="many">Každých %d hodín</item>
+        <item quantity="other">Každých %d hodín</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Každú minútu</item>
+        <item quantity="few">Každé %d minúty</item>
+        <item quantity="many">Každých %d minút</item>
+        <item quantity="other">Každých %d minút</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 správa</item>
+        <item quantity="few">%d správy</item>
+        <item quantity="many">%d správ</item>
+        <item quantity="other">%d správ</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Vymazať túto správu?</item>
+        <item quantity="few">Vymmazať %1$d správy?</item>
+        <item quantity="many">Vymazať %1$d správ?</item>
+        <item quantity="other">Vymazať %1$d správ?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Presunúť túto správu do priečinka Nevyžiadaná?</item>
+        <item quantity="few">Presunúť %1$d správy do priečinka Nevyžiadaná?</item>
+        <item quantity="many">Presunúť %1$d správ do priečinka Nevyžiadaná?</item>
+        <item quantity="other">Presunúť %1$d správ do priečinka Nevyžiadaná?</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d nová správa</item>
+        <item quantity="few">%d nové správy</item>
+        <item quantity="many">%d nových správ</item>
+        <item quantity="other">%d nových správ</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">Preberám %d výsledok</item>
+        <item quantity="few">Preberám %d výsledky</item>
+        <item quantity="many">Preberám %d výsledkov</item>
+        <item quantity="other">Preberám %d výsledkov</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">Preberám %1$d z %2$d výsledkov</item>
+        <item quantity="few">Preberám %1$d z %2$d výsledkov</item>
+        <item quantity="many">Preberám %1$d z %2$d výsledkov</item>
+        <item quantity="other">Preberám %1$d z %2$d výsledkov</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">Pred používaním účtu \"%s\" je potrebné zadať heslo na server.</item>
+        <item quantity="few">Pred používaním účtu \"%s\" je potrebné zadať heslo na server.</item>
+        <item quantity="many">Pred používaním účtov \"%s\" je potrebné zadať heslo na server.</item>
+        <item quantity="other">Pred používaním účtov „%s“ je potrebné zadať heslo na server.</item>
+    </plurals>
+</resources>

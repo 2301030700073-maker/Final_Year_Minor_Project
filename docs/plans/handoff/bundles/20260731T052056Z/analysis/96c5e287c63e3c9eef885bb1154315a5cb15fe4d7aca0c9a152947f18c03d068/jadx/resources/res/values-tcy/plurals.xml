@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s ಬೈಟ್</item>
+        <item quantity="other">%s ಬೈಟ್‌ಗಳು</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="other">ಒಂಜಿ= %1$d %2$s ( %3$s) ಡ್ದ್ ಬೊಕ್ಕ ಸಂಪಾದನೆ ಮಲ್ಪುಲೆ</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="other">ಒಂಜಿ= %2$s ಡ್ದ್ %1$d ಸಂಪಾದನೆ</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">This article will no longer be available offline.</item>
+        <item quantity="other">These articles will no longer be available offline.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">This article will now be available offline.</item>
+        <item quantity="other">These articles will now be available offline.</item>
+    </plurals>
+</resources>

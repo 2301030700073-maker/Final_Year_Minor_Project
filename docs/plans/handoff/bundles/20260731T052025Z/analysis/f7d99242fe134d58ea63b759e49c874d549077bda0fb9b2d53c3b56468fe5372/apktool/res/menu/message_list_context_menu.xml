@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:icon="@drawable/ic_delete" android:id="@id/delete" android:title="@string/delete_action" app:showAsAction="always" />
+    <item android:icon="@drawable/ic_mark_email_read" android:id="@id/mark_as_read" android:title="@string/mark_as_read_action" app:showAsAction="always" />
+    <item android:icon="@drawable/ic_mark_email_unread" android:id="@id/mark_as_unread" android:title="@string/mark_as_unread_action" app:showAsAction="always" />
+    <item android:icon="@drawable/ic_archive" android:id="@id/archive" android:title="@string/archive_action" app:showAsAction="always" />
+    <item android:icon="@drawable/ic_drive_file_move" android:id="@id/move" android:title="@string/move_action" app:showAsAction="ifRoom" />
+    <item android:id="@id/move_to_drafts" android:visible="false" android:title="@string/move_to_drafts_action" app:showAsAction="never" />
+    <item android:icon="@drawable/ic_content_copy" android:id="@id/copy" android:title="@string/copy_action" />
+    <item android:icon="@drawable/ic_star_filled" android:id="@id/flag" android:title="@string/flag_action" app:showAsAction="ifRoom" />
+    <item android:icon="@drawable/ic_star" android:id="@id/unflag" android:title="@string/unflag_action" app:showAsAction="ifRoom" />
+    <item android:icon="@drawable/ic_report" android:id="@id/spam" android:title="@string/spam_action" app:showAsAction="ifRoom" />
+    <item android:icon="@drawable/ic_select_all" android:id="@id/select_all" android:title="@string/batch_select_all" app:showAsAction="never" />
+</menu>

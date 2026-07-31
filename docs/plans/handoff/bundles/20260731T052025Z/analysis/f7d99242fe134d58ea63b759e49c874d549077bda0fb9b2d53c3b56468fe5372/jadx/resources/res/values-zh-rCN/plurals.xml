@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="other">每 %d 小时</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="other">每 %d 分钟</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="other">%d 封邮件</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="other">是否确定要删除 %1$d 封邮件？</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="other">是否确定要移动 %1$d 封邮件到垃圾邮件文件夹？</item>
+    </plurals>
+    <plurals name="message_view_attachment_summary">
+        <item quantity="other">%1$d 个附件(%2$s)</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="other">%d 封新邮件</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="other">正在获取 %d 条结果</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="other">正在获取 %1$d 条结果，共 %2$d 条结果</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="other">您需要提供服务器密码才能使用此账号 &quot;%s&quot;。</item>
+    </plurals>
+</resources>

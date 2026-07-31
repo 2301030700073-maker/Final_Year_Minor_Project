@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="days">
+        <item quantity="one">%d rojê</item>
+        <item quantity="other">%d roj</item>
+    </plurals>
+    <plurals name="feed_group_dialog_selection_count">
+        <item quantity="one">%d hilbijart</item>
+        <item quantity="other">%d hilbijartî</item>
+    </plurals>
+    <plurals name="hours">
+        <item quantity="one">%d saet</item>
+        <item quantity="other">%d demjimêran</item>
+    </plurals>
+    <plurals name="listening">
+        <item quantity="one">%s guhdar</item>
+        <item quantity="other">%s guhdarvanan</item>
+    </plurals>
+    <plurals name="minutes">
+        <item quantity="one">%d hûrdem</item>
+        <item quantity="other">%d deqîqe</item>
+    </plurals>
+    <plurals name="seconds">
+        <item quantity="one">%d çirk</item>
+        <item quantity="other">%d çirkeyan</item>
+    </plurals>
+    <plurals name="subscribers">
+        <item quantity="one">%s abone</item>
+        <item quantity="other">%s abonekirin</item>
+    </plurals>
+    <plurals name="videos">
+        <item quantity="one">%s vîdyoya</item>
+        <item quantity="other">%s vîdyoyên</item>
+    </plurals>
+    <plurals name="views">
+        <item quantity="one">dîtina % s</item>
+        <item quantity="other">%s dîtin</item>
+    </plurals>
+    <plurals name="watching">
+        <item quantity="one">%s temaşe dike</item>
+        <item quantity="other">%s temaşe dikin</item>
+    </plurals>
+</resources>

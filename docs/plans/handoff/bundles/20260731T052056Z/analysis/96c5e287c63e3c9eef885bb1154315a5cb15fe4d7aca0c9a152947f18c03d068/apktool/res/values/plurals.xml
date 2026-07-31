@@ -1,0 +1,423 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="one">edit last month</item>
+        <item quantity="other">edits last month</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="one">edit this month</item>
+        <item quantity="other">edits this month</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="one">Edit</item>
+        <item quantity="other">Edits</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_views">
+        <item quantity="one">"View on articles you've edited"</item>
+        <item quantity="other">"Views on articles you've edited"</item>
+    </plurals>
+    <plurals name="activity_tab_impact_thanks">
+        <item quantity="one">thank</item>
+        <item quantity="other">thanks</item>
+    </plurals>
+    <plurals name="activity_tab_impact_total_edits">
+        <item quantity="one">total edit</item>
+        <item quantity="other">total edits</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="one">Last year</item>
+        <item quantity="other">%d years ago</item>
+    </plurals>
+    <plurals name="donation_reminders_text_articles">
+        <item quantity="one">%d article</item>
+        <item quantity="other">%d articles</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s byte</item>
+        <item quantity="other">%s bytes</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d edit since %2$s (%3$s)</item>
+        <item quantity="other">%1$d edits since %2$s (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">%1$d of 1 article available offline, %3$.2f MB</item>
+        <item quantity="other">%1$d of %2$d articles available offline, %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">%1$d of 1 article available offline</item>
+        <item quantity="other">%1$d of %2$d articles available offline</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 article, %2$.2f MB</item>
+        <item quantity="other">%1$d articles, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 article</item>
+        <item quantity="other">%d articles</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d new notification</item>
+        <item quantity="other">%d new notifications</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d selected</item>
+        <item quantity="other">%d selected</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Notification archived</item>
+        <item quantity="other">%d notifications archived</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Downloading article</item>
+        <item quantity="other">Downloading articles</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">%1$d article left</item>
+        <item quantity="other">%1$d articles left</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Syncing Reading List</item>
+        <item quantity="other">Syncing Reading Lists</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">%1$d list left</item>
+        <item quantity="other">%1$d lists left</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">Syncing %1$d list…</item>
+        <item quantity="other">Syncing %1$d lists…</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Downloading %1$d article…</item>
+        <item quantity="other">Downloading %1$d articles…</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 marked as read</item>
+        <item quantity="other">%d marked as read</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 marked as unread</item>
+        <item quantity="other">%d marked as unread</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="other">%d filters</item>
+    </plurals>
+    <plurals name="on_this_day_game_stats_games_played">
+        <item quantity="one">Game played</item>
+        <item quantity="other">Games played</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d edit since %2$s</item>
+        <item quantity="other">%1$d edits since %2$s</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="other">%d filters</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final">
+        <item quantity="one">%1$d of %2$d</item>
+        <item quantity="other">%1$d of %2$d</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final_large">
+        <item quantity="one">%1$d of %2$d day</item>
+        <item quantity="other">%1$d of %2$d days</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">This article will no longer be available offline.</item>
+        <item quantity="other">These articles will no longer be available offline.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">This article will now be available offline.</item>
+        <item quantity="other">These articles will now be available offline.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d article removed from list</item>
+        <item quantity="other">%d articles removed from list</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d article removed from %2$s</item>
+        <item quantity="other">%1$d articles removed from %2$s</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">Are you sure you want to delete %d list?</item>
+        <item quantity="other">Are you sure you want to delete %d lists?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">Reading list export failed</item>
+        <item quantity="other">Reading lists export failed</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Reading list imported</item>
+        <item quantity="other">Reading lists imported</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d list deleted</item>
+        <item quantity="other">%d lists deleted</item>
+    </plurals>
+    <plurals name="recommended_reading_list_interest_pick_selected_articles">
+        <item quantity="one">%d selected</item>
+        <item quantity="other">%d selected</item>
+    </plurals>
+    <plurals name="recommended_reading_list_page_subtitle_articles">
+        <item quantity="one">• %d article</item>
+        <item quantity="other">• %d articles</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 result</item>
+        <item quantity="other">%d results</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">You added %d character</item>
+        <item quantity="other">You added %d characters</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Contribution</item>
+        <item quantity="other">Contributions</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 contribution</item>
+        <item quantity="other">%d contributions</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s character</item>
+        <item quantity="other">%1$s characters</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Seen once in the past 30 days.</item>
+        <item quantity="other">Seen %s times in the past 30 days.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">Edit</item>
+        <item quantity="other">Edits</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">You added %d tag</item>
+        <item quantity="other">You added %d tags</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">You removed %d character</item>
+        <item quantity="other">You removed %d characters</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s tag</item>
+        <item quantity="other">%1$s tags</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Hide reply</item>
+        <item quantity="other">Hide replies (%d)</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Show reply</item>
+        <item quantity="other">Show replies (%d)</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">Are you sure you want to delete the message from the list?</item>
+        <item quantity="other">Are you sure you want to delete the messages from the list?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">Message has been deleted</item>
+        <item quantity="other">Messages have been deleted</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">Temporary account %1$s was created after your edit was published. It will expire in %2$d day.</item>
+        <item quantity="other">Temporary account %1$s was created after your edit was published. It will expire in %2$d days.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">Account will expire in %d day.</item>
+        <item quantity="other">Account will expire in %d days.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">yesterday</item>
+        <item quantity="other">%d days ago</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="other">%d filters</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Remove selected language?</item>
+        <item quantity="other">Remove selected languages?</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_interested_categories_title">
+        <item quantity="one">Category that interested me</item>
+        <item quantity="other">Categories that interested me</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_read_title">
+        <item quantity="one">Article read</item>
+        <item quantity="other">Articles read</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_minutes_read_title">
+        <item quantity="one">Minute read</item>
+        <item quantity="other">Minutes read</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_most_read_article_title">
+        <item quantity="one">Article I read the most</item>
+        <item quantity="other">Articles I read the most</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_total_edits_title">
+        <item quantity="one">Time edited</item>
+        <item quantity="other">Times edited</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_edits_title">
+        <item quantity="one">Change editors made</item>
+        <item quantity="other">Changes editors made</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_hours_spent_title">
+        <item quantity="one">Hour spent reading</item>
+        <item quantity="other">Hours spent reading</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_most_read_title">
+        <item quantity="one">Most read article on English Wikipedia</item>
+        <item quantity="other">Most read articles on English Wikipedia</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_articles_title">
+        <item quantity="one">Number of viewed article</item>
+        <item quantity="other">Number of viewed articles</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_edits_title">
+        <item quantity="one">Edit on-app</item>
+        <item quantity="other">Edits on-app</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_wikipedia_per_minute_label">
+        <item quantity="one">%d time per minute</item>
+        <item quantity="other">%d times per minute</item>
+    </plurals>
+    <plurals name="year_in_review_slide_app_edited_times_headline">
+        <item quantity="one">Editors on the official Wikipedia apps made %,d edit</item>
+        <item quantity="other">Editors on the official Wikipedia apps made %,d edits</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_first">
+        <item quantity="one">Wikipedia had %,d article</item>
+        <item quantity="other">Wikipedia had %,d articles</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_second">
+        <item quantity="one">across over %,d active language this year. You joined millions in expanding knowledge and exploring diverse topics.</item>
+        <item quantity="other">across over %,d active languages this year. You joined millions in expanding knowledge and exploring diverse topics.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_headline">
+        <item quantity="one">Wikipedia was available in more than %,d language</item>
+        <item quantity="other">Wikipedia was available in more than %,d languages</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_body">
+        <item quantity="one">In %1$d, volunteers added %2$,d byte to English Wikipedia. The sum of all their work together leads to a steadily improving, fact-based, and reliable knowledge resource that they give to the world. All of us have knowledge to share, &lt;a href=%3$s>learn how to participate&lt;/a>.</item>
+        <item quantity="other">In %1$d, volunteers added %2$,d bytes to English Wikipedia. The sum of all their work together leads to a steadily improving, fact-based, and reliable knowledge resource that they give to the world. All of us have knowledge to share, &lt;a href=%3$s>learn how to participate&lt;/a>.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_headline">
+        <item quantity="one">%,d byte added</item>
+        <item quantity="other">%,d bytes added</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_per_minute_headline">
+        <item quantity="one">Wikipedia was edited %,d time per minute</item>
+        <item quantity="other">Wikipedia was edited %,d times per minute</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_body">
+        <item quantity="one">Thank you for being one of the volunteer editors making a difference on Wikimedia projects around the world. Volunteers like you made %,d change across over 300 different language editions of Wikipedia.</item>
+        <item quantity="other">Thank you for being one of the volunteer editors making a difference on Wikimedia projects around the world. Volunteers like you made %,d changes across over 300 different language editions of Wikipedia.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_headline">
+        <item quantity="one">You edited %s time</item>
+        <item quantity="other">You edited %s times</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_body">
+        <item quantity="one">"Readers around the world appreciate your contributions. In the last 2 months, articles you've edited have received %,d total view. Thanks to editors like you, Wikipedia is a steadily improving, fact-based, and reliable knowledge resource for the world."</item>
+        <item quantity="other">"Readers around the world appreciate your contributions. In the last 2 months, articles you've edited have received %,d total views. Thanks to editors like you, Wikipedia is a steadily improving, fact-based, and reliable knowledge resource for the world."</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_headline">
+        <item quantity="one">Your edit has been viewed more than %,d times recently</item>
+        <item quantity="other">Your edits have been viewed more than %,d times recently</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_first">
+        <item quantity="one">Volunteers made %,d change across over 300 different language editions of Wikipedia.</item>
+        <item quantity="other">Volunteers made %,d changes across over 300 different language editions of Wikipedia.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_second">
+        <item quantity="one">%,d change was made on English Wikipedia. Every hour of every day, volunteers are working to improve Wikipedia.</item>
+        <item quantity="other">%,d changes were made on English Wikipedia. Every hour of every day, volunteers are working to improve Wikipedia.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_headline">
+        <item quantity="one">Editors made %,d change this year</item>
+        <item quantity="other">Editors made %,d changes this year</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_first">
+        <item quantity="one">People spent an estimated %,d hour</item>
+        <item quantity="other">People spent an estimated %,d hours</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_second">
+        <item quantity="one">"—around %1$,d year!—reading English Wikipedia in %2$d. Wikipedia is there when you want to learn about our changing world, win a bet among friends, or answer a curious child's question."</item>
+        <item quantity="other">"—around %1$,d years!—reading English Wikipedia in %2$d. Wikipedia is there when you want to learn about our changing world, win a bet among friends, or answer a curious child's question."</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_headline">
+        <item quantity="one">We spent %,d hour reading</item>
+        <item quantity="other">We spent %,d hours reading</item>
+    </plurals>
+    <plurals name="year_in_review_slide_global_saved_articles_headline">
+        <item quantity="one">App users had %,d saved article</item>
+        <item quantity="other">App users had %,d saved articles</item>
+    </plurals>
+    <plurals name="year_in_review_slide_most_read_english_articles_body">
+        <item quantity="one">When people want to learn about our world, they turn to Wikipedia. The top %1$d visited article on English Wikipedia was: %2$s &lt;br />Read more in our &lt;a href=\"%3$s\">dedicated blog post&lt;/a>.</item>
+        <item quantity="other">When people want to learn about our world, they turn to Wikipedia. The top %1$d visited articles on English Wikipedia were: %2$s &lt;br />Read more in our &lt;a href=\"%3$s\">dedicated blog post&lt;/a>.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_body">
+        <item quantity="one">These articles included &lt;b>%1$s&lt;/b>, &lt;b>%2$s&lt;/b>, and &lt;b>%3$s&lt;/b>. Each saved article reflects your interests and helps build a personalized knowledge base on Wikipedia.&lt;br />&lt;br />Active app users had %4$,d saved article this year.</item>
+        <item quantity="other">These articles included &lt;b>%1$s&lt;/b>, &lt;b>%2$s&lt;/b>, and &lt;b>%3$s&lt;/b>. Each saved article reflects your interests and helps build a personalized knowledge base on Wikipedia.&lt;br />&lt;br />Active app users had %4$,d saved articles this year.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_headline">
+        <item quantity="one">You saved %,d article</item>
+        <item quantity="other">You saved %,d articles</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_first">
+        <item quantity="one">People spent an estimated %,d hour</item>
+        <item quantity="other">People spent an estimated %,d hours</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_second">
+        <item quantity="one">—around %1$,d year!—reading English Wikipedia in %2$d.</item>
+        <item quantity="other">—around %1$,d years!—reading English Wikipedia in %2$d.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_first">
+        <item quantity="one">Wikipedia had %,d article</item>
+        <item quantity="other">Wikipedia had %,d articles</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_second">
+        <item quantity="one">across over %,d active language this year. You joined millions in expanding knowledge and exploring diverse topics.</item>
+        <item quantity="other">across over %,d active languages this year. You joined millions in expanding knowledge and exploring diverse topics.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_top">
+        <item quantity="one">We estimate that puts you in the top %1$s%% of Wikipedia readers globally. The average person reads %2$,d article a year.</item>
+        <item quantity="other">We estimate that puts you in the top %1$s%% of Wikipedia readers globally. The average person reads %2$,d articles a year.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_first">
+        <item quantity="one">You spent %,d minute</item>
+        <item quantity="other">You spent %,d minutes</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_second">
+        <item quantity="one">reading %1$,d article in %2$d</item>
+        <item quantity="other">reading %1$,d articles in %2$d</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_body">
+        <item quantity="one">Here was the article you visited the most in %1$d: %2$s</item>
+        <item quantity="other">Here were the articles you visited the most in %1$d: %2$s</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_headline">
+        <item quantity="one">Your top article</item>
+        <item quantity="other">Your top articles</item>
+    </plurals>
+    <plurals name="year_in_review_slide_viewed_articles_times_headline">
+        <item quantity="one">App users viewed Wikipedia articles %,d time</item>
+        <item quantity="other">App users viewed Wikipedia articles %,d times</item>
+    </plurals>
+</resources>

@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="one">%d ਦਿਨ</item>
+        <item quantity="other">%d ਦਿਨ</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="one">ਪਿਛਲੇ ਮਹੀਨੇ ਸੋਧ</item>
+        <item quantity="other">ਪਿਛਲੇ ਮਹੀਨੇ ਸੋਧਾਂ</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="one">ਇਸ ਮਹੀਨੇ ਸੋਧ</item>
+        <item quantity="other">ਇਸ ਮਹੀਨੇ ਸੋਧਾਂ</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="one">ਸੋਧ</item>
+        <item quantity="other">ਸੋਧਾਂ</item>
+    </plurals>
+    <plurals name="activity_tab_impact_thanks">
+        <item quantity="one">ਧੰਨਵਾਦ</item>
+        <item quantity="other">ਧੰਨਵਾਦ</item>
+    </plurals>
+    <plurals name="activity_tab_impact_total_edits">
+        <item quantity="one">ਕੁੱਲ ਸੋਧ</item>
+        <item quantity="other">ਕੁੱਲ ਸੋਧਾਂ</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="one">ਪਿਛਲੇ ਸਾਲ</item>
+        <item quantity="other">%d ਸਾਲ ਪਹਿਲਾਂ</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s ਬਾਈਟ</item>
+        <item quantity="other">%s ਬਾਈਟਾਂ</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%2$s (%3$s) ਤੋਂ %1$d ਸੋਧ</item>
+        <item quantity="other">%2$s (%3$s) ਤੋਂ %1$d ਸੋਧਾਂ</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 ਲੇਖ, %2$.2f MB</item>
+        <item quantity="other">%1$d ਲੇਖ, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 ਲੇਖ</item>
+        <item quantity="other">%d ਲੇਖ</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d ਨਵੀਂ ਸੂਚਨਾ</item>
+        <item quantity="other">%d ਨਵੀਆਂ ਸੂਚਨਾਵਾਂ</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d ਚੁਣਿਆ ਗਿਆ/ਚੁਣੀ ਗਈ</item>
+        <item quantity="other">%d ਚੁਣਿਆ ਗਇਆਂ/ਚੁਣੇ ਗਏ</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">%1$d ਲੇਖ ਬਾਕੀ</item>
+        <item quantity="other">%1$d ਲੇਖ ਬਾਕੀ</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">ਪੜ੍ਹਨ ਦੀ ਸੂਚੀ ਨੂੰ ਸਮਕਾਲੀ ਕਰ ਰਿਹਾ ਹੈ</item>
+        <item quantity="other">ਪੜ੍ਹਨ ਦੀਆਂ ਸੂਚੀਆਂ ਨੂੰ ਸਮਕਾਲੀ ਕਰ ਰਿਹਾ ਹੈ</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">%1$d ਸੂਚੀ ਬਾਕੀ</item>
+        <item quantity="other">%1$d ਸੂਚੀਆਂ ਬਾਕੀ</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">%1$d ਸੂਚੀ ਨੂੰ ਸਮਕਾਲੀ ਕੀਤਾ ਜਾ ਰਿਹਾ ਹੈ…</item>
+        <item quantity="other">%1$d ਸੂਚੀਆਂ ਨੂੰ ਸਮਕਾਲੀ ਕੀਤਾ ਜਾ ਰਿਹਾ ਹੈ...</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 ਨੂੰ ਪੜ੍ਹਿਆ ਗਿਆ ਵਜੋਂ ਨਿਸ਼ਾਨਬੱਧ ਕੀਤਾ ਗਿਆ</item>
+        <item quantity="other">%d ਪੜ੍ਹਿਆ ਗਿਆ ਵਜੋਂ ਨਿਸ਼ਾਨਬੱਧ ਕੀਤਾ ਗਿਆ</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 ਨੂੰ ਨਹੀਂ-ਪੜ੍ਹਿਆ ਵਜੋਂ ਨਿਸ਼ਾਨਬੱਧ ਕੀਤਾ ਗਿਆ</item>
+        <item quantity="other">%d ਨੂੰ ਨਹੀਂ-ਪੜ੍ਹਿਆ ਵਜੋਂ ਨਿਸ਼ਾਨਬੱਧ ਕੀਤਾ ਗਿਆ</item>
+    </plurals>
+    <plurals name="on_this_day_game_stats_games_played">
+        <item quantity="one">ਖੇਡ ਖੇਡੀ ਗਈ</item>
+        <item quantity="other">ਖੇਡੀਆਂ ਗਈਆਂ ਖੇਡਾਂ</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%2$s ਤੋਂ %1$d ਸੋਧ</item>
+        <item quantity="other">%2$s ਤੋਂ %1$d ਸੋਧਾਂ</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d ਲੇਖ ਹਟਾਇਆ ਗਿਆ</item>
+        <item quantity="other">ਸੂਚੀ ਵਿੱਚੋਂ %d ਲੇਖ ਹਟਾਏ ਗਏ</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%2$s ਤੋਂ %1$d ਲੇਖ ਹਟਾਇਆ ਗਿਆ</item>
+        <item quantity="other">%2$s ਤੋਂ %1$d ਲੇਖ ਹਟਾਏ ਗਏ</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">ਕੀ ਤੁਸੀਂ ਯਕੀਨਨ %d ਸੂਚੀ ਨੂੰ ਮਿਟਾਉਣਾ ਚਾਹੁੰਦੇ ਹੋ?</item>
+        <item quantity="other">ਕੀ ਤੁਸੀਂ ਯਕੀਨਨ %d ਸੂਚੀਆਂ ਨੂੰ ਮਿਟਾਉਣਾ ਚਾਹੁੰਦੇ ਹੋ?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">ਪੜ੍ਹਨ ਸੂਚੀ ਬਰਾਮਦ ਅਸਫਲ</item>
+        <item quantity="other">ਪੜ੍ਹਨ ਸੂਚੀ ਬਰਾਮਦ ਅਸਫਲ</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">ਪੜ੍ਹਨ ਦੀ ਸੂਚੀ ਦਰਾਮਦ ਕੀਤੀ</item>
+        <item quantity="other">ਪੜ੍ਹਨ ਦੀਆਂ ਸੂਚੀਆਂ ਦਰਾਮਦ ਕੀਤੀਆਂ</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d ਸੂਚੀ ਮਿਟਾਈ ਗਈ</item>
+        <item quantity="other">%d ਸੂਚੀਆਂ ਮਿਟਾਈਆਂ ਗਈਆਂ</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 ਨਤੀਜਾ</item>
+        <item quantity="other">%d ਨਤੀਜੇ</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">ਤੁਸੀਂ %d ਅੱਖਰ ਜੋੜਿਆ</item>
+        <item quantity="other">ਤੁਸੀਂ %d ਅੱਖਰ ਜੋੜੇ</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">ਯੋਗਦਾਨ</item>
+        <item quantity="other">ਯੋਗਦਾਨ</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 ਯੋਗਦਾਨ</item>
+        <item quantity="other">%d ਯੋਗਦਾਨ</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s ਅੱਖਰ</item>
+        <item quantity="other">%1$s ਅੱਖਰ</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">ਪਿਛਲੇ 30 ਦਿਨਾਂ ਵਿੱਚ ਇੱਕ ਵਾਰ ਵੇਖਿਆ ਗਿਆ।</item>
+        <item quantity="other">ਪਿਛਲੇ 30 ਦਿਨਾਂ ਵਿੱਚ %s ਵਾਰ ਵੇਖਿਆ ਗਿਆ।</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">ਸੋਧ</item>
+        <item quantity="other">ਸੋਧਾਂ</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d ਦਿਨ</item>
+        <item quantity="other">%d ਦਿਨ</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">ਤੁਸੀਂ %d ਟੈਗ ਜੋੜਿਆ</item>
+        <item quantity="other">ਤੁਸੀਂ %d ਟੈਗ ਜੋੜੇ</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">ਤੁਸੀਂ %d ਅੱਖਰ ਹਟਾਏ</item>
+        <item quantity="other">ਤੁਸੀਂ %d ਅੱਖਰ ਹਟਾਏ</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s ਟੈਗ</item>
+        <item quantity="other">%1$s ਟੈਗ</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">ਜਵਾਬ ਲੁਕਾਓ</item>
+        <item quantity="other">ਜਵਾਬ ਲੁਕਾਓ (%d )</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">ਜਵਾਬ ਵਿਖਾਓ</item>
+        <item quantity="other">ਜਵਾਬ ਵਿਖਾਓ (%d )</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">ਕੀ ਤੁਸੀਂ ਯਕੀਨੀ ਤੌਰ &apos;ਤੇ ਸੂਚੀ ਵਿੱਚੋਂ ਸੁਨੇਹਾ ਨੂੰ ਮਿਟਾਉਣਾ ਚਾਹੁੰਦੇ ਹੋ?</item>
+        <item quantity="other">ਕੀ ਤੁਸੀਂ ਯਕੀਨੀ ਤੌਰ &apos;ਤੇ ਸੂਚੀ ਵਿੱਚੋਂ ਸੁਨੇਹਿਆਂ ਨੂੰ ਮਿਟਾਉਣਾ ਚਾਹੁੰਦੇ ਹੋ?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">ਸੁਨੇਹਾ ਮਿਟਾ ਦਿੱਤਾ ਗਿਆ ਹੈ</item>
+        <item quantity="other">ਸੁਨੇਹੇ ਮਿਟਾ ਦਿੱਤੇ ਗਏ ਹਨ</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">ਤੁਹਾਡੇ ਸੋਧ ਦੇ ਛਾਪੇ ਜਾਣ ਤੋਂ ਬਾਅਦ ਅਸਥਾਈ ਖਾਤਾ %1$s ਬਣਾਇਆ ਗਿਆ ਸੀ। ਇਸਦੀ ਮਿਆਦ %2$d ਦਿਨ ਵਿੱਚ ਖਤਮ ਹੋ ਜਾਵੇਗੀ।</item>
+        <item quantity="other">ਤੁਹਾਡੇ ਸੋਧ ਦੇ ਛਾਪੇ ਜਾਣ ਤੋਂ ਬਾਅਦ ਅਸਥਾਈ ਖਾਤਾ %1$s ਬਣਾਇਆ ਗਿਆ ਸੀ। ਇਸਦੀ ਮਿਆਦ %2$d ਦਿਨਾਂ ਵਿੱਚ ਖਤਮ ਹੋ ਜਾਵੇਗੀ।</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">ਖਾਤੇ ਦੀ ਮਿਆਦ %d ਦਿਨ ਵਿੱਚ ਖਤਮ ਹੋ ਜਾਵੇਗੀ।</item>
+        <item quantity="other">ਖਾਤੇ ਦੀ ਮਿਆਦ %d ਦਿਨਾਂ ਵਿੱਚ ਖਤਮ ਹੋ ਜਾਵੇਗੀ।</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">ਕੱਲ੍ਹ</item>
+        <item quantity="other">%d ਦਿਨ ਪਹਿਲਾਂ</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d ਛਾਣਨੀ</item>
+        <item quantity="other">%d ਛਾਣਨੀ</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">ਚੁਣੀਆਂ ਭਾਸ਼ਾਵਾਂ ਨੂੰ ਹਟਾਓ?</item>
+        <item quantity="other">ਚੁਣੀਆਂ ਭਾਸ਼ਾਵਾਂ ਨੂੰ ਹਟਾਓ?</item>
+    </plurals>
+</resources>

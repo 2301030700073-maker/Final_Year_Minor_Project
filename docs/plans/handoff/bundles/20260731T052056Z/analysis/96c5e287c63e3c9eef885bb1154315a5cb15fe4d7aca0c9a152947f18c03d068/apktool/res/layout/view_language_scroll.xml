@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<merge
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <com.google.android.material.tabs.TabLayout android:id="@id/horizontal_scroll_languages" android:background="?paper_color" android:fadingEdgeLength="24.0dp" android:clipChildren="false" android:clipToPadding="false" android:layout_width="0.0dp" android:layout_height="0.0dp" android:requiresFadingEdge="horizontal" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toStartOf="@id/more_languages" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent" app:tabGravity="fill" app:tabIndicatorColor="?progressive_color" app:tabIndicatorHeight="2.0dp" app:tabMaxWidth="0.0dp" app:tabMode="scrollable" app:tabPaddingBottom="8.0dp" app:tabPaddingEnd="8.0dp" app:tabPaddingStart="8.0dp" app:tabPaddingTop="8.0dp" app:tabSelectedTextColor="?progressive_color" />
+    <Button android:id="@id/more_languages" android:layout_width="wrap_content" android:layout_height="0.0dp" android:minWidth="0.0dp" android:text="@string/more_language_options" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintTop_toTopOf="parent" style="@style/App.Button.Text" />
+</merge>

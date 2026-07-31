@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:orientation="vertical" android:id="@id/tasksContainer" android:layout_width="match_parent" android:layout_height="wrap_content"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <androidx.recyclerview.widget.RecyclerView android:id="@id/tasksRecyclerView" android:layout_width="match_parent" android:layout_height="wrap_content" />
+    <org.wikipedia.views.WikiCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24.0dp" android:layout_marginBottom="24.0dp" android:layout_marginStart="@dimen/activity_horizontal_margin" android:layout_marginEnd="@dimen/activity_horizontal_margin">
+        <LinearLayout android:orientation="vertical" android:id="@id/learnMoreCard" android:background="?selectableItemBackground" android:paddingTop="16.0dp" android:paddingBottom="8.0dp" android:focusable="true" android:clickable="true" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="16.0dp" android:paddingEnd="16.0dp">
+            <TextView android:textSize="20.0sp" android:textStyle="bold" android:textColor="?primary_color" android:id="@id/whatIsTitleText" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/suggested_edits_what_is_title" />
+            <TextView android:textSize="16.0sp" android:textColor="?secondary_color" android:id="@id/whatIsBodyText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8.0dp" android:text="@string/suggested_edits_what_is_text" android:lineSpacingExtra="8.0sp" />
+            <com.google.android.material.button.MaterialButton android:id="@id/learnMoreButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6.0dp" android:text="@string/suggested_edits_learn_more" app:icon="@drawable/ic_open_in_new_black_24px" style="@style/App.Button.Secondary" />
+        </LinearLayout>
+    </org.wikipedia.views.WikiCardView>
+    <LinearLayout android:padding="8.0dp" android:layout_width="match_parent" android:layout_height="wrap_content">
+        <TextView android:textSize="@dimen/bottom_nav_label_text_size" android:textColor="?progressive_color" android:id="@id/showIPBlockedMessage" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="IPBlocked" android:layout_marginStart="8.0dp" />
+        <TextView android:textSize="@dimen/bottom_nav_label_text_size" android:textColor="?progressive_color" android:id="@id/showOnboardingMessage" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Onboarding" android:layout_marginStart="8.0dp" />
+    </LinearLayout>
+</LinearLayout>

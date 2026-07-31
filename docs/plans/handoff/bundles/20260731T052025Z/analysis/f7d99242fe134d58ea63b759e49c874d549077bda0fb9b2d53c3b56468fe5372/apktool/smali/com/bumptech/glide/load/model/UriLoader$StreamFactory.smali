@@ -1,0 +1,97 @@
+.class public final Lcom/bumptech/glide/load/model/UriLoader$StreamFactory;
+.super Ljava/lang/Object;
+.source "r8-map-id-0bf79158388e53a51ca0182ea2539bd0412421e50b81f5daf687f0d2f9d1b594"
+
+# interfaces
+.implements Lcom/bumptech/glide/load/model/ModelLoaderFactory;
+
+
+# instance fields
+.field public final synthetic $r8$classId:I
+
+.field public final contentResolver:Landroid/content/ContentResolver;
+
+
+# direct methods
+.method public synthetic constructor <init>(Landroid/content/ContentResolver;I)V
+    .locals 0
+
+    .line 1
+    iput p2, p0, Lcom/bumptech/glide/load/model/UriLoader$StreamFactory;->$r8$classId:I
+
+    .line 2
+    .line 3
+    iput-object p1, p0, Lcom/bumptech/glide/load/model/UriLoader$StreamFactory;->contentResolver:Landroid/content/ContentResolver;
+
+    .line 4
+    .line 5
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    .line 6
+    .line 7
+    .line 8
+    return-void
+.end method
+
+
+# virtual methods
+.method public final build(Lcom/bumptech/glide/load/model/MultiModelLoaderFactory;)Lcom/bumptech/glide/load/model/ModelLoader;
+    .locals 0
+
+    .line 1
+    iget p1, p0, Lcom/bumptech/glide/load/model/UriLoader$StreamFactory;->$r8$classId:I
+
+    .line 2
+    .line 3
+    packed-switch p1, :pswitch_data_0
+
+    .line 4
+    .line 5
+    .line 6
+    new-instance p1, Lcom/bumptech/glide/load/model/UriLoader;
+
+    .line 7
+    .line 8
+    invoke-direct {p1, p0}, Lcom/bumptech/glide/load/model/UriLoader;-><init>(Lcom/bumptech/glide/load/model/UriLoader$StreamFactory;)V
+
+    .line 9
+    .line 10
+    .line 11
+    return-object p1
+
+    .line 12
+    :pswitch_0
+    new-instance p1, Lcom/bumptech/glide/load/model/UriLoader;
+
+    .line 13
+    .line 14
+    invoke-direct {p1, p0}, Lcom/bumptech/glide/load/model/UriLoader;-><init>(Lcom/bumptech/glide/load/model/UriLoader$StreamFactory;)V
+
+    .line 15
+    .line 16
+    .line 17
+    return-object p1
+
+    .line 18
+    :pswitch_1
+    new-instance p1, Lcom/bumptech/glide/load/model/UriLoader;
+
+    .line 19
+    .line 20
+    invoke-direct {p1, p0}, Lcom/bumptech/glide/load/model/UriLoader;-><init>(Lcom/bumptech/glide/load/model/UriLoader$StreamFactory;)V
+
+    .line 21
+    .line 22
+    .line 23
+    return-object p1
+
+    .line 24
+    nop
+
+    .line 25
+    :pswitch_data_0
+    .packed-switch 0x0
+        :pswitch_1
+        :pswitch_0
+    .end packed-switch
+.end method

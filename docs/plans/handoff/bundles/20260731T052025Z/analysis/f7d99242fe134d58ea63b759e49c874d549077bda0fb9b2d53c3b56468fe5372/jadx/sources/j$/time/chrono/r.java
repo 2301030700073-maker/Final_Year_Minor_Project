@@ -1,0 +1,67 @@
+package j$.time.chrono;
+
+import j$.time.temporal.ChronoField;
+import j$.time.temporal.Temporal;
+import j$.time.temporal.TemporalField;
+import j$.time.temporal.TemporalQuery;
+
+/* JADX WARN: Failed to restore enum class, 'enum' modifier and super class removed */
+/* JADX WARN: Unknown enum class pattern. Please report as an issue! */
+/* compiled from: r8-map-id-0bf79158388e53a51ca0182ea2539bd0412421e50b81f5daf687f0d2f9d1b594 */
+/* loaded from: classes2.dex */
+public final class r implements k {
+    public static final r BCE;
+    public static final r CE;
+    public static final /* synthetic */ r[] a;
+
+    static {
+        r rVar = new r("BCE", 0);
+        BCE = rVar;
+        r rVar2 = new r("CE", 1);
+        CE = rVar2;
+        a = new r[]{rVar, rVar2};
+    }
+
+    public static r valueOf(String str) {
+        return (r) Enum.valueOf(r.class, str);
+    }
+
+    public static r[] values() {
+        return (r[]) a.clone();
+    }
+
+    @Override // j$.time.temporal.TemporalAccessor
+    public final /* synthetic */ long J(TemporalField temporalField) {
+        return j$.com.android.tools.r8.a.g(this, temporalField);
+    }
+
+    @Override // j$.time.temporal.TemporalAccessor
+    public final /* synthetic */ Object L(TemporalQuery temporalQuery) {
+        return j$.com.android.tools.r8.a.m(this, temporalQuery);
+    }
+
+    @Override // j$.time.temporal.TemporalAccessor
+    public final /* synthetic */ boolean d(TemporalField temporalField) {
+        return j$.com.android.tools.r8.a.i(this, temporalField);
+    }
+
+    @Override // j$.time.chrono.k
+    public final int getValue() {
+        return ordinal();
+    }
+
+    @Override // j$.time.temporal.TemporalAccessor
+    public final /* synthetic */ int k(TemporalField temporalField) {
+        return j$.com.android.tools.r8.a.f(this, temporalField);
+    }
+
+    @Override // j$.time.temporal.TemporalAccessor
+    public final j$.time.temporal.p n(TemporalField temporalField) {
+        return j$.time.temporal.n.d(this, temporalField);
+    }
+
+    @Override // j$.time.temporal.k
+    public final Temporal u(Temporal temporal) {
+        return temporal.b(getValue(), ChronoField.ERA);
+    }
+}

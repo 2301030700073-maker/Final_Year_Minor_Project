@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="UnreadWidgetContainer">
+        <item name="android:gravity">center|bottom</item>
+        <item name="android:background">@drawable/unread_widget_background</item>
+        <item name="android:paddingLeft">2.0dp</item>
+        <item name="android:paddingTop">2.0dp</item>
+        <item name="android:paddingRight">2.0dp</item>
+        <item name="android:paddingBottom">0.0dp</item>
+    </style>
+    <style name="UnreadWidgetTextView">
+        <item name="android:textSize">13.0dp</item>
+        <item name="android:textColor">#ffffff</item>
+        <item name="android:background">@drawable/rounded_corners</item>
+        <item name="android:layout_marginBottom">0.0dp</item>
+        <item name="android:shadowColor">#000000</item>
+        <item name="android:shadowRadius">2.0</item>
+    </style>
+    <style name="Widget.Design.TabLayout" parent="@style/Base.Widget.Design.TabLayout">
+        <item name="tabGravity">center</item>
+        <item name="tabMode">fixed</item>
+    </style>
+    <style name="Widget.Material3.MaterialCalendar.HeaderSelection" parent="@style/Widget.MaterialComponents.MaterialCalendar.HeaderSelection">
+        <item name="android:textAppearance">?textAppearanceHeadlineLarge</item>
+        <item name="android:textColor">?colorOnSurfaceVariant</item>
+        <item name="android:paddingTop">0.0dp</item>
+        <item name="autoSizeMaxTextSize">32.0sp</item>
+    </style>
+    <style name="Widget.Material3.MaterialCalendar.HeaderSelection.Fullscreen" parent="@style/Widget.Material3.MaterialCalendar.HeaderSelection">
+        <item name="android:textAppearance">?textAppearanceTitleLarge</item>
+        <item name="android:maxLines">1</item>
+        <item name="autoSizeMaxTextSize">20.0sp</item>
+        <item name="autoSizeTextType">none</item>
+    </style>
+    <style name="Widget.MaterialComponents.MaterialCalendar.HeaderSelection" parent="@style/Widget.AppCompat.TextView">
+        <item name="android:textAppearance">?textAppearanceHeadline6</item>
+        <item name="android:textColor">?colorOnPrimary</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:layout_gravity">start|top</item>
+        <item name="android:paddingTop">16.0dp</item>
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:maxLines">@integer/mtrl_calendar_selection_text_lines</item>
+        <item name="autoSizeMaxTextSize">20.0sp</item>
+        <item name="autoSizeTextType">uniform</item>
+    </style>
+    <style name="Widget.MaterialComponents.MaterialCalendar.HeaderSelection.Fullscreen" parent="@style/Widget.MaterialComponents.MaterialCalendar.HeaderSelection">
+        <item name="android:textAppearance">?textAppearanceHeadline6</item>
+        <item name="android:maxLines">1</item>
+        <item name="autoSizeMaxTextSize">20.0sp</item>
+        <item name="autoSizeTextType">none</item>
+    </style>
+    <style name="Widget.MaterialComponents.MaterialCalendar.HeaderToggleButton" parent="@style/Base.Widget.MaterialComponents.MaterialCalendar.HeaderToggleButton">
+        <item name="android:layout_gravity">start|bottom</item>
+    </style>
+</resources>

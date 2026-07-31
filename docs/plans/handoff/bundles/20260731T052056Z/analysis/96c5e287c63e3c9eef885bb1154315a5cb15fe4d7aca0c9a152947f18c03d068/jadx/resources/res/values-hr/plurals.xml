@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="diff_years">
+        <item quantity="one">Prošle godine</item>
+        <item quantity="few">Prije %d godine</item>
+        <item quantity="other">Prije %d godina</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s bajt</item>
+        <item quantity="few">%s bajta</item>
+        <item quantity="other">%s bajtova</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d uređivanje od %2$s. (%3$s)</item>
+        <item quantity="few">%1$d uređivanja od %2$s. (%3$s)</item>
+        <item quantity="other">%1$d uređivanja od %2$s. (%3$s)</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d nova obavijest</item>
+        <item quantity="few">%d nove obavijesti</item>
+        <item quantity="other">%d novih obavijesti</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Preuzimanje članka</item>
+        <item quantity="few">Preuzimanje nekoliko članaka</item>
+        <item quantity="other">Preuzimanje članaka</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">Preostao je %1$d članak</item>
+        <item quantity="few">Preostala su %1$d članka</item>
+        <item quantity="other">Preostalo je %1$d članaka</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Preuzimanje %1$d članka…</item>
+        <item quantity="few">Preuzimanje %1$d članka…</item>
+        <item quantity="other">Preuzimanje %1$d članaka…</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d uređivanje od %2$s.</item>
+        <item quantity="few">%1$d uređivanja od %2$s.</item>
+        <item quantity="other">%1$d uređivanja od %2$s.</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Ovaj članak više neće biti dostupan izvan mreže.</item>
+        <item quantity="few">Ovi članci više neće biti dostupni izvan mreže.</item>
+        <item quantity="other">Ovi članci više neće biti dostupni izvan mreže.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Ovaj će članak odsad biti dostupan izvan mreže.</item>
+        <item quantity="few">Ovi će članci odsad biti dostupni izvan mreže.</item>
+        <item quantity="other">Ovi će članci odsad biti dostupni izvan mreže.</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 rezultat</item>
+        <item quantity="few">%d rezultata</item>
+        <item quantity="other">%d rezultata</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Doprinos</item>
+        <item quantity="few">Doprinosa</item>
+        <item quantity="other">Doprinosa</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">jedan doprinos</item>
+        <item quantity="few">%d doprinos(a)</item>
+        <item quantity="other">%d doprinosa</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d dan</item>
+        <item quantity="few">%d dana</item>
+        <item quantity="other">%d dana</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">prije %d dan</item>
+        <item quantity="few">prije %d dana</item>
+        <item quantity="other">prije %d dana</item>
+    </plurals>
+</resources>

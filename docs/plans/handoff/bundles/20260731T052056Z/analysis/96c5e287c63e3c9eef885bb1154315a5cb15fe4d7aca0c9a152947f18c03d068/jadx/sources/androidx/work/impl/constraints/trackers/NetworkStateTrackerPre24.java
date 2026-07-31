@@ -1,0 +1,40 @@
+package androidx.work.impl.constraints.trackers;
+
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.net.ConnectivityManager;
+import androidx.work.Logger$LogcatLogger;
+import androidx.work.impl.utils.taskexecutor.WorkManagerTaskExecutor;
+import kotlin.jvm.internal.Intrinsics;
+
+/* compiled from: r8-map-id-5c42cb83f75859ba9a04ff37bb86a22b3712bc256fe317787b2a7645129b709e */
+/* loaded from: classes.dex */
+public final class NetworkStateTrackerPre24 extends BroadcastReceiverConstraintTracker {
+    public final ConnectivityManager connectivityManager;
+
+    public NetworkStateTrackerPre24(Context context, WorkManagerTaskExecutor workManagerTaskExecutor) {
+        super(context, workManagerTaskExecutor);
+        Object systemService = this.appContext.getSystemService("connectivity");
+        systemService.getClass();
+        this.connectivityManager = (ConnectivityManager) systemService;
+    }
+
+    @Override // androidx.work.impl.constraints.trackers.BroadcastReceiverConstraintTracker
+    public final IntentFilter getIntentFilter() {
+        return new IntentFilter("android.net.conn.CONNECTIVITY_CHANGE");
+    }
+
+    @Override // androidx.work.impl.constraints.trackers.BroadcastReceiverConstraintTracker
+    public final void onBroadcastReceive(Intent intent) {
+        if (Intrinsics.areEqual(intent.getAction(), "android.net.conn.CONNECTIVITY_CHANGE")) {
+            Logger$LogcatLogger.get().debug(NetworkStateTrackerKt.TAG, "Network broadcast received");
+            setState(NetworkStateTrackerKt.getActiveNetworkState(this.connectivityManager, false));
+        }
+    }
+
+    @Override // androidx.work.impl.constraints.trackers.ConstraintTracker
+    public final Object readSystemState() {
+        return NetworkStateTrackerKt.getActiveNetworkState(this.connectivityManager, false);
+    }
+}

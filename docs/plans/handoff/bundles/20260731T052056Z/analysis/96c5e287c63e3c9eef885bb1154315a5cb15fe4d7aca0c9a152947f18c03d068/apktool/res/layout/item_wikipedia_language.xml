@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<merge
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <TextView android:textSize="14.0sp" android:textColor="?placeholder_color" android:gravity="center" android:id="@id/wiki_language_order" android:layout_width="48.0dp" android:layout_height="match_parent" android:fontFamily="sans-serif-medium" android:textAlignment="center" android:layout_marginStart="6.0dp" />
+    <CheckBox android:gravity="center" android:id="@id/wiki_language_checkbox" android:visibility="gone" android:layout_width="48.0dp" android:layout_height="match_parent" android:layout_marginStart="14.0dp" android:layout_marginEnd="-8.0dp" />
+    <org.wikipedia.views.LangCodeView android:layout_gravity="center_vertical" android:id="@id/wiki_language_code" android:layout_width="24.0dp" android:layout_height="24.0dp" android:contentDescription="@null" android:layout_marginStart="14.0dp" app:backgroundTint="?placeholder_color" app:textColor="?placeholder_color" />
+    <TextView android:layout_gravity="center_vertical" android:id="@id/wiki_language_title" android:paddingLeft="8.0dp" android:paddingTop="4.0dp" android:paddingRight="8.0dp" android:paddingBottom="4.0dp" android:layout_width="0.0dp" android:layout_height="wrap_content" android:layout_weight="1.0" android:paddingHorizontal="8.0dp" android:paddingVertical="4.0dp" style="@style/P.MaterialListTitle" />
+    <ImageView android:id="@id/wiki_language_drag_handle" android:layout_width="56.0dp" android:layout_height="match_parent" android:scaleType="center" android:contentDescription="@null" app:srcCompat="@drawable/ic_draggable" app:tint="?placeholder_color" />
+</merge>

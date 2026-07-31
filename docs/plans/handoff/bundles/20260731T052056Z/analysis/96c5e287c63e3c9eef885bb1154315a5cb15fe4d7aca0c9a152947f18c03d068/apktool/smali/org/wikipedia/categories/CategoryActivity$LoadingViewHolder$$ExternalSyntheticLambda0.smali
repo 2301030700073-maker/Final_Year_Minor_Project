@@ -1,0 +1,108 @@
+.class public final synthetic Lorg/wikipedia/categories/CategoryActivity$LoadingViewHolder$$ExternalSyntheticLambda0;
+.super Ljava/lang/Object;
+.source "r8-map-id-5c42cb83f75859ba9a04ff37bb86a22b3712bc256fe317787b2a7645129b709e"
+
+# interfaces
+.implements Landroid/view/View$OnClickListener;
+
+
+# instance fields
+.field public final synthetic $r8$classId:I
+
+.field public final synthetic f$0:Lkotlin/jvm/functions/Function0;
+
+
+# direct methods
+.method public synthetic constructor <init>(ILkotlin/jvm/functions/Function0;)V
+    .locals 0
+
+    .line 1
+    iput p1, p0, Lorg/wikipedia/categories/CategoryActivity$LoadingViewHolder$$ExternalSyntheticLambda0;->$r8$classId:I
+
+    .line 2
+    .line 3
+    iput-object p2, p0, Lorg/wikipedia/categories/CategoryActivity$LoadingViewHolder$$ExternalSyntheticLambda0;->f$0:Lkotlin/jvm/functions/Function0;
+
+    .line 4
+    .line 5
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    .line 6
+    .line 7
+    .line 8
+    return-void
+.end method
+
+
+# virtual methods
+.method public final onClick(Landroid/view/View;)V
+    .locals 0
+
+    .line 1
+    iget p1, p0, Lorg/wikipedia/categories/CategoryActivity$LoadingViewHolder$$ExternalSyntheticLambda0;->$r8$classId:I
+
+    .line 2
+    .line 3
+    iget-object p0, p0, Lorg/wikipedia/categories/CategoryActivity$LoadingViewHolder$$ExternalSyntheticLambda0;->f$0:Lkotlin/jvm/functions/Function0;
+
+    .line 4
+    .line 5
+    packed-switch p1, :pswitch_data_0
+
+    .line 6
+    .line 7
+    .line 8
+    invoke-interface {p0}, Lkotlin/jvm/functions/Function0;->invoke()Ljava/lang/Object;
+
+    .line 9
+    .line 10
+    .line 11
+    return-void
+
+    .line 12
+    :pswitch_0
+    invoke-interface {p0}, Lkotlin/jvm/functions/Function0;->invoke()Ljava/lang/Object;
+
+    .line 13
+    .line 14
+    .line 15
+    return-void
+
+    .line 16
+    :pswitch_1
+    invoke-interface {p0}, Lkotlin/jvm/functions/Function0;->invoke()Ljava/lang/Object;
+
+    .line 17
+    .line 18
+    .line 19
+    return-void
+
+    .line 20
+    :pswitch_2
+    invoke-interface {p0}, Lkotlin/jvm/functions/Function0;->invoke()Ljava/lang/Object;
+
+    .line 21
+    .line 22
+    .line 23
+    return-void
+
+    .line 24
+    :pswitch_3
+    invoke-interface {p0}, Lkotlin/jvm/functions/Function0;->invoke()Ljava/lang/Object;
+
+    .line 25
+    .line 26
+    .line 27
+    return-void
+
+    .line 28
+    nop
+
+    :pswitch_data_0
+    .packed-switch 0x0
+        :pswitch_3
+        :pswitch_2
+        :pswitch_1
+        :pswitch_0
+    .end packed-switch
+.end method

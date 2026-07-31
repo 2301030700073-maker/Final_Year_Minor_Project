@@ -1,0 +1,633 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="one">%d день</item>
+        <item quantity="few">%d дні</item>
+        <item quantity="many">%d днів</item>
+        <item quantity="other">%d днів</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="one">редагування минулого місяця</item>
+        <item quantity="few">редагування минулого місяця</item>
+        <item quantity="many">редагувань минулого місяця</item>
+        <item quantity="other">редагувань минулого місяця</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="one">редагування цього місяця</item>
+        <item quantity="few">редагування цього місяця</item>
+        <item quantity="many">редагувань цього місяця</item>
+        <item quantity="other">редагувань цього місяця</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="one">Редагування</item>
+        <item quantity="few">Редагування</item>
+        <item quantity="many">Редагувань</item>
+        <item quantity="other">Редагувань</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_views">
+        <item quantity="one">Перегляд статей, які ви редагували</item>
+        <item quantity="few">Перегляди статей, які ви редагували</item>
+        <item quantity="many">Перегляди статей, які ви редагували</item>
+        <item quantity="other">Перегляди статей, які ви редагували</item>
+    </plurals>
+    <plurals name="activity_tab_impact_thanks">
+        <item quantity="one">подяка</item>
+        <item quantity="few">подяки</item>
+        <item quantity="many">подяк</item>
+        <item quantity="other">подяк</item>
+    </plurals>
+    <plurals name="activity_tab_impact_total_edits">
+        <item quantity="one">редагування разом</item>
+        <item quantity="few">редагування разом</item>
+        <item quantity="many">редагувань разом</item>
+        <item quantity="other">редагувань разом</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="one">%d рік тому</item>
+        <item quantity="few">%d роки тому</item>
+        <item quantity="many">%d років тому</item>
+        <item quantity="other">%d років тому</item>
+    </plurals>
+    <plurals name="donation_reminders_text_articles">
+        <item quantity="one">1 стаття</item>
+        <item quantity="few">%d статті</item>
+        <item quantity="many">%d статей</item>
+        <item quantity="other">%d статей</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s байт</item>
+        <item quantity="few">%s байти</item>
+        <item quantity="many">%s байтів</item>
+        <item quantity="other">%s байтів</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d редагування від %2$s ( %3$s)</item>
+        <item quantity="few">%1$d редагування від %2$s (%3$s)</item>
+        <item quantity="many">%1$d редагувань від %2$s (%3$s)</item>
+        <item quantity="other">%1$d редагувань від %2$s (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">%1$d 1 статті доступно офлайн, %3$.2f MB</item>
+        <item quantity="few">%1$d %2$d статей доступно офлайн, %3$.2f MB</item>
+        <item quantity="many">%1$d %2$d статей доступно офлайн, %3$.2f MB</item>
+        <item quantity="other">%1$d %2$d статей доступно офлайн, %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">%1$d з 1 статті доступна офлайн</item>
+        <item quantity="few">%1$d з %2$d статей доступні офлайн</item>
+        <item quantity="many">%1$d з %2$d статей доступні офлайн</item>
+        <item quantity="other">%1$d з %2$d статей доступні офлайн</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 стаття, %2$.2f MB</item>
+        <item quantity="few">%1$d статті, %2$.2f MB</item>
+        <item quantity="many">%1$d статей, %2$.2f MB</item>
+        <item quantity="other">%1$d статей, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 стаття</item>
+        <item quantity="few">%d статті</item>
+        <item quantity="many">%d статей</item>
+        <item quantity="other">%d статей</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d нове сповіщення</item>
+        <item quantity="few">%d нові сповіщення</item>
+        <item quantity="many">%d нових сповіщень</item>
+        <item quantity="other">%d нового сповіщення</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">Вибрано %d</item>
+        <item quantity="few">Вибрано %d</item>
+        <item quantity="many">Вибрано %d</item>
+        <item quantity="other">Вибрано %d</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Сповіщення архівовано</item>
+        <item quantity="few">Архівовано %d сповіщення</item>
+        <item quantity="many">Архівовано %d сповіщень</item>
+        <item quantity="other">Архівовано %d сповіщень</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Завантаження статті</item>
+        <item quantity="few">Завантаження статей</item>
+        <item quantity="many">Завантаження статей</item>
+        <item quantity="other">Завантаження статей</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">Залишилася %1$d стаття</item>
+        <item quantity="few">Залишилося %1$d статті</item>
+        <item quantity="many">Залишилося %1$d статей</item>
+        <item quantity="other">Залишилося %1$d статей</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Синхронізація списку читання</item>
+        <item quantity="few">Синхронізація списків читання</item>
+        <item quantity="many">Синхронізація списків читання</item>
+        <item quantity="other">Синхронізація списків читання</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">Залишився %1$d список</item>
+        <item quantity="few">Залишилося %1$d списки</item>
+        <item quantity="many">Залишилося %1$d списків</item>
+        <item quantity="other">Синхронізація %1$d списків…</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">Синхронізація %1$d списку…</item>
+        <item quantity="few">Синхронізація %1$d списків…</item>
+        <item quantity="many">Синхронізація %1$d списків…</item>
+        <item quantity="other">Синхронізація %1$d списків…</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Завантажується %1$d стаття…</item>
+        <item quantity="few">Завантажуються %1$d статті…</item>
+        <item quantity="many">Завантажується %1$d статей…</item>
+        <item quantity="other">Завантажується %1$d статей…</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 позначено як прочитане</item>
+        <item quantity="few">%d позначено як прочитані</item>
+        <item quantity="many">%d позначено як прочитані</item>
+        <item quantity="other">%d позначено як прочитані</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 позначено як непрочитане</item>
+        <item quantity="few">%d позначено як непрочитані</item>
+        <item quantity="many">%d позначено як непрочитані</item>
+        <item quantity="other">%d позначено як непрочитані</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d фільтр</item>
+        <item quantity="few">%d фільтри</item>
+        <item quantity="many">%d фільтрів</item>
+        <item quantity="other">%d фільтрів</item>
+    </plurals>
+    <plurals name="on_this_day_game_stats_games_played">
+        <item quantity="one">Зіграна гра</item>
+        <item quantity="few">Зіграні ігри</item>
+        <item quantity="many">Зіграні ігри</item>
+        <item quantity="other">Зіграні ігри</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d редагування з %2$s</item>
+        <item quantity="few">%1$d редагування з %2$s</item>
+        <item quantity="many">%1$d редагувань з %2$s</item>
+        <item quantity="other">%1$d редагувань з %2$s</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d фільтр</item>
+        <item quantity="few">%d фільтри</item>
+        <item quantity="many">%d фільтрів</item>
+        <item quantity="other">%d фільтрів</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak">
+        <item quantity="one">%d день</item>
+        <item quantity="few">%d дні</item>
+        <item quantity="many">%d днів</item>
+        <item quantity="other">%d днів</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final">
+        <item quantity="one">%1$d з %2$d</item>
+        <item quantity="few">%1$d з %2$d</item>
+        <item quantity="many">%1$d з %2$d</item>
+        <item quantity="other">%1$d з %2$d</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final_large">
+        <item quantity="one">%1$d з %2$d дня</item>
+        <item quantity="few">%1$d з %2$d днів</item>
+        <item quantity="many">%1$d з %2$d днів</item>
+        <item quantity="other">%1$d з %2$d днів</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Ця стаття більше не буде доступна автономно.</item>
+        <item quantity="few">Ці статті більше не будуть доступні автономно.</item>
+        <item quantity="many">Ці статті більше не будуть доступні автономно.</item>
+        <item quantity="other">Ці статті більше не будуть доступні автономно.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Ця стаття тепер буде доступна автономно.</item>
+        <item quantity="few">Ці статті тепер будуть доступні автономно.</item>
+        <item quantity="many">Ці статті тепер будуть доступні автономно.</item>
+        <item quantity="other">Ці статті тепер будуть доступні автономно.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d статтю вилучено зі списку</item>
+        <item quantity="few">%d статті вилучено зі списку</item>
+        <item quantity="many">%d статей вилучено зі списку</item>
+        <item quantity="other">%d статей вилучено зі списку</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d статтю вилучено з %2$s</item>
+        <item quantity="few">%1$d статті вилучено з %2$s</item>
+        <item quantity="many">%1$d статей вилучено з %2$s</item>
+        <item quantity="other">%1$d статей вилучено з %2$s</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">Ви впевнені, що бажаєте вилучити %d список?</item>
+        <item quantity="few">…Ви впевнені, що бажаєте вилучити %d списки?</item>
+        <item quantity="many">Ви впевнені, що бажаєте вилучити %d списків?</item>
+        <item quantity="other">Ви впевнені, що бажаєте вилучити %d списків?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">Не вдалося експортувати список для читання</item>
+        <item quantity="few">Не вдалося експортувати списки для читання</item>
+        <item quantity="many">Не вдалося експортувати списки для читання</item>
+        <item quantity="other">Не вдалося експортувати списки для читання</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Список для читання імпортовано</item>
+        <item quantity="few">Списки для читання імпортовано</item>
+        <item quantity="many">Списки для читання імпортовано</item>
+        <item quantity="other">Списки для читання імпортовано</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d список вилучено</item>
+        <item quantity="few">%d списки вилучено</item>
+        <item quantity="many">%d списків вилучено</item>
+        <item quantity="other">%d списків вилучено</item>
+    </plurals>
+    <plurals name="recommended_reading_list_interest_pick_selected_articles">
+        <item quantity="one">Вибрано %d</item>
+        <item quantity="few">Вибрано %d</item>
+        <item quantity="many">Вибрано %d</item>
+        <item quantity="other">Вибрано %d</item>
+    </plurals>
+    <plurals name="recommended_reading_list_page_subtitle_articles">
+        <item quantity="one">• 1 стаття</item>
+        <item quantity="few">• %d статті</item>
+        <item quantity="many">• %d статей</item>
+        <item quantity="other">• %d статей</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 результат</item>
+        <item quantity="few">%d результати</item>
+        <item quantity="many">%d результатів</item>
+        <item quantity="other">%d результатів</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">Ви додали %d символ</item>
+        <item quantity="few">Ви додали %d символи</item>
+        <item quantity="many">Ви додали %d символів</item>
+        <item quantity="other">Ви додали %d символів</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Внесок</item>
+        <item quantity="few">Внесок</item>
+        <item quantity="many">Внесків</item>
+        <item quantity="other">Внесок</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">%d редагування</item>
+        <item quantity="few">%d редагування</item>
+        <item quantity="many">%d редагувань</item>
+        <item quantity="other">%d редагувань</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s символ</item>
+        <item quantity="few">%1$s символи</item>
+        <item quantity="many">%1$s символів</item>
+        <item quantity="other">%1$s символів</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Побачено один раз за минулі 30 днів.</item>
+        <item quantity="few">Побачено %s рази за минулі 30 днів.</item>
+        <item quantity="many">Побачено %s разів за минулі 30 днів.</item>
+        <item quantity="other">Побачено %s разів за минулі 30 днів.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">Редагування</item>
+        <item quantity="few">Редагування</item>
+        <item quantity="many">Редагувань</item>
+        <item quantity="other">Редагувань</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d день</item>
+        <item quantity="few">%d дні</item>
+        <item quantity="many">%d днів</item>
+        <item quantity="other">%d днів</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">Ви додали %d тег</item>
+        <item quantity="few">Ви додали %d теги</item>
+        <item quantity="many">Ви додали %d тегів</item>
+        <item quantity="other">Ви додали %d тегів</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">Ви вилучили %d символ</item>
+        <item quantity="few">Ви вилучили %d символи</item>
+        <item quantity="many">Ви вилучили %d символів</item>
+        <item quantity="other">Ви вилучили %d символів</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s тег</item>
+        <item quantity="few">%1$s теги</item>
+        <item quantity="many">%1$s тегів</item>
+        <item quantity="other">%1$s тегів</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Приховати відповідь</item>
+        <item quantity="few">Приховати відповіді (%d)</item>
+        <item quantity="many">Приховати відповіді (%d)</item>
+        <item quantity="other">Приховати відповіді (%d)</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Показати відповідь</item>
+        <item quantity="few">Показати відповіді (%d)</item>
+        <item quantity="many">Показати відповіді (%d)</item>
+        <item quantity="other">Показати відповіді (%d)</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">Ви впевнені, що бажаєте вилучити повідомлення зі списку?</item>
+        <item quantity="few">Ви впевнені, що бажаєте вилучити повідомлення зі списку?</item>
+        <item quantity="many">Ви впевнені, що бажаєте вилучити повідомлення зі списку?</item>
+        <item quantity="other">Ви впевнені, що бажаєте вилучити повідомлення зі списку?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">Повідомлення вилучено</item>
+        <item quantity="few">Повідомлення вилучено</item>
+        <item quantity="many">Повідомлення вилучено</item>
+        <item quantity="other">Повідомлення вилучено</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">Тимчасовий обліковий запис %1$s було створено після публікації ваших змін. Термін його дії закінчиться через %2$d день.</item>
+        <item quantity="few">Тимчасовий обліковий запис %1$s було створено після публікації ваших змін. Термін його дії закінчиться через %2$d дні.</item>
+        <item quantity="many">Тимчасовий обліковий запис %1$s було створено після публікації ваших змін. Термін його дії закінчиться через %2$d днів.</item>
+        <item quantity="other">Тимчасовий обліковий запис %1$s було створено після публікації ваших змін. Термін його дії закінчиться через %2$d днів.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">Термін дії облікового запису закінчиться через %d день.</item>
+        <item quantity="few">Термін дії облікового запису закінчиться через %d дні.</item>
+        <item quantity="many">Термін дії облікового запису закінчиться через %d днів.</item>
+        <item quantity="other">Термін дії облікового запису закінчиться через %d днів.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">1 день тому</item>
+        <item quantity="few">%d дні тому</item>
+        <item quantity="many">%d днів тому</item>
+        <item quantity="other">%d днів тому</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d фільтр</item>
+        <item quantity="few">%d фільтри</item>
+        <item quantity="many">%d фільтрів</item>
+        <item quantity="other">%d фільтрів</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Вилучити обрану мову?</item>
+        <item quantity="few">Вилучити обрані мови?</item>
+        <item quantity="many">Вилучити обрані мови?</item>
+        <item quantity="other">Вилучити обрані мови?</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_interested_categories_title">
+        <item quantity="one">Категорія, яка мене зацікавила</item>
+        <item quantity="few">Категорії, які мене зацікавили</item>
+        <item quantity="many">Категорії, які мене зацікавили</item>
+        <item quantity="other">Категорії, які мене зацікавили</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_read_title">
+        <item quantity="one">Прочитана стаття</item>
+        <item quantity="few">Прочитані статті</item>
+        <item quantity="many">Прочитані статті</item>
+        <item quantity="other">Прочитані статті</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_minutes_read_title">
+        <item quantity="one">Хвилина читання</item>
+        <item quantity="few">Хвилини читання</item>
+        <item quantity="many">Хвилини читання</item>
+        <item quantity="other">Хвилини читання</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_most_read_article_title">
+        <item quantity="one">Стаття, яку мені читалося найчастіше</item>
+        <item quantity="few">Статті, які мені читалося найчастіше</item>
+        <item quantity="many">Статті, які мені читалося найчастіше</item>
+        <item quantity="other">Статті, які мені читалося найчастіше</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_total_edits_title">
+        <item quantity="one">Відредагована стаття</item>
+        <item quantity="few">Відредаговані статті</item>
+        <item quantity="many">Відредаговані статті</item>
+        <item quantity="other">Відредаговані статті</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_edits_title">
+        <item quantity="one">Зміна, внесена редакторами</item>
+        <item quantity="few">Зміни, внесені редакторами</item>
+        <item quantity="many">Змін, внесених редакторами</item>
+        <item quantity="other">Зміни, внесені редакторами</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_hours_spent_title">
+        <item quantity="one">Година, витрачена на читання</item>
+        <item quantity="few">Години, витрачені на читання</item>
+        <item quantity="many">Годин, витрачених на читання</item>
+        <item quantity="other">Години, витрачені на читання</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_most_read_title">
+        <item quantity="one">Найбільш читана стаття в англійській Вікіпедії</item>
+        <item quantity="few">Найбільш читані статті в англійській Вікіпедії</item>
+        <item quantity="many">Найбільш читані статті в англійській Вікіпедії</item>
+        <item quantity="other">Найбільш читані статті в англійській Вікіпедії</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_articles_title">
+        <item quantity="one">Кількість переглянутих статей</item>
+        <item quantity="few">Кількість переглянутих статей</item>
+        <item quantity="many">Кількість переглянутих статей</item>
+        <item quantity="other">Кількість переглянутих статей</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_edits_title">
+        <item quantity="one">Редагування в програмці</item>
+        <item quantity="few">Редагування в програмці</item>
+        <item quantity="many">Редагування в програмці</item>
+        <item quantity="other">Редагування в програмці</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_wikipedia_per_minute_label">
+        <item quantity="one">%d раз на хвилину</item>
+        <item quantity="few">%d рази на хвилину</item>
+        <item quantity="many">%d разів на хвилину</item>
+        <item quantity="other">%d разів на хвилину</item>
+    </plurals>
+    <plurals name="year_in_review_slide_app_edited_times_headline">
+        <item quantity="one">Редактори офіційних застосунків Вікіпедії зробили %,d редагування</item>
+        <item quantity="few">Редактори офіційних застосунків Вікіпедії зробили %,d редагування</item>
+        <item quantity="many">Редактори офіційних застосунків Вікіпедії зробили %,d редагувань</item>
+        <item quantity="other">Редактори офіційних застосунків Вікіпедії зробили %,d редагувань</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_first">
+        <item quantity="one">У Вікіпедії цьогоріч була %,d стаття</item>
+        <item quantity="few">У Вікіпедії цьогоріч було %,d статті</item>
+        <item quantity="many">У Вікіпедії цьогоріч було %,d статей</item>
+        <item quantity="other">У Вікіпедії було %,d статей</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_second">
+        <item quantity="one">понад %,d активною мовою. Ви приєдналися до мільйонів людей, які розширюють знання та досліджують різноманітні теми.</item>
+        <item quantity="few">понад %,d активними мовами. Ви приєдналися до мільйонів людей, які розширюють знання та досліджують різноманітні теми.</item>
+        <item quantity="many">понад %,d активними мовами. Ви приєдналися до мільйонів людей, які розширюють знання та досліджують різноманітні теми.</item>
+        <item quantity="other">понад %,d активними мовами. Ви приєдналися до мільйонів людей, які розширюють знання та досліджують різноманітні теми.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_headline">
+        <item quantity="one">Вікіпедія була доступна понад %,d мовою</item>
+        <item quantity="few">Вікіпедія була доступна понад %,d мовами</item>
+        <item quantity="many">Вікіпедія була доступна понад %,d мовами</item>
+        <item quantity="other">Вікіпедія була доступна понад %,d мовами</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_body">
+        <item quantity="one">У %1$d волонтери додали %2$,d байт до англійської Вікіпедії. Уся їхня спільна робота разом веде до постійно вдосконалюваного, заснованого на фактах та надійного ресурсу знань, який вони надають світові. Усі ми маємо знання, якими можемо поділитися, &lt;a href=\"%3$s\">дізнайтеся, як узяти участь.&lt;/a></item>
+        <item quantity="few">У %1$d волонтери додали %2$,d байти до англійської Вікіпедії. Уся їхня спільна робота разом веде до постійно вдосконалюваного, заснованого на фактах та надійного ресурсу знань, який вони надають світові. Усі ми маємо знання, якими можемо поділитися, &lt;a href=\"%3$s\">дізнайтеся, як узяти участь&lt;/a>.</item>
+        <item quantity="many">У %1$d волонтери додали %2$,d байтів до англійської Вікіпедії. Уся їхня спільна робота разом веде до постійно вдосконалюваного, заснованого на фактах та надійного ресурсу знань, який вони надають світові. Усі ми маємо знання, якими можемо поділитися, &lt;a href=\"%3$s\">дізнайтеся, як узяти участь&lt;/a>.</item>
+        <item quantity="other">У %1$d волонтери додали %2$,d байтів до англійської Вікіпедії. Уся їхня спільна робота разом веде до постійно вдосконалюваного, заснованого на фактах та надійного ресурсу знань, який вони надають світові. Усі ми маємо знання, якими можемо поділитися, &lt;a href=\"%3$s\">дізнайтеся, як узяти участь&lt;/a>.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_headline">
+        <item quantity="one">%,d байт додано</item>
+        <item quantity="few">%,d байти додано</item>
+        <item quantity="many">%,d байтів додано</item>
+        <item quantity="other">%,d байтів додано</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_per_minute_headline">
+        <item quantity="one">Вікіпедію редагували %,d раз на хвилину</item>
+        <item quantity="few">Вікіпедію редагували %,d рази на хвилину</item>
+        <item quantity="many">Вікіпедію редагували %,d разів на хвилину</item>
+        <item quantity="other">Вікіпедію редагували %,d разів на хвилину</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_body">
+        <item quantity="one">Дякуємо, що належите до редакторів-волонтерів, які роблять внесок у проєкти Вікімедіа по всьому світу. Волонтери, як ви, внесли %,d редагування у понад 300 різних мовних версій Вікіпедії.</item>
+        <item quantity="few">Дякуємо, що належите до редакторів-волонтерів, які роблять внесок у проєкти Вікімедіа по всьому світу. Волонтери, як ви, внесли %,d редагування у понад 300 різних мовних версій Вікіпедії.</item>
+        <item quantity="many">Дякуємо, що належите до редакторів-волонтерів, які роблять внесок у проєкти Вікімедіа по всьому світу. Волонтери, як ви, внесли %,d редагувань у понад 300 різних мовних версій Вікіпедії.</item>
+        <item quantity="other">Дякуємо, що належите до редакторів-волонтерів, які роблять внесок у проєкти Вікімедіа по всьому світу. Волонтери, як ви, внесли %,d редагувань у понад 300 різних мовних версій Вікіпедії.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_headline">
+        <item quantity="one">Ви редагували %s раз</item>
+        <item quantity="few">Ви редагували %s рази</item>
+        <item quantity="many">Ви редагували %s разів</item>
+        <item quantity="other">Ви редагували %s разів</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_body">
+        <item quantity="one">Читачі в усьому світі цінують ваш внесок. За останні 2 місяці статті, які ви редагували, разом отримали %,d перегляд. Завдяки таким редакторам, як ви, Вікіпедія для всього світу є надійним, заснованим на фактах ресурсом, що постійно вдосконалюється.</item>
+        <item quantity="few">Читачі в усьому світі цінують ваш внесок. За останні 2 місяці статті, які ви редагували, разом отримали %,d перегляди. Завдяки таким редакторам, як ви, Вікіпедія для всього світу є надійним, заснованим на фактах ресурсом, що постійно вдосконалюється.</item>
+        <item quantity="many">Читачі в усьому світі цінують ваш внесок. За останні 2 місяці статті, які ви редагували, разом отримали %,d переглядів. Завдяки таким редакторам, як ви, Вікіпедія для всього світу є надійним, заснованим на фактах ресурсом, що постійно вдосконалюється.</item>
+        <item quantity="other">Читачі в усьому світі цінують ваш внесок. За останні 2 місяці статті, які ви редагували, разом отримали %,d переглядів. Завдяки таким редакторам, як ви, Вікіпедія для всього світу є надійним, заснованим на фактах ресурсом, що постійно вдосконалюється.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_headline">
+        <item quantity="one">Ваше редагування нещодавно переглянули понад %,d раз</item>
+        <item quantity="few">Ваші редагування нещодавно переглянули понад %,d рази</item>
+        <item quantity="many">Ваші редагування нещодавно переглянули понад %,d разів</item>
+        <item quantity="other">Ваші редагування нещодавно переглянули понад %,d разів</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_first">
+        <item quantity="one">Волонтери зробили %,d редагування у понад 300 різних мовних версіях Вікіпедії.</item>
+        <item quantity="few">Волонтери зробили %,d редагування у понад 300 різних мовних версіях Вікіпедії.</item>
+        <item quantity="many">Волонтери зробили %,d редагувань у понад 300 різних мовних версіях Вікіпедії.</item>
+        <item quantity="other">Волонтери зробили %,d редагувань у понад 300 різних мовних версіях Вікіпедії.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_second">
+        <item quantity="one">%,d редагування зроблене в англійській Вікіпедії. Щодня, щогодини волонтери працюють над покращенням Вікіпедії.</item>
+        <item quantity="few">%,d редагування зроблені в англійській Вікіпедії. Щодня, щогодини волонтери працюють над покращенням Вікіпедії.</item>
+        <item quantity="many">%,d редагувань зроблені в англійській Вікіпедії. Щодня, щогодини волонтери працюють над покращенням Вікіпедії.</item>
+        <item quantity="other">%,d редагувань зроблені в англійській Вікіпедії. Щодня, щогодини волонтери працюють над покращенням Вікіпедії.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_headline">
+        <item quantity="one">Редактори зробили %,d редагування цього року</item>
+        <item quantity="few">Редактори зробили %,d редагування цього року</item>
+        <item quantity="many">Редактори зробили %,d редагувань цього року</item>
+        <item quantity="other">Редактори зробили %,d редагувань цього року</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_first">
+        <item quantity="one">Люди витратили приблизно %,d години</item>
+        <item quantity="few">Люди витратили приблизно %,d години</item>
+        <item quantity="many">Люди витратили приблизно %,d годин</item>
+        <item quantity="other">Люди витратили приблизно %,d годин</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_second">
+        <item quantity="one">— майже %1$,d рік! — на читання англійської Вікіпедії у %2$d. Вікіпедія допоможе, коли ви хочете дізнатися про наш мінливий світ, виграти парі серед друзів або відповісти на запитання допитливої дитини.</item>
+        <item quantity="few">— майже %1$,d роки! — на читання англійської Вікіпедії у %2$d. Вікіпедія допоможе, коли ви хочете дізнатися про наш мінливий світ, виграти парі серед друзів або відповісти на запитання допитливої дитини.</item>
+        <item quantity="many">— майже %1$,d років! — на читання англійської Вікіпедії у %2$d. Вікіпедія допоможе, коли ви хочете дізнатися про наш мінливий світ, виграти парі серед друзів або відповісти на запитання допитливої дитини.</item>
+        <item quantity="other">— майже %1$,d років! — на читання англійської Вікіпедії у %2$d. Вікіпедія допоможе, коли ви хочете дізнатися про наш мінливий світ, виграти парі серед друзів або відповісти на запитання допитливої дитини.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_headline">
+        <item quantity="one">Ми провели за читанням %,d годину</item>
+        <item quantity="few">Ми провели за читанням %,d години</item>
+        <item quantity="many">Ми провели за читанням %,d годин</item>
+        <item quantity="other">Ми провели за читанням %,d годин</item>
+    </plurals>
+    <plurals name="year_in_review_slide_global_saved_articles_headline">
+        <item quantity="one">Користувачі програми мали %,d збережену статтю</item>
+        <item quantity="few">Користувачі програми мали %,d збережені статті</item>
+        <item quantity="many">Користувачі програми мали %,d збережених статей</item>
+        <item quantity="other">Користувачі програми мали %,d збережених статей</item>
+    </plurals>
+    <plurals name="year_in_review_slide_most_read_english_articles_body">
+        <item quantity="one">Коли люди хочуть дізнатися про наш світ, вони звертаються до Вікіпедії. На %1$d-му місці за відвідуваністю в англійській Вікіпедії була ця стаття: %2$s &lt;br />Детальніше про це читайте у &lt;a href=\"%3$s\">нашому дописі блогу&lt;/a>.</item>
+        <item quantity="few">Коли люди хочуть дізнатися про наш світ, вони звертаються до Вікіпедії. %1$d найбільш відвідувані статті в англійській Вікіпедії були такими: %2$s &lt;br />Детальніше про це читайте у &lt;a href=\"%3$s\">нашому дописі блогу&lt;/a>.</item>
+        <item quantity="many">Коли люди хочуть дізнатися про наш світ, вони звертаються до Вікіпедії. %1$d найбільш відвідуваних статей в англійській Вікіпедії були такими: %2$s &lt;br />Детальніше про це читайте у &lt;a href=\"%3$s\">нашому дописі блогу&lt;/a>.</item>
+        <item quantity="other">Коли люди хочуть дізнатися про наш світ, вони звертаються до Вікіпедії. %1$d найбільш відвідуваних статей в англійській Вікіпедії були такими: %2$s &lt;br />Детальніше про це читайте у &lt;a href=\"%3$s\">нашому дописі блогу&lt;/a>.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_body">
+        <item quantity="one">Серед цих статей були &lt;b>%1$s&lt;/b>, &lt;b>%2$s&lt;/b> та &lt;b>%3$s&lt;/b>. Кожна збережена стаття відображає ваші інтереси та допомагає створити персоналізовану базу знань у Вікіпедії.&lt;br />&lt;br /> Активні користувачі програми зберегли %4$,d статтю цього року.</item>
+        <item quantity="few">Серед цих статей були &lt;b>%1$s&lt;/b>, &lt;b>%2$s&lt;/b> та &lt;b>%3$s&lt;/b>. Кожна збережена стаття відображає ваші інтереси та допомагає створити персоналізовану базу знань у Вікіпедії.&lt;br />&lt;br /> Активні користувачі програми зберегли %4$,d статті цього року.</item>
+        <item quantity="many">Серед цих статей були &lt;b>%1$s&lt;/b>, &lt;b>%2$s&lt;/b> та &lt;b>%3$s&lt;/b>. Кожна збережена стаття відображає ваші інтереси та допомагає створити персоналізовану базу знань у Вікіпедії.&lt;br />&lt;br /> Активні користувачі програми зберегли %4$,d статей цього року.</item>
+        <item quantity="other">Серед цих статей були &lt;b>%1$s&lt;/b>, &lt;b>%2$s&lt;/b> та &lt;b>%3$s&lt;/b>. Кожна збережена стаття відображає ваші інтереси та допомагає створити персоналізовану базу знань у Вікіпедії.&lt;br />&lt;br /> Активні користувачі програми зберегли %4$,d статей цього року.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_headline">
+        <item quantity="one">Ви зберегли %,d статтю</item>
+        <item quantity="few">Ви зберегли %,d статті</item>
+        <item quantity="many">Ви зберегли %,d статей</item>
+        <item quantity="other">Ви зберегли %,d статей</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_first">
+        <item quantity="one">Люди витратили приблизно %,d години</item>
+        <item quantity="few">Люди витратили приблизно %,d години</item>
+        <item quantity="many">Люди витратили приблизно %,d годин</item>
+        <item quantity="other">Люди витратили приблизно %,d годин</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_second">
+        <item quantity="one">— майже %1$,d рік! — на читання англійської Вікіпедії у %2$d.</item>
+        <item quantity="few">— майже %1$,d роки! — на читання англійської Вікіпедії у %2$d.</item>
+        <item quantity="many">— майже %1$,d років! — на читання англійської Вікіпедії у %2$d.</item>
+        <item quantity="other">— майже %1$,d років! — на читання англійської Вікіпедії у %2$d.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_first">
+        <item quantity="one">У Вікіпедії цьогоріч була %,d стаття</item>
+        <item quantity="few">У Вікіпедії цьогоріч було %,d статті</item>
+        <item quantity="many">У Вікіпедії цьогоріч було %,d статей</item>
+        <item quantity="other">У Вікіпедії було %,d статей</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_second">
+        <item quantity="one">понад %,d активною мовою. Ви приєдналися до мільйонів людей, які розширюють знання та досліджують різноманітні теми.</item>
+        <item quantity="few">понад %,d активними мовами. Ви приєдналися до мільйонів людей, які розширюють знання та досліджують різноманітні теми.</item>
+        <item quantity="many">понад %,d активними мовами. Ви приєдналися до мільйонів людей, які розширюють знання та досліджують різноманітні теми.</item>
+        <item quantity="other">понад %,d активними мовами. Ви приєдналися до мільйонів людей, які розширюють знання та досліджують різноманітні теми.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_top">
+        <item quantity="one">За нашими підрахунками, ви належите до %1$s%% найкращих читачів Вікіпедії у світі. Середньостатистична людина читає %2$,d статтю на рік.</item>
+        <item quantity="few">За нашими підрахунками, ви належите до %1$s%% найкращих читачів Вікіпедії у світі. Середньостатистична людина читає %2$,d статті на рік.</item>
+        <item quantity="many">За нашими підрахунками, ви належите до %1$s%% найкращих читачів Вікіпедії у світі. Середньостатистична людина читає %2$,d статей на рік.</item>
+        <item quantity="other">За нашими підрахунками, ви належите до %1$s%% найкращих читачів Вікіпедії у світі. Середньостатистична людина читає %2$,d статей на рік.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_first">
+        <item quantity="one">Ви витратили %,d хвилину</item>
+        <item quantity="few">Ви витратили %,d хвилини</item>
+        <item quantity="many">Ви витратили %,d хвилин</item>
+        <item quantity="other">Ви витратили %,d хвилин</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_second">
+        <item quantity="one">на читання %1$,d статті у %2$d</item>
+        <item quantity="few">на читання %1$,d статей у %2$d</item>
+        <item quantity="many">на читання %1$,d статті у %2$d</item>
+        <item quantity="other">на читання %1$,d статей у %2$d</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_body">
+        <item quantity="one">Ось стаття, яку ви найчастіше відвідували у %1$d: %2$s</item>
+        <item quantity="few">Ось статті, які ви найчастіше відвідували у %1$d: %2$s</item>
+        <item quantity="many">Ось статті, які ви найчастіше відвідували у %1$d: %2$s</item>
+        <item quantity="other">Ось статті, які ви найчастіше відвідували у %1$d: %2$s</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_headline">
+        <item quantity="one">Ваша улюблена стаття</item>
+        <item quantity="few">Ваші улюблені статті</item>
+        <item quantity="many">Ваші улюблені статті</item>
+        <item quantity="other">Ваші улюблені статті</item>
+    </plurals>
+    <plurals name="year_in_review_slide_viewed_articles_times_headline">
+        <item quantity="one">Користувачі програми переглянули статті Вікіпедії %,d раз</item>
+        <item quantity="few">Користувачі програми переглянули статті Вікіпедії %,d рази</item>
+        <item quantity="many">Користувачі програми переглянули статті Вікіпедії %,d разів</item>
+        <item quantity="other">Користувачі програми переглянули статті Вікіпедії %,d разів</item>
+    </plurals>
+</resources>

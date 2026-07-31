@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:id="@id/menu_notifications" android:title="@string/notifications_activity_title" app:showAsAction="always" />
+    <item android:icon="@drawable/ic_more_vert_white_24dp" android:id="@id/empty" android:title="@string/nav_item_more" app:iconTint="?primary_color" app:showAsAction="ifRoom">
+        <menu>
+            <item android:icon="@drawable/ic_leaderboard_24" android:id="@id/menu_game_stats" android:title="@string/games_hub_activity_overflow_view_game_stats" app:iconTint="?secondary_color" />
+            <item android:icon="@drawable/ic_info_outline_black_24dp" android:id="@id/menu_learn_more" android:title="@string/games_hub_activity_overflow_learn_more" app:iconTint="?secondary_color" />
+        </menu>
+    </item>
+</menu>

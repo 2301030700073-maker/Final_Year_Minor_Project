@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="other">aŋpétu %d heháŋyaŋ</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="other">hékta wi he eháŋ yutȟokečapi</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="other">wi kiŋ le yutȟokečapi</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="other">Wóyutȟokča</item>
+    </plurals>
+    <plurals name="activity_tab_impact_thanks">
+        <item quantity="other">wóphila</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="other">Hékta ómakȟa %d he eháŋ</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="other">wíhoši okáza %s</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="other">%2$s heháƞtaƞhaƞ, wóyutȟokča %1$d (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="other">wówapi %1$d, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="other">wówapi %d</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="other">Wahóši aú %d mnayé</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="other">Wówapi khulwówakšu</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="other">Wówapi %1$d khulwówakšu</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="other">wínazeya %d</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="other">%2$s heháƞtaƞhaƞ, wóyutȟokča %1$d</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak">
+        <item quantity="other">aŋpétu %d heháŋyaŋ</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="other">čhašówapi etáŋhaŋ wówapi %d yuȟéyab ičú</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="other">%2$s etáŋhaŋ wówapi %1$d yuȟéyab ičú</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="other">Čhašówapi yakáȟniǧe %d iháŋgyaya yačȟíŋ he?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="other">Táku-awáyawa čhašówapi yutȟáŋkal iyáču oyáhiki šni</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="other">Táku-awáyawa čhašówapi yuthímahel iyáču</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="other">čhašówapi %d iháŋgya</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="other">Táku iyéyaya kiŋ %d</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="other">oówa %d leyá</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="other">"Táku kíč'uŋ"</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="other">"táku kíč'uŋ %d"</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="other">oówa %1$s</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="other">Wóyutȟokča</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="other">aŋpétu %d heháŋyaŋ</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="other">oówa %d yuȟéyab iyáču</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="other">hékta aŋpétu %d he eháŋ</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="other">Iyápi kiŋ le yuȟéyab ičú yačhíŋ he?</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_headline">
+        <item quantity="other">wíhoši okáza %,d yutȟáŋka</item>
+    </plurals>
+</resources>

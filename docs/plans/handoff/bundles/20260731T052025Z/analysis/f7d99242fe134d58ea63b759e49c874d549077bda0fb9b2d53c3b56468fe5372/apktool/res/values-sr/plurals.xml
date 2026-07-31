@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Сваког сата</item>
+        <item quantity="few">Свака %d сата</item>
+        <item quantity="other">Сваких %d сати</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Сваког минута</item>
+        <item quantity="few">Свака %d минута</item>
+        <item quantity="other">Сваких %d минута</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 порука</item>
+        <item quantity="few">%d поруке</item>
+        <item quantity="other">%d порука</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Желите ли заиста да избришете поруку?</item>
+        <item quantity="few">Желите ли заиста да избришете %1$d поруке?</item>
+        <item quantity="other">Желите ли заиста да избришете %1$d порука?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Желите ли заиста да померите ову поруку у фолдер непожељног?</item>
+        <item quantity="few">Желите ли заиста да померите %1$d поруке у фолдер непожељног?</item>
+        <item quantity="other">Желите ли заиста да померите %1$d порука у фолдер непожељног?</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d нова порука</item>
+        <item quantity="few">%d нове поруке</item>
+        <item quantity="other">%d нових порука</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">Прикупљање %d резултата</item>
+        <item quantity="few">Прикупљање %d резултата</item>
+        <item quantity="other">Прикупљање %d резултата</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">Прикупљање %1$d од %2$d резултата</item>
+        <item quantity="few">Прикупљање %1$d од %2$d резултата</item>
+        <item quantity="other">Прикупљање %1$d од %2$d резултата</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">Да бисте користили налог „%s“, морате унети лозинку сервера.</item>
+        <item quantity="few">Да бисте користили налог „%s“, морате унети лозинке сервера.</item>
+        <item quantity="other">Да бисте користили налог „%s“, морате унети лозинке сервера.</item>
+    </plurals>
+</resources>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Saatte bir</item>
+        <item quantity="other">%d saatte bir</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Dakikada bir</item>
+        <item quantity="other">%d dakikada bir</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 ileti</item>
+        <item quantity="other">%d ileti</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Bu iletiyi silmek istediğinizden emin misiniz?</item>
+        <item quantity="other">%1$d iletiyi silmek istediğinizden emin misiniz?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Bu iletiyi spam klasörüne taşımak istediğinizden emin misiniz?</item>
+        <item quantity="other">%1$d iletiyi spam klasörüne taşımak istediğinizden emin misiniz?</item>
+    </plurals>
+    <plurals name="message_view_attachment_summary">
+        <item quantity="one">%1$d ek (%2$s)</item>
+        <item quantity="other">%1$d ek (%2$s)</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d yeni ileti</item>
+        <item quantity="other">%d yeni ileti</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">%d sonuç getiriliyor</item>
+        <item quantity="other">%d sonuç getiriliyor</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">%2$d sonuçtan %1$d tanesi alınıyor</item>
+        <item quantity="other">%2$d sonuçtan %1$d tanesi alınıyor</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">&quot;%s&quot; hesabını kullanabilmek için sunucu parolasını sağlamanız gerekir.</item>
+        <item quantity="other">&quot;%s&quot; hesabını kullanabilmek için sunucu parolalarını sağlamanız gerekir.</item>
+    </plurals>
+</resources>

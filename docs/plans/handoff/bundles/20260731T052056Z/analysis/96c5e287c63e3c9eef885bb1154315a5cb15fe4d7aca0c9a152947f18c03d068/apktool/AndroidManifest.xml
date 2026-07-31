@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" android:compileSdkVersion="37" android:compileSdkVersionCodename="17" android:installLocation="auto" package="org.wikipedia" platformBuildVersionCode="37" platformBuildVersionName="17">
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:maxSdkVersion="22" android:name="android.permission.GET_ACCOUNTS"/>
+    <uses-permission android:maxSdkVersion="22" android:name="android.permission.AUTHENTICATE_ACCOUNTS"/>
+    <uses-permission android:maxSdkVersion="22" android:name="android.permission.MANAGE_ACCOUNTS"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-feature android:name="android.hardware.wifi" android:required="false"/>
+    <uses-feature android:name="android.hardware.location" android:required="false"/>
+    <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:required="false"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:required="false"/>
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH"/>
+        </intent>
+    </queries>
+    <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-feature android:name="android.hardware.vulkan.version" android:required="true" android:version="0x400003"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    <permission android:name="org.wikipedia.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" android:protectionLevel="signature"/>
+    <uses-permission android:name="org.wikipedia.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"/>
+    <application android:allowBackup="true" android:appComponentFactory="androidx.core.app.CoreComponentFactory" android:extractNativeLibs="false" android:fullBackupContent="@xml/full_backup_rules" android:icon="@mipmap/launcher" android:label="@string/app_name" android:localeConfig="@xml/_generated_res_locale_config" android:name="org.wikipedia.WikipediaApp" android:networkSecurityConfig="@xml/network_security_config" android:supportsRtl="true" android:theme="@style/AppTheme" android:usesCleartextTraffic="false">
+        <meta-data android:name="@string/preference_key_app_channel" android:value="F-Droid"/>
+        <uses-library android:name="com.sec.android.app.multiwindow" android:required="false"/>
+        <meta-data android:name="com.sec.android.support.multiwindow" android:value="true"/>
+        <meta-data android:name="android.webkit.WebView.MetricsOptOut" android:value="true"/>
+        <activity android:exported="true" android:name="org.wikipedia.main.MainActivity" android:theme="@style/AppTheme.Splash" android:windowSoftInputMode="adjustResize"/>
+        <activity-alias android:enabled="false" android:exported="true" android:icon="@mipmap/launcher_yir25" android:name="org.wikipedia.YIR25Icon" android:targetActivity="org.wikipedia.main.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+                <category android:name="android.intent.category.MULTIWINDOW_LAUNCHER"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="wikipedia"/>
+                <data android:host="*.wikipedia.org"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:exported="true" android:icon="@mipmap/launcher" android:name="org.wikipedia.DefaultIcon" android:targetActivity="org.wikipedia.main.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+                <category android:name="android.intent.category.MULTIWINDOW_LAUNCHER"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="wikipedia"/>
+                <data android:host="*.wikipedia.org"/>
+            </intent-filter>
+        </activity-alias>
+        <activity android:configChanges="orientation|screenSize" android:exported="true" android:launchMode="singleTask" android:name="org.wikipedia.page.PageActivity" android:parentActivityName="org.wikipedia.main.MainActivity" android:windowSoftInputMode="stateAlwaysHidden|adjustPan">
+            <meta-data android:name="android.support.PARENT_ACTIVITY" android:value=".main.MainActivity"/>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="http"/>
+                <data android:scheme="https"/>
+                <data android:host="*.wikipedia.org" android:pathPrefix="/wiki/"/>
+                <data android:host="*.wikipedia.org" android:pathPattern="/zh.*"/>
+                <data android:host="*.wikipedia.org" android:pathPattern="/sr.*"/>
+            </intent-filter>
+        </activity>
+        <activity android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:name="org.wikipedia.settings.SettingsActivity"/>
+        <activity android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:name="org.wikipedia.settings.dev.DeveloperSettingsActivity"/>
+        <activity android:name="org.wikipedia.settings.NotificationSettingsActivity"/>
+        <activity android:label="@string/wikipedia_languages_title" android:name="org.wikipedia.settings.languages.WikipediaLanguagesActivity"/>
+        <activity android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:name="org.wikipedia.language.LangLinksActivity" android:windowSoftInputMode="adjustResize"/>
+        <activity android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:name="org.wikipedia.language.addlanguages.AddLanguagesListActivity" android:windowSoftInputMode="adjustResize"/>
+        <activity android:launchMode="singleTask" android:name="org.wikipedia.suggestededits.SuggestionsActivity" android:windowSoftInputMode="adjustPan"/>
+        <activity android:label="@string/suggested_edits_activity_title" android:name="org.wikipedia.suggestededits.SuggestedEditsTasksActivity" android:theme="@style/AppTheme.ActionBar"/>
+        <activity android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:name="org.wikipedia.edit.EditSectionActivity" android:windowSoftInputMode="stateVisible|adjustResize"/>
+        <activity android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:name="org.wikipedia.login.LoginActivity" android:theme="@style/AppTheme" android:windowSoftInputMode="stateAlwaysHidden|adjustResize"/>
+        <activity android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:name="org.wikipedia.createaccount.CreateAccountActivity" android:theme="@style/AppTheme" android:windowSoftInputMode="stateAlwaysHidden|adjustResize"/>
+        <activity android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:name="org.wikipedia.login.ResetPasswordActivity" android:theme="@style/AppTheme" android:windowSoftInputMode="stateAlwaysHidden|adjustResize"/>
+        <activity android:configChanges="orientation|screenSize" android:name="org.wikipedia.gallery.GalleryActivity" android:theme="@style/AppTheme.FullScreen"/>
+        <activity android:name="org.wikipedia.settings.LicenseActivity"/>
+        <activity android:label="@string/view_card_news_title" android:name="org.wikipedia.feed.news.NewsActivity"/>
+        <activity android:configChanges="orientation|screenSize" android:name="org.wikipedia.descriptions.DescriptionEditActivity" android:windowSoftInputMode="adjustResize"/>
+        <activity android:configChanges="orientation|screenSize" android:exported="true" android:name="org.wikipedia.search.SearchActivity" android:theme="@style/AppTheme.Splash" android:windowSoftInputMode="adjustResize">
+            <intent-filter android:label="@string/search_hint">
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+            <intent-filter android:label="@string/search_hint">
+                <action android:name="android.intent.action.PROCESS_TEXT"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+        </activity>
+        <activity android:name="org.wikipedia.descriptions.DescriptionEditSuccessActivity" android:theme="@style/AppTheme.FullScreen.Translucent" android:windowSoftInputMode="stateAlwaysHidden"/>
+        <activity android:name="org.wikipedia.descriptions.DescriptionEditTutorialActivity"/>
+        <activity android:name="org.wikipedia.readinglist.ReadingListActivity"/>
+        <activity android:name="org.wikipedia.onboarding.InitialOnboardingActivity"/>
+        <activity android:name="org.wikipedia.feed.topread.TopReadArticlesActivity" android:theme="@style/AppTheme.ActionBar"/>
+        <activity android:name="org.wikipedia.feed.didyouknow.DidYouKnowActivity"/>
+        <activity android:configChanges="orientation|screenSize" android:name="org.wikipedia.feed.onthisday.OnThisDayActivity"/>
+        <activity android:label="@string/view_random_card_title" android:name="org.wikipedia.random.RandomActivity"/>
+        <activity android:label="@string/preference_title_app_theme" android:name="org.wikipedia.theme.ThemeFittingRoomActivity" android:theme="@style/AppTheme.ActionBar"/>
+        <activity android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:label="@string/notifications_activity_title" android:name="org.wikipedia.notifications.NotificationActivity"/>
+        <activity android:label="@string/tabs_activity_title" android:name="org.wikipedia.page.tabs.TabActivity"/>
+        <activity android:name="org.wikipedia.categories.CategoryActivity"/>
+        <activity android:name="org.wikipedia.suggestededits.SuggestedEditsImageTagsOnboardingActivity"/>
+        <activity android:name="org.wikipedia.suggestededits.SuggestedEditsImageRecsOnboardingActivity"/>
+        <activity android:name="org.wikipedia.suggestededits.SuggestedEditsRecentEditsOnboardingActivity"/>
+        <activity android:label="@string/watchlist_title" android:name="org.wikipedia.watchlist.WatchlistActivity" android:theme="@style/AppTheme.ActionBar"/>
+        <activity android:label="@string/watchlist_filter_title" android:name="org.wikipedia.watchlist.WatchlistFilterActivity" android:theme="@style/AppTheme.ActionBar"/>
+        <activity android:name="org.wikipedia.suggestededits.SuggestedEditsImageTagEditActivity" android:theme="@style/AppTheme.ActionBar"/>
+        <activity android:name="org.wikipedia.suggestededits.SuggestedEditsRecentEditsActivity"/>
+        <activity android:label="@string/patroller_tasks_filters_title" android:name="org.wikipedia.suggestededits.SuggestedEditsRecentEditsFilterActivity" android:theme="@style/AppTheme.ActionBar"/>
+        <activity android:label="" android:name="org.wikipedia.commons.FilePageActivity" android:theme="@style/AppTheme"/>
+        <activity android:label="" android:name="org.wikipedia.talk.TalkTopicsActivity"/>
+        <activity android:name="org.wikipedia.talk.TalkTopicActivity"/>
+        <activity android:configChanges="orientation|screenSize" android:name="org.wikipedia.talk.TalkReplyActivity"/>
+        <activity android:name="org.wikipedia.talk.ArchivedTalkPagesActivity"/>
+        <activity android:name="org.wikipedia.diff.ArticleEditDetailsActivity"/>
+        <activity android:configChanges="orientation|screenSize" android:name="org.wikipedia.activity.SingleWebViewActivity" android:theme="@style/AppTheme"/>
+        <activity android:label="@string/customize_toolbar_title" android:name="org.wikipedia.page.customize.CustomizeToolbarActivity" android:theme="@style/AppTheme.ActionBar"/>
+        <activity android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:label="@string/notifications_filter_label" android:name="org.wikipedia.notifications.NotificationFilterActivity" android:theme="@style/AppTheme.ActionBar"/>
+        <activity android:name="org.wikipedia.page.edithistory.EditHistoryListActivity"/>
+        <activity android:name="org.wikipedia.usercontrib.UserContribListActivity"/>
+        <activity android:label="@string/user_contrib_filter_activity_title" android:name="org.wikipedia.usercontrib.UserContribFilterActivity" android:theme="@style/AppTheme.ActionBar"/>
+        <activity android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:label="@string/insert_media_title" android:name="org.wikipedia.edit.insertmedia.InsertMediaActivity"/>
+        <activity android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:label="@string/templates_search_hint" android:name="org.wikipedia.edit.templates.TemplatesSearchActivity"/>
+        <activity android:name="org.wikipedia.places.PlacesActivity"/>
+        <activity android:name="org.wikipedia.places.PlacesFilterActivity"/>
+        <activity android:name="org.wikipedia.talk.template.TalkTemplatesActivity" android:theme="@style/AppTheme"/>
+        <activity android:name="org.wikipedia.settings.AboutActivity"/>
+        <activity android:name="org.wikipedia.games.onthisday.OnThisDayGameActivity"/>
+        <activity android:name="org.wikipedia.games.GamesHubActivity"/>
+        <activity android:name="org.wikipedia.readinglist.recommended.RecommendedReadingListOnboardingActivity"/>
+        <activity android:name="org.wikipedia.settings.dev.playground.CategoryDeveloperPlayGround"/>
+        <activity android:name="org.wikipedia.yearinreview.YearInReviewOnboardingActivity"/>
+        <activity android:name="org.wikipedia.yearinreview.YearInReviewActivity"/>
+        <activity android:name="org.wikipedia.readinglist.recommended.RecommendedReadingListSettingsActivity" android:windowSoftInputMode="adjustResize"/>
+        <activity android:name="org.wikipedia.activitytab.ActivityTabCustomizationActivity"/>
+        <activity android:name="org.wikipedia.activitytab.ActivityTabOnboardingActivity"/>
+        <activity android:name="org.wikipedia.search.HybridSearchOnboardingActivity"/>
+        <activity android:name="org.wikipedia.donate.donationreminder.DonationReminderActivity" android:windowSoftInputMode="adjustResize"/>
+        <activity android:name="org.wikipedia.widgets.readingchallenge.ReadingChallengeOnboardingActivity"/>
+        <activity android:name="org.wikipedia.feed.onboarding.ExploreFeedUpdatePromptActivity"/>
+        <activity android:name="org.wikipedia.feed.onboarding.ExploreFeedBuildingActivity"/>
+        <activity android:name="org.wikipedia.feed.personalization.PersonalizationActivity"/>
+        <activity android:name="org.wikipedia.settings.homefeed.HomeFeedSettingsActivity"/>
+        <provider android:authorities="org.wikipedia.fileprovider" android:exported="false" android:grantUriPermissions="true" android:name="org.wikipedia.WikipediaFileProvider">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths"/>
+        </provider>
+        <receiver android:exported="true" android:icon="@mipmap/launcher" android:label="@string/widget_name_search" android:name="org.wikipedia.widgets.WidgetProviderSearch">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_search"/>
+        </receiver>
+        <receiver android:exported="true" android:icon="@mipmap/launcher" android:label="@string/widget_name_featured_page" android:name="org.wikipedia.widgets.WidgetProviderFeaturedPage">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_featured_page"/>
+        </receiver>
+        <receiver android:exported="true" android:label="@string/random_article_widget_name" android:name="org.wikipedia.widgets.readingchallenge.ReadingChallengeWidgetReceiver">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/reading_challenge_widget_info"/>
+        </receiver>
+        <receiver android:exported="true" android:name="org.wikipedia.notifications.NotificationPollBroadcastReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name=".notifications.NotificationPollBroadcastReceiver.ACTION_POLL"/>
+            </intent-filter>
+        </receiver>
+        <service android:exported="false" android:name="org.wikipedia.auth.AuthenticatorService">
+            <intent-filter>
+                <action android:name="android.accounts.AccountAuthenticator"/>
+            </intent-filter>
+            <meta-data android:name="android.accounts.AccountAuthenticator" android:resource="@xml/wikimedia_authenticator"/>
+        </service>
+        <receiver android:name="org.wikipedia.savedpages.SavedPageSyncNotification"/>
+        <activity android:enabled="true" android:excludeFromRecents="true" android:exported="false" android:name="androidx.glance.appwidget.action.ActionTrampolineActivity" android:theme="@android:style/Theme.NoDisplay"/>
+        <activity android:enabled="true" android:exported="false" android:launchMode="singleInstance" android:name="androidx.glance.appwidget.action.InvisibleActionTrampolineActivity" android:noHistory="true" android:taskAffinity="androidx.glance.appwidget.ListAdapterCallbackTrampoline" android:theme="@style/Widget.Glance.AppWidget.CallbackTrampoline"/>
+        <receiver android:enabled="true" android:exported="false" android:name="androidx.glance.appwidget.action.ActionCallbackBroadcastReceiver"/>
+        <receiver android:enabled="true" android:exported="false" android:name="androidx.glance.appwidget.UnmanagedSessionReceiver"/>
+        <receiver android:enabled="true" android:exported="false" android:name="androidx.glance.appwidget.MyPackageReplacedReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
+        <service android:exported="true" android:name="androidx.glance.appwidget.GlanceRemoteViewsService" android:permission="android.permission.BIND_REMOTEVIEWS"/>
+        <provider android:authorities="org.wikipedia.androidx-startup" android:exported="false" android:name="androidx.startup.InitializationProvider">
+            <meta-data android:name="androidx.work.WorkManagerInitializer" android:value="androidx.startup"/>
+            <meta-data android:name="androidx.emoji2.text.EmojiCompatInitializer" android:value="androidx.startup"/>
+            <meta-data android:name="androidx.lifecycle.ProcessLifecycleInitializer" android:value="androidx.startup"/>
+            <meta-data android:name="okhttp3.internal.platform.PlatformInitializer" android:value="androidx.startup"/>
+            <meta-data android:name="androidx.profileinstaller.ProfileInstallerInitializer" android:value="androidx.startup"/>
+        </provider>
+        <service android:directBootAware="false" android:enabled="@bool/enable_system_job_service_default" android:exported="true" android:name="androidx.work.impl.background.systemjob.SystemJobService" android:permission="android.permission.BIND_JOB_SERVICE"/>
+        <service android:directBootAware="false" android:enabled="@bool/enable_system_foreground_service_default" android:exported="false" android:name="androidx.work.impl.foreground.SystemForegroundService"/>
+        <receiver android:directBootAware="false" android:enabled="true" android:exported="false" android:name="androidx.work.impl.utils.ForceStopRunnable$BroadcastReceiver"/>
+        <receiver android:directBootAware="false" android:enabled="false" android:exported="false" android:name="androidx.work.impl.background.systemalarm.RescheduleReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            </intent-filter>
+        </receiver>
+        <receiver android:directBootAware="false" android:enabled="true" android:exported="true" android:name="androidx.work.impl.diagnostics.DiagnosticsReceiver" android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="androidx.work.diagnostics.REQUEST_DIAGNOSTICS"/>
+            </intent-filter>
+        </receiver>
+        <service android:directBootAware="true" android:exported="false" android:name="androidx.room.MultiInstanceInvalidationService"/>
+        <service android:name="androidx.core.widget.RemoteViewsCompatService" android:permission="android.permission.BIND_REMOTEVIEWS"/>
+        <uses-library android:name="androidx.window.extensions" android:required="false"/>
+        <uses-library android:name="androidx.window.sidecar" android:required="false"/>
+        <provider android:authorities="org.wikipedia.plumber-installer" android:enabled="@bool/leak_canary_plumber_auto_install" android:exported="false" android:name="leakcanary.internal.PlumberInstaller"/>
+        <receiver android:directBootAware="false" android:enabled="true" android:exported="true" android:name="androidx.profileinstaller.ProfileInstallReceiver" android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="androidx.profileinstaller.action.SKIP_FILE"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION"/>
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

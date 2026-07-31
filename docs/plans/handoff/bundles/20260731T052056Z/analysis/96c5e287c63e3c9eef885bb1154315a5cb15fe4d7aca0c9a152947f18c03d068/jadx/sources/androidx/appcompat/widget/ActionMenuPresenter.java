@@ -1,0 +1,716 @@
+package androidx.appcompat.widget;
+
+import android.content.Context;
+import android.content.res.Configuration;
+import android.content.res.Resources;
+import android.graphics.drawable.Drawable;
+import android.os.Parcel;
+import android.os.Parcelable;
+import android.util.SparseBooleanArray;
+import android.view.LayoutInflater;
+import android.view.MenuItem;
+import android.view.View;
+import android.view.ViewGroup;
+import androidx.appcompat.view.menu.ActionMenuItemView;
+import androidx.appcompat.view.menu.MenuBuilder;
+import androidx.appcompat.view.menu.MenuItemImpl;
+import androidx.appcompat.view.menu.MenuPopup;
+import androidx.appcompat.view.menu.MenuPopupHelper;
+import androidx.appcompat.view.menu.MenuPresenter;
+import androidx.appcompat.view.menu.MenuView;
+import androidx.appcompat.view.menu.ShowableListMenu;
+import androidx.appcompat.view.menu.SubMenuBuilder;
+import androidx.appcompat.widget.ActionMenuView;
+import androidx.core.view.ActionProvider;
+import androidx.fragment.app.FragmentState;
+import java.util.ArrayList;
+import kotlin.text.RegexKt;
+import org.wikipedia.R;
+
+/* compiled from: r8-map-id-5c42cb83f75859ba9a04ff37bb86a22b3712bc256fe317787b2a7645129b709e */
+/* loaded from: classes.dex */
+public final class ActionMenuPresenter implements MenuPresenter {
+    public OverflowPopup mActionButtonPopup;
+    public int mActionItemWidthLimit;
+    public MenuPresenter.Callback mCallback;
+    public Context mContext;
+    public boolean mExpandedActionViewsExclusive;
+    public int mId;
+    public int mMaxItems;
+    public MenuBuilder mMenu;
+    public MenuView mMenuView;
+    public int mOpenSubMenuId;
+    public OverflowMenuButton mOverflowButton;
+    public OverflowPopup mOverflowPopup;
+    public Drawable mPendingOverflowIcon;
+    public boolean mPendingOverflowIconSet;
+    public ActionMenuPopupCallback mPopupCallback;
+    public OpenOverflowRunnable mPostedOpenRunnable;
+    public boolean mReserveOverflow;
+    public boolean mReserveOverflowSet;
+    public final Context mSystemContext;
+    public final LayoutInflater mSystemInflater;
+    public int mWidthLimit;
+    public final SparseBooleanArray mActionButtonGroups = new SparseBooleanArray();
+    public final PopupMenu$1 mPopupPresenterCallback = new PopupMenu$1(4, this);
+
+    /* compiled from: r8-map-id-5c42cb83f75859ba9a04ff37bb86a22b3712bc256fe317787b2a7645129b709e */
+    public final class ActionMenuPopupCallback extends ActionMenuItemView.PopupCallback {
+        public ActionMenuPopupCallback() {
+        }
+    }
+
+    /* compiled from: r8-map-id-5c42cb83f75859ba9a04ff37bb86a22b3712bc256fe317787b2a7645129b709e */
+    public final class OpenOverflowRunnable implements Runnable {
+        public final OverflowPopup mPopup;
+
+        public OpenOverflowRunnable(OverflowPopup overflowPopup) {
+            this.mPopup = overflowPopup;
+        }
+
+        @Override // java.lang.Runnable
+        public final void run() {
+            MenuBuilder.Callback callback;
+            ActionMenuPresenter actionMenuPresenter = ActionMenuPresenter.this;
+            MenuBuilder menuBuilder = actionMenuPresenter.mMenu;
+            if (menuBuilder != null && (callback = menuBuilder.mCallback) != null) {
+                callback.onMenuModeChange(menuBuilder);
+            }
+            View view = (View) actionMenuPresenter.mMenuView;
+            if (view != null && view.getWindowToken() != null) {
+                OverflowPopup overflowPopup = this.mPopup;
+                if (!overflowPopup.isShowing()) {
+                    if (overflowPopup.mAnchorView != null) {
+                        overflowPopup.showPopup(0, 0, false, false);
+                    }
+                }
+                actionMenuPresenter.mOverflowPopup = overflowPopup;
+            }
+            actionMenuPresenter.mPostedOpenRunnable = null;
+        }
+    }
+
+    /* compiled from: r8-map-id-5c42cb83f75859ba9a04ff37bb86a22b3712bc256fe317787b2a7645129b709e */
+    public final class SavedState implements Parcelable {
+        public static final Parcelable.Creator<SavedState> CREATOR = new FragmentState.AnonymousClass1(3);
+        public int openSubMenuId;
+
+        @Override // android.os.Parcelable
+        public final int describeContents() {
+            return 0;
+        }
+
+        @Override // android.os.Parcelable
+        public final void writeToParcel(Parcel parcel, int i) {
+            parcel.writeInt(this.openSubMenuId);
+        }
+    }
+
+    public ActionMenuPresenter(Context context) {
+        this.mSystemContext = context;
+        this.mSystemInflater = LayoutInflater.from(context);
+    }
+
+    @Override // androidx.appcompat.view.menu.MenuPresenter
+    public final boolean collapseItemActionView(MenuItemImpl menuItemImpl) {
+        return false;
+    }
+
+    @Override // androidx.appcompat.view.menu.MenuPresenter
+    public final boolean expandItemActionView(MenuItemImpl menuItemImpl) {
+        return false;
+    }
+
+    @Override // androidx.appcompat.view.menu.MenuPresenter
+    public final boolean flagActionItems() {
+        int i;
+        ArrayList arrayList;
+        int i2;
+        boolean z;
+        ActionMenuPresenter actionMenuPresenter = this;
+        MenuBuilder menuBuilder = actionMenuPresenter.mMenu;
+        if (menuBuilder != null) {
+            arrayList = menuBuilder.getVisibleItems();
+            i = arrayList.size();
+        } else {
+            i = 0;
+            arrayList = null;
+        }
+        int i3 = actionMenuPresenter.mMaxItems;
+        int i4 = actionMenuPresenter.mActionItemWidthLimit;
+        int makeMeasureSpec = View.MeasureSpec.makeMeasureSpec(0, 0);
+        ViewGroup viewGroup = (ViewGroup) actionMenuPresenter.mMenuView;
+        int i5 = 0;
+        boolean z2 = false;
+        int i6 = 0;
+        int i7 = 0;
+        while (true) {
+            i2 = 2;
+            z = true;
+            if (i5 >= i) {
+                break;
+            }
+            MenuItemImpl menuItemImpl = (MenuItemImpl) arrayList.get(i5);
+            int i8 = menuItemImpl.mShowAsAction;
+            if ((i8 & 2) == 2) {
+                i6++;
+            } else if ((i8 & 1) == 1) {
+                i7++;
+            } else {
+                z2 = true;
+            }
+            if (actionMenuPresenter.mExpandedActionViewsExclusive && menuItemImpl.mIsActionViewExpanded) {
+                i3 = 0;
+            }
+            i5++;
+        }
+        if (actionMenuPresenter.mReserveOverflow && (z2 || i7 + i6 > i3)) {
+            i3--;
+        }
+        int i9 = i3 - i6;
+        SparseBooleanArray sparseBooleanArray = actionMenuPresenter.mActionButtonGroups;
+        sparseBooleanArray.clear();
+        int i10 = 0;
+        int i11 = 0;
+        while (i10 < i) {
+            MenuItemImpl menuItemImpl2 = (MenuItemImpl) arrayList.get(i10);
+            int i12 = menuItemImpl2.mShowAsAction;
+            boolean z3 = (i12 & 2) == i2 ? z : false;
+            int i13 = menuItemImpl2.mGroup;
+            if (z3) {
+                View itemView = actionMenuPresenter.getItemView(menuItemImpl2, null, viewGroup);
+                itemView.measure(makeMeasureSpec, makeMeasureSpec);
+                int measuredWidth = itemView.getMeasuredWidth();
+                i4 -= measuredWidth;
+                if (i11 == 0) {
+                    i11 = measuredWidth;
+                }
+                if (i13 != 0) {
+                    sparseBooleanArray.put(i13, z);
+                }
+                menuItemImpl2.setIsActionButton(z);
+            } else if ((i12 & 1) == z) {
+                boolean z4 = sparseBooleanArray.get(i13);
+                boolean z5 = ((i9 > 0 || z4) && i4 > 0) ? z : false;
+                if (z5) {
+                    View itemView2 = actionMenuPresenter.getItemView(menuItemImpl2, null, viewGroup);
+                    itemView2.measure(makeMeasureSpec, makeMeasureSpec);
+                    int measuredWidth2 = itemView2.getMeasuredWidth();
+                    i4 -= measuredWidth2;
+                    if (i11 == 0) {
+                        i11 = measuredWidth2;
+                    }
+                    z5 &= i4 + i11 > 0;
+                }
+                if (z5 && i13 != 0) {
+                    sparseBooleanArray.put(i13, true);
+                } else if (z4) {
+                    sparseBooleanArray.put(i13, false);
+                    for (int i14 = 0; i14 < i10; i14++) {
+                        MenuItemImpl menuItemImpl3 = (MenuItemImpl) arrayList.get(i14);
+                        if (menuItemImpl3.mGroup == i13) {
+                            if ((menuItemImpl3.mFlags & 32) == 32) {
+                                i9++;
+                            }
+                            menuItemImpl3.setIsActionButton(false);
+                        }
+                    }
+                }
+                if (z5) {
+                    i9--;
+                }
+                menuItemImpl2.setIsActionButton(z5);
+            } else {
+                menuItemImpl2.setIsActionButton(false);
+                i10++;
+                i2 = 2;
+                actionMenuPresenter = this;
+                z = true;
+            }
+            i10++;
+            i2 = 2;
+            actionMenuPresenter = this;
+            z = true;
+        }
+        return z;
+    }
+
+    @Override // androidx.appcompat.view.menu.MenuPresenter
+    public final int getId() {
+        return this.mId;
+    }
+
+    /* JADX WARN: Multi-variable type inference failed */
+    /* JADX WARN: Type inference failed for: r5v0, types: [android.view.View] */
+    /* JADX WARN: Type inference failed for: r5v4, types: [androidx.appcompat.view.menu.MenuView$ItemView] */
+    /* JADX WARN: Type inference failed for: r5v6 */
+    /* JADX WARN: Type inference failed for: r5v7 */
+    public final View getItemView(MenuItemImpl menuItemImpl, View view, ViewGroup viewGroup) {
+        View actionView = menuItemImpl.getActionView();
+        if (actionView == null || menuItemImpl.hasCollapsibleActionView()) {
+            ActionMenuItemView actionMenuItemView = view instanceof MenuView.ItemView ? (MenuView.ItemView) view : (MenuView.ItemView) this.mSystemInflater.inflate(R.layout.abc_action_menu_item_layout, viewGroup, false);
+            actionMenuItemView.initialize(menuItemImpl);
+            ActionMenuItemView actionMenuItemView2 = actionMenuItemView;
+            actionMenuItemView2.setItemInvoker((ActionMenuView) this.mMenuView);
+            ActionMenuPopupCallback actionMenuPopupCallback = this.mPopupCallback;
+            if (actionMenuPopupCallback == null) {
+                actionMenuPopupCallback = new ActionMenuPopupCallback();
+                this.mPopupCallback = actionMenuPopupCallback;
+            }
+            actionMenuItemView2.setPopupCallback(actionMenuPopupCallback);
+            actionView = actionMenuItemView;
+        }
+        actionView.setVisibility(menuItemImpl.mIsActionViewExpanded ? 8 : 0);
+        ViewGroup.LayoutParams layoutParams = actionView.getLayoutParams();
+        ((ActionMenuView) viewGroup).getClass();
+        if (!(layoutParams instanceof ActionMenuView.LayoutParams)) {
+            actionView.setLayoutParams(ActionMenuView.generateLayoutParams(layoutParams));
+        }
+        return actionView;
+    }
+
+    public final boolean hideOverflowMenu() {
+        Object obj;
+        OpenOverflowRunnable openOverflowRunnable = this.mPostedOpenRunnable;
+        if (openOverflowRunnable != null && (obj = this.mMenuView) != null) {
+            ((View) obj).removeCallbacks(openOverflowRunnable);
+            this.mPostedOpenRunnable = null;
+            return true;
+        }
+        OverflowPopup overflowPopup = this.mOverflowPopup;
+        if (overflowPopup == null) {
+            return false;
+        }
+        if (overflowPopup.isShowing()) {
+            overflowPopup.mPopup.dismiss();
+        }
+        return true;
+    }
+
+    @Override // androidx.appcompat.view.menu.MenuPresenter
+    public final void initForMenu(Context context, MenuBuilder menuBuilder) {
+        this.mContext = context;
+        LayoutInflater.from(context);
+        this.mMenu = menuBuilder;
+        Resources resources = context.getResources();
+        if (!this.mReserveOverflowSet) {
+            this.mReserveOverflow = true;
+        }
+        int i = 2;
+        this.mWidthLimit = context.getResources().getDisplayMetrics().widthPixels / 2;
+        Configuration configuration = context.getResources().getConfiguration();
+        int i2 = configuration.screenWidthDp;
+        int i3 = configuration.screenHeightDp;
+        if (configuration.smallestScreenWidthDp > 600 || i2 > 600 || ((i2 > 960 && i3 > 720) || (i2 > 720 && i3 > 960))) {
+            i = 5;
+        } else if (i2 >= 500 || ((i2 > 640 && i3 > 480) || (i2 > 480 && i3 > 640))) {
+            i = 4;
+        } else if (i2 >= 360) {
+            i = 3;
+        }
+        this.mMaxItems = i;
+        int i4 = this.mWidthLimit;
+        if (this.mReserveOverflow) {
+            if (this.mOverflowButton == null) {
+                OverflowMenuButton overflowMenuButton = new OverflowMenuButton(this.mSystemContext);
+                this.mOverflowButton = overflowMenuButton;
+                if (this.mPendingOverflowIconSet) {
+                    overflowMenuButton.setImageDrawable(this.mPendingOverflowIcon);
+                    this.mPendingOverflowIcon = null;
+                    this.mPendingOverflowIconSet = false;
+                }
+                int makeMeasureSpec = View.MeasureSpec.makeMeasureSpec(0, 0);
+                this.mOverflowButton.measure(makeMeasureSpec, makeMeasureSpec);
+            }
+            i4 -= this.mOverflowButton.getMeasuredWidth();
+        } else {
+            this.mOverflowButton = null;
+        }
+        this.mActionItemWidthLimit = i4;
+        float f = resources.getDisplayMetrics().density;
+    }
+
+    public final boolean isOverflowMenuShowing() {
+        OverflowPopup overflowPopup = this.mOverflowPopup;
+        return overflowPopup != null && overflowPopup.isShowing();
+    }
+
+    @Override // androidx.appcompat.view.menu.MenuPresenter
+    public final void onCloseMenu(MenuBuilder menuBuilder, boolean z) {
+        hideOverflowMenu();
+        OverflowPopup overflowPopup = this.mActionButtonPopup;
+        if (overflowPopup != null && overflowPopup.isShowing()) {
+            overflowPopup.mPopup.dismiss();
+        }
+        MenuPresenter.Callback callback = this.mCallback;
+        if (callback != null) {
+            callback.onCloseMenu(menuBuilder, z);
+        }
+    }
+
+    @Override // androidx.appcompat.view.menu.MenuPresenter
+    public final void onRestoreInstanceState(Parcelable parcelable) {
+        int i;
+        MenuItem findItem;
+        if ((parcelable instanceof SavedState) && (i = ((SavedState) parcelable).openSubMenuId) > 0 && (findItem = this.mMenu.findItem(i)) != null) {
+            onSubMenuSelected((SubMenuBuilder) findItem.getSubMenu());
+        }
+    }
+
+    @Override // androidx.appcompat.view.menu.MenuPresenter
+    public final Parcelable onSaveInstanceState() {
+        SavedState savedState = new SavedState();
+        savedState.openSubMenuId = this.mOpenSubMenuId;
+        return savedState;
+    }
+
+    /* JADX WARN: Multi-variable type inference failed */
+    @Override // androidx.appcompat.view.menu.MenuPresenter
+    public final boolean onSubMenuSelected(SubMenuBuilder subMenuBuilder) {
+        boolean z = false;
+        if (subMenuBuilder.hasVisibleItems()) {
+            SubMenuBuilder subMenuBuilder2 = subMenuBuilder;
+            while (true) {
+                MenuBuilder menuBuilder = subMenuBuilder2.mParentMenu;
+                if (menuBuilder == this.mMenu) {
+                    break;
+                }
+                subMenuBuilder2 = (SubMenuBuilder) menuBuilder;
+            }
+            MenuItemImpl menuItemImpl = subMenuBuilder2.mItem;
+            ViewGroup viewGroup = (ViewGroup) this.mMenuView;
+            View view = null;
+            if (viewGroup != null) {
+                int childCount = viewGroup.getChildCount();
+                int i = 0;
+                while (true) {
+                    if (i >= childCount) {
+                        break;
+                    }
+                    View childAt = viewGroup.getChildAt(i);
+                    if ((childAt instanceof MenuView.ItemView) && ((MenuView.ItemView) childAt).getItemData() == menuItemImpl) {
+                        view = childAt;
+                        break;
+                    }
+                    i++;
+                }
+            }
+            if (view != null) {
+                this.mOpenSubMenuId = subMenuBuilder.mItem.mId;
+                int size = subMenuBuilder.mItems.size();
+                int i2 = 0;
+                while (true) {
+                    if (i2 >= size) {
+                        break;
+                    }
+                    MenuItem item = subMenuBuilder.getItem(i2);
+                    if (item.isVisible() && item.getIcon() != null) {
+                        z = true;
+                        break;
+                    }
+                    i2++;
+                }
+                OverflowPopup overflowPopup = new OverflowPopup(this.mContext, subMenuBuilder, view);
+                this.mActionButtonPopup = overflowPopup;
+                overflowPopup.setForceShowIcon(z);
+                this.mActionButtonPopup.show();
+                MenuPresenter.Callback callback = this.mCallback;
+                if (callback != null) {
+                    callback.onOpenSubMenu(subMenuBuilder);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override // androidx.appcompat.view.menu.MenuPresenter
+    public final void setCallback(MenuPresenter.Callback callback) {
+        throw null;
+    }
+
+    public final boolean showOverflowMenu() {
+        MenuBuilder menuBuilder;
+        if (!this.mReserveOverflow || isOverflowMenuShowing() || (menuBuilder = this.mMenu) == null || this.mMenuView == null || this.mPostedOpenRunnable != null) {
+            return false;
+        }
+        menuBuilder.flagActionItems();
+        if (menuBuilder.mNonActionItems.isEmpty()) {
+            return false;
+        }
+        OpenOverflowRunnable openOverflowRunnable = new OpenOverflowRunnable(new OverflowPopup(this.mContext, this.mMenu, this.mOverflowButton));
+        this.mPostedOpenRunnable = openOverflowRunnable;
+        ((View) this.mMenuView).post(openOverflowRunnable);
+        return true;
+    }
+
+    /* JADX WARN: Multi-variable type inference failed */
+    @Override // androidx.appcompat.view.menu.MenuPresenter
+    public final void updateMenuView(boolean z) {
+        int i;
+        ViewGroup viewGroup = (ViewGroup) this.mMenuView;
+        ArrayList arrayList = null;
+        boolean z2 = false;
+        if (viewGroup != null) {
+            MenuBuilder menuBuilder = this.mMenu;
+            if (menuBuilder != null) {
+                menuBuilder.flagActionItems();
+                ArrayList visibleItems = this.mMenu.getVisibleItems();
+                int size = visibleItems.size();
+                i = 0;
+                for (int i2 = 0; i2 < size; i2++) {
+                    MenuItemImpl menuItemImpl = (MenuItemImpl) visibleItems.get(i2);
+                    if ((menuItemImpl.mFlags & 32) == 32) {
+                        View childAt = viewGroup.getChildAt(i);
+                        MenuItemImpl itemData = childAt instanceof MenuView.ItemView ? ((MenuView.ItemView) childAt).getItemData() : null;
+                        View itemView = getItemView(menuItemImpl, childAt, viewGroup);
+                        if (menuItemImpl != itemData) {
+                            itemView.setPressed(false);
+                            itemView.jumpDrawablesToCurrentState();
+                        }
+                        if (itemView != childAt) {
+                            ViewGroup viewGroup2 = (ViewGroup) itemView.getParent();
+                            if (viewGroup2 != null) {
+                                viewGroup2.removeView(itemView);
+                            }
+                            ((ViewGroup) this.mMenuView).addView(itemView, i);
+                        }
+                        i++;
+                    }
+                }
+            } else {
+                i = 0;
+            }
+            while (i < viewGroup.getChildCount()) {
+                if (viewGroup.getChildAt(i) == this.mOverflowButton) {
+                    i++;
+                } else {
+                    viewGroup.removeViewAt(i);
+                }
+            }
+        }
+        ((View) this.mMenuView).requestLayout();
+        MenuBuilder menuBuilder2 = this.mMenu;
+        if (menuBuilder2 != null) {
+            menuBuilder2.flagActionItems();
+            ArrayList arrayList2 = menuBuilder2.mActionItems;
+            int size2 = arrayList2.size();
+            for (int i3 = 0; i3 < size2; i3++) {
+                ActionProvider actionProvider = ((MenuItemImpl) arrayList2.get(i3)).mActionProvider;
+            }
+        }
+        MenuBuilder menuBuilder3 = this.mMenu;
+        if (menuBuilder3 != null) {
+            menuBuilder3.flagActionItems();
+            arrayList = menuBuilder3.mNonActionItems;
+        }
+        if (this.mReserveOverflow && arrayList != null) {
+            int size3 = arrayList.size();
+            if (size3 == 1) {
+                z2 = !((MenuItemImpl) arrayList.get(0)).mIsActionViewExpanded;
+            } else if (size3 > 0) {
+                z2 = true;
+            }
+        }
+        OverflowMenuButton overflowMenuButton = this.mOverflowButton;
+        if (z2) {
+            if (overflowMenuButton == null) {
+                overflowMenuButton = new OverflowMenuButton(this.mSystemContext);
+                this.mOverflowButton = overflowMenuButton;
+            }
+            ViewGroup viewGroup3 = (ViewGroup) overflowMenuButton.getParent();
+            if (viewGroup3 != this.mMenuView) {
+                if (viewGroup3 != null) {
+                    viewGroup3.removeView(this.mOverflowButton);
+                }
+                ActionMenuView actionMenuView = (ActionMenuView) this.mMenuView;
+                OverflowMenuButton overflowMenuButton2 = this.mOverflowButton;
+                actionMenuView.getClass();
+                ActionMenuView.LayoutParams generateDefaultLayoutParams = ActionMenuView.generateDefaultLayoutParams();
+                generateDefaultLayoutParams.isOverflowButton = true;
+                actionMenuView.addView(overflowMenuButton2, generateDefaultLayoutParams);
+            }
+        } else if (overflowMenuButton != null) {
+            Object parent = overflowMenuButton.getParent();
+            Object obj = this.mMenuView;
+            if (parent == obj) {
+                ((ViewGroup) obj).removeView(this.mOverflowButton);
+            }
+        }
+        ((ActionMenuView) this.mMenuView).setOverflowReserved(this.mReserveOverflow);
+    }
+
+    /* compiled from: r8-map-id-5c42cb83f75859ba9a04ff37bb86a22b3712bc256fe317787b2a7645129b709e */
+    public final class OverflowMenuButton extends AppCompatImageView implements ActionMenuView.ActionMenuChildView {
+        public OverflowMenuButton(Context context) {
+            super(context, null, R.attr.actionOverflowButtonStyle);
+            setClickable(true);
+            setFocusable(true);
+            setVisibility(0);
+            setEnabled(true);
+            RegexKt.setTooltipText(this, getContentDescription());
+            setOnTouchListener(new AnonymousClass1(this, this));
+        }
+
+        @Override // androidx.appcompat.widget.ActionMenuView.ActionMenuChildView
+        public final boolean needsDividerAfter() {
+            return false;
+        }
+
+        @Override // androidx.appcompat.widget.ActionMenuView.ActionMenuChildView
+        public final boolean needsDividerBefore() {
+            return false;
+        }
+
+        @Override // android.view.View
+        public final boolean performClick() {
+            if (super.performClick()) {
+                return true;
+            }
+            playSoundEffect(0);
+            ActionMenuPresenter.this.showOverflowMenu();
+            return true;
+        }
+
+        @Override // android.widget.ImageView
+        public final boolean setFrame(int i, int i2, int i3, int i4) {
+            boolean frame = super.setFrame(i, i2, i3, i4);
+            Drawable drawable = getDrawable();
+            Drawable background = getBackground();
+            if (drawable != null && background != null) {
+                int width = getWidth();
+                int height = getHeight();
+                int max = Math.max(width, height) / 2;
+                int paddingLeft = (width + (getPaddingLeft() - getPaddingRight())) / 2;
+                int paddingTop = (height + (getPaddingTop() - getPaddingBottom())) / 2;
+                background.setHotspotBounds(paddingLeft - max, paddingTop - max, paddingLeft + max, paddingTop + max);
+            }
+            return frame;
+        }
+
+        /* compiled from: r8-map-id-5c42cb83f75859ba9a04ff37bb86a22b3712bc256fe317787b2a7645129b709e */
+        /* renamed from: androidx.appcompat.widget.ActionMenuPresenter$OverflowMenuButton$1, reason: invalid class name */
+        public final class AnonymousClass1 extends ForwardingListener {
+            public final /* synthetic */ int $r8$classId = 1;
+            public final /* synthetic */ View this$1;
+
+            /* JADX WARN: 'super' call moved to the top of the method (can break code semantics) */
+            public AnonymousClass1(ActionMenuItemView actionMenuItemView) {
+                super(actionMenuItemView);
+                this.this$1 = actionMenuItemView;
+            }
+
+            @Override // androidx.appcompat.widget.ForwardingListener
+            public final ShowableListMenu getPopup() {
+                OverflowPopup overflowPopup;
+                int i = this.$r8$classId;
+                View view = this.this$1;
+                switch (i) {
+                    case 0:
+                        OverflowPopup overflowPopup2 = ActionMenuPresenter.this.mOverflowPopup;
+                        if (overflowPopup2 == null) {
+                            return null;
+                        }
+                        return overflowPopup2.getPopup();
+                    default:
+                        ActionMenuItemView.PopupCallback popupCallback = ((ActionMenuItemView) view).mPopupCallback;
+                        if (popupCallback == null || (overflowPopup = ActionMenuPresenter.this.mActionButtonPopup) == null) {
+                            return null;
+                        }
+                        return overflowPopup.getPopup();
+                }
+            }
+
+            @Override // androidx.appcompat.widget.ForwardingListener
+            public final boolean onForwardingStarted() {
+                ShowableListMenu popup;
+                int i = this.$r8$classId;
+                View view = this.this$1;
+                switch (i) {
+                    case 0:
+                        ActionMenuPresenter.this.showOverflowMenu();
+                        break;
+                    default:
+                        ActionMenuItemView actionMenuItemView = (ActionMenuItemView) view;
+                        MenuBuilder.ItemInvoker itemInvoker = actionMenuItemView.mItemInvoker;
+                        if (itemInvoker == null || !itemInvoker.invokeItem(actionMenuItemView.mItemData) || (popup = getPopup()) == null || !popup.isShowing()) {
+                        }
+                        break;
+                }
+                return true;
+            }
+
+            @Override // androidx.appcompat.widget.ForwardingListener
+            public boolean onForwardingStopped() {
+                switch (this.$r8$classId) {
+                    case 0:
+                        ActionMenuPresenter actionMenuPresenter = ActionMenuPresenter.this;
+                        if (actionMenuPresenter.mPostedOpenRunnable != null) {
+                            return false;
+                        }
+                        actionMenuPresenter.hideOverflowMenu();
+                        return true;
+                    default:
+                        return super.onForwardingStopped();
+                }
+            }
+
+            /* JADX WARN: 'super' call moved to the top of the method (can break code semantics) */
+            public AnonymousClass1(OverflowMenuButton overflowMenuButton, OverflowMenuButton overflowMenuButton2) {
+                super(overflowMenuButton2);
+                this.this$1 = overflowMenuButton;
+            }
+        }
+    }
+
+    /* compiled from: r8-map-id-5c42cb83f75859ba9a04ff37bb86a22b3712bc256fe317787b2a7645129b709e */
+    public final class OverflowPopup extends MenuPopupHelper {
+        public final /* synthetic */ int $r8$classId = 0;
+
+        public OverflowPopup(Context context, SubMenuBuilder subMenuBuilder, View view) {
+            super(R.attr.actionOverflowMenuStyle, 0, context, view, subMenuBuilder, false);
+            if ((subMenuBuilder.mItem.mFlags & 32) != 32) {
+                View view2 = ActionMenuPresenter.this.mOverflowButton;
+                this.mAnchorView = view2 == null ? (View) ActionMenuPresenter.this.mMenuView : view2;
+            }
+            PopupMenu$1 popupMenu$1 = ActionMenuPresenter.this.mPopupPresenterCallback;
+            this.mPresenterCallback = popupMenu$1;
+            MenuPopup menuPopup = this.mPopup;
+            if (menuPopup != null) {
+                menuPopup.setCallback(popupMenu$1);
+            }
+        }
+
+        @Override // androidx.appcompat.view.menu.MenuPopupHelper
+        public final void onDismiss() {
+            int i = this.$r8$classId;
+            ActionMenuPresenter actionMenuPresenter = ActionMenuPresenter.this;
+            switch (i) {
+                case 0:
+                    MenuBuilder menuBuilder = actionMenuPresenter.mMenu;
+                    if (menuBuilder != null) {
+                        menuBuilder.close(true);
+                    }
+                    actionMenuPresenter.mOverflowPopup = null;
+                    super.onDismiss();
+                    break;
+                default:
+                    actionMenuPresenter.mActionButtonPopup = null;
+                    actionMenuPresenter.mOpenSubMenuId = 0;
+                    super.onDismiss();
+                    break;
+            }
+        }
+
+        public OverflowPopup(Context context, MenuBuilder menuBuilder, View view) {
+            super(R.attr.actionOverflowMenuStyle, 0, context, view, menuBuilder, true);
+            this.mDropDownGravity = 8388613;
+            PopupMenu$1 popupMenu$1 = ActionMenuPresenter.this.mPopupPresenterCallback;
+            this.mPresenterCallback = popupMenu$1;
+            MenuPopup menuPopup = this.mPopup;
+            if (menuPopup != null) {
+                menuPopup.setCallback(popupMenu$1);
+            }
+        }
+    }
+}

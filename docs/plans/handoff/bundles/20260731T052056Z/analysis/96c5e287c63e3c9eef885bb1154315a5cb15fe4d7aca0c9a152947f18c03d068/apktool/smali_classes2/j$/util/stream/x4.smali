@@ -1,0 +1,153 @@
+.class public final Lj$/util/stream/x4;
+.super Lj$/util/stream/d;
+.source "r8-map-id-5c42cb83f75859ba9a04ff37bb86a22b3712bc256fe317787b2a7645129b709e"
+
+
+# instance fields
+.field public final h:Lj$/util/stream/v3;
+
+
+# direct methods
+.method public constructor <init>(Lj$/util/stream/v3;Lj$/util/stream/a;Lj$/util/Spliterator;)V
+    .locals 0
+
+    .line 9
+    invoke-direct {p0, p2, p3}, Lj$/util/stream/d;-><init>(Lj$/util/stream/a;Lj$/util/Spliterator;)V
+
+    .line 10
+    iput-object p1, p0, Lj$/util/stream/x4;->h:Lj$/util/stream/v3;
+
+    return-void
+.end method
+
+.method public constructor <init>(Lj$/util/stream/x4;Lj$/util/Spliterator;)V
+    .locals 0
+
+    .line 1
+    invoke-direct {p0, p1, p2}, Lj$/util/stream/d;-><init>(Lj$/util/stream/d;Lj$/util/Spliterator;)V
+
+    .line 2
+    .line 3
+    .line 4
+    iget-object p1, p1, Lj$/util/stream/x4;->h:Lj$/util/stream/v3;
+
+    .line 5
+    .line 6
+    iput-object p1, p0, Lj$/util/stream/x4;->h:Lj$/util/stream/v3;
+
+    .line 7
+    .line 8
+    return-void
+.end method
+
+
+# virtual methods
+.method public final a()Ljava/lang/Object;
+    .locals 2
+
+    .line 1
+    iget-object v0, p0, Lj$/util/stream/d;->a:Lj$/util/stream/a;
+
+    .line 2
+    .line 3
+    iget-object v1, p0, Lj$/util/stream/x4;->h:Lj$/util/stream/v3;
+
+    .line 4
+    .line 5
+    invoke-virtual {v1}, Lj$/util/stream/v3;->X()Lj$/util/stream/q4;
+
+    .line 6
+    .line 7
+    .line 8
+    move-result-object v1
+
+    .line 9
+    iget-object p0, p0, Lj$/util/stream/d;->b:Lj$/util/Spliterator;
+
+    .line 10
+    .line 11
+    invoke-virtual {v0, p0, v1}, Lj$/util/stream/a;->Q(Lj$/util/Spliterator;Lj$/util/stream/l5;)Lj$/util/stream/l5;
+
+    .line 12
+    .line 13
+    .line 14
+    return-object v1
+.end method
+
+.method public final c(Lj$/util/Spliterator;)Lj$/util/stream/d;
+    .locals 1
+
+    .line 1
+    new-instance v0, Lj$/util/stream/x4;
+
+    .line 2
+    .line 3
+    invoke-direct {v0, p0, p1}, Lj$/util/stream/x4;-><init>(Lj$/util/stream/x4;Lj$/util/Spliterator;)V
+
+    .line 4
+    .line 5
+    .line 6
+    return-object v0
+.end method
+
+.method public final onCompletion(Ljava/util/concurrent/CountedCompleter;)V
+    .locals 2
+
+    .line 1
+    iget-object v0, p0, Lj$/util/stream/d;->d:Lj$/util/stream/d;
+
+    .line 2
+    .line 3
+    if-nez v0, :cond_0
+
+    .line 4
+    .line 5
+    goto :goto_0
+
+    .line 6
+    :cond_0
+    check-cast v0, Lj$/util/stream/x4;
+
+    .line 7
+    .line 8
+    iget-object v0, v0, Lj$/util/stream/d;->f:Ljava/lang/Object;
+
+    .line 9
+    .line 10
+    check-cast v0, Lj$/util/stream/q4;
+
+    .line 11
+    .line 12
+    iget-object v1, p0, Lj$/util/stream/d;->e:Lj$/util/stream/d;
+
+    .line 13
+    .line 14
+    check-cast v1, Lj$/util/stream/x4;
+
+    .line 15
+    .line 16
+    iget-object v1, v1, Lj$/util/stream/d;->f:Ljava/lang/Object;
+
+    .line 17
+    .line 18
+    check-cast v1, Lj$/util/stream/q4;
+
+    .line 19
+    .line 20
+    invoke-interface {v0, v1}, Lj$/util/stream/q4;->i(Lj$/util/stream/q4;)V
+
+    .line 21
+    .line 22
+    .line 23
+    iput-object v0, p0, Lj$/util/stream/d;->f:Ljava/lang/Object;
+
+    .line 24
+    .line 25
+    :goto_0
+    invoke-super {p0, p1}, Lj$/util/stream/d;->onCompletion(Ljava/util/concurrent/CountedCompleter;)V
+
+    .line 26
+    .line 27
+    .line 28
+    return-void
+.end method

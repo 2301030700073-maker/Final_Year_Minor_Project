@@ -1,0 +1,135 @@
+.class public abstract Lapp/k9mail/core/android/common/camera/CameraKoinModuleKt;
+.super Ljava/lang/Object;
+.source "r8-map-id-0bf79158388e53a51ca0182ea2539bd0412421e50b81f5daf687f0d2f9d1b594"
+
+
+# static fields
+.field public static final cameraModule:Lorg/koin/core/module/Module;
+
+
+# direct methods
+.method static constructor <clinit>()V
+    .locals 12
+
+    .line 1
+    new-instance v0, Lorg/koin/core/module/Module;
+
+    .line 2
+    .line 3
+    invoke-direct {v0}, Lorg/koin/core/module/Module;-><init>()V
+
+    .line 4
+    .line 5
+    .line 6
+    new-instance v5, Lapp/k9mail/K9KoinModuleKt$$ExternalSyntheticLambda2;
+
+    .line 7
+    .line 8
+    const/16 v1, 0x1d
+
+    .line 9
+    .line 10
+    invoke-direct {v5, v1}, Lapp/k9mail/K9KoinModuleKt$$ExternalSyntheticLambda2;-><init>(I)V
+
+    .line 11
+    .line 12
+    .line 13
+    new-instance v1, Lorg/koin/core/definition/BeanDefinition;
+
+    .line 14
+    .line 15
+    const-class v2, Lapp/k9mail/core/android/common/camera/io/CaptureImageFileWriter;
+
+    .line 16
+    .line 17
+    invoke-static {v2}, Lkotlin/jvm/internal/Reflection;->getOrCreateKotlinClass(Ljava/lang/Class;)Lkotlin/jvm/internal/ClassReference;
+
+    .line 18
+    .line 19
+    .line 20
+    move-result-object v3
+
+    .line 21
+    sget-object v2, Lorg/koin/core/registry/ScopeRegistry;->rootScopeQualifier:Lorg/koin/core/qualifier/StringQualifier;
+
+    .line 22
+    .line 23
+    const/4 v4, 0x0
+
+    .line 24
+    sget-object v6, Lorg/koin/core/definition/Kind;->Singleton:Lorg/koin/core/definition/Kind;
+
+    .line 25
+    .line 26
+    invoke-direct/range {v1 .. v6}, Lorg/koin/core/definition/BeanDefinition;-><init>(Lorg/koin/core/qualifier/Qualifier;Lkotlin/jvm/internal/ClassReference;Lorg/koin/core/qualifier/Qualifier;Lkotlin/jvm/functions/Function2;Lorg/koin/core/definition/Kind;)V
+
+    .line 27
+    .line 28
+    .line 29
+    new-instance v3, Lorg/koin/core/instance/SingleInstanceFactory;
+
+    .line 30
+    .line 31
+    invoke-direct {v3, v1}, Lorg/koin/core/instance/InstanceFactory;-><init>(Lorg/koin/core/definition/BeanDefinition;)V
+
+    .line 32
+    .line 33
+    .line 34
+    invoke-virtual {v0, v3}, Lorg/koin/core/module/Module;->indexPrimaryType(Lorg/koin/core/instance/InstanceFactory;)V
+
+    .line 35
+    .line 36
+    .line 37
+    new-instance v10, Lapp/k9mail/dev/ReleaseConfigKt$$ExternalSyntheticLambda0;
+
+    .line 38
+    .line 39
+    const/4 v1, 0x1
+
+    .line 40
+    invoke-direct {v10, v1}, Lapp/k9mail/dev/ReleaseConfigKt$$ExternalSyntheticLambda0;-><init>(I)V
+
+    .line 41
+    .line 42
+    .line 43
+    move-object v11, v6
+
+    .line 44
+    new-instance v6, Lorg/koin/core/definition/BeanDefinition;
+
+    .line 45
+    .line 46
+    const-class v1, Lapp/k9mail/core/android/common/camera/CameraCaptureHandler;
+
+    .line 47
+    .line 48
+    invoke-static {v1}, Lkotlin/jvm/internal/Reflection;->getOrCreateKotlinClass(Ljava/lang/Class;)Lkotlin/jvm/internal/ClassReference;
+
+    .line 49
+    .line 50
+    .line 51
+    move-result-object v8
+
+    .line 52
+    const/4 v9, 0x0
+
+    .line 53
+    move-object v7, v2
+
+    .line 54
+    invoke-direct/range {v6 .. v11}, Lorg/koin/core/definition/BeanDefinition;-><init>(Lorg/koin/core/qualifier/Qualifier;Lkotlin/jvm/internal/ClassReference;Lorg/koin/core/qualifier/Qualifier;Lkotlin/jvm/functions/Function2;Lorg/koin/core/definition/Kind;)V
+
+    .line 55
+    .line 56
+    .line 57
+    invoke-static {v6, v0}, Lcoil3/size/ViewSizeResolver$-CC;->m(Lorg/koin/core/definition/BeanDefinition;Lorg/koin/core/module/Module;)V
+
+    .line 58
+    .line 59
+    .line 60
+    sput-object v0, Lapp/k9mail/core/android/common/camera/CameraKoinModuleKt;->cameraModule:Lorg/koin/core/module/Module;
+
+    .line 61
+    .line 62
+    return-void
+.end method

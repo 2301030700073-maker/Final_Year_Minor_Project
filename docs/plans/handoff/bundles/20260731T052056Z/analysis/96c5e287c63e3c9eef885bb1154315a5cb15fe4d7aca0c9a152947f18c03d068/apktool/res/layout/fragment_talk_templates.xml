@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:orientation="vertical" android:background="?paper_color" android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <com.google.android.material.appbar.AppBarLayout android:id="@id/talkTemplatesToolbarContainer" android:background="?paper_color" android:layout_width="match_parent" android:layout_height="wrap_content" app:elevation="0.0dp">
+        <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <com.google.android.material.appbar.MaterialToolbar android:id="@id/toolbar" android:layout_width="0.0dp" android:layout_height="?actionBarSize" android:layout_weight="1.0" app:contentInsetEnd="0.0dp" app:contentInsetStart="0.0dp" app:layout_scrollFlags="scroll|enterAlways" style="@style/ToolbarStyle.Small" />
+            <TextView android:textColor="?progressive_color" android:layout_gravity="center_vertical" android:id="@id/toolBarEditButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="16.0dp" android:layout_marginRight="16.0dp" android:text="@string/talk_templates_menu_edit_title" android:layout_marginHorizontal="16.0dp" style="@style/H3" />
+        </LinearLayout>
+        <com.google.android.material.tabs.TabLayout android:layout_gravity="center" android:id="@id/talkTemplatesTabLayout" android:background="@drawable/tab_layout_background_bottom_line" android:visibility="visible" android:layout_width="match_parent" android:layout_height="wrap_content" app:tabIndicatorColor="?progressive_color" app:tabIndicatorFullWidth="true" app:tabRippleColor="?progressive_color" app:tabSelectedTextColor="?progressive_color" app:tabTextAppearance="@style/H3.Button" app:tabTextColor="?inactive_color">
+            <com.google.android.material.tabs.TabItem android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/talk_templates_your_messages_tab_title" />
+            <com.google.android.material.tabs.TabItem android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/talk_templates_example_messages_tab_title" />
+        </com.google.android.material.tabs.TabLayout>
+    </com.google.android.material.appbar.AppBarLayout>
+    <androidx.coordinatorlayout.widget.CoordinatorLayout android:id="@id/coordinatorView" android:layout_width="match_parent" android:layout_height="0.0dp" android:layout_weight="1.0">
+        <ProgressBar android:layout_gravity="center" android:id="@id/talkTemplatesProgressBar" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+        <androidx.recyclerview.widget.RecyclerView android:id="@id/talkTemplatesRecyclerView" android:background="?paper_color" android:paddingBottom="64.0dp" android:scrollbars="vertical" android:clipToPadding="false" android:layout_width="match_parent" android:layout_height="wrap_content" />
+        <LinearLayout android:gravity="center" android:layout_gravity="center_vertical" android:orientation="vertical" android:id="@id/talkTemplatesEmptyContainer" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_margin="@dimen/activity_horizontal_margin">
+            <ImageView android:layout_width="120.0dp" android:layout_height="120.0dp" android:contentDescription="@null" app:srcCompat="@drawable/ic_empty_state_illustration" />
+            <TextView android:id="@id/talkTemplatesEmptyStateTextView" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8.0dp" android:layout_marginBottom="8.0dp" android:text="@string/talk_templates_empty_message" android:textAlignment="center" style="@style/P" />
+        </LinearLayout>
+        <org.wikipedia.views.WikiErrorView android:layout_gravity="center" android:orientation="vertical" android:id="@id/talkTemplatesErrorView" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_margin="@dimen/activity_horizontal_margin" />
+        <com.google.android.material.floatingactionbutton.FloatingActionButton android:layout_gravity="end|bottom" android:id="@id/addSavedMessageFab" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_margin="12.0dp" android:contentDescription="@null" app:backgroundTint="?progressive_color" app:srcCompat="@drawable/outline_edit_square_24" app:tint="?paper_color" />
+    </androidx.coordinatorlayout.widget.CoordinatorLayout>
+</LinearLayout>

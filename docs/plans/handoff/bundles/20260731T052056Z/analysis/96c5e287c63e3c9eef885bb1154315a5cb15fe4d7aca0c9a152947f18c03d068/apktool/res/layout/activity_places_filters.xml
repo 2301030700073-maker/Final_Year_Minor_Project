@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout android:background="?background_color" android:fitsSystemWindows="true" android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <com.google.android.material.appbar.MaterialToolbar android:id="@id/toolbar" android:background="?background_color" android:layout_width="match_parent" android:layout_height="?actionBarSize" app:title="@string/places_filter_title" />
+    <androidx.recyclerview.widget.RecyclerView android:id="@id/placesFiltersRecyclerView" android:background="?paper_color" android:scrollbars="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="?actionBarSize" android:layout_marginBottom="24.0dp" />
+</FrameLayout>

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<merge xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <org.wikipedia.views.LangCodeView
+        android:layout_gravity="center_vertical"
+        android:id="@+id/notification_filter_language_code"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:contentDescription="@null"
+        android:layout_marginStart="24dp"
+        app:backgroundTint="?attr/placeholder_color"
+        app:textColor="?attr/placeholder_color"/>
+    <ImageView
+        android:layout_gravity="center_vertical"
+        android:id="@+id/notification_filter_wiki_logo"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:scaleType="center"
+        android:contentDescription="@null"
+        android:layout_marginStart="24dp"
+        app:tint="?attr/placeholder_color"/>
+    <TextView
+        android:textColor="?attr/primary_color"
+        android:layout_gravity="center_vertical"
+        android:id="@+id/notification_filter_title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:paddingStart="14dp"
+        android:paddingEnd="8dp"
+        style="@style/P"/>
+    <ImageView
+        android:layout_gravity="center_vertical"
+        android:id="@+id/notification_filter_check"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:scaleType="center"
+        android:contentDescription="@null"
+        android:layout_marginEnd="14dp"
+        app:srcCompat="@drawable/ic_check_borderless"
+        app:tint="?attr/progressive_color"/>
+</merge>

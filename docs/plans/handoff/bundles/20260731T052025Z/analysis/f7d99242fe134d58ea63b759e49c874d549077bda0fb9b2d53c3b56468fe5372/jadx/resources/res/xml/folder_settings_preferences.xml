@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+    <PreferenceCategory android:key="folder_settings">
+        <SwitchPreference
+            android:title="@string/folder_settings_in_top_group_label"
+            android:key="folder_settings_in_top_group"/>
+        <SwitchPreference
+            android:title="@string/folder_settings_visible_label"
+            android:key="folder_settings_visible"/>
+        <SwitchPreference
+            android:title="@string/folder_settings_sync_label"
+            android:key="folder_settings_sync"/>
+        <SwitchPreference
+            android:title="@string/folder_settings_push_label"
+            android:key="folder_settings_push"/>
+        <SwitchPreference
+            android:title="@string/folder_settings_notifications_label"
+            android:key="folder_settings_notifications"/>
+        <SwitchPreference
+            android:title="@string/folder_settings_include_in_integrated_inbox_label"
+            android:key="folder_settings_include_in_integrated_inbox"/>
+    </PreferenceCategory>
+</PreferenceScreen>

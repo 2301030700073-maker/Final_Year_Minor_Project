@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s byte</item>
+        <item quantity="other">%s bytes</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d ကို %2$s (%3$s)</item>
+        <item quantity="other">%1$d ကို %2$s (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">1 ဆောင်းပါးဧ့ အော့ဖ်လိုင်းရနိုင်ရေ %1$d၊ %3$.2f MB</item>
+        <item quantity="other">အော့ဖ်လိုင်းရနိုင်ရေ %2$d ဆောင်းပါးတိမှ %1$d၊ %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">1 ဆောင်းပါးတွင် အော့ဖ်လိုင်းရနိုင်ရေ %1$d</item>
+        <item quantity="other">အော့ဖ်လိုင်း %2$d ဆောင်းပါးတိ ထဲမှ %1$d ဆောင်းပါး</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 ‌‌‌‌‌‌‌ဆောင်းပါး, %2$.2f MB</item>
+        <item quantity="other">%1$d ဆောင်းပါးတိ, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 ‌‌‌‌‌‌‌‌ဆောင်းပါး</item>
+        <item quantity="other">%d ဆောင်းပါးတိ</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d ရွီးထားရေ</item>
+        <item quantity="other">%d ရွီးထားရေ</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">အသိပီးချက်ကို မော်ကွန်းတင်ခရေ</item>
+        <item quantity="other">%d အသိပီးချက်တိကို မော်ကွန်းတင်ခရေ</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">ဆောင်းပါး ဒေါင်းလုဒ်ဆွဲနီရေ</item>
+        <item quantity="other">ဆောင်းပါးတိ ဒေါင်းလုဒ်ဆွဲနီရေ</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">ဆောင်းပါး %1$d ကျန်ဟိ</item>
+        <item quantity="other">ဆောင်းပါးတိ %1$d ကျန်ဟိ</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">စာဖတ်စရင်းကို sync လုပ်နီရေ</item>
+        <item quantity="other">စာဖတ်စရင်းတိကို sync လုပ်နီရေ</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">စရင်း %1$d ကျန်ဟိ</item>
+        <item quantity="other">စရင်းတိ %1$d ကျန်ဟိ</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">%1$d စရင်းကို sync လုပ်နီရေ…</item>
+        <item quantity="other">%1$d စရင်းတိကို sync လုပ်နီရေ…</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">ဆောင်းပါး %1$d ဒေါင်းလုဒ်ဆွဲနီရေ…</item>
+        <item quantity="other">ဆောင်းပါးတိ %1$d ဒေါင်းလုဒ်ဆွဲနီရေ…</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 ကို ဖတ်ပြီးယာလို့ အမှတ်အသားပြုထားရေ</item>
+        <item quantity="other">%d ကို ဖတ်ပြီးယာလို့ အမှတ်အသားပြုထားရေ</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 မဖတ်ရသိကြောင်း အမှတ်အသားပြုထားရေ</item>
+        <item quantity="other">%d ကို မဖတ်ရသိဟု အမှတ်အသားပြုထားရေ</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d စစ်ထုတ်</item>
+        <item quantity="other">%d စစ်ထုတ်မှုတိ</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%2$s</item>
+        <item quantity="other">%2$s ကတည်းက တီးဖြတ်မှု %1$d ကတည်းက တီးဖြတ်တေ</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">‌ဒေဆောင်းပါးစွာအင်တာနက်မဟိဘဲ အသုံးပြုနိုင်ဖို့မဟုတ်ပါ။</item>
+        <item quantity="other">ဆောင်းပါးတိစွာ အင်တာနက်မဟိဘဲ အသုံးပြုနိုင်ဖို့မဟုတ်ပါ။</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">‌ဒေဆောင်းပါးကို အင်တာနက်မဟိချိန်မာ အသုံးပြုနိုင်ပါယာ</item>
+        <item quantity="other">‌ဒေဆောင်းပါးတိကို အင်တာနက်မဟိချိန်မာ အသုံးပြုနိုင်ပါယာ</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d ဆောင်းပါးကို စရင်းက ဖယ်ယှားထားရေ</item>
+        <item quantity="other">စရင်းက ဆောင်းပါး %d ခုကို ဖယ်ယှားလိုက်တေ</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d ဆောင်းပါးကို %2$s</item>
+        <item quantity="other">%1$d ဆောင်းပါးကို %2$s က ဖယ်ယှားလိုက်တေ</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">%d စရင်းကို ဖျက်ချင်စော်က သေချာပါလား။</item>
+        <item quantity="other">သင် %d စာရင်းတိကို ဖျက်ချင်စော်က သေချာပါလား။</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">ဖတ်ရှုခြင်းစရင်း ထုတ်ယူခြင်း မအောင်မြင်ပါ</item>
+        <item quantity="other">ဖတ်ရှုခြင်း စရင်းတိ ထုတ်ယူခြင်း မအောင်မြင်ပါ</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">ဖတ်ရှုခြင်းစရင်းကို တင်သွင်းထားရေ</item>
+        <item quantity="other">ဖတ်ရှုခြင်းစာရင်းတိကို တင်သွင်းထားရေ</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d စရင်းကို ဖျက်လိုက်ပါယာ</item>
+        <item quantity="other">%d စရင်းတိကို ဖျက်လိုက်ပါယာ</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 ရလဒ်</item>
+        <item quantity="other">%d ရလဒ်တိ</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 ပံ့ပိုးမှု</item>
+        <item quantity="other">%d ပံ့ပိုးမှုတိ</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">သင်ဧ့တီးဖြတ်မှီငြမ်းပနာ ထုတ်ဝီပြီးနောက် ယာယီအကောင့် %1$s ကို ဖန်တီးခရေ။ %2$d နိမာ သက်တမ်းကုန်ဆုံးပါဖို့။</item>
+        <item quantity="other">သင်ဧ့တီးဖြတ်မှီငြမ်းပနာ ထုတ်ဝီပြီးနောက် ယာယီအကောင့် %1$s ကို ဖန်တီးခခြင်းဖြိုက်ရေ။ %2$d ရက်အတွင်းမာ သက်တမ်းကုန်ပါဖို့။</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">အကောင့်စွာ %d ရက်အတွင်းမာ သက်တမ်းကုန်ဆုံးဖို့ဖြိုက်ရေ။</item>
+        <item quantity="other">အကောင့်စွာ %d ရက်အတွင်းမာ သက်တမ်းကုန်ဆုံးဖို့ဖြိုက်ရေ။</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">ညက</item>
+        <item quantity="other">%d ရက် အကြာက</item>
+    </plurals>
+</resources>

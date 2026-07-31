@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="diff_years">
+        <item quantity="one">Oggiallannu</item>
+        <item quantity="other">%d anni arrè</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d canciamentu dû %2$s (%3$s)</item>
+        <item quantity="other">%1$d canciamenti dû %2$s (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 vuci, %2$.2f MB</item>
+        <item quantity="other">%1$d vuci, %2$.2f MB</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d filtru</item>
+        <item quantity="other">%d filtri</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d canciamentu dû %2$s</item>
+        <item quantity="other">%1$d canciamenti dû %2$s</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 risurtatu</item>
+        <item quantity="other">%d risurtati</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Cuntribbutu</item>
+        <item quantity="other">Cuntribbuti</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 cuntribbutu</item>
+        <item quantity="other">%d cuntribbuti</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d jornu</item>
+        <item quantity="other">%d jorna</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">ajeri</item>
+        <item quantity="other">%d jorna arrè</item>
+    </plurals>
+</resources>

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Ogni ora</item>
+        <item quantity="many">Ogni %d ore</item>
+        <item quantity="other">Ogni %d ore</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Ogni minuto</item>
+        <item quantity="many">Ogni %d minuti</item>
+        <item quantity="other">Ogni %d minuti</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 messaggio</item>
+        <item quantity="many">%d messaggi</item>
+        <item quantity="other">%d messaggi</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Vuoi davvero eliminare questo messaggio?</item>
+        <item quantity="many">Vuoi davvero eliminare i %1$d messaggi selezionati?</item>
+        <item quantity="other">Vuoi davvero eliminare i %1$d messaggi selezionati?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Vuoi davvero spostare il messaggio nella cartella spam?</item>
+        <item quantity="many">Vuoi davvero spostare i %1$d messaggi selezionati nella cartella spam?</item>
+        <item quantity="other">Vuoi davvero spostare i %1$d messaggi selezionati nella cartella spam?</item>
+    </plurals>
+    <plurals name="message_view_attachment_summary">
+        <item quantity="one">%1$d Allegato (%2$s)</item>
+        <item quantity="many">%1$d Allegati (%2$s)</item>
+        <item quantity="other">%1$d Allegati (%2$s)</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d nuovo messaggio</item>
+        <item quantity="many">%d nuovi messaggi</item>
+        <item quantity="other">%d nuovi messaggi</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">Recupero di %d risultato</item>
+        <item quantity="many">Recupero di %d risultati</item>
+        <item quantity="other">Recupero di %d risultati</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">Recupero di %1$d risultato su %2$d</item>
+        <item quantity="many">Recupero di %1$d risultati su %2$d</item>
+        <item quantity="other">Recupero di %1$d risultati su %2$d</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">"Per poter utilizzare l'account \"%s\" devi fornire la password del server."</item>
+        <item quantity="many">"Per poter utilizzare l'account \"%s\" devi fornire le password del server."</item>
+        <item quantity="other">"Per poter utilizzare l'account \"%s\" devi fornire le password del server."</item>
+    </plurals>
+</resources>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s bait</item>
+        <item quantity="other">%s bait</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="other">ona=%1$d modifega dal %2$s (%3$s)</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="other">ona=%1$d modifega dal %2$s</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 risultad</item>
+        <item quantity="other">%d risultad</item>
+    </plurals>
+</resources>

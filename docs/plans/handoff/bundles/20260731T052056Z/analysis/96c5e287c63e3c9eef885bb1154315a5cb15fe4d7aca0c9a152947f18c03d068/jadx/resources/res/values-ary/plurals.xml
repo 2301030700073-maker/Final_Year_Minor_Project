@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="zero">تا نهار</item>
+        <item quantity="one">نهار واحد</item>
+        <item quantity="two">يوماين</item>
+        <item quantity="few">%d يوم</item>
+        <item quantity="many">%d يام</item>
+        <item quantity="other">%d يوم</item>
+    </plurals>
+</resources>

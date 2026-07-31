@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s bajt</item>
+        <item quantity="few">%s bajta</item>
+        <item quantity="other">%s bajtova</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d izmjena od %2$s. (%3$s)</item>
+        <item quantity="few">%1$d izmjene od %2$s. (%3$s)</item>
+        <item quantity="other">%1$d izmjena od %2$s. (%3$s)</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d izmjena od %2$s.</item>
+        <item quantity="few">%1$d izmjene od %2$s.</item>
+        <item quantity="other">%1$d izmjena od %2$s.</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 rezultat</item>
+        <item quantity="few">%d rezultata</item>
+        <item quantity="other">%d rezultata</item>
+    </plurals>
+</resources>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <LinearLayout android:gravity="center_horizontal" android:orientation="vertical" android:paddingTop="24.0dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="24.0dp" android:paddingEnd="24.0dp">
+        <TextView android:textSize="20.0sp" android:textStyle="bold" android:textColor="?primary_color" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/revision_undo_title" android:lineSpacingExtra="8.0sp" />
+        <TextView android:textSize="16.0sp" android:textColor="?secondary_color" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8.0dp" android:text="@string/revision_undo_message" android:lineSpacingExtra="6.0sp" />
+        <com.google.android.material.textfield.TextInputLayout android:id="@id/text_input_container" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16.0dp" android:hint="@string/revision_undo_summary_hint">
+            <org.wikipedia.views.PlainPasteEditText android:textSize="16.0sp" android:id="@id/text_input" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textCapSentences" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <TextView android:textSize="12.0sp" android:textColor="?secondary_color" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4.0dp" android:text="@string/revision_undo_reason" android:lineSpacingExtra="6.0sp" android:fontFamily="sans-serif-medium" android:layout_marginStart="10.0dp" />
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout android:fitsSystemWindows="true" android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <com.google.android.material.appbar.MaterialToolbar android:id="@id/toolbar" android:layout_width="match_parent" android:layout_height="?actionBarSize" app:title="@string/create_account_activity_title" />
+    <ScrollView android:layout_width="match_parent" android:layout_height="match_parent" android:layout_marginTop="?actionBarSize">
+        <FrameLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="@dimen/activity_horizontal_margin" android:paddingEnd="@dimen/activity_horizontal_margin">
+            <LinearLayout android:orientation="vertical" android:id="@id/create_account_primary_container" android:clipToPadding="false" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16.0dp">
+                <com.google.android.material.textfield.TextInputLayout android:id="@id/create_account_username" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/create_account_username_hint">
+                    <org.wikipedia.views.PlainPasteEditText android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="1" android:inputType="textNoSuggestions" android:imeOptions="flagNoExtractUi" android:autofillHints="username" />
+                </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputLayout android:id="@id/create_account_password_input" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8.0dp" android:hint="@string/account_creation_password_hint" app:passwordToggleEnabled="true" app:passwordToggleTint="?android:textColorHint">
+                    <org.wikipedia.views.PlainPasteEditText android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="1" android:inputType="textPassword" android:imeOptions="flagNoExtractUi" android:autofillHints="password" />
+                </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputLayout android:id="@id/create_account_password_repeat" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8.0dp" android:hint="@string/create_account_password_repeat_hint" app:passwordToggleEnabled="true" app:passwordToggleTint="?android:textColorHint">
+                    <org.wikipedia.views.PlainPasteEditText android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="1" android:inputType="textPassword" android:imeOptions="flagNoExtractUi" android:autofillHints="password" />
+                </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputLayout android:id="@id/create_account_email" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8.0dp" android:hint="@string/create_account_email_hint">
+                    <org.wikipedia.views.PlainPasteEditText android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="1" android:inputType="textEmailAddress" android:imeOptions="actionDone|flagNoExtractUi" android:autofillHints="emailAddress" />
+                </com.google.android.material.textfield.TextInputLayout>
+                <TextView android:enabled="false" android:textSize="12.0sp" android:textColor="?secondary_color" android:id="@id/email_recommendation_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/email_recommendation_message" android:layout_marginStart="4.0dp" android:layout_marginEnd="0.0dp" style="@style/RtlAwareTextView" />
+                <Button android:id="@id/create_account_submit_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8.0dp" android:text="@string/create_account_next" android:layout_marginStart="0.0dp" android:layout_marginEnd="0.0dp" />
+                <View android:background="?border_color" android:layout_width="match_parent" android:layout_height="0.5dp" android:layout_marginTop="8.0dp" android:layout_marginBottom="8.0dp" />
+                <LinearLayout android:gravity="center_horizontal" android:orientation="vertical" android:paddingTop="16.0dp" android:layout_width="match_parent" android:layout_height="wrap_content">
+                    <TextView android:textColor="?secondary_color" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/create_account_already_have" />
+                    <Button android:textColor="?progressive_color" android:id="@id/create_account_login_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/create_account_login" style="@style/App.Button.Secondary" />
+                </LinearLayout>
+                <include android:id="@id/footer_container" layout="@layout/inflate_login_and_account_creation_footer" />
+            </LinearLayout>
+            <include android:id="@id/captcha_container" layout="@layout/group_captcha" />
+        </FrameLayout>
+    </ScrollView>
+    <org.wikipedia.views.WikiErrorView android:layout_gravity="center" android:orientation="vertical" android:id="@id/view_create_account_error" android:background="?android:windowBackground" android:visibility="gone" android:layout_width="match_parent" android:layout_height="match_parent" />
+    <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@id/view_progress_bar" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="?actionBarSize" android:indeterminate="true" />
+</FrameLayout>

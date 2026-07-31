@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <ScrollView android:id="@id/message_headers_data" android:visibility="gone" android:layout_width="match_parent" android:layout_height="match_parent">
+        <com.google.android.material.textview.MaterialTextView android:textAppearance="?textAppearanceBodyMedium" android:textColor="?colorSecondary" android:ellipsize="none" android:id="@id/message_source" android:padding="16.0dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:singleLine="false" android:textIsSelectable="true" />
+    </ScrollView>
+    <ProgressBar android:layout_gravity="center" android:id="@id/message_headers_loading" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:indeterminate="true" style="?progressBarStyle" />
+    <com.google.android.material.textview.MaterialTextView android:layout_gravity="center" android:id="@id/message_headers_error" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/generic_loading_error" />
+</FrameLayout>

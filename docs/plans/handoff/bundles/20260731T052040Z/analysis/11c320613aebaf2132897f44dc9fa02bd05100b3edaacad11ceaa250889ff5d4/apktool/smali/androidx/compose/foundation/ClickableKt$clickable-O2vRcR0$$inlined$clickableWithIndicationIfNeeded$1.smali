@@ -1,0 +1,179 @@
+.class public final Landroidx/compose/foundation/ClickableKt$clickable-O2vRcR0$$inlined$clickableWithIndicationIfNeeded$1;
+.super Ljava/lang/Object;
+.source "r8-map-id-86a71dde26502018768275c3ef5c4d56379672d582e9c15e1a63fb997724bbe7"
+
+# interfaces
+.implements Lkotlin/jvm/functions/Function3;
+
+
+# instance fields
+.field public final synthetic $enabled$inlined:Z
+
+.field public final synthetic $indication:Landroidx/compose/foundation/IndicationNodeFactory;
+
+.field public final synthetic $onClick$inlined:Lkotlin/jvm/functions/Function0;
+
+.field public final synthetic $role$inlined:Landroidx/compose/ui/semantics/Role;
+
+
+# direct methods
+.method public constructor <init>(Landroidx/compose/foundation/IndicationNodeFactory;ZLandroidx/compose/ui/semantics/Role;Lkotlin/jvm/functions/Function0;)V
+    .locals 0
+
+    .line 1
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    .line 2
+    .line 3
+    .line 4
+    iput-object p1, p0, Landroidx/compose/foundation/ClickableKt$clickable-O2vRcR0$$inlined$clickableWithIndicationIfNeeded$1;->$indication:Landroidx/compose/foundation/IndicationNodeFactory;
+
+    .line 5
+    .line 6
+    iput-boolean p2, p0, Landroidx/compose/foundation/ClickableKt$clickable-O2vRcR0$$inlined$clickableWithIndicationIfNeeded$1;->$enabled$inlined:Z
+
+    .line 7
+    .line 8
+    iput-object p3, p0, Landroidx/compose/foundation/ClickableKt$clickable-O2vRcR0$$inlined$clickableWithIndicationIfNeeded$1;->$role$inlined:Landroidx/compose/ui/semantics/Role;
+
+    .line 9
+    .line 10
+    iput-object p4, p0, Landroidx/compose/foundation/ClickableKt$clickable-O2vRcR0$$inlined$clickableWithIndicationIfNeeded$1;->$onClick$inlined:Lkotlin/jvm/functions/Function0;
+
+    .line 11
+    .line 12
+    return-void
+.end method
+
+
+# virtual methods
+.method public final invoke(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+    .locals 7
+
+    .line 1
+    check-cast p1, Landroidx/compose/ui/Modifier;
+
+    .line 2
+    .line 3
+    check-cast p2, Landroidx/compose/runtime/Composer;
+
+    .line 4
+    .line 5
+    check-cast p3, Ljava/lang/Number;
+
+    .line 6
+    .line 7
+    invoke-virtual {p3}, Ljava/lang/Number;->intValue()I
+
+    .line 8
+    .line 9
+    .line 10
+    check-cast p2, Landroidx/compose/runtime/GapComposer;
+
+    .line 11
+    .line 12
+    const p1, -0x5af0b3b9
+
+    .line 13
+    .line 14
+    .line 15
+    invoke-virtual {p2, p1}, Landroidx/compose/runtime/GapComposer;->startReplaceGroup(I)V
+
+    .line 16
+    .line 17
+    .line 18
+    invoke-virtual {p2}, Landroidx/compose/runtime/GapComposer;->rememberedValue()Ljava/lang/Object;
+
+    .line 19
+    .line 20
+    .line 21
+    move-result-object p1
+
+    .line 22
+    sget-object p3, Landroidx/compose/runtime/Composer$Companion;->Empty:Landroidx/compose/runtime/NeverEqualPolicy;
+
+    .line 23
+    .line 24
+    if-ne p1, p3, :cond_0
+
+    .line 25
+    .line 26
+    new-instance p1, Landroidx/compose/foundation/interaction/MutableInteractionSourceImpl;
+
+    .line 27
+    .line 28
+    invoke-direct {p1}, Landroidx/compose/foundation/interaction/MutableInteractionSourceImpl;-><init>()V
+
+    .line 29
+    .line 30
+    .line 31
+    invoke-virtual {p2, p1}, Landroidx/compose/runtime/GapComposer;->updateRememberedValue(Ljava/lang/Object;)V
+
+    .line 32
+    .line 33
+    .line 34
+    :cond_0
+    move-object v1, p1
+
+    .line 35
+    check-cast v1, Landroidx/compose/foundation/interaction/MutableInteractionSource;
+
+    .line 36
+    .line 37
+    iget-object p1, p0, Landroidx/compose/foundation/ClickableKt$clickable-O2vRcR0$$inlined$clickableWithIndicationIfNeeded$1;->$indication:Landroidx/compose/foundation/IndicationNodeFactory;
+
+    .line 38
+    .line 39
+    invoke-static {v1, p1}, Landroidx/compose/foundation/IndicationKt;->indication(Landroidx/compose/foundation/interaction/MutableInteractionSource;Landroidx/compose/foundation/IndicationNodeFactory;)Landroidx/compose/ui/Modifier;
+
+    .line 40
+    .line 41
+    .line 42
+    move-result-object p1
+
+    .line 43
+    new-instance v0, Landroidx/compose/foundation/ClickableElement;
+
+    .line 44
+    .line 45
+    iget-object v5, p0, Landroidx/compose/foundation/ClickableKt$clickable-O2vRcR0$$inlined$clickableWithIndicationIfNeeded$1;->$role$inlined:Landroidx/compose/ui/semantics/Role;
+
+    .line 46
+    .line 47
+    iget-object v6, p0, Landroidx/compose/foundation/ClickableKt$clickable-O2vRcR0$$inlined$clickableWithIndicationIfNeeded$1;->$onClick$inlined:Lkotlin/jvm/functions/Function0;
+
+    .line 48
+    .line 49
+    const/4 v2, 0x0
+
+    .line 50
+    const/4 v3, 0x0
+
+    .line 51
+    iget-boolean v4, p0, Landroidx/compose/foundation/ClickableKt$clickable-O2vRcR0$$inlined$clickableWithIndicationIfNeeded$1;->$enabled$inlined:Z
+
+    .line 52
+    .line 53
+    invoke-direct/range {v0 .. v6}, Landroidx/compose/foundation/ClickableElement;-><init>(Landroidx/compose/foundation/interaction/MutableInteractionSource;Landroidx/compose/material3/RippleNodeFactory;ZZLandroidx/compose/ui/semantics/Role;Lkotlin/jvm/functions/Function0;)V
+
+    .line 54
+    .line 55
+    .line 56
+    invoke-interface {p1, v0}, Landroidx/compose/ui/Modifier;->then(Landroidx/compose/ui/Modifier;)Landroidx/compose/ui/Modifier;
+
+    .line 57
+    .line 58
+    .line 59
+    move-result-object p0
+
+    .line 60
+    const/4 p1, 0x0
+
+    .line 61
+    invoke-virtual {p2, p1}, Landroidx/compose/runtime/GapComposer;->end(Z)V
+
+    .line 62
+    .line 63
+    .line 64
+    return-object p0
+.end method

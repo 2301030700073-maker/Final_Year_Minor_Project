@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="diff_years">
+        <item quantity="one">шо хьалкха</item>
+        <item quantity="other">%d шо хьалкха</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s байт</item>
+        <item quantity="other">%s байт</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d фильтр</item>
+        <item quantity="other">%d фильтр</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d фильтр</item>
+        <item quantity="other">%d фильтр</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 жамӀ</item>
+        <item quantity="other">%d жамӀ</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Къинхьегам</item>
+        <item quantity="other">Къинхьегам</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 цхьаъ хийцам</item>
+        <item quantity="other">%d хийцам</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s хьаьрк</item>
+        <item quantity="other">%1$s хьаьрк</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">Хийцам</item>
+        <item quantity="other">Хийцам</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d де</item>
+        <item quantity="other">%d де</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s тег</item>
+        <item quantity="other">%1$s тег</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">селхана</item>
+        <item quantity="other">%d де хьалха</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d фильтр</item>
+        <item quantity="other">%d фильтр</item>
+    </plurals>
+</resources>

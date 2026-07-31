@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="?android:listPreferredItemHeight"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <LinearLayout android:gravity="center" android:orientation="horizontal" android:id="@id/alternate_container_header" android:background="?android:selectableItemBackground" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="?android:listPreferredItemHeight">
+        <com.fsck.k9.ui.ContactBadge android:id="@id/alternate_contact_photo" android:layout_width="42.0dp" android:layout_height="42.0dp" android:layout_marginLeft="12.0dp" android:layout_marginRight="12.0dp" />
+        <LinearLayout android:orientation="vertical" android:layout_width="0.0dp" android:layout_height="wrap_content" android:layout_weight="1.0">
+            <com.google.android.material.textview.MaterialTextView android:textAppearance="?textAppearanceBodyLarge" android:textColor="?textColorPrimaryRecipientDropdown" android:ellipsize="end" android:id="@id/alternate_header_name" android:layout_width="wrap_content" android:layout_height="wrap_content" android:singleLine="true" android:layout_marginStart="6.0dp" />
+            <com.google.android.material.textview.MaterialTextView android:textAppearance="?textAppearanceBodyMedium" android:textColor="?textColorPrimaryRecipientDropdown" android:ellipsize="end" android:id="@id/alternate_header_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:singleLine="true" android:layout_marginStart="6.0dp" />
+        </LinearLayout>
+        <ImageView android:id="@id/alternate_remove" android:background="?android:selectableItemBackground" android:padding="8.0dp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_margin="6.0dp" app:srcCompat="@drawable/ic_close" />
+    </LinearLayout>
+    <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:id="@id/alternate_container_item" android:background="?android:selectableItemBackground" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="?android:listPreferredItemHeight">
+        <com.google.android.material.textview.MaterialTextView android:textAppearance="?textAppearanceBodyMedium" android:textColor="?textColorSecondaryRecipientDropdown" android:ellipsize="end" android:gravity="center_horizontal" android:id="@id/alternate_address_label" android:layout_width="60.0dp" android:layout_height="wrap_content" android:singleLine="true" />
+        <com.google.android.material.textview.MaterialTextView android:textAppearance="?textAppearanceBodyMedium" android:textColor="?textColorSecondaryRecipientDropdown" android:ellipsize="end" android:id="@id/alternate_address" android:paddingLeft="6.0dp" android:paddingRight="6.0dp" android:layout_width="0.0dp" android:layout_height="wrap_content" android:singleLine="true" android:layout_weight="1.0" />
+        <ImageView android:layout_gravity="center_vertical" android:id="@id/alternate_crypto_status" android:visibility="gone" android:layout_width="16.0dp" android:layout_height="16.0dp" android:layout_margin="13.0dp" app:srcCompat="@drawable/ic_lock" app:tint="?openpgp_black" />
+        <ImageView android:id="@id/button_copy_email_address" android:background="?controlBackground" android:layout_width="48.0dp" android:layout_height="48.0dp" android:scaleType="center" android:contentDescription="@string/copy_action" app:srcCompat="@drawable/ic_content_copy" />
+    </LinearLayout>
+</LinearLayout>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:icon="@drawable/ic_user_avatar" android:id="@id/menu_user_profile_page" android:title="@string/menu_option_view_user_profile" app:iconTint="?secondary_color" />
+    <item android:icon="@drawable/ic_user_talk" android:id="@id/menu_user_talk_page" android:title="@string/menu_option_view_user_talk" app:iconTint="?secondary_color" />
+    <item android:icon="@drawable/ic_user_information" android:id="@id/menu_user_information" android:title="@string/patroller_tasks_edits_list_card_overflow_user_information" app:iconTint="?secondary_color" />
+    <item android:icon="@drawable/ic_icon_user_contributions_ooui" android:id="@id/menu_user_contributions_page" android:title="@string/menu_option_view_user_contributions" app:iconTint="?secondary_color" />
+    <item android:icon="@drawable/ic_heart_24" android:id="@id/menu_user_thank" android:title="@string/thank_label" app:iconTint="?secondary_color" />
+</menu>

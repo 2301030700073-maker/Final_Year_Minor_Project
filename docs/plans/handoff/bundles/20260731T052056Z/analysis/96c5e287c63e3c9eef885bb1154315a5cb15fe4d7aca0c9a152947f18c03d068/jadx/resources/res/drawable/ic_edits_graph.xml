@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
+    android:height="104dp"
+    android:width="160dp"
+    android:autoMirrored="true"
+    android:viewportWidth="160"
+    android:viewportHeight="104">
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M2,102L54.375,52 89.72,76 158,2"
+        android:strokeColor="@drawable/_ic_edits_graph__0_res_0x7f080035"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillType="evenOdd"/>
+</vector>

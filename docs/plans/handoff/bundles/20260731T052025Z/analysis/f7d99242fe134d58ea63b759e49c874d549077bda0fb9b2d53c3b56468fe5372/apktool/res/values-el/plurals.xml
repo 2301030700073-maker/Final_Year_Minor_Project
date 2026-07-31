@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Κάθε ώρα</item>
+        <item quantity="other">Κάθε %d ώρες</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Κάθε λεπτό</item>
+        <item quantity="other">Κάθε %d λεπτά</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 μήνυμα</item>
+        <item quantity="other">%d μηνύματα</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Θέλετε πράγματι να διαγράψετε αυτό το μήνυμα;</item>
+        <item quantity="other">Θέλετε πράγματι να διαγράψετε %1$d μηνύματα;</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Θέλετε πράγματι να μετακινήσετε αυτό το μήνυμα στο φάκελο σκουπιδιών;</item>
+        <item quantity="other">Θέλετε πραγματικά να μετακινήσετε %1$d μηνύματα στο φάκελο ανεπιθύμητης αλληλογραφίας;</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d νέο μήνυμα</item>
+        <item quantity="other">%d νέα μηνύματα</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">Φόρτωση %d αποτελέσματος</item>
+        <item quantity="other">Φόρτωση %d αποτελεσμάτων</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">Φόρτωση %1$d από %2$d αποτελέσματα</item>
+        <item quantity="other">Φόρτωση %1$d από %2$d αποτελέσματα</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">Για να μπορέσετε να χρησιμοποιήσετε τον λογαριασμό \"%s\", θα χρειαστεί να παράσχετε τον κωδικό πρόσβασης του διακομιστή.</item>
+        <item quantity="other">Για να μπορέσετε να χρησιμοποιήσετε τον λογαριασμό \"%s\", θα χρειαστεί να παράσχετε τους κωδικούς πρόσβασης του διακομιστή.</item>
+    </plurals>
+</resources>

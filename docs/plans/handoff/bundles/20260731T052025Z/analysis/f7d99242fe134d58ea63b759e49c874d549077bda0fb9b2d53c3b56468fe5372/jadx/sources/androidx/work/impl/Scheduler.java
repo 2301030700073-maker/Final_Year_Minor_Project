@@ -1,0 +1,13 @@
+package androidx.work.impl;
+
+import androidx.work.impl.model.WorkSpec;
+
+/* compiled from: r8-map-id-0bf79158388e53a51ca0182ea2539bd0412421e50b81f5daf687f0d2f9d1b594 */
+/* loaded from: classes.dex */
+public interface Scheduler {
+    void cancel(String str);
+
+    boolean hasLimitedSchedulingSlots();
+
+    void schedule(WorkSpec... workSpecArr);
+}

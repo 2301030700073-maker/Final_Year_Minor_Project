@@ -1,0 +1,209 @@
+.class public final synthetic Lj$/util/m0;
+.super Ljava/lang/Object;
+.source "r8-map-id-0bf79158388e53a51ca0182ea2539bd0412421e50b81f5daf687f0d2f9d1b594"
+
+# interfaces
+.implements Ljava/util/PrimitiveIterator$OfLong;
+
+
+# instance fields
+.field public final synthetic a:Lj$/util/n0;
+
+
+# direct methods
+.method public synthetic constructor <init>(Lj$/util/n0;)V
+    .locals 0
+
+    .line 1
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    .line 2
+    .line 3
+    .line 4
+    iput-object p1, p0, Lj$/util/m0;->a:Lj$/util/n0;
+
+    .line 5
+    .line 6
+    return-void
+.end method
+
+
+# virtual methods
+.method public final synthetic equals(Ljava/lang/Object;)Z
+    .locals 1
+
+    .line 1
+    iget-object p0, p0, Lj$/util/m0;->a:Lj$/util/n0;
+
+    .line 2
+    .line 3
+    instance-of v0, p1, Lj$/util/m0;
+
+    .line 4
+    .line 5
+    if-eqz v0, :cond_0
+
+    .line 6
+    .line 7
+    check-cast p1, Lj$/util/m0;
+
+    .line 8
+    .line 9
+    iget-object p1, p1, Lj$/util/m0;->a:Lj$/util/n0;
+
+    .line 10
+    .line 11
+    :cond_0
+    invoke-virtual {p0, p1}, Ljava/lang/Object;->equals(Ljava/lang/Object;)Z
+
+    .line 12
+    .line 13
+    .line 14
+    move-result p0
+
+    .line 15
+    return p0
+.end method
+
+.method public final synthetic forEachRemaining(Ljava/lang/Object;)V
+    .locals 0
+
+    .line 1
+    iget-object p0, p0, Lj$/util/m0;->a:Lj$/util/n0;
+
+    .line 2
+    .line 3
+    invoke-interface {p0, p1}, Lj$/util/o0;->forEachRemaining(Ljava/lang/Object;)V
+
+    .line 4
+    .line 5
+    .line 6
+    return-void
+.end method
+
+.method public final synthetic forEachRemaining(Ljava/util/function/Consumer;)V
+    .locals 0
+
+    .line 7
+    iget-object p0, p0, Lj$/util/m0;->a:Lj$/util/n0;
+
+    invoke-interface {p0, p1}, Lj$/util/n0;->forEachRemaining(Ljava/util/function/Consumer;)V
+
+    return-void
+.end method
+
+.method public final synthetic forEachRemaining(Ljava/util/function/LongConsumer;)V
+    .locals 0
+
+    .line 8
+    iget-object p0, p0, Lj$/util/m0;->a:Lj$/util/n0;
+
+    invoke-interface {p0, p1}, Lj$/util/n0;->forEachRemaining(Ljava/util/function/LongConsumer;)V
+
+    return-void
+.end method
+
+.method public final synthetic hasNext()Z
+    .locals 0
+
+    .line 1
+    iget-object p0, p0, Lj$/util/m0;->a:Lj$/util/n0;
+
+    .line 2
+    .line 3
+    invoke-interface {p0}, Ljava/util/Iterator;->hasNext()Z
+
+    .line 4
+    .line 5
+    .line 6
+    move-result p0
+
+    .line 7
+    return p0
+.end method
+
+.method public final synthetic hashCode()I
+    .locals 0
+
+    .line 1
+    iget-object p0, p0, Lj$/util/m0;->a:Lj$/util/n0;
+
+    .line 2
+    .line 3
+    invoke-virtual {p0}, Ljava/lang/Object;->hashCode()I
+
+    .line 4
+    .line 5
+    .line 6
+    move-result p0
+
+    .line 7
+    return p0
+.end method
+
+.method public final synthetic next()Ljava/lang/Long;
+    .locals 0
+
+    .line 1
+    iget-object p0, p0, Lj$/util/m0;->a:Lj$/util/n0;
+
+    .line 2
+    .line 3
+    invoke-interface {p0}, Lj$/util/n0;->next()Ljava/lang/Long;
+
+    .line 4
+    .line 5
+    .line 6
+    move-result-object p0
+
+    .line 7
+    return-object p0
+.end method
+
+.method public final synthetic next()Ljava/lang/Object;
+    .locals 0
+
+    .line 8
+    iget-object p0, p0, Lj$/util/m0;->a:Lj$/util/n0;
+
+    invoke-interface {p0}, Ljava/util/Iterator;->next()Ljava/lang/Object;
+
+    move-result-object p0
+
+    return-object p0
+.end method
+
+.method public final synthetic nextLong()J
+    .locals 2
+
+    .line 1
+    iget-object p0, p0, Lj$/util/m0;->a:Lj$/util/n0;
+
+    .line 2
+    .line 3
+    invoke-interface {p0}, Lj$/util/n0;->nextLong()J
+
+    .line 4
+    .line 5
+    .line 6
+    move-result-wide v0
+
+    .line 7
+    return-wide v0
+.end method
+
+.method public final synthetic remove()V
+    .locals 0
+
+    .line 1
+    iget-object p0, p0, Lj$/util/m0;->a:Lj$/util/n0;
+
+    .line 2
+    .line 3
+    invoke-interface {p0}, Ljava/util/Iterator;->remove()V
+
+    .line 4
+    .line 5
+    .line 6
+    return-void
+.end method

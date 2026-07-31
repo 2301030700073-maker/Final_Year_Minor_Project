@@ -1,0 +1,23 @@
+package j$.util.stream;
+
+import java.util.function.IntFunction;
+
+/* compiled from: r8-map-id-0bf79158388e53a51ca0182ea2539bd0412421e50b81f5daf687f0d2f9d1b594 */
+/* loaded from: classes2.dex */
+public final /* synthetic */ class m8 implements IntFunction {
+    public final /* synthetic */ int a;
+
+    @Override // java.util.function.IntFunction
+    public final Object apply(int i) {
+        switch (this.a) {
+            case 0:
+                return new Long[i];
+            case 1:
+                return new Long[i];
+            case 2:
+                return new Double[i];
+            default:
+                return new Double[i];
+        }
+    }
+}

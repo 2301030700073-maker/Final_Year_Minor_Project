@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.drawerlayout.widget.FixedDrawerLayout android:layout_gravity="end" android:id="@id/navigation_drawer" android:fitsSystemWindows="true" android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <org.wikipedia.views.FrameLayoutNavMenuTriggerer android:id="@id/container_with_nav_trigger" android:layout_width="match_parent" android:layout_height="match_parent">
+        <androidx.fragment.app.FragmentContainerView android:name="org.wikipedia.page.PageFragment" android:id="@id/page_fragment" android:layout_width="match_parent" android:layout_height="match_parent" />
+        <FrameLayout android:id="@id/page_toolbar_container" android:background="?paper_color" android:layout_width="match_parent" android:layout_height="wrap_content" android:elevation="4.0dp">
+            <com.google.android.material.appbar.MaterialToolbar android:id="@id/page_toolbar" android:layout_width="match_parent" android:layout_height="?actionBarSize" app:contentInsetStartWithNavigation="0.0dp">
+                <LinearLayout android:gravity="end|center" android:layout_width="match_parent" android:layout_height="match_parent">
+                    <com.google.android.material.textview.MaterialTextView android:textColor="?secondary_color" android:ellipsize="end" android:gravity="center_vertical" android:id="@id/page_toolbar_button_search" android:background="@drawable/shape_search_box" android:paddingLeft="12.0dp" android:paddingRight="12.0dp" android:layout_width="0.0dp" android:layout_height="36.0dp" android:text="@string/search_hint" android:maxLines="1" android:drawablePadding="8.0dp" android:layout_weight="1.0" android:layout_marginEnd="4.0dp" android:paddingHorizontal="12.0dp" app:drawableStartCompat="@drawable/ic_search_white_24dp" app:drawableTint="?placeholder_color" />
+                    <org.wikipedia.views.TabCountsView android:id="@id/page_toolbar_button_tabs" android:layout_width="48.0dp" android:layout_height="match_parent" android:contentDescription="@string/menu_page_show_tabs" />
+                    <org.wikipedia.views.NotificationButtonView android:id="@id/page_toolbar_button_notifications" android:layout_width="48.0dp" android:layout_height="match_parent" android:contentDescription="@string/notifications_activity_title" />
+                    <ImageView android:id="@id/page_toolbar_button_show_overflow_menu" android:background="?selectableItemBackgroundBorderless" android:focusable="true" android:clickable="true" android:layout_width="48.0dp" android:layout_height="48.0dp" android:contentDescription="@string/menu_feed_overflow_label" android:paddingStart="12.0dp" android:paddingEnd="12.0dp" app:srcCompat="@drawable/ic_more_vert_white_24dp" app:tint="?primary_color" />
+                </LinearLayout>
+            </com.google.android.material.appbar.MaterialToolbar>
+            <com.google.android.material.progressindicator.LinearProgressIndicator android:layout_gravity="top" android:id="@id/page_progress_bar" android:layout_width="match_parent" android:layout_height="wrap_content" android:indeterminate="true" />
+        </FrameLayout>
+        <org.wikipedia.views.WikiArticleCardView android:id="@id/wiki_article_card_view" android:layout_width="match_parent" android:layout_height="match_parent" android:layout_marginTop="?actionBarSize" />
+    </org.wikipedia.views.FrameLayoutNavMenuTriggerer>
+    <FrameLayout android:layout_gravity="end" android:id="@id/side_panel_container" android:background="?paper_color" android:layout_width="300.0dp" android:layout_height="match_parent">
+        <org.wikipedia.views.SwipeableListView android:id="@id/toc_list" android:paddingTop="64.0dp" android:paddingBottom="64.0dp" android:scrollbars="none" android:clipChildren="false" android:clipToPadding="false" android:layout_width="match_parent" android:layout_height="match_parent" android:listSelector="?android:selectableItemBackground" />
+        <ImageView android:layout_gravity="end" android:layout_width="37.0dp" android:layout_height="match_parent" android:layout_marginTop="-4.0dp" android:layout_marginBottom="-4.0dp" android:src="@drawable/toc_dotted_line" android:contentDescription="@null" android:layerType="software" android:layout_marginEnd="-2.0dp" />
+        <org.wikipedia.views.PageScrollerView android:layout_gravity="end" android:id="@id/page_scroller_button" android:background="@drawable/shape_circle" android:focusable="true" android:clickable="true" android:layout_width="48.0dp" android:layout_height="48.0dp" android:scaleType="center" android:elevation="8.0dp" app:backgroundTint="?background_color" app:srcCompat="@drawable/ic_unfold_more_black_24dp" app:tint="?progressive_color" />
+    </FrameLayout>
+</androidx.drawerlayout.widget.FixedDrawerLayout>

@@ -1,0 +1,419 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="one">%d die</item>
+        <item quantity="other">%d dies</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="one">modification le ultime mense</item>
+        <item quantity="other">modificationes le ultime mense</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="one">modification iste mense</item>
+        <item quantity="other">modificationes iste mense</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="one">Modification</item>
+        <item quantity="other">Modificationes</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_views">
+        <item quantity="one">Visita de un articulo que tu ha modificate</item>
+        <item quantity="other">Visitas de articulos que tu ha modificate</item>
+    </plurals>
+    <plurals name="activity_tab_impact_thanks">
+        <item quantity="one">regratiamento</item>
+        <item quantity="other">regratiamentos</item>
+    </plurals>
+    <plurals name="activity_tab_impact_total_edits">
+        <item quantity="one">modification in total</item>
+        <item quantity="other">modificationes in total</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="one">Anno passate</item>
+        <item quantity="other">%d annos retro</item>
+    </plurals>
+    <plurals name="donation_reminders_text_articles">
+        <item quantity="one">%d articulo</item>
+        <item quantity="other">%d articulo</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s byte</item>
+        <item quantity="other">%s bytes</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d modification desde %2$s (%3$s)</item>
+        <item quantity="other">%1$d modificationes desde %2$s (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">%1$d de 1 articulo disponibile foras de linea, %3$.2f MB</item>
+        <item quantity="other">%1$d de %2$d articulos disponibile foras de linea, %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">%1$d de 1 articulo disponibile foras de linea</item>
+        <item quantity="other">%1$d de %2$d articulos disponibile foras de linea</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 articulo, %2$.2f MB</item>
+        <item quantity="other">%1$d articulos, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 articulo</item>
+        <item quantity="other">%d articulos</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d seligite</item>
+        <item quantity="other">%d seligite</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Notification archivate</item>
+        <item quantity="other">%d notificationes archivate</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Discargamento de un articulo</item>
+        <item quantity="other">Discargamento de articulos</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">%1$d articulo restante</item>
+        <item quantity="other">%1$d articulos restante</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Synchronisation de un lista de lectura</item>
+        <item quantity="other">Synchronisation de listas de lectura</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">%1$d lista restante</item>
+        <item quantity="other">%1$d listas restante</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">Synchronisa %1$d lista…</item>
+        <item quantity="other">Synchronisa %1$d listas…</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Discarga %1$d articulo…</item>
+        <item quantity="other">Discarga %1$d articulos…</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 marcate como legite</item>
+        <item quantity="other">%d marcate como legite</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 marcate como non legite</item>
+        <item quantity="other">%d marcate como non legite</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d filtro</item>
+        <item quantity="other">%d filtros</item>
+    </plurals>
+    <plurals name="on_this_day_game_stats_games_played">
+        <item quantity="one">Partita jocate</item>
+        <item quantity="other">Partitas jocate</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d modification desde %2$s</item>
+        <item quantity="other">%1$d modificationes desde %2$s</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d filtro</item>
+        <item quantity="other">%d filtros</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak">
+        <item quantity="one">%d die</item>
+        <item quantity="other">%d dies</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final">
+        <item quantity="one">%1$d de %2$d</item>
+        <item quantity="other">%1$d de %2$d</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final_large">
+        <item quantity="one">%1$d de %2$d die</item>
+        <item quantity="other">%1$d de %2$d dies</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Iste articulo non es plus disponibile foras de linea.</item>
+        <item quantity="other">Iste articulos non es plus disponibile foras de linea.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Iste articulo es ora disponibile foras de linea.</item>
+        <item quantity="other">Iste articulos es ora disponibile foras de linea.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d articulo removite del lista</item>
+        <item quantity="other">%d articulos removite del lista</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d articulo removite de %2$s</item>
+        <item quantity="other">%1$d articulos removite de %2$s</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">Es tu secur de voler deler iste lista?</item>
+        <item quantity="other">Es tu secur de voler deler %d listas?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">Le exportation del lista de lectura ha fallite</item>
+        <item quantity="other">Le exportation del listas de lectura ha fallite</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Lista de lectura importate</item>
+        <item quantity="other">Listas de lectura importate</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d lista delite</item>
+        <item quantity="other">%d listas delite</item>
+    </plurals>
+    <plurals name="recommended_reading_list_interest_pick_selected_articles">
+        <item quantity="one">%d seligite</item>
+        <item quantity="other">%d seligite</item>
+    </plurals>
+    <plurals name="recommended_reading_list_page_subtitle_articles">
+        <item quantity="one">• %d articulo</item>
+        <item quantity="other">• %d articulos</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 resultato</item>
+        <item quantity="other">%d resultatos</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">Tu ha addite %d character</item>
+        <item quantity="other">Tu ha addite %d characteres</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Contribution</item>
+        <item quantity="other">Contributiones</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 contribution</item>
+        <item quantity="other">%d contributiones</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s character</item>
+        <item quantity="other">%1$s characteres</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Vidite un vice in le ultime 30 dies.</item>
+        <item quantity="other">Vidite %s vices in le ultime 30 dies.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">Modification</item>
+        <item quantity="other">Modificationes</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d die</item>
+        <item quantity="other">%d dies</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">Tu ha addite %d etiquetta</item>
+        <item quantity="other">Tu ha addite %d etiquettas</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">Tu ha removite %d character</item>
+        <item quantity="other">Tu ha removite %d characteres</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s etiquetta</item>
+        <item quantity="other">%1$s etiquettas</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Celar responsa</item>
+        <item quantity="other">Celar responsas (%d)</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Monstrar responsa</item>
+        <item quantity="other">Monstrar responsas (%d)</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">Es tu secur de voler deler le message del lista?</item>
+        <item quantity="other">Es tu secur de voler deler le messages del lista?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">Le message ha essite delite</item>
+        <item quantity="other">Le messages ha essite delite</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">Le conto temporari %1$s ha essite create post le publication de tu modification. Illo expirara in %2$d die.</item>
+        <item quantity="other">Le conto temporari %1$s ha essite create post le publication de tu modification. Illo expirara in %2$d dies.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">Le conto expirara in %d die.</item>
+        <item quantity="other">Le conto expirara in %d dies.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">heri</item>
+        <item quantity="other">%d dies retro</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d filtro</item>
+        <item quantity="other">%d filtros</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Remover le lingua seligite?</item>
+        <item quantity="other">Remover le linguas seligite?</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_interested_categories_title">
+        <item quantity="one">Categoria de mi interesse</item>
+        <item quantity="other">Categorias de mi interesse</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_read_title">
+        <item quantity="one">Articulo legite</item>
+        <item quantity="other">Articulos legite</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_minutes_read_title">
+        <item quantity="one">Minuta legite</item>
+        <item quantity="other">Minutas legite</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_most_read_article_title">
+        <item quantity="one">Articulo que io ha legite le plus</item>
+        <item quantity="other">Articulos que io ha legite le plus</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_total_edits_title">
+        <item quantity="one">Articulo modificate</item>
+        <item quantity="other">Articulos modificate</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_edits_title">
+        <item quantity="one">Modification apportate per un redactor</item>
+        <item quantity="other">Modificationes apportate per redactores</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_hours_spent_title">
+        <item quantity="one">Hora passate a leger</item>
+        <item quantity="other">Horas passate a leger</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_most_read_title">
+        <item quantity="one">Le articulo le plus legite sur Wikipedia in anglese</item>
+        <item quantity="other">Le articulos le plus legite sur Wikipedia in anglese</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_articles_title">
+        <item quantity="one">Numero de articulo visitate</item>
+        <item quantity="other">Numero de articulos visitate</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_edits_title">
+        <item quantity="one">Modification in app</item>
+        <item quantity="other">Modificationes in app</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_wikipedia_per_minute_label">
+        <item quantity="one">%d vice per minuta</item>
+        <item quantity="other">%d vices per minuta</item>
+    </plurals>
+    <plurals name="year_in_review_slide_app_edited_times_headline">
+        <item quantity="one">Un redactor usante un del apps official de Wikipedia ha apportate %,d modification</item>
+        <item quantity="other">Le redactores usante le apps official de Wikipedia ha apportate %,d modificationes</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_first">
+        <item quantity="one">Wikipedia habeva %,d articulo</item>
+        <item quantity="other">Wikipedia habeva %,d articulos</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_second">
+        <item quantity="one">in plus de %,d lingua active. Tu te jungeva a milliones pro expander le cognoscentia e explorar subjectos diverse.</item>
+        <item quantity="other">in plus de %,d linguas active. Tu te jungeva a milliones pro expander le cognoscentia e explorar subjectos diverse.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_headline">
+        <item quantity="one">Wikipedia esseva disponibile in plus de %,d lingua</item>
+        <item quantity="other">Wikipedia esseva disponibile in plus de %,d linguas</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_body">
+        <item quantity="one">In %1$d, le voluntarios ha addite %2$,d byte al Wikipedia in anglese. Le summa de tote lor travalio commun resulta in un ressource de cognoscimento in constante melioramento, basate sur factos e digne de fide, que illes mitte al disposition del mundo. Tote nos ha cognoscentias a condivider. &lt;a href=\"%3$s\">Apprende como participar&lt;/a>!</item>
+        <item quantity="other">In %1$d, le voluntarios ha addite %2$,d bytes al Wikipedia in anglese. Le summa de tote lor travalio commun resulta in un ressource de cognoscimento in constante melioramento, basate sur factos e digne de fide, que illes mitte al disposition del mundo. Tote nos ha cognoscentias a condivider. &lt;a href=\"%3$s\">Apprende como participar&lt;/a>!</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_headline">
+        <item quantity="one">%,d byte addite</item>
+        <item quantity="other">%,d bytes addite</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_per_minute_headline">
+        <item quantity="one">Wikipedia ha essite modificate %,d vice per minuta</item>
+        <item quantity="other">Wikipedia ha essite modificate %,d vices per minuta</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_body">
+        <item quantity="one">Gratias pro esser un del redactores voluntari qui face le differentia sur le projectos de Wikimedia in tote le mundo. Voluntarios como tu ha apportate %,d modification sur plus de 300 editiones de Wikipedia in linguas differente.</item>
+        <item quantity="other">Gratias pro esser un del redactores voluntari qui face le differentia sur le projectos de Wikimedia in tote le mundo. Voluntarios como tu ha apportate %,d modificationes sur plus de 300 editiones de Wikipedia in linguas differente.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_headline">
+        <item quantity="one">Tu ha modificate %s vice</item>
+        <item quantity="other">Tu ha modificate %s vices</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_body">
+        <item quantity="one">Lectores de tote le mundo apprecia tu contributiones. In le ultime duo menses, le articulos que tu ha modificate ha recipite un total de %,d visita. Gratias a redactores como tu, Wikipedia es un ressource de cognoscentia factual, confidibile e in constante melioration, pro tote le mundo.</item>
+        <item quantity="other">Lectores de tote le mundo apprecia tu contributiones. In le ultime duo menses, le articulos que tu ha modificate ha recipite un total de %,d visitas. Gratias a redactores como tu, Wikipedia es un ressource de cognoscentia factual, confidibile e in constante melioration, pro tote le mundo.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_headline">
+        <item quantity="one">Tu modification ha essite vidite plus de %,d vices recentemente</item>
+        <item quantity="other">Tu modificationes ha essite vidite plus de %,d vices recentemente</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_first">
+        <item quantity="one">Un voluntario ha apportate %,d modification a un del plus de 300 editiones linguistic de Wikipedia.</item>
+        <item quantity="other">Voluntarios ha apportate %,d modificationes a plus de 300 editiones linguistic de Wikipedia.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_second">
+        <item quantity="one">%,d modification ha essite apportate sur Wikipedia in anglese. Cata hora de cata die, voluntarios labora pro meliorar Wikipedia.</item>
+        <item quantity="other">%,d modificationes ha essite apportate sur Wikipedia in anglese. Cata hora de cata die, voluntarios labora pro meliorar Wikipedia.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_headline">
+        <item quantity="one">Un redactor ha apportate %,d modification iste anno</item>
+        <item quantity="other">Redactores ha apportate %,d modificationes iste anno</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_first">
+        <item quantity="one">Le gente ha passate circa %,d hora</item>
+        <item quantity="other">Le gente ha passate circa %,d horas</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_second">
+        <item quantity="one">(circa %1$,d anno!) a leger Wikipedia in anglese in %2$d. Wikipedia es a tu disposition quando tu vole saper plus sur nostre mundo evolvente, ganiar un sponsion inter amicos, o responder al question de un infante curiose.</item>
+        <item quantity="other">(circa %1$,d annos!) a leger Wikipedia in anglese in %2$d. Wikipedia es a tu disposition quando tu vole saper plus sur nostre mundo evolvente, ganiar un sponsion inter amicos, o responder al question de un infante curiose.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_headline">
+        <item quantity="one">Nos ha passate %,d hora a leger</item>
+        <item quantity="other">Nos ha passate %,d horas a leger</item>
+    </plurals>
+    <plurals name="year_in_review_slide_global_saved_articles_headline">
+        <item quantity="one">Le usatores del app habeva %,d articulo salveguardate</item>
+        <item quantity="other">Le usatores del app habeva %,d articulos salveguardate</item>
+    </plurals>
+    <plurals name="year_in_review_slide_most_read_english_articles_body">
+        <item quantity="one">Quando le gente vole apprender sur nostre mundo, illes se refere a Wikipedia. Le articulo le plus visitate in Wikipedia in anglese esseva: %2$s&lt;br />Lege plus in nostre &lt;a href=\"%3$s\">articulo de blog dedicate al thema&lt;/a>.</item>
+        <item quantity="other">Quando le gente vole apprender sur nostre mundo, illes se refere a Wikipedia. Le %1$d articulos le plus visitate in Wikipedia in anglese esseva: %2$s&lt;br />Lege plus in nostre &lt;a href=\"%3$s\">articulo de blog dedicate al thema&lt;/a>.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_body">
+        <item quantity="one">Iste articulos ha includite &lt;b>%1$s&lt;/b>, &lt;b>%2$s&lt;/b> e &lt;b>%3$s&lt;/b>. Cata articulo salveguardate reflecte tu interesses e adjuta a construer un base de cognoscentia personalisate sur Wikipedia.&lt;br />&lt;br />Le usatores active del app habeva %4$,d articulo salveguardate iste anno.</item>
+        <item quantity="other">Iste articulos ha includite &lt;b>%1$s&lt;/b>, &lt;b>%2$s&lt;/b> e &lt;b>%3$s&lt;/b>. Cata articulo salveguardate reflecte tu interesses e adjuta a construer un base de cognoscentia personalisate sur Wikipedia.&lt;br />&lt;br />Le usatores active del app habeva %4$,d articulos salveguardate iste anno.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_headline">
+        <item quantity="one">Tu ha salveguardate %,d articulo</item>
+        <item quantity="other">Tu ha salveguardate %,d articulos</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_first">
+        <item quantity="one">Le gente ha passate circa %,d hora</item>
+        <item quantity="other">Le gente ha passate circa %,d horas</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_second">
+        <item quantity="one">(circa %1$,d anno!) a leger Wikipedia in anglese in %2$d.</item>
+        <item quantity="other">(circa %1$,d annos!) a leger Wikipedia in anglese in %2$d.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_first">
+        <item quantity="one">Wikipedia habeva %,d articulo</item>
+        <item quantity="other">Wikipedia habeva %,d articulos</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_second">
+        <item quantity="one">in plus de %,d lingua active. Tu te jungeva a milliones pro expander le cognoscentia e explorar subjectos diverse.</item>
+        <item quantity="other">in plus de %,d linguas active. Tu te jungeva a milliones pro expander le cognoscentia e explorar subjectos diverse.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_top">
+        <item quantity="one">Secundo nostre estimation, isto te pone in le prime %1$s%% del lectores de Wikipedia de tote le mundo. In media, un persona lege %2$,d articulo per anno.</item>
+        <item quantity="other">Secundo nostre estimation, isto te pone in le prime %1$s%% del lectores de Wikipedia de tote le mundo. In media, un persona lege %2$,d articulos per anno.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_first">
+        <item quantity="one">Tu ha passate %,d minuta</item>
+        <item quantity="other">Tu ha passate %,d minutas</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_second">
+        <item quantity="one">a leger %1$,d articulo in %2$d</item>
+        <item quantity="other">a leger %1$,d articulos in %2$d</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_body">
+        <item quantity="one">Ecce le articulo que tu ha visitate le plus in %1$d: %2$s</item>
+        <item quantity="other">Ecce le articulos que tu ha visitate le plus in %1$d: %2$s</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_headline">
+        <item quantity="one">Tu articulo principal</item>
+        <item quantity="other">Tu articulos principal</item>
+    </plurals>
+    <plurals name="year_in_review_slide_viewed_articles_times_headline">
+        <item quantity="one">Le usatores del app ha consultate articulos de Wikipedia %,d vice</item>
+        <item quantity="other">Le usatores del app ha consultate articulos de Wikipedia %,d vices</item>
+    </plurals>
+</resources>

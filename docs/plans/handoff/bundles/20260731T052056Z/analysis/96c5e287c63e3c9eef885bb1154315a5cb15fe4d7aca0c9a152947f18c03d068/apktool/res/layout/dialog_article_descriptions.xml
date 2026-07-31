@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView android:layout_width="match_parent" android:layout_height="wrap_content"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <LinearLayout android:orientation="vertical" android:id="@id/descriptionsContainer" android:paddingTop="12.0dp" android:paddingBottom="12.0dp" android:clipChildren="false" android:clipToPadding="false" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="16.0dp" android:paddingEnd="4.0dp">
+        <LinearLayout android:gravity="center_vertical" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <TextView android:textSize="20.0sp" android:textStyle="bold" android:textColor="?primary_color" android:gravity="center" android:layout_width="0.0dp" android:layout_height="match_parent" android:text="@string/suggested_edits_article_descriptions_dialog_title" android:layout_weight="1.0" android:fontFamily="sans-serif" />
+            <androidx.appcompat.widget.AppCompatImageView android:id="@id/closeButton" android:background="?selectableItemBackgroundBorderless" android:padding="12.0dp" android:layout_width="48.0dp" android:layout_height="48.0dp" android:contentDescription="@string/dialog_close_description" app:srcCompat="@drawable/ic_close_black_24dp" app:tint="?primary_color" />
+        </LinearLayout>
+        <LinearLayout android:gravity="center_vertical" android:clipChildren="false" android:clipToPadding="false" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8.0dp">
+            <TextView android:id="@id/firstSuggestion" android:background="@drawable/background_8dp_radius" android:padding="8.0dp" android:layout_width="0.0dp" android:layout_height="wrap_content" android:foreground="?selectableItemBackground" android:layout_weight="1.0" style="@style/Chip.Accessible" />
+            <androidx.appcompat.widget.AppCompatImageView android:id="@id/firstSuggestionFlag" android:background="?selectableItemBackgroundBorderless" android:padding="12.0dp" android:layout_width="48.0dp" android:layout_height="48.0dp" android:contentDescription="@string/article_header_edit_description" app:srcCompat="@drawable/ic_report_flag" app:tint="?primary_color" />
+        </LinearLayout>
+        <LinearLayout android:gravity="center_vertical" android:id="@id/secondSuggestionLayout" android:clipToPadding="false" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8.0dp" android:layout_marginBottom="12.0dp">
+            <TextView android:id="@id/secondSuggestion" android:background="@drawable/background_8dp_radius" android:padding="8.0dp" android:layout_width="0.0dp" android:layout_height="wrap_content" android:foreground="?selectableItemBackground" android:layout_weight="1.0" style="@style/Chip.Accessible" />
+            <androidx.appcompat.widget.AppCompatImageView android:id="@id/secondSuggestionFlag" android:background="?selectableItemBackgroundBorderless" android:padding="12.0dp" android:layout_width="48.0dp" android:layout_height="48.0dp" app:srcCompat="@drawable/ic_report_flag" app:tint="?primary_color" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

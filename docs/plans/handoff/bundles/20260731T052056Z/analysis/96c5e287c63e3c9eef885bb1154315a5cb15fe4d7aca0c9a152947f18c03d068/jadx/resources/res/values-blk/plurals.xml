@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="diff_years">
+        <item quantity="one">နေင်ႏဟာ</item>
+        <item quantity="other">လꩻလဲဉ်း %d နေင်ႏ</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">ရောမ်ဖြုဲင်ꩻ 1 ဗာႏ လꩻနွောင်ꩻလိုႏတဝ်းလဲင်းစား %1$d ဗာႏ၊ %3$.2f MB</item>
+        <item quantity="other">ရောမ်ဖြုဲင်ꩻ %2$d ဗာႏ လꩻနွောင်ꩻလိုႏတဝ်းလဲင်းစား %1$d ဗာႏ၊ %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">ရောမ်ဖြုဲင်ꩻ 1 ဗာႏ၊ %2$.2f MB</item>
+        <item quantity="other">ရောမ်ဖြုဲင်ꩻ %1$d ဗာႏ၊ %2$.2f MB</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d လွိုက်ခါꩻလဲဉ်း</item>
+        <item quantity="other">%d လွိုက်ခါꩻလဲဉ်း</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">ဒင်ႏထွူလဲဉ်းဖေႏသေချက်မော်ကွန်း</item>
+        <item quantity="other">ဒင်ႏထွူလဲဉ်းဖေႏသေချက်မော်ကွန် %d ဗာႏ</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">အဝ်ႏဒေါင်းထူႏရောမ်ဖြုဲင်ꩻ</item>
+        <item quantity="other">အဝ်ႏဒေါင်းထူႏရောမ်ဖြုဲင်ꩻဖိုင်ႏ</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">ရောမ်ဖြုဲင်ꩻအဝ်ႏကုဲင် %1$d ဗာႏ</item>
+        <item quantity="other">ရောမ်ဖြုဲင်ꩻဖိုင်ႏအဝ်ႏကုဲင် %1$d ဗာႏ</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">အဝ်ႏမာꩻ ဟော်ꩻထွားစာႏရင်ꩻ sync</item>
+        <item quantity="other">အဝ်ႏမာꩻ ဟော်ꩻထွားစာႏရင်ꩻဖိုင်ႏ sync</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">စာႏရင်ꩻအဝ်ႏကုဲင် %1$d ဗာႏ</item>
+        <item quantity="other">စာႏရင်ꩻဖိုင်ႏအဝ်ႏကုဲင် %1$d ဗာႏ</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">အဝ်ႏမာꩻစာႏရင်ꩻ %1$d ဗာႏ syncကျာꩻ…</item>
+        <item quantity="other">အဝ်ႏမာꩻစာႏရင်ꩻဖိုင်ႏ %1$d ဗာႏ syncကျာꩻ…</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">အဝ်ႏဒေါင်းထူႏရောမ်ဖြုဲင်ꩻ %1$d ဗာႏ…</item>
+        <item quantity="other">အဝ်ႏဒေါင်းထူႏရောမ်ဖြုဲင်ꩻဖိုင်ႏ %1$d ဗာႏ…</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">မာꩻနုဲင်းဟော်ꩻဗာႏ ၁ ဗာႏ</item>
+        <item quantity="other">မာꩻနုဲင်းဟော်ꩻဗာႏ %d ဗာႏ</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">မာꩻနုဲင်းဟော်ꩻဗာႏဒွိုန် ၁ ဗာႏ</item>
+        <item quantity="other">မာꩻနုဲင်းဟော်ꩻဗာႏဒွိုန်း %d ဗာႏ</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">စဲစ်ထွားမုꩻ %d</item>
+        <item quantity="other">စဲစ်ထွားမုꩻဖိုင်ႏ %d</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">ရောမ်ဖြုဲင်ꩻယိုနဝ်ꩻ အီႏလꩻနွောင်ꩻတဝ်းဒုမ် အဝ်ႏလိုႏတဝ်းလဲင်းစားသွူ</item>
+        <item quantity="other">ရောမ်ဖြုဲင်ꩻယိုဖိုင်ႏနဝ်ꩻ အီႏလꩻနွောင်ꩻတဝ်းဒုမ် အဝ်ႏလိုႏတဝ်းလဲင်းစားသွူ။</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">ရောမ်ဖြုဲင်ꩻယိုနဝ်ꩻ ယိုခါ ထွားလꩻနွောင်ꩻလဲဉ်း အဝ်ႏလိုႏတဝ်းလဲင်းစားသွူ</item>
+        <item quantity="other">ရောမ်ဖြုဲင်ꩻယိုဖိုင်ႏနဝ်ꩻ ယိုခါ ထွားလꩻနွောင်ꩻလဲဉ်း အဝ်ႏလိုႏတဝ်းလဲင်းစားသွူ။</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">အဝ်ႏစာႏရင်ꩻကို ဖုဲင်းထန်ႏထွူလဲဉ်း ရောမ်ဖြုဲင်ꩻ %d</item>
+        <item quantity="other">အဝ်ႏစာႏရင်ꩻကို ဖုဲင်းထန်ႏထွူလဲဉ်း ရောမ်ဖြုဲင်ꩻဖိုင်ႏ %d</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">အဝ်ႏ%2$sကို ဖုဲင်းထန်ႏထွူလဲဉ်း ရောမ်ဖြုဲင်ꩻ %1$d</item>
+        <item quantity="other">အဝ်ႏ%2$sကို ဖုဲင်းထန်ႏထွူလဲဉ်း ရောမ်ဖြုဲင်ꩻဖိုင်ႏ %1$d</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 လꩻလဒ်</item>
+        <item quantity="other">%d လꩻလဒ်ဖိုင်ႏ</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">စွဲးကမ်းခွုမ်မာꩻမုꩻ</item>
+        <item quantity="other">စွဲးကမ်းခွုမ်မာꩻမုꩻဖိုင်ႏ</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">စွဲးကမ်းခွုမ်မာꩻမုꩻ 1</item>
+        <item quantity="other">စွဲးကမ်းခွုမ်မာꩻမုꩻဖိုင်ႏ %d</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="other">တာ=လက္ခဏာႏပွိုင်ပုင်ႏ %1$s</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d နီꩻ</item>
+        <item quantity="other">%d နီꩻ</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">မဟာနီꩻ</item>
+        <item quantity="other">လꩻလဲဉ်းမွူးနီꩻ %d နီꩻ</item>
+    </plurals>
+</resources>

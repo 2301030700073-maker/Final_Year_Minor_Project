@@ -1,0 +1,755 @@
+.class public Lcom/airbnb/lottie/value/Keyframe;
+.super Ljava/lang/Object;
+.source "r8-map-id-5c42cb83f75859ba9a04ff37bb86a22b3712bc256fe317787b2a7645129b709e"
+
+
+# instance fields
+.field public final composition:Lcom/airbnb/lottie/LottieComposition;
+
+.field public endFrame:Ljava/lang/Float;
+
+.field public endProgress:F
+
+.field public endValue:Ljava/lang/Object;
+
+.field public endValueFloat:F
+
+.field public endValueInt:I
+
+.field public final interpolator:Landroid/view/animation/Interpolator;
+
+.field public pathCp1:Landroid/graphics/PointF;
+
+.field public pathCp2:Landroid/graphics/PointF;
+
+.field public final startFrame:F
+
+.field public startProgress:F
+
+.field public final startValue:Ljava/lang/Object;
+
+.field public startValueFloat:F
+
+.field public startValueInt:I
+
+.field public final xInterpolator:Landroid/view/animation/Interpolator;
+
+.field public final yInterpolator:Landroid/view/animation/Interpolator;
+
+
+# direct methods
+.method public constructor <init>(Lcom/airbnb/lottie/LottieComposition;Ljava/lang/Object;Ljava/lang/Object;Landroid/view/animation/Interpolator;FLjava/lang/Float;)V
+    .locals 1
+
+    .line 86
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    const v0, -0x358c9d09
+
+    .line 87
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startValueFloat:F
+
+    .line 88
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endValueFloat:F
+
+    const v0, 0x2ec8fb09
+
+    .line 89
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startValueInt:I
+
+    .line 90
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endValueInt:I
+
+    const/4 v0, 0x1
+
+    .line 91
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startProgress:F
+
+    .line 92
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endProgress:F
+
+    const/4 v0, 0x0
+
+    .line 93
+    iput-object v0, p0, Lcom/airbnb/lottie/value/Keyframe;->pathCp1:Landroid/graphics/PointF;
+
+    .line 94
+    iput-object v0, p0, Lcom/airbnb/lottie/value/Keyframe;->pathCp2:Landroid/graphics/PointF;
+
+    .line 95
+    iput-object p1, p0, Lcom/airbnb/lottie/value/Keyframe;->composition:Lcom/airbnb/lottie/LottieComposition;
+
+    .line 96
+    iput-object p2, p0, Lcom/airbnb/lottie/value/Keyframe;->startValue:Ljava/lang/Object;
+
+    .line 97
+    iput-object p3, p0, Lcom/airbnb/lottie/value/Keyframe;->endValue:Ljava/lang/Object;
+
+    .line 98
+    iput-object p4, p0, Lcom/airbnb/lottie/value/Keyframe;->interpolator:Landroid/view/animation/Interpolator;
+
+    .line 99
+    iput-object v0, p0, Lcom/airbnb/lottie/value/Keyframe;->xInterpolator:Landroid/view/animation/Interpolator;
+
+    .line 100
+    iput-object v0, p0, Lcom/airbnb/lottie/value/Keyframe;->yInterpolator:Landroid/view/animation/Interpolator;
+
+    .line 101
+    iput p5, p0, Lcom/airbnb/lottie/value/Keyframe;->startFrame:F
+
+    .line 102
+    iput-object p6, p0, Lcom/airbnb/lottie/value/Keyframe;->endFrame:Ljava/lang/Float;
+
+    return-void
+.end method
+
+.method public constructor <init>(Lcom/airbnb/lottie/LottieComposition;Ljava/lang/Object;Ljava/lang/Object;Landroid/view/animation/Interpolator;Landroid/view/animation/Interpolator;F)V
+    .locals 1
+
+    .line 52
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    const v0, -0x358c9d09
+
+    .line 53
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startValueFloat:F
+
+    .line 54
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endValueFloat:F
+
+    const v0, 0x2ec8fb09
+
+    .line 55
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startValueInt:I
+
+    .line 56
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endValueInt:I
+
+    const/4 v0, 0x1
+
+    .line 57
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startProgress:F
+
+    .line 58
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endProgress:F
+
+    const/4 v0, 0x0
+
+    .line 59
+    iput-object v0, p0, Lcom/airbnb/lottie/value/Keyframe;->pathCp1:Landroid/graphics/PointF;
+
+    .line 60
+    iput-object v0, p0, Lcom/airbnb/lottie/value/Keyframe;->pathCp2:Landroid/graphics/PointF;
+
+    .line 61
+    iput-object p1, p0, Lcom/airbnb/lottie/value/Keyframe;->composition:Lcom/airbnb/lottie/LottieComposition;
+
+    .line 62
+    iput-object p2, p0, Lcom/airbnb/lottie/value/Keyframe;->startValue:Ljava/lang/Object;
+
+    .line 63
+    iput-object p3, p0, Lcom/airbnb/lottie/value/Keyframe;->endValue:Ljava/lang/Object;
+
+    .line 64
+    iput-object v0, p0, Lcom/airbnb/lottie/value/Keyframe;->interpolator:Landroid/view/animation/Interpolator;
+
+    .line 65
+    iput-object p4, p0, Lcom/airbnb/lottie/value/Keyframe;->xInterpolator:Landroid/view/animation/Interpolator;
+
+    .line 66
+    iput-object p5, p0, Lcom/airbnb/lottie/value/Keyframe;->yInterpolator:Landroid/view/animation/Interpolator;
+
+    .line 67
+    iput p6, p0, Lcom/airbnb/lottie/value/Keyframe;->startFrame:F
+
+    .line 68
+    iput-object v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endFrame:Ljava/lang/Float;
+
+    return-void
+.end method
+
+.method public constructor <init>(Lcom/airbnb/lottie/LottieComposition;Ljava/lang/Object;Ljava/lang/Object;Landroid/view/animation/Interpolator;Landroid/view/animation/Interpolator;Landroid/view/animation/Interpolator;FLjava/lang/Float;)V
+    .locals 1
+
+    .line 69
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    const v0, -0x358c9d09
+
+    .line 70
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startValueFloat:F
+
+    .line 71
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endValueFloat:F
+
+    const v0, 0x2ec8fb09
+
+    .line 72
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startValueInt:I
+
+    .line 73
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endValueInt:I
+
+    const/4 v0, 0x1
+
+    .line 74
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startProgress:F
+
+    .line 75
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endProgress:F
+
+    const/4 v0, 0x0
+
+    .line 76
+    iput-object v0, p0, Lcom/airbnb/lottie/value/Keyframe;->pathCp1:Landroid/graphics/PointF;
+
+    .line 77
+    iput-object v0, p0, Lcom/airbnb/lottie/value/Keyframe;->pathCp2:Landroid/graphics/PointF;
+
+    .line 78
+    iput-object p1, p0, Lcom/airbnb/lottie/value/Keyframe;->composition:Lcom/airbnb/lottie/LottieComposition;
+
+    .line 79
+    iput-object p2, p0, Lcom/airbnb/lottie/value/Keyframe;->startValue:Ljava/lang/Object;
+
+    .line 80
+    iput-object p3, p0, Lcom/airbnb/lottie/value/Keyframe;->endValue:Ljava/lang/Object;
+
+    .line 81
+    iput-object p4, p0, Lcom/airbnb/lottie/value/Keyframe;->interpolator:Landroid/view/animation/Interpolator;
+
+    .line 82
+    iput-object p5, p0, Lcom/airbnb/lottie/value/Keyframe;->xInterpolator:Landroid/view/animation/Interpolator;
+
+    .line 83
+    iput-object p6, p0, Lcom/airbnb/lottie/value/Keyframe;->yInterpolator:Landroid/view/animation/Interpolator;
+
+    .line 84
+    iput p7, p0, Lcom/airbnb/lottie/value/Keyframe;->startFrame:F
+
+    .line 85
+    iput-object p8, p0, Lcom/airbnb/lottie/value/Keyframe;->endFrame:Ljava/lang/Float;
+
+    return-void
+.end method
+
+.method public constructor <init>(Lcom/airbnb/lottie/model/content/GradientColor;Lcom/airbnb/lottie/model/content/GradientColor;)V
+    .locals 2
+
+    .line 103
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    const v0, -0x358c9d09
+
+    .line 104
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startValueFloat:F
+
+    .line 105
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endValueFloat:F
+
+    const v0, 0x2ec8fb09
+
+    .line 106
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startValueInt:I
+
+    .line 107
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endValueInt:I
+
+    const/4 v0, 0x1
+
+    .line 108
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startProgress:F
+
+    .line 109
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endProgress:F
+
+    const/4 v1, 0x0
+
+    .line 110
+    iput-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->pathCp1:Landroid/graphics/PointF;
+
+    .line 111
+    iput-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->pathCp2:Landroid/graphics/PointF;
+
+    .line 112
+    iput-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->composition:Lcom/airbnb/lottie/LottieComposition;
+
+    .line 113
+    iput-object p1, p0, Lcom/airbnb/lottie/value/Keyframe;->startValue:Ljava/lang/Object;
+
+    .line 114
+    iput-object p2, p0, Lcom/airbnb/lottie/value/Keyframe;->endValue:Ljava/lang/Object;
+
+    .line 115
+    iput-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->interpolator:Landroid/view/animation/Interpolator;
+
+    .line 116
+    iput-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->xInterpolator:Landroid/view/animation/Interpolator;
+
+    .line 117
+    iput-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->yInterpolator:Landroid/view/animation/Interpolator;
+
+    .line 118
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startFrame:F
+
+    const p1, 0x7f7fffff    # Float.MAX_VALUE
+
+    .line 119
+    invoke-static {p1}, Ljava/lang/Float;->valueOf(F)Ljava/lang/Float;
+
+    move-result-object p1
+
+    iput-object p1, p0, Lcom/airbnb/lottie/value/Keyframe;->endFrame:Ljava/lang/Float;
+
+    return-void
+.end method
+
+.method public constructor <init>(Ljava/lang/Object;)V
+    .locals 2
+
+    .line 1
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    .line 2
+    .line 3
+    .line 4
+    const v0, -0x358c9d09
+
+    .line 5
+    .line 6
+    .line 7
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startValueFloat:F
+
+    .line 8
+    .line 9
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endValueFloat:F
+
+    .line 10
+    .line 11
+    const v0, 0x2ec8fb09
+
+    .line 12
+    .line 13
+    .line 14
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startValueInt:I
+
+    .line 15
+    .line 16
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endValueInt:I
+
+    .line 17
+    .line 18
+    const/4 v0, 0x1
+
+    .line 19
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startProgress:F
+
+    .line 20
+    .line 21
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endProgress:F
+
+    .line 22
+    .line 23
+    const/4 v1, 0x0
+
+    .line 24
+    iput-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->pathCp1:Landroid/graphics/PointF;
+
+    .line 25
+    .line 26
+    iput-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->pathCp2:Landroid/graphics/PointF;
+
+    .line 27
+    .line 28
+    iput-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->composition:Lcom/airbnb/lottie/LottieComposition;
+
+    .line 29
+    .line 30
+    iput-object p1, p0, Lcom/airbnb/lottie/value/Keyframe;->startValue:Ljava/lang/Object;
+
+    .line 31
+    .line 32
+    iput-object p1, p0, Lcom/airbnb/lottie/value/Keyframe;->endValue:Ljava/lang/Object;
+
+    .line 33
+    .line 34
+    iput-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->interpolator:Landroid/view/animation/Interpolator;
+
+    .line 35
+    .line 36
+    iput-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->xInterpolator:Landroid/view/animation/Interpolator;
+
+    .line 37
+    .line 38
+    iput-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->yInterpolator:Landroid/view/animation/Interpolator;
+
+    .line 39
+    .line 40
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->startFrame:F
+
+    .line 41
+    .line 42
+    const p1, 0x7f7fffff    # Float.MAX_VALUE
+
+    .line 43
+    .line 44
+    .line 45
+    invoke-static {p1}, Ljava/lang/Float;->valueOf(F)Ljava/lang/Float;
+
+    .line 46
+    .line 47
+    .line 48
+    move-result-object p1
+
+    .line 49
+    iput-object p1, p0, Lcom/airbnb/lottie/value/Keyframe;->endFrame:Ljava/lang/Float;
+
+    .line 50
+    .line 51
+    return-void
+.end method
+
+
+# virtual methods
+.method public final getEndProgress()F
+    .locals 6
+
+    .line 1
+    const/high16 v0, 0x3f800000    # 1.0f
+
+    .line 2
+    .line 3
+    iget-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->composition:Lcom/airbnb/lottie/LottieComposition;
+
+    .line 4
+    .line 5
+    if-nez v1, :cond_0
+
+    .line 6
+    .line 7
+    return v0
+
+    .line 8
+    :cond_0
+    iget v2, p0, Lcom/airbnb/lottie/value/Keyframe;->endProgress:F
+
+    .line 9
+    .line 10
+    const/4 v3, 0x1
+
+    .line 11
+    cmpl-float v3, v2, v3
+
+    .line 12
+    .line 13
+    if-nez v3, :cond_2
+
+    .line 14
+    .line 15
+    iget-object v2, p0, Lcom/airbnb/lottie/value/Keyframe;->endFrame:Ljava/lang/Float;
+
+    .line 16
+    .line 17
+    if-nez v2, :cond_1
+
+    .line 18
+    .line 19
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endProgress:F
+
+    .line 20
+    .line 21
+    return v0
+
+    .line 22
+    :cond_1
+    invoke-virtual {p0}, Lcom/airbnb/lottie/value/Keyframe;->getStartProgress()F
+
+    .line 23
+    .line 24
+    .line 25
+    move-result v0
+
+    .line 26
+    iget-object v2, p0, Lcom/airbnb/lottie/value/Keyframe;->endFrame:Ljava/lang/Float;
+
+    .line 27
+    .line 28
+    invoke-virtual {v2}, Ljava/lang/Float;->floatValue()F
+
+    .line 29
+    .line 30
+    .line 31
+    move-result v2
+
+    .line 32
+    iget v3, p0, Lcom/airbnb/lottie/value/Keyframe;->startFrame:F
+
+    .line 33
+    .line 34
+    sub-float/2addr v2, v3
+
+    .line 35
+    float-to-double v2, v2
+
+    .line 36
+    iget v4, v1, Lcom/airbnb/lottie/LottieComposition;->endFrame:F
+
+    .line 37
+    .line 38
+    iget v1, v1, Lcom/airbnb/lottie/LottieComposition;->startFrame:F
+
+    .line 39
+    .line 40
+    sub-float/2addr v4, v1
+
+    .line 41
+    float-to-double v4, v4
+
+    .line 42
+    div-double/2addr v2, v4
+
+    .line 43
+    float-to-double v0, v0
+
+    .line 44
+    add-double/2addr v0, v2
+
+    .line 45
+    double-to-float v0, v0
+
+    .line 46
+    iput v0, p0, Lcom/airbnb/lottie/value/Keyframe;->endProgress:F
+
+    .line 47
+    .line 48
+    return v0
+
+    .line 49
+    :cond_2
+    return v2
+.end method
+
+.method public final getStartProgress()F
+    .locals 3
+
+    .line 1
+    iget-object v0, p0, Lcom/airbnb/lottie/value/Keyframe;->composition:Lcom/airbnb/lottie/LottieComposition;
+
+    .line 2
+    .line 3
+    if-nez v0, :cond_0
+
+    .line 4
+    .line 5
+    const/4 p0, 0x0
+
+    .line 6
+    return p0
+
+    .line 7
+    :cond_0
+    iget v1, p0, Lcom/airbnb/lottie/value/Keyframe;->startProgress:F
+
+    .line 8
+    .line 9
+    const/4 v2, 0x1
+
+    .line 10
+    cmpl-float v2, v1, v2
+
+    .line 11
+    .line 12
+    if-nez v2, :cond_1
+
+    .line 13
+    .line 14
+    iget v1, v0, Lcom/airbnb/lottie/LottieComposition;->startFrame:F
+
+    .line 15
+    .line 16
+    iget v2, p0, Lcom/airbnb/lottie/value/Keyframe;->startFrame:F
+
+    .line 17
+    .line 18
+    sub-float/2addr v2, v1
+
+    .line 19
+    iget v0, v0, Lcom/airbnb/lottie/LottieComposition;->endFrame:F
+
+    .line 20
+    .line 21
+    sub-float/2addr v0, v1
+
+    .line 22
+    div-float/2addr v2, v0
+
+    .line 23
+    iput v2, p0, Lcom/airbnb/lottie/value/Keyframe;->startProgress:F
+
+    .line 24
+    .line 25
+    return v2
+
+    .line 26
+    :cond_1
+    return v1
+.end method
+
+.method public final isStatic()Z
+    .locals 1
+
+    .line 1
+    iget-object v0, p0, Lcom/airbnb/lottie/value/Keyframe;->interpolator:Landroid/view/animation/Interpolator;
+
+    .line 2
+    .line 3
+    if-nez v0, :cond_0
+
+    .line 4
+    .line 5
+    iget-object v0, p0, Lcom/airbnb/lottie/value/Keyframe;->xInterpolator:Landroid/view/animation/Interpolator;
+
+    .line 6
+    .line 7
+    if-nez v0, :cond_0
+
+    .line 8
+    .line 9
+    iget-object p0, p0, Lcom/airbnb/lottie/value/Keyframe;->yInterpolator:Landroid/view/animation/Interpolator;
+
+    .line 10
+    .line 11
+    if-nez p0, :cond_0
+
+    .line 12
+    .line 13
+    const/4 p0, 0x1
+
+    .line 14
+    return p0
+
+    .line 15
+    :cond_0
+    const/4 p0, 0x0
+
+    .line 16
+    return p0
+.end method
+
+.method public final toString()Ljava/lang/String;
+    .locals 2
+
+    .line 1
+    new-instance v0, Ljava/lang/StringBuilder;
+
+    .line 2
+    .line 3
+    const-string v1, "Keyframe{startValue="
+
+    .line 4
+    .line 5
+    invoke-direct {v0, v1}, Ljava/lang/StringBuilder;-><init>(Ljava/lang/String;)V
+
+    .line 6
+    .line 7
+    .line 8
+    iget-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->startValue:Ljava/lang/Object;
+
+    .line 9
+    .line 10
+    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/Object;)Ljava/lang/StringBuilder;
+
+    .line 11
+    .line 12
+    .line 13
+    const-string v1, ", endValue="
+
+    .line 14
+    .line 15
+    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+
+    .line 16
+    .line 17
+    .line 18
+    iget-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->endValue:Ljava/lang/Object;
+
+    .line 19
+    .line 20
+    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/Object;)Ljava/lang/StringBuilder;
+
+    .line 21
+    .line 22
+    .line 23
+    const-string v1, ", startFrame="
+
+    .line 24
+    .line 25
+    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+
+    .line 26
+    .line 27
+    .line 28
+    iget v1, p0, Lcom/airbnb/lottie/value/Keyframe;->startFrame:F
+
+    .line 29
+    .line 30
+    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(F)Ljava/lang/StringBuilder;
+
+    .line 31
+    .line 32
+    .line 33
+    const-string v1, ", endFrame="
+
+    .line 34
+    .line 35
+    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+
+    .line 36
+    .line 37
+    .line 38
+    iget-object v1, p0, Lcom/airbnb/lottie/value/Keyframe;->endFrame:Ljava/lang/Float;
+
+    .line 39
+    .line 40
+    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/Object;)Ljava/lang/StringBuilder;
+
+    .line 41
+    .line 42
+    .line 43
+    const-string v1, ", interpolator="
+
+    .line 44
+    .line 45
+    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+
+    .line 46
+    .line 47
+    .line 48
+    iget-object p0, p0, Lcom/airbnb/lottie/value/Keyframe;->interpolator:Landroid/view/animation/Interpolator;
+
+    .line 49
+    .line 50
+    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/Object;)Ljava/lang/StringBuilder;
+
+    .line 51
+    .line 52
+    .line 53
+    const/16 p0, 0x7d
+
+    .line 54
+    .line 55
+    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(C)Ljava/lang/StringBuilder;
+
+    .line 56
+    .line 57
+    .line 58
+    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
+
+    .line 59
+    .line 60
+    .line 61
+    move-result-object p0
+
+    .line 62
+    return-object p0
+.end method

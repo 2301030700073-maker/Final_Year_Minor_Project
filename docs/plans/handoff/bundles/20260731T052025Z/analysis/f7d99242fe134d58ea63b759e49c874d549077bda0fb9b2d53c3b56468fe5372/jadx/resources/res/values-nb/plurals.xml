@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Ønsker du virkelig å slette denne meldingen?</item>
+        <item quantity="other">Ønsker du virkelig å slette %1$d meldinger?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Ønsker du virkelig å flytte denne meldingen til søppelpost-mappen?</item>
+        <item quantity="other">Ønsker du virkelig å flytte %1$d meldinger til søppelpost-mappen?</item>
+    </plurals>
+    <plurals name="message_view_attachment_summary">
+        <item quantity="one">%1$d Vedlegg (%2$s)</item>
+        <item quantity="other">%1$d Vedlegg (%2$s)</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d ny melding</item>
+        <item quantity="other">%d nye meldinger</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">Henter %d resultat</item>
+        <item quantity="other">Henter %d resultater</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">Henter %1$d av %2$d resultater</item>
+        <item quantity="other">Henter %1$d av %2$d resultater</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">For å bruke %s-kontoen må du angi tjenerpassordet.</item>
+        <item quantity="other">For å bruke %s-kontoen må du angi tjenerpassordene.</item>
+    </plurals>
+</resources>

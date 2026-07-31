@@ -1,0 +1,371 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="one">%d päivä</item>
+        <item quantity="other">%d päivää</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="one">muokkaus viime kuussa</item>
+        <item quantity="other">muokkausta viime kuussa</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="one">muokkaus tässä kuussa</item>
+        <item quantity="other">muokkausta tässä kuussa</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="one">Muokkaus</item>
+        <item quantity="other">Muokkausta</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_views">
+        <item quantity="one">Muokaamasi artikkelin katselukerrat</item>
+        <item quantity="other">Muokaamiesi artikkelien katselukerrat</item>
+    </plurals>
+    <plurals name="activity_tab_impact_thanks">
+        <item quantity="one">kiitos</item>
+        <item quantity="other">kiitosta</item>
+    </plurals>
+    <plurals name="activity_tab_impact_total_edits">
+        <item quantity="one">muokkaus yhteensä</item>
+        <item quantity="other">muokkausta yhteensä</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="one">Viime vuonna</item>
+        <item quantity="other">%d vuotta sitten</item>
+    </plurals>
+    <plurals name="donation_reminders_text_articles">
+        <item quantity="one">%d artikkeli</item>
+        <item quantity="other">%d artikkelia</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s tavu</item>
+        <item quantity="other">%s tavua</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d muokkaus vuodesta %2$s lähtien (%3$s)</item>
+        <item quantity="other">%1$d muokkausta vuodesta %2$s lähtien (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">%1$d / 1 artikkeli saatavilla offline-tilassa, %3$.2f Mt</item>
+        <item quantity="other">%1$d / %2$d artikkelia saatavilla offline-tilassa, %3$.2f Mt</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 artikkeli • %2$.2f MB</item>
+        <item quantity="other">%1$d artikkelia • %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 artikkeli</item>
+        <item quantity="other">%d artikkelia</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d uusi ilmoitus</item>
+        <item quantity="other">%d uutta ilmoitusta</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d valittu</item>
+        <item quantity="other">%d valittu</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Ilmoitus arkistoitu</item>
+        <item quantity="other">%d ilmoitusta arkistoitu</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Ladataan artikkelia</item>
+        <item quantity="other">Ladataan artikkeleita</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">%1$d artikkeli jäljellä</item>
+        <item quantity="other">%1$d artikkelia jäljellä</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Synkronoidaan lukulistaa</item>
+        <item quantity="other">Synkronoidaan lukulistoja</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">%1$d lista jäljellä</item>
+        <item quantity="other">%1$d listaa jäljellä</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">Synkronoidaan %1$d listaa…</item>
+        <item quantity="other">Synkronoidaan %1$d listaa…</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Ladataan %1$d artikkeli…</item>
+        <item quantity="other">Ladataan %1$d artikkelia…</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 merkitty luetuksi</item>
+        <item quantity="other">%d merkitty luetuksi</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 merkitty lukemattomaksi</item>
+        <item quantity="other">%d merkitty lukemattomaksi</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d suodatin</item>
+        <item quantity="other">%d suodatinta</item>
+    </plurals>
+    <plurals name="on_this_day_game_stats_games_played">
+        <item quantity="one">Pelattu peli</item>
+        <item quantity="other">Pelattua peliä</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d muokkaus vuodesta %2$s lähtien</item>
+        <item quantity="other">%1$d muokkausta vuodesta %2$s lähtien</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d suodatin</item>
+        <item quantity="other">%d suodatinta</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak">
+        <item quantity="one">%d päivä</item>
+        <item quantity="other">%d päivää</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final">
+        <item quantity="one">%1$d/%2$d</item>
+        <item quantity="other">%1$d/%2$d</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final_large">
+        <item quantity="one">%1$d/%2$d päivää</item>
+        <item quantity="other">%1$d/%2$d päivää</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Tämä artikkeli ei ole enää käytettävissä offline-tilassa.</item>
+        <item quantity="other">Nämä artikkelit eivät enää ole käytettävissä offline-tilassa.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Tämä artikkeli on nyt saatavilla offline-tilassa.</item>
+        <item quantity="other">Nämä artikkelit ovat nyt saatavilla offline-tilassa.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d artikkeli poistettu listalta</item>
+        <item quantity="other">%d artikkelia poistettu listalta</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d artikkeli poistettu lukulistalta %2$s</item>
+        <item quantity="other">%1$d artikkelia poistettu lukulistalta %2$s</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">Poistetaanko %d lista?</item>
+        <item quantity="other">Poistetaanko %d listaa?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">Lukulistan vienti epäonnistui</item>
+        <item quantity="other">Lukulistojen vienti epäonnistui</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Lukulista tuotu</item>
+        <item quantity="other">Lukulistat tuotu</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d lista poistettu</item>
+        <item quantity="other">%d listaa poistettu</item>
+    </plurals>
+    <plurals name="recommended_reading_list_interest_pick_selected_articles">
+        <item quantity="one">%d valittu</item>
+        <item quantity="other">%d valittu</item>
+    </plurals>
+    <plurals name="recommended_reading_list_page_subtitle_articles">
+        <item quantity="one">• %d artikkeli</item>
+        <item quantity="other">• %d artikkelia</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 hakutulos</item>
+        <item quantity="other">%d hakutulosta</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">Lisäsit %d merkin</item>
+        <item quantity="other">Lisäsit %d merkkiä</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Muokkaus</item>
+        <item quantity="other">Muokkauksia</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 muokkaus</item>
+        <item quantity="other">%d muokkausta</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s merkki</item>
+        <item quantity="other">%1$s merkkiä</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Nähty kerran viimeisten 30 päivän aikana.</item>
+        <item quantity="other">Nähty %s kertaa viimeisen 30 päivän aikana.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">muokkaus</item>
+        <item quantity="other">muokkausta</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d päivä</item>
+        <item quantity="other">%d päivää</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">Lisäsit %d kuvamerkinnän</item>
+        <item quantity="other">Lisäsit %d kuvamerkintää</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">Poistit %d merkin</item>
+        <item quantity="other">Poistit %d merkkiä</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s merkintä</item>
+        <item quantity="other">%1$s merkintää</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Piilota vastaus</item>
+        <item quantity="other">Piilota vastaukset (%d)</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Näytä vastaus</item>
+        <item quantity="other">Näytä vastaukset (%d)</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">Poistetaanko viesti luettelosta?</item>
+        <item quantity="other">Poistetaanko viestit luettelosta?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">Viesti on poistettu</item>
+        <item quantity="other">Viestit on poistettu</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">Tilapäinen tunnus %1$s luotiin muokkauksesi julkaisun yhteydessä. Se vanhenee %2$d päivän päästä.</item>
+        <item quantity="other">Tilapäinen tunnus %1$s luotiin muokkauksesi julkaisun yhteydessä. Se vanhenee %2$d päivän päästä.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">Tunnus vanhenee %d päivän päästä.</item>
+        <item quantity="other">Tunnus vanhenee %d päivän päästä.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">eilen</item>
+        <item quantity="other">%d päivää sitten</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d suodatin</item>
+        <item quantity="other">%d suodatinta</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Poistetaanko valittu kieli?</item>
+        <item quantity="other">Poistetaanko valitut kielet?</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_interested_categories_title">
+        <item quantity="one">Minua kiinnostanut luokka</item>
+        <item quantity="other">Minua kiinnostaneet luokat</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_read_title">
+        <item quantity="one">Luettuja artikkeleita</item>
+        <item quantity="other">Luettuja artikkeleita</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_minutes_read_title">
+        <item quantity="one">Lukemiseen käytettyjä minuutteja</item>
+        <item quantity="other">Lukemiseen käytettyjä minuutteja</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_most_read_article_title">
+        <item quantity="one">Eniten lukemani artikkeli</item>
+        <item quantity="other">Eniten lukemani artikkelit</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_total_edits_title">
+        <item quantity="one">Muokkausten määrä</item>
+        <item quantity="other">Muokkausten määrä</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_edits_title">
+        <item quantity="one">Muokkaajien tekemä muutos</item>
+        <item quantity="other">Muokkaajien tekemiä muutoksia</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_hours_spent_title">
+        <item quantity="one">Lukemiseen käytetty tunti</item>
+        <item quantity="other">Lukemiseen käytetyt tunnit</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_most_read_title">
+        <item quantity="one">Luetuin artikkeli englanninkielisessä Wikipediassa</item>
+        <item quantity="other">Luetuimmat artikkelit englanninkielisessä Wikipediassa</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_articles_title">
+        <item quantity="one">Katsottujen artikkelien määrä</item>
+        <item quantity="other">Katsottujen artikkelien määrä</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_edits_title">
+        <item quantity="one">Muokkaus sovelluksessa</item>
+        <item quantity="other">Muokkauksia sovelluksessa</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_wikipedia_per_minute_label">
+        <item quantity="one">%d kerran minuutissa</item>
+        <item quantity="other">%d kertaa minuutissa</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_first">
+        <item quantity="one">Wikipediassa oli %,d artikkeli</item>
+        <item quantity="other">Wikipediassa oli %,d artikkelia</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_second">
+        <item quantity="one">%,d aktiivisella kielellä tänä vuonna. Olit mukana miljoonien muiden kanssa kerryttämässä tietoa ja tutkimassa erilaisia aiheita.</item>
+        <item quantity="other">yli %,d aktiivisella kielellä tänä vuonna. Olit mukana miljoonien muiden kanssa kerryttämässä tietoa ja tutkimassa erilaisia aiheita.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_headline">
+        <item quantity="one">Wikipedia oli saatavilla yli %,d kielellä</item>
+        <item quantity="other">Wikipedia oli saatavilla yli %,d kielellä</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_headline">
+        <item quantity="one">%,d tavu lisätty</item>
+        <item quantity="other">%,d tavua lisätty</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_headline">
+        <item quantity="one">Muokkasit %s kerran</item>
+        <item quantity="other">Muokkasit %s kertaa</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_headline">
+        <item quantity="one">Muokkaustasi on katsottu viime aikoina %,d kertaa</item>
+        <item quantity="other">Muokkauksiasi on katsottu viime aikoina %,d kertaa</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_first">
+        <item quantity="one">Vapaaehtoiset tekivät %,d muokkauksen yli 300 Wikipedian kieliversiolla.</item>
+        <item quantity="other">Vapaaehtoiset tekivät %,d muokkausta yli 300 Wikipedian kieliversiolla.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_second">
+        <item quantity="one">Englanninkieliseen Wikipediaan tehtiin %,d muokkaus. Jokaisen päivän jokaisena tuntina vapaaehtoiset auttoivat parantamaan Wikipedia.</item>
+        <item quantity="other">Englanninkieliseen Wikipediaan tehtiin %,d muokkausta. Jokaisen päivän jokaisena tuntina vapaaehtoiset auttoivat parantamaan Wikipedia.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_headline">
+        <item quantity="one">Muokkaajat tekivät %,d muokkauksen tänä vuonna</item>
+        <item quantity="other">Muokkaajat tekivät %,d muokkausta tänä vuonna</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_headline">
+        <item quantity="one">Käytimme %,d tunnin lukemiseen</item>
+        <item quantity="other">Käytimme %,d tuntia lukemiseen</item>
+    </plurals>
+    <plurals name="year_in_review_slide_global_saved_articles_headline">
+        <item quantity="one">Sovelluksen käyttäjillä oli %,d tallennettu artikkeli</item>
+        <item quantity="other">Sovelluksen käyttäjillä oli %,d tallennettua artikkelia</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_headline">
+        <item quantity="one">Tallensit %,d artikkelin</item>
+        <item quantity="other">Tallensit %,d artikkelia</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_first">
+        <item quantity="one">Wikipediassa oli %,d artikkeli</item>
+        <item quantity="other">Wikipediassa oli %,d artikkelia</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_second">
+        <item quantity="one">%,d aktiivisella kielellä tänä vuonna. Olit mukana miljoonien muiden kanssa kerryttämässä tietoa ja tutkimassa erilaisia aiheita.</item>
+        <item quantity="other">yli %,d aktiivisella kielellä tänä vuonna. Olit mukana miljoonien muiden kanssa kerryttämässä tietoa ja tutkimassa erilaisia aiheita.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_first">
+        <item quantity="one">Käytit %,d minuutin</item>
+        <item quantity="other">Käytit %,d minuuttia</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_second">
+        <item quantity="one">lukiessasi %1$,d artikkelin vuonna %2$d</item>
+        <item quantity="other">lukiessasi %1$,d artikkelia vuonna %2$d</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_body">
+        <item quantity="one">Tässä on artikkeli, jota katsoit eniten vuonna %1$d: %2$s</item>
+        <item quantity="other">Tässä on artikkelit, joita katsoit eniten vuonna %1$d: %2$s</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_headline">
+        <item quantity="one">Suosituin artikkelisi</item>
+        <item quantity="other">Suosituimmat artikkelisi</item>
+    </plurals>
+    <plurals name="year_in_review_slide_viewed_articles_times_headline">
+        <item quantity="one">Sovelluksen käyttäjät katsoivat Wikipedia-artikkeleita %,d kerran</item>
+        <item quantity="other">Sovelluksen käyttäjät katsoivat Wikipedia-artikkeleita %,d kertaa</item>
+    </plurals>
+</resources>

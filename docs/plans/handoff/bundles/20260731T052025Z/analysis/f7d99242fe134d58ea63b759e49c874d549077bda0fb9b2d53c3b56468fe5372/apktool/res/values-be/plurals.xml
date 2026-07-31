@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Сапраўды хочаце выдаліць гэты ліст?</item>
+        <item quantity="few">Сапраўды хочаце выдаліць %1$d лісты?</item>
+        <item quantity="many">Сапраўды хочаце выдаліць %1$d лістоў?</item>
+        <item quantity="other">Сапраўды хочаце выдаліць %1$d лістоў?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Сапраўды хочаце перамясціць ліст у каталог спаму?</item>
+        <item quantity="few">Сапраўды хочаце перамясціць %1$d лісты ў каталог спаму?</item>
+        <item quantity="many">Сапраўды хочаце перамясціць %1$d лістоў у каталог спаму?</item>
+        <item quantity="other">Сапраўды хочаце перамясціць %1$d лістоў у каталог спаму?</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d новы ліст</item>
+        <item quantity="few">%d новыя лісты</item>
+        <item quantity="many">%d новых лістоў</item>
+        <item quantity="other">%d новыя лісты</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">Атрыманне %d выніку</item>
+        <item quantity="few">Атрыманне %d вынікаў</item>
+        <item quantity="many">Атрыманне %d вынікаў</item>
+        <item quantity="other">Атрыманне %d вынікаў</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">Атрыманне %1$d з %2$d вынікаў</item>
+        <item quantity="few">Атрыманне %1$d з %2$d вынікаў</item>
+        <item quantity="many">Атрыманне %1$d з %2$d вынікаў</item>
+        <item quantity="other">Атрыманне %1$d з %2$d вынікаў</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">Каб мець магчымасць выкарыстоўваць акаўнт \"%s\", вам неабходна ўвесці пароль для сервера.</item>
+        <item quantity="few">Каб мець магчымасць выкарыстоўваць акаўнт \"%s\", вам неабходна ўвесці паролі для сервера.</item>
+        <item quantity="many">Каб мець магчымасць выкарыстоўваць акаўнт \"%s\", вам неабходна ўвесці паролі для сервера.</item>
+        <item quantity="other">Каб мець магчымасць выкарыстоўваць акаўнт \"%s\", вам неабходна ўвесці паролі для сервера.</item>
+    </plurals>
+</resources>

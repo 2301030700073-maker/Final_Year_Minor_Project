@@ -1,0 +1,371 @@
+.class public final synthetic Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;
+.super Ljava/lang/Object;
+.source "r8-map-id-86a71dde26502018768275c3ef5c4d56379672d582e9c15e1a63fb997724bbe7"
+
+# interfaces
+.implements Lkotlin/jvm/functions/Function2;
+
+
+# instance fields
+.field public final synthetic $r8$classId:I
+
+.field public final synthetic f$0:J
+
+.field public final synthetic f$1:Ljava/lang/Object;
+
+.field public final synthetic f$2:Lkotlin/jvm/functions/Function2;
+
+
+# direct methods
+.method public synthetic constructor <init>(JLandroidx/compose/foundation/layout/PaddingValues;Landroidx/compose/runtime/internal/ComposableLambdaImpl;)V
+    .locals 1
+
+    .line 1
+    const/4 v0, 0x0
+
+    .line 2
+    iput v0, p0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->$r8$classId:I
+
+    .line 3
+    .line 4
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    .line 5
+    .line 6
+    .line 7
+    iput-wide p1, p0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->f$0:J
+
+    .line 8
+    .line 9
+    iput-object p3, p0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->f$1:Ljava/lang/Object;
+
+    .line 10
+    .line 11
+    iput-object p4, p0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->f$2:Lkotlin/jvm/functions/Function2;
+
+    .line 12
+    .line 13
+    return-void
+.end method
+
+.method public synthetic constructor <init>(JLandroidx/compose/material3/tokens/TypographyKeyTokens;Lkotlin/jvm/functions/Function2;II)V
+    .locals 0
+
+    .line 14
+    iput p6, p0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->$r8$classId:I
+
+    iput-wide p1, p0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->f$0:J
+
+    iput-object p3, p0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->f$1:Ljava/lang/Object;
+
+    iput-object p4, p0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->f$2:Lkotlin/jvm/functions/Function2;
+
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    return-void
+.end method
+
+
+# virtual methods
+.method public final invoke(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+    .locals 18
+
+    .line 1
+    move-object/from16 v0, p0
+
+    .line 2
+    .line 3
+    iget v1, v0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->$r8$classId:I
+
+    .line 4
+    .line 5
+    iget-object v2, v0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->f$2:Lkotlin/jvm/functions/Function2;
+
+    .line 6
+    .line 7
+    const/16 v3, 0x31
+
+    .line 8
+    .line 9
+    sget-object v4, Lkotlin/Unit;->INSTANCE:Lkotlin/Unit;
+
+    .line 10
+    .line 11
+    iget-object v5, v0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->f$1:Ljava/lang/Object;
+
+    .line 12
+    .line 13
+    packed-switch v1, :pswitch_data_0
+
+    .line 14
+    .line 15
+    .line 16
+    move-object v8, v5
+
+    .line 17
+    check-cast v8, Landroidx/compose/material3/tokens/TypographyKeyTokens;
+
+    .line 18
+    .line 19
+    move-object/from16 v10, p1
+
+    .line 20
+    .line 21
+    check-cast v10, Landroidx/compose/runtime/Composer;
+
+    .line 22
+    .line 23
+    move-object/from16 v1, p2
+
+    .line 24
+    .line 25
+    check-cast v1, Ljava/lang/Integer;
+
+    .line 26
+    .line 27
+    invoke-virtual {v1}, Ljava/lang/Object;->getClass()Ljava/lang/Class;
+
+    .line 28
+    .line 29
+    .line 30
+    invoke-static {v3}, Landroidx/compose/runtime/Updater;->updateChangedFlags(I)I
+
+    .line 31
+    .line 32
+    .line 33
+    move-result v11
+
+    .line 34
+    iget-wide v6, v0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->f$0:J
+
+    .line 35
+    .line 36
+    iget-object v9, v0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->f$2:Lkotlin/jvm/functions/Function2;
+
+    .line 37
+    .line 38
+    invoke-static/range {v6 .. v11}, Landroidx/compose/material3/ListItemKt;->ProvideTextStyleFromToken-3J-VO9M(JLandroidx/compose/material3/tokens/TypographyKeyTokens;Lkotlin/jvm/functions/Function2;Landroidx/compose/runtime/Composer;I)V
+
+    .line 39
+    .line 40
+    .line 41
+    return-object v4
+
+    .line 42
+    :pswitch_0
+    move-object v14, v5
+
+    .line 43
+    check-cast v14, Landroidx/compose/material3/tokens/TypographyKeyTokens;
+
+    .line 44
+    .line 45
+    move-object v15, v2
+
+    .line 46
+    check-cast v15, Landroidx/compose/runtime/internal/ComposableLambdaImpl;
+
+    .line 47
+    .line 48
+    move-object/from16 v16, p1
+
+    .line 49
+    .line 50
+    check-cast v16, Landroidx/compose/runtime/Composer;
+
+    .line 51
+    .line 52
+    move-object/from16 v1, p2
+
+    .line 53
+    .line 54
+    check-cast v1, Ljava/lang/Integer;
+
+    .line 55
+    .line 56
+    invoke-virtual {v1}, Ljava/lang/Object;->getClass()Ljava/lang/Class;
+
+    .line 57
+    .line 58
+    .line 59
+    invoke-static {v3}, Landroidx/compose/runtime/Updater;->updateChangedFlags(I)I
+
+    .line 60
+    .line 61
+    .line 62
+    move-result v17
+
+    .line 63
+    iget-wide v12, v0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->f$0:J
+
+    .line 64
+    .line 65
+    invoke-static/range {v12 .. v17}, Landroidx/compose/material3/ListItemKt;->ContentDecorator-3J-VO9M(JLandroidx/compose/material3/tokens/TypographyKeyTokens;Landroidx/compose/runtime/internal/ComposableLambdaImpl;Landroidx/compose/runtime/Composer;I)V
+
+    .line 66
+    .line 67
+    .line 68
+    return-object v4
+
+    .line 69
+    :pswitch_1
+    check-cast v5, Landroidx/compose/foundation/layout/PaddingValues;
+
+    .line 70
+    .line 71
+    check-cast v2, Landroidx/compose/runtime/internal/ComposableLambdaImpl;
+
+    .line 72
+    .line 73
+    move-object/from16 v1, p1
+
+    .line 74
+    .line 75
+    check-cast v1, Landroidx/compose/runtime/Composer;
+
+    .line 76
+    .line 77
+    move-object/from16 v3, p2
+
+    .line 78
+    .line 79
+    check-cast v3, Ljava/lang/Integer;
+
+    .line 80
+    .line 81
+    invoke-virtual {v3}, Ljava/lang/Integer;->intValue()I
+
+    .line 82
+    .line 83
+    .line 84
+    move-result v3
+
+    .line 85
+    and-int/lit8 v6, v3, 0x3
+
+    .line 86
+    .line 87
+    const/4 v7, 0x2
+
+    .line 88
+    const/4 v8, 0x1
+
+    .line 89
+    if-eq v6, v7, :cond_0
+
+    .line 90
+    .line 91
+    move v6, v8
+
+    .line 92
+    goto :goto_0
+
+    .line 93
+    :cond_0
+    const/4 v6, 0x0
+
+    .line 94
+    :goto_0
+    and-int/2addr v3, v8
+
+    .line 95
+    move-object v11, v1
+
+    .line 96
+    check-cast v11, Landroidx/compose/runtime/GapComposer;
+
+    .line 97
+    .line 98
+    invoke-virtual {v11, v3, v6}, Landroidx/compose/runtime/GapComposer;->shouldExecute(IZ)Z
+
+    .line 99
+    .line 100
+    .line 101
+    move-result v1
+
+    .line 102
+    if-eqz v1, :cond_1
+
+    .line 103
+    .line 104
+    sget-object v1, Landroidx/compose/material3/MaterialThemeKt;->_localMaterialTheme:Landroidx/compose/runtime/StaticProvidableCompositionLocal;
+
+    .line 105
+    .line 106
+    invoke-virtual {v11, v1}, Landroidx/compose/runtime/GapComposer;->consume(Landroidx/compose/runtime/ProvidableCompositionLocal;)Ljava/lang/Object;
+
+    .line 107
+    .line 108
+    .line 109
+    move-result-object v1
+
+    .line 110
+    check-cast v1, Landroidx/compose/material3/MaterialTheme$Values;
+
+    .line 111
+    .line 112
+    iget-object v1, v1, Landroidx/compose/material3/MaterialTheme$Values;->typography:Landroidx/compose/material3/Typography;
+
+    .line 113
+    .line 114
+    iget-object v9, v1, Landroidx/compose/material3/Typography;->labelLarge:Landroidx/compose/ui/text/TextStyle;
+
+    .line 115
+    .line 116
+    new-instance v1, Landroidx/compose/material3/TextKt$$ExternalSyntheticLambda2;
+
+    .line 117
+    .line 118
+    const/4 v3, 0x6
+
+    .line 119
+    invoke-direct {v1, v5, v2, v3}, Landroidx/compose/material3/TextKt$$ExternalSyntheticLambda2;-><init>(Ljava/lang/Object;Ljava/lang/Object;I)V
+
+    .line 120
+    .line 121
+    .line 122
+    const v2, 0x18e49c83
+
+    .line 123
+    .line 124
+    .line 125
+    invoke-static {v2, v1, v11}, Landroidx/compose/runtime/internal/Expect_jvmKt;->rememberComposableLambda(ILkotlin/Function;Landroidx/compose/runtime/Composer;)Landroidx/compose/runtime/internal/ComposableLambdaImpl;
+
+    .line 126
+    .line 127
+    .line 128
+    move-result-object v10
+
+    .line 129
+    const/16 v12, 0x180
+
+    .line 130
+    .line 131
+    iget-wide v7, v0, Landroidx/compose/material3/ButtonKt$$ExternalSyntheticLambda2;->f$0:J
+
+    .line 132
+    .line 133
+    invoke-static/range {v7 .. v12}, Landroidx/compose/material3/internal/LayoutUtilKt;->ProvideContentColorTextStyle-3J-VO9M(JLandroidx/compose/ui/text/TextStyle;Lkotlin/jvm/functions/Function2;Landroidx/compose/runtime/Composer;I)V
+
+    .line 134
+    .line 135
+    .line 136
+    goto :goto_1
+
+    .line 137
+    :cond_1
+    invoke-virtual {v11}, Landroidx/compose/runtime/GapComposer;->skipToGroupEnd()V
+
+    .line 138
+    .line 139
+    .line 140
+    :goto_1
+    return-object v4
+
+    .line 141
+    :pswitch_data_0
+    .packed-switch 0x0
+        :pswitch_1
+        :pswitch_0
+    .end packed-switch
+.end method

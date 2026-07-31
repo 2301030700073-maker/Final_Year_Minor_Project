@@ -1,0 +1,216 @@
+.class public Lorg/schabi/newpipe/extractor/timeago/patterns/id;
+.super Lorg/schabi/newpipe/extractor/timeago/PatternsHolder;
+.source "r8-map-id-86a71dde26502018768275c3ef5c4d56379672d582e9c15e1a63fb997724bbe7"
+
+
+# static fields
+.field private static final DAYS:[Ljava/lang/String;
+
+.field private static final HOURS:[Ljava/lang/String;
+
+.field private static final INSTANCE:Lorg/schabi/newpipe/extractor/timeago/patterns/id;
+
+.field private static final MINUTES:[Ljava/lang/String;
+
+.field private static final MONTHS:[Ljava/lang/String;
+
+.field private static final SECONDS:[Ljava/lang/String;
+
+.field private static final WEEKS:[Ljava/lang/String;
+
+.field private static final WORD_SEPARATOR:Ljava/lang/String; = " "
+
+.field private static final YEARS:[Ljava/lang/String;
+
+
+# direct methods
+.method static constructor <clinit>()V
+    .locals 1
+
+    .line 1
+    const-string v0, "detik"
+
+    .line 2
+    .line 3
+    filled-new-array {v0}, [Ljava/lang/String;
+
+    .line 4
+    .line 5
+    .line 6
+    move-result-object v0
+
+    .line 7
+    sput-object v0, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->SECONDS:[Ljava/lang/String;
+
+    .line 8
+    .line 9
+    const-string v0, "menit"
+
+    .line 10
+    .line 11
+    filled-new-array {v0}, [Ljava/lang/String;
+
+    .line 12
+    .line 13
+    .line 14
+    move-result-object v0
+
+    .line 15
+    sput-object v0, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->MINUTES:[Ljava/lang/String;
+
+    .line 16
+    .line 17
+    const-string v0, "jam"
+
+    .line 18
+    .line 19
+    filled-new-array {v0}, [Ljava/lang/String;
+
+    .line 20
+    .line 21
+    .line 22
+    move-result-object v0
+
+    .line 23
+    sput-object v0, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->HOURS:[Ljava/lang/String;
+
+    .line 24
+    .line 25
+    const-string v0, "hari"
+
+    .line 26
+    .line 27
+    filled-new-array {v0}, [Ljava/lang/String;
+
+    .line 28
+    .line 29
+    .line 30
+    move-result-object v0
+
+    .line 31
+    sput-object v0, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->DAYS:[Ljava/lang/String;
+
+    .line 32
+    .line 33
+    const-string v0, "minggu"
+
+    .line 34
+    .line 35
+    filled-new-array {v0}, [Ljava/lang/String;
+
+    .line 36
+    .line 37
+    .line 38
+    move-result-object v0
+
+    .line 39
+    sput-object v0, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->WEEKS:[Ljava/lang/String;
+
+    .line 40
+    .line 41
+    const-string v0, "bulan"
+
+    .line 42
+    .line 43
+    filled-new-array {v0}, [Ljava/lang/String;
+
+    .line 44
+    .line 45
+    .line 46
+    move-result-object v0
+
+    .line 47
+    sput-object v0, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->MONTHS:[Ljava/lang/String;
+
+    .line 48
+    .line 49
+    const-string/jumbo v0, "tahun"
+
+    .line 50
+    .line 51
+    .line 52
+    filled-new-array {v0}, [Ljava/lang/String;
+
+    .line 53
+    .line 54
+    .line 55
+    move-result-object v0
+
+    .line 56
+    sput-object v0, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->YEARS:[Ljava/lang/String;
+
+    .line 57
+    .line 58
+    new-instance v0, Lorg/schabi/newpipe/extractor/timeago/patterns/id;
+
+    .line 59
+    .line 60
+    invoke-direct {v0}, Lorg/schabi/newpipe/extractor/timeago/patterns/id;-><init>()V
+
+    .line 61
+    .line 62
+    .line 63
+    sput-object v0, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->INSTANCE:Lorg/schabi/newpipe/extractor/timeago/patterns/id;
+
+    .line 64
+    .line 65
+    return-void
+.end method
+
+.method private constructor <init>()V
+    .locals 9
+
+    .line 1
+    sget-object v2, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->SECONDS:[Ljava/lang/String;
+
+    .line 2
+    .line 3
+    sget-object v3, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->MINUTES:[Ljava/lang/String;
+
+    .line 4
+    .line 5
+    sget-object v4, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->HOURS:[Ljava/lang/String;
+
+    .line 6
+    .line 7
+    sget-object v5, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->DAYS:[Ljava/lang/String;
+
+    .line 8
+    .line 9
+    sget-object v6, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->WEEKS:[Ljava/lang/String;
+
+    .line 10
+    .line 11
+    sget-object v7, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->MONTHS:[Ljava/lang/String;
+
+    .line 12
+    .line 13
+    sget-object v8, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->YEARS:[Ljava/lang/String;
+
+    .line 14
+    .line 15
+    const-string v1, " "
+
+    .line 16
+    .line 17
+    move-object v0, p0
+
+    .line 18
+    invoke-direct/range {v0 .. v8}, Lorg/schabi/newpipe/extractor/timeago/PatternsHolder;-><init>(Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V
+
+    .line 19
+    .line 20
+    .line 21
+    return-void
+.end method
+
+.method public static getInstance()Lorg/schabi/newpipe/extractor/timeago/patterns/id;
+    .locals 1
+
+    .line 1
+    sget-object v0, Lorg/schabi/newpipe/extractor/timeago/patterns/id;->INSTANCE:Lorg/schabi/newpipe/extractor/timeago/patterns/id;
+
+    .line 2
+    .line 3
+    return-object v0
+.end method

@@ -1,0 +1,22 @@
+version: 3.0.1
+apkFileName: org.wikipedia_50598.apk
+usesFramework:
+  ids:
+  - 1
+sdkInfo:
+  minSdkVersion: 23
+  targetSdkVersion: 37
+versionInfo:
+  versionCode: 50598
+  versionName: r/50598-r-2026-07-13
+resourcesInfo:
+  packageId: 127
+doNotCompress:
+- arsc
+- gif
+- ogg
+- png
+- so
+- assets/dexopt/baseline.prof
+- assets/dexopt/baseline.profm
+- res/raw/isrg_root_x1.der

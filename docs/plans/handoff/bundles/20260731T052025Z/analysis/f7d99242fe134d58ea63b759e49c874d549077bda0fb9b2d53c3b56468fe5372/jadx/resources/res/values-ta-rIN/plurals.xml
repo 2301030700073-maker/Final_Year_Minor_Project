@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">இந்த செய்தியை நீக்க விரும்புகிறீர்களா?</item>
+        <item quantity="other">%1$d செய்திகளை நீக்க விரும்புகிறீர்களா?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">இந்த செய்தியை ச்பேம் கோப்புறையில் நகர்த்த விரும்புகிறீர்களா?</item>
+        <item quantity="other">நீங்கள் உண்மையில் %1$d ச்பேம் கோப்புறையில் செய்திகளை நகர்த்த விரும்புகிறீர்களா?</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d புதிய செய்தி</item>
+        <item quantity="other">%d புதிய செய்திகள்</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">%d முடிவைப் பெறுதல்</item>
+        <item quantity="other">%d முடிவுகளைப் பெறுதல்</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">%2$d முடிவின் %1$d ஐப் பெறுகிறது</item>
+        <item quantity="other">%2$d முடிவுகளின் %1$d ஐப் பெறுகிறது</item>
+    </plurals>
+</resources>

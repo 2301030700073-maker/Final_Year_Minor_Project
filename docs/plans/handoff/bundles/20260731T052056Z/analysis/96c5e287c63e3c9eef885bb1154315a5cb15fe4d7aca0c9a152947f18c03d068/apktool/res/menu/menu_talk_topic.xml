@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:icon="@drawable/ic_find_in_page_24px" android:id="@id/menu_find_in_page" android:title="@string/menu_option_find_in_talk_page_topic" app:iconTint="?primary_color" app:showAsAction="ifRoom" />
+    <item android:icon="@drawable/ic_more_vert_white_24dp" android:id="@id/menu_talk_topic_group" android:title="@string/nav_item_more" app:iconTint="?primary_color" app:showAsAction="always">
+        <menu>
+            <item android:icon="@drawable/ic_expand_24" android:id="@id/menu_talk_topic_expand" android:title="@string/talk_menu_expand_threads" app:iconTint="?secondary_color" app:showAsAction="never" />
+            <item android:icon="@drawable/ic_collapse_24" android:id="@id/menu_talk_topic_collapse" android:title="@string/talk_menu_collapse_threads" app:iconTint="?secondary_color" app:showAsAction="never" />
+            <item android:icon="@drawable/ic_share" android:id="@id/menu_talk_topic_share" android:title="@string/talk_list_item_overflow_share" app:iconTint="?secondary_color" app:showAsAction="never" />
+            <item android:icon="@drawable/ic_mode_edit_white_24dp" android:id="@id/menu_edit_source" android:title="@string/menu_option_edit_source" app:iconTint="?secondary_color" app:showAsAction="never" />
+        </menu>
+    </item>
+</menu>

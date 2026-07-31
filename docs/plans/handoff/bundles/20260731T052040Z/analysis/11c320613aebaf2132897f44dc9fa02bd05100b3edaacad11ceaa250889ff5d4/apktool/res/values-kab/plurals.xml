@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="days">
+        <item quantity="one">%d n wass</item>
+        <item quantity="other">%d n wussan</item>
+    </plurals>
+    <plurals name="feed_group_dialog_selection_count">
+        <item quantity="one">%d i yettwafren</item>
+        <item quantity="other">%d i yettwafernen</item>
+    </plurals>
+    <plurals name="minutes">
+        <item quantity="one">%d n tesdat</item>
+        <item quantity="other">%d n tesdatin</item>
+    </plurals>
+    <plurals name="videos">
+        <item quantity="one">%s n tvidyut</item>
+        <item quantity="other">%s n tvidyutin</item>
+    </plurals>
+    <plurals name="views">
+        <item quantity="one">%s n tmeẓriwt</item>
+        <item quantity="other">%s n tmeẓriyin</item>
+    </plurals>
+</resources>

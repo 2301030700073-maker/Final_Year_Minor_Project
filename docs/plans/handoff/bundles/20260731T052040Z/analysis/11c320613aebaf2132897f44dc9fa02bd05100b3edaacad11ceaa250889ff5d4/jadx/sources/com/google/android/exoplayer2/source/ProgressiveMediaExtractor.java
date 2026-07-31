@@ -1,0 +1,32 @@
+package com.google.android.exoplayer2.source;
+
+import android.net.Uri;
+import com.google.android.exoplayer2.analytics.PlayerId;
+import com.google.android.exoplayer2.extractor.ExtractorOutput;
+import com.google.android.exoplayer2.extractor.PositionHolder;
+import com.google.android.exoplayer2.upstream.DataReader;
+import java.util.List;
+import java.util.Map;
+
+/* compiled from: r8-map-id-86a71dde26502018768275c3ef5c4d56379672d582e9c15e1a63fb997724bbe7 */
+@Deprecated
+/* loaded from: classes.dex */
+public interface ProgressiveMediaExtractor {
+
+    /* compiled from: r8-map-id-86a71dde26502018768275c3ef5c4d56379672d582e9c15e1a63fb997724bbe7 */
+    public interface Factory {
+        ProgressiveMediaExtractor createProgressiveMediaExtractor(PlayerId playerId);
+    }
+
+    void disableSeekingOnMp3Streams();
+
+    long getCurrentInputPosition();
+
+    void init(DataReader dataReader, Uri uri, Map<String, List<String>> map, long j, long j2, ExtractorOutput extractorOutput);
+
+    int read(PositionHolder positionHolder);
+
+    void release();
+
+    void seek(long j, long j2);
+}

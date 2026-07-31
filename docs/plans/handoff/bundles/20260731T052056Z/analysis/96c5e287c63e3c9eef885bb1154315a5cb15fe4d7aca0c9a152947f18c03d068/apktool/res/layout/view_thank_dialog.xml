@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:gravity="center_horizontal" android:orientation="vertical" android:padding="24.0dp" android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <ImageView android:layout_width="180.0dp" android:layout_height="100.0dp" app:srcCompat="@drawable/ic_thank_illustration" />
+    <TextView android:textSize="20.0sp" android:textStyle="bold" android:textColor="?primary_color" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16.0dp" android:text="@string/thank_dialog_title_text" android:lineSpacingExtra="8.0sp" android:letterSpacing="0.01" />
+    <TextView android:textSize="16.0sp" android:textColor="?secondary_color" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8.0dp" android:text="@string/thank_dialog_text" android:lineSpacingExtra="8.0sp" android:letterSpacing="0.01" />
+</LinearLayout>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:id="@id/top_controls" android:background="@color/message_list_widget_header_background" android:layout_width="match_parent" android:layout_height="wrap_content">
+        <TextView android:textSize="20.0sp" android:textColor="@color/message_list_widget_header_text" android:id="@id/folder" android:paddingLeft="8.0dp" android:paddingTop="12.0dp" android:paddingRight="8.0dp" android:paddingBottom="12.0dp" android:layout_width="0.0dp" android:layout_height="wrap_content" android:layout_weight="1.0" />
+        <ImageButton android:id="@id/new_message" android:background="?android:selectableItemBackground" android:layout_width="56.0dp" android:layout_height="match_parent" android:src="@drawable/ic_edit" android:scaleType="center" android:contentDescription="@string/message_list_widget_compose_action" />
+    </LinearLayout>
+    <ListView android:id="@id/listView" android:background="@android:color/white" android:layout_width="match_parent" android:layout_height="match_parent" android:divider="@color/message_list_widget_divider" android:dividerHeight="0.5dp" />
+</LinearLayout>

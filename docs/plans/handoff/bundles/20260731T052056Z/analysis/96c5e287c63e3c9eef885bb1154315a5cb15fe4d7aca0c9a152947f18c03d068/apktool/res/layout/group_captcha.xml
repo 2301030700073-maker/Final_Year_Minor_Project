@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:gravity="center" android:orientation="vertical" android:paddingTop="8.0dp" android:paddingBottom="8.0dp" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingVertical="8.0dp"
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <TextView android:textColor="?primary_color" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_margin="0.0dp" android:text="@string/edit_section_captcha_message" android:textAlignment="center" style="@style/P" />
+    <TextView android:textColor="?primary_color" android:id="@id/request_account_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_margin="16.0dp" android:text="@string/edit_section_captcha_request_an_account_message" style="@style/List.MaterialListSubtitle" />
+    <FrameLayout android:paddingBottom="8.0dp" android:layout_width="240.0dp" android:layout_height="wrap_content">
+        <ImageView android:layout_gravity="center_horizontal" android:id="@id/captcha_image" android:background="?paper_color" android:layout_width="match_parent" android:layout_height="80.0dp" android:scaleType="fitCenter" android:contentDescription="@string/captcha_image" style="@style/ImageViewDefault" />
+        <ProgressBar android:layout_gravity="center_horizontal" android:id="@id/captcha_image_progress" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content" android:indeterminate="true" style="?android:progressBarStyleHorizontal" />
+    </FrameLayout>
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/edit_section_captcha_reload" android:textAlignment="center" style="?android:textAppearanceSmall" />
+    <com.google.android.material.textfield.TextInputLayout android:id="@id/captcha_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16.0dp" android:layout_marginBottom="8.0dp" android:hint="@string/edit_section_captcha_hint" android:focusedByDefault="false">
+        <org.wikipedia.views.PlainPasteEditText android:layout_gravity="center_horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="1" android:inputType="textVisiblePassword|textNoSuggestions" android:imeOptions="actionDone|flagNoExtractUi" style="?android:textAppearanceMedium" />
+    </com.google.android.material.textfield.TextInputLayout>
+    <Button android:id="@id/captcha_submit_button" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/create_account_button" android:layout_marginStart="0.0dp" android:layout_marginEnd="0.0dp" />
+</LinearLayout>

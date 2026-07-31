@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <com.google.android.material.appbar.MaterialToolbar android:id="@id/toolbar" android:layout_width="match_parent" android:layout_height="?actionBarSize" style="@style/ToolbarStyle.Small" />
+    <androidx.constraintlayout.widget.ConstraintLayout android:layout_width="match_parent" android:layout_height="match_parent" android:layout_marginTop="?actionBarSize">
+        <LinearLayout android:gravity="center_vertical" android:id="@id/wikiLanguageDropdownContainer" android:visibility="gone" android:layout_width="match_parent" android:layout_height="48.0dp" android:layout_marginTop="1.0px" android:elevation="4.0dp" app:layout_constraintTop_toTopOf="parent">
+            <LinearLayout android:layout_width="0.0dp" android:layout_height="match_parent" android:layout_weight="1.0">
+                <Spinner android:layout_gravity="center_vertical" android:id="@id/wikiFromLanguageSpinner" android:layout_width="wrap_content" android:layout_height="wrap_content" android:backgroundTint="?progressive_color" />
+            </LinearLayout>
+            <ImageView android:layout_gravity="center" android:id="@id/arrow" android:background="?selectableItemBackgroundBorderless" android:paddingTop="8.0dp" android:paddingBottom="8.0dp" android:layout_width="24.0dp" android:layout_height="24.0dp" android:scaleType="center" android:contentDescription="@null" android:paddingStart="4.0dp" android:paddingEnd="4.0dp" app:srcCompat="@drawable/ic_baseline_arrow_right_alt_24px" app:tint="?secondary_color" />
+            <LinearLayout android:gravity="end" android:layout_width="0.0dp" android:layout_height="match_parent" android:layout_weight="1.0">
+                <Spinner android:layout_gravity="center_vertical" android:id="@id/wikiToLanguageSpinner" android:layout_width="wrap_content" android:layout_height="wrap_content" android:backgroundTint="?progressive_color" />
+            </LinearLayout>
+        </LinearLayout>
+        <androidx.coordinatorlayout.widget.CoordinatorLayout android:id="@id/suggestedEditsCardsCoordinator" android:layout_width="match_parent" android:layout_height="0.0dp" app:layout_constraintBottom_toTopOf="@id/bottomButtonContainer" app:layout_constraintTop_toBottomOf="@id/wikiLanguageDropdownContainer">
+            <androidx.viewpager2.widget.ViewPager2 android:id="@id/cardsViewPager" android:layout_width="match_parent" android:layout_height="match_parent" />
+        </androidx.coordinatorlayout.widget.CoordinatorLayout>
+        <androidx.constraintlayout.widget.ConstraintLayout android:id="@id/bottomButtonContainer" android:paddingTop="10.0dp" android:paddingBottom="24.0dp" android:clipChildren="false" android:clipToPadding="false" android:layout_width="match_parent" android:layout_height="wrap_content" app:layout_constraintBottom_toBottomOf="parent">
+            <ImageView android:id="@id/backButton" android:background="?selectableItemBackgroundBorderless" android:padding="12.0dp" android:focusable="true" android:clickable="true" android:layout_width="48.0dp" android:layout_height="48.0dp" android:contentDescription="@null" android:scaleX="-1.0" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent" app:srcCompat="@drawable/ic_chevron_forward_white_24dp" app:tint="?progressive_color" />
+            <com.google.android.material.button.MaterialButton android:id="@id/addContributionButton" android:tag="portrait" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/suggested_edits_add_description_button" app:icon="@drawable/ic_add_gray_white_24dp" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent" />
+            <ImageView android:id="@id/nextButton" android:background="?selectableItemBackgroundBorderless" android:padding="12.0dp" android:focusable="true" android:clickable="true" android:layout_width="48.0dp" android:layout_height="48.0dp" android:contentDescription="@string/view_next_random_article" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintTop_toTopOf="parent" app:srcCompat="@drawable/ic_chevron_forward_white_24dp" app:tint="?progressive_color" />
+        </androidx.constraintlayout.widget.ConstraintLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</FrameLayout>

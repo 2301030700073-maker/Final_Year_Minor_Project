@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="zero">كل 0 ساعة</item>
+        <item quantity="one">كل ساعة</item>
+        <item quantity="two">كل ساعتين</item>
+        <item quantity="few">كل %d ساعات</item>
+        <item quantity="many">كل %d ساعة</item>
+        <item quantity="other">كل %d ساعة</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="zero">كل 0 دقيقة</item>
+        <item quantity="one">كل دقيقة</item>
+        <item quantity="two">كل دقيقتين</item>
+        <item quantity="few">كل %d دقائق</item>
+        <item quantity="many">كل %d دقيقة</item>
+        <item quantity="other">كل %d دقيقة</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="zero">0 رسالة</item>
+        <item quantity="one">رسالة واحدة</item>
+        <item quantity="two">رسالتين</item>
+        <item quantity="few">%d رسائل</item>
+        <item quantity="many">%d رسالة</item>
+        <item quantity="other">%d رسالة</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="zero">%d ﻻ رسائل</item>
+        <item quantity="one">%d رسالة واحدة</item>
+        <item quantity="two">%d رسالتان</item>
+        <item quantity="few">%d رسائل</item>
+        <item quantity="many">%d رسالة</item>
+        <item quantity="other">%d رسالة جديدة</item>
+    </plurals>
+</resources>

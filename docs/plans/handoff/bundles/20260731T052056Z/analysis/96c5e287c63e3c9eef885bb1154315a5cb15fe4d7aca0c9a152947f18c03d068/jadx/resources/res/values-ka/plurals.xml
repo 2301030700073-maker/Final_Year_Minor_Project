@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="diff_years">
+        <item quantity="one">შარშან</item>
+        <item quantity="other">%d წლის წინ</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d ახალი შეტყობინება</item>
+        <item quantity="other">%d ახალი შეტყობინება</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">სტატიის გადმოწერა</item>
+        <item quantity="other">სტატიების გადმოწერა</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">დარჩა %1$d სტატია</item>
+        <item quantity="other">დარჩა %1$d სტატია</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">იტვირთება %1$d სტატია…</item>
+        <item quantity="other">იტვირთება %1$d სტატია…</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 შედეგი</item>
+        <item quantity="other">%d შედეგი</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">გუშინ</item>
+        <item quantity="other">%d დღის წინ</item>
+    </plurals>
+</resources>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout android:orientation="vertical" android:id="@id/coordinator_layout" android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <com.google.android.material.appbar.AppBarLayout android:id="@id/app_bar_layout" android:layout_width="match_parent" android:layout_height="wrap_content" style="@style/Widget.App.AppBarLayout">
+        <include layout="@layout/toolbar" />
+    </com.google.android.material.appbar.AppBarLayout>
+    <LinearLayout android:gravity="center" android:orientation="vertical" android:id="@id/content_container" android:layout_width="match_parent" android:layout_height="match_parent" app:layout_behavior="@string/appbar_scrolling_view_behavior">
+        <ProgressBar android:id="@id/databaseUpgradeProgress" android:layout_width="wrap_content" android:layout_height="wrap_content" style="?android:progressBarStyleLarge" />
+        <com.google.android.material.textview.MaterialTextView android:id="@id/databaseUpgradeText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/upgrade_databases_unspecified" />
+    </LinearLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:orientation="vertical" android:paddingLeft="10.0dp" android:paddingTop="14.0dp" android:paddingRight="10.0dp" android:paddingBottom="14.0dp" android:layout_width="wrap_content" android:layout_height="wrap_content"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <LinearLayout android:orientation="horizontal" android:layout_width="wrap_content" android:layout_height="wrap_content">
+        <ImageView android:layout_gravity="center_vertical" android:layout_width="wrap_content" android:layout_height="20.0dp" android:scaleType="fitCenter" app:srcCompat="@drawable/ic_check_circle" app:tint="@color/light_black" />
+        <com.google.android.material.textview.MaterialTextView android:textAppearance="?android:textAppearanceMedium" android:layout_gravity="center_vertical" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="6.0dp" android:layout_marginRight="6.0dp" android:text="@string/openpgp_encryption" />
+    </LinearLayout>
+    <com.google.android.material.textview.MaterialTextView android:textAppearance="?android:textAppearanceSmall" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10.0dp" android:layout_marginBottom="10.0dp" android:text="@string/openpgp_description_text1" />
+    <LinearLayout android:gravity="center_horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
+        <ImageView android:padding="6.0dp" android:layout_width="wrap_content" android:layout_height="wrap_content" app:srcCompat="@drawable/ic_no_encryption" app:tint="?openpgp_dark_grey" />
+        <ImageView android:layout_gravity="center_vertical" android:layout_width="wrap_content" android:layout_height="wrap_content" app:srcCompat="@drawable/ic_chevron_right" />
+        <ImageView android:padding="6.0dp" android:layout_width="wrap_content" android:layout_height="wrap_content" app:srcCompat="@drawable/ic_lock" app:tint="?openpgp_green" />
+    </LinearLayout>
+    <com.google.android.material.textview.MaterialTextView android:textAppearance="?android:textAppearanceSmall" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10.0dp" android:layout_marginBottom="10.0dp" android:text="@string/openpgp_description_text2" />
+    <com.google.android.material.textview.MaterialTextView android:textAppearance="?android:textAppearanceSmall" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10.0dp" android:layout_marginBottom="10.0dp" android:text="@string/openpgp_description_text3" />
+</LinearLayout>

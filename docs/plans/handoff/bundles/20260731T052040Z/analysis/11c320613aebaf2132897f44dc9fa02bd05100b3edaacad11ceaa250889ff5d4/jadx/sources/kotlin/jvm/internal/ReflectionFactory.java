@@ -1,0 +1,10 @@
+package kotlin.jvm.internal;
+
+/* compiled from: r8-map-id-86a71dde26502018768275c3ef5c4d56379672d582e9c15e1a63fb997724bbe7 */
+/* loaded from: classes.dex */
+public final class ReflectionFactory {
+    public static String renderLambdaToString(FunctionBase functionBase) {
+        String obj = functionBase.getClass().getGenericInterfaces()[0].toString();
+        return obj.startsWith("kotlin.jvm.functions.") ? obj.substring(21) : obj;
+    }
+}

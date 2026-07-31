@@ -1,0 +1,102 @@
+package org.wikipedia.databinding;
+
+import android.view.View;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import androidx.constraintlayout.widget.ConstraintLayout;
+import androidx.coordinatorlayout.widget.CoordinatorLayout;
+import androidx.recyclerview.widget.RecyclerView;
+import com.google.android.material.appbar.AppBarLayout;
+import com.google.android.material.appbar.CollapsingToolbarLayout;
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.progressindicator.LinearProgressIndicator;
+import org.wikipedia.views.GoneIfEmptyTextView;
+import org.wikipedia.views.WikiErrorView;
+
+/* compiled from: r8-map-id-5c42cb83f75859ba9a04ff37bb86a22b3712bc256fe317787b2a7645129b709e */
+/* loaded from: classes.dex */
+public final class FragmentArticleEditDetailsBinding {
+    public final AppBarLayout appBarLayout;
+    public final View articleTitleDivider;
+    public final TextView articleTitleView;
+    public final CollapsingToolbarLayout collapsingToolbarLayout;
+    public final TextView diffCharacterCountView;
+    public final View diffDivider;
+    public final RecyclerView diffRecyclerView;
+    public final LinearLayout diffUnavailableContainer;
+    public final WikiErrorView errorView;
+    public final View fromToDivider;
+    public final LinearLayout navTabContainer;
+    public final ImageView newerIdButton;
+    public final ImageView olderIdButton;
+    public final MaterialButton oresDamagingButton;
+    public final MaterialButton oresGoodFaithButton;
+    public final View overlayArticleTitleDivider;
+    public final View overlayDiffDivider;
+    public final View overlayFromToDivider;
+    public final ConstraintLayout overlayRevisionDetailsView;
+    public final TextView overlayRevisionFromTimestamp;
+    public final TextView overlayRevisionToTimestamp;
+    public final LinearProgressIndicator progressBar;
+    public final ConstraintLayout revisionDetailsView;
+    public final GoneIfEmptyTextView revisionFromEditComment;
+    public final TextView revisionFromTimestamp;
+    public final GoneIfEmptyTextView revisionToEditComment;
+    public final TextView revisionToTimestamp;
+    public final CoordinatorLayout rootView;
+    public final FrameLayout talkButton;
+    public final FrameLayout thankButton;
+    public final ImageView thankIcon;
+    public final View thanksDivider;
+    public final FrameLayout undoButton;
+    public final TextView undoLabel;
+    public final MaterialButton usernameFromButton;
+    public final MaterialButton usernameToButton;
+    public final FrameLayout watchButton;
+    public final ImageView watchIcon;
+    public final TextView watchLabel;
+
+    public FragmentArticleEditDetailsBinding(CoordinatorLayout coordinatorLayout, AppBarLayout appBarLayout, View view, TextView textView, CollapsingToolbarLayout collapsingToolbarLayout, TextView textView2, View view2, RecyclerView recyclerView, LinearLayout linearLayout, WikiErrorView wikiErrorView, View view3, LinearLayout linearLayout2, ImageView imageView, ImageView imageView2, MaterialButton materialButton, MaterialButton materialButton2, View view4, View view5, View view6, ConstraintLayout constraintLayout, TextView textView3, TextView textView4, LinearProgressIndicator linearProgressIndicator, ConstraintLayout constraintLayout2, GoneIfEmptyTextView goneIfEmptyTextView, TextView textView5, GoneIfEmptyTextView goneIfEmptyTextView2, TextView textView6, FrameLayout frameLayout, FrameLayout frameLayout2, ImageView imageView3, View view7, FrameLayout frameLayout3, TextView textView7, MaterialButton materialButton3, MaterialButton materialButton4, FrameLayout frameLayout4, ImageView imageView4, TextView textView8) {
+        this.rootView = coordinatorLayout;
+        this.appBarLayout = appBarLayout;
+        this.articleTitleDivider = view;
+        this.articleTitleView = textView;
+        this.collapsingToolbarLayout = collapsingToolbarLayout;
+        this.diffCharacterCountView = textView2;
+        this.diffDivider = view2;
+        this.diffRecyclerView = recyclerView;
+        this.diffUnavailableContainer = linearLayout;
+        this.errorView = wikiErrorView;
+        this.fromToDivider = view3;
+        this.navTabContainer = linearLayout2;
+        this.newerIdButton = imageView;
+        this.olderIdButton = imageView2;
+        this.oresDamagingButton = materialButton;
+        this.oresGoodFaithButton = materialButton2;
+        this.overlayArticleTitleDivider = view4;
+        this.overlayDiffDivider = view5;
+        this.overlayFromToDivider = view6;
+        this.overlayRevisionDetailsView = constraintLayout;
+        this.overlayRevisionFromTimestamp = textView3;
+        this.overlayRevisionToTimestamp = textView4;
+        this.progressBar = linearProgressIndicator;
+        this.revisionDetailsView = constraintLayout2;
+        this.revisionFromEditComment = goneIfEmptyTextView;
+        this.revisionFromTimestamp = textView5;
+        this.revisionToEditComment = goneIfEmptyTextView2;
+        this.revisionToTimestamp = textView6;
+        this.talkButton = frameLayout;
+        this.thankButton = frameLayout2;
+        this.thankIcon = imageView3;
+        this.thanksDivider = view7;
+        this.undoButton = frameLayout3;
+        this.undoLabel = textView7;
+        this.usernameFromButton = materialButton3;
+        this.usernameToButton = materialButton4;
+        this.watchButton = frameLayout4;
+        this.watchIcon = imageView4;
+        this.watchLabel = textView8;
+    }
+}

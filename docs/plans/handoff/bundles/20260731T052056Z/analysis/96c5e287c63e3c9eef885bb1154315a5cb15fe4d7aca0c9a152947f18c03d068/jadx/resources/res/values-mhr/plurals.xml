@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s байт</item>
+        <item quantity="other">%s байт</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d тӧрлымаш</item>
+        <item quantity="other">%2$s (%3$s) дене %1$d тӧрлымаш</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 статья, %2$.2f МБ</item>
+        <item quantity="other">%1$d статья, %2$.2f МБ</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 статья</item>
+        <item quantity="other">%d статья</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d тӧрлымаш</item>
+        <item quantity="other">%2$s дене %1$d тӧрлымаш</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 лектыш</item>
+        <item quantity="other">%d лектыш</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">теҥгече</item>
+        <item quantity="other">%d кече ончыч</item>
+    </plurals>
+</resources>

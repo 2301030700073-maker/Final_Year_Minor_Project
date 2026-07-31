@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Da li stvarno želite obrisati ovu poruku?</item>
+        <item quantity="few">Da li stvarno želite obrisati %1$d poruke?</item>
+        <item quantity="other">Da li stvarno želite obrisati %1$d poruke?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Da li stvarno želite premjestiti ovu poruku u mapu otpada?</item>
+        <item quantity="few">Da li stvarno želite obrisati %1$d poruke?</item>
+        <item quantity="other">Da li stvarno želite obrisati %1$d poruke?</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d nova poruka</item>
+        <item quantity="few">%d novih poruka</item>
+        <item quantity="other">%d novih poruka</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">Dohvaćam %d rezultat</item>
+        <item quantity="few">Dohvaćam %d rezultata</item>
+        <item quantity="other">Dohvaćam %d rezultata</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">Dohvaćam %1$d od %2$d rezultat</item>
+        <item quantity="few">Dohvaćam %1$d od %2$d rezultata</item>
+        <item quantity="other">Dohvaćam %1$d od %2$d rezultata</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">Da biste mogli koristiti račun &quot;%s&quot; trebate unijeti lozinku za poslužitelj.</item>
+        <item quantity="few">Da biste mogli koristiti račun&quot;%s&quot; trebate unijeti lozinke za poslužitelj.</item>
+        <item quantity="other">Da biste mogli koristiti račun &quot;%s&quot; trebate unijeti lozinke za poslužitelj.</item>
+    </plurals>
+</resources>

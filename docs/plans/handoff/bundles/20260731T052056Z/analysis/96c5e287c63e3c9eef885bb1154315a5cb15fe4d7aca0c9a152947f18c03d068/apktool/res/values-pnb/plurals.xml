@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="diff_years">
+        <item quantity="one">پچلے سال</item>
+        <item quantity="other">%d سال پہلاں</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="other">%s بائٹ</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d دن</item>
+        <item quantity="other">%d دن</item>
+    </plurals>
+</resources>

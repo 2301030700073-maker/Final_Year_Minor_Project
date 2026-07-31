@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="one">%d dag</item>
+        <item quantity="other">%d dager</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="one">redigering forrige måned</item>
+        <item quantity="other">redigeringer forrige måned</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="one">redigering denne måneden</item>
+        <item quantity="other">redigeringer denne måneden</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="one">redigering</item>
+        <item quantity="other">redigeringer</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_views">
+        <item quantity="one">Visninger av artikler du har redigert</item>
+        <item quantity="other">Visninger av artikler du har redigert</item>
+    </plurals>
+    <plurals name="activity_tab_impact_thanks">
+        <item quantity="one">takk</item>
+        <item quantity="other">takk</item>
+    </plurals>
+    <plurals name="activity_tab_impact_total_edits">
+        <item quantity="one">redigering totalt</item>
+        <item quantity="other">redigeringer totalt</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="one">I fjor</item>
+        <item quantity="other">For %d år siden</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s byte</item>
+        <item quantity="other">%s byte</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d redigering siden %2$s (%3$s)</item>
+        <item quantity="other">%1$d redigeringer siden %2$s (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">%1$d av 1 artikkel tilgjengelig offline, %3$.2f MB</item>
+        <item quantity="other">%1$d av %2$d artikler tilgjengelig offline, %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">%1$d av 1 artikkel tilgjengelig offline</item>
+        <item quantity="other">%1$d av %2$d artikler tilgjengelige offline</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 artikkel, %2$.2f MB</item>
+        <item quantity="other">%1$d artikler, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 artikkel</item>
+        <item quantity="other">%d artikler</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d nytt varsel</item>
+        <item quantity="other">%d nye varsler</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d valgt</item>
+        <item quantity="other">%d valgte</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Varsel arkivert</item>
+        <item quantity="other">%d varsler arkivert</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Laster ned artikkel</item>
+        <item quantity="other">Laster ned artikler</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">%1$d artikkel gjenstår</item>
+        <item quantity="other">%1$d artikler gjenstår</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Synkroniserer leselisten</item>
+        <item quantity="other">Synkroniserer leselistene</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">%1$d liste gjenstår</item>
+        <item quantity="other">%1$d lister gjenstår</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">Synkroniserer %1$d liste…</item>
+        <item quantity="other">Synkroniserer %1$d lister…</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Laster ned %1$d artikkel …</item>
+        <item quantity="other">Laster ned %1$d artikler …</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 markert som lest</item>
+        <item quantity="other">%d markert som lest</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 markert som ulest</item>
+        <item quantity="other">%d markert som ulest</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="other">%d filtre</item>
+    </plurals>
+    <plurals name="on_this_day_game_stats_games_played">
+        <item quantity="one">Spill spilt</item>
+        <item quantity="other">Spill spilt</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d redigering siden %2$s</item>
+        <item quantity="other">%1$d redigeringer siden %2$s</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="other">%d filtre</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Denne artikkelen vil ikke lenger være tilgjengelig offline.</item>
+        <item quantity="other">Disse artiklene vil ikke lenger være tilgjengelig offline.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Denne artikkelen vil nå være tilgjengelig offline.</item>
+        <item quantity="other">Disse artiklene vil nå være tilgjengelig offline.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d artikkel fjernet fra listen</item>
+        <item quantity="other">%d artikler fjernet fra listen</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d artikkel fjernet fra %2$s</item>
+        <item quantity="other">%1$d artikler fjernet fra %2$s</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">Er du sikker på at du vil slette %d liste?</item>
+        <item quantity="other">Er du sikker på at du vil slette %d lister?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">Eksportering av leseliste feilet</item>
+        <item quantity="other">Eksportering av leselister feilet</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Leseliste importert</item>
+        <item quantity="other">Leselister importert</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d liste slettet</item>
+        <item quantity="other">%d lister slettet</item>
+    </plurals>
+    <plurals name="recommended_reading_list_interest_pick_selected_articles">
+        <item quantity="one">%d valgt</item>
+        <item quantity="other">%d valgt</item>
+    </plurals>
+    <plurals name="recommended_reading_list_page_subtitle_articles">
+        <item quantity="one">• %d artikkel</item>
+        <item quantity="other">• %d artikler</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 treff</item>
+        <item quantity="other">%d treff</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">Du la til %d tegn</item>
+        <item quantity="other">Du la til %d tegn</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Bidrag</item>
+        <item quantity="other">Bidrag</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">bidrag fra appen</item>
+        <item quantity="other">%d bidrag fra appen</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s tegn</item>
+        <item quantity="other">%1$s tegn</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Sett én gang de siste 30 dagene.</item>
+        <item quantity="other">Sett %s ganger de siste 30 dagene.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">Redigering</item>
+        <item quantity="other">Redigeringer</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d dag</item>
+        <item quantity="other">%d dager</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">Du la til %d tagg</item>
+        <item quantity="other">Du la til %d tagger</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">Du fjernet %d tegn</item>
+        <item quantity="other">Du fjernet %d tegn</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s knagg</item>
+        <item quantity="other">%1$s knagger</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Skjul svar</item>
+        <item quantity="other">Skjul svar (%d)</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Vis svar</item>
+        <item quantity="other">Vis svar (%d)</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">Er du sikker på at du vil slette beskjeden fra lista?</item>
+        <item quantity="other">Er du sikker på at du vil slette beskjeden fra lista?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">Beskjeden har blitt slettet</item>
+        <item quantity="other">Beskjedene har blitt slettet</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">Den midlertidige kontoen %1$s ble opprettet etter at redigeringen din ble publisert. Den vil utløpe om %2$d dag.</item>
+        <item quantity="other">Den midlertidige kontoen %1$s ble opprettet etter at redigeringen din ble publisert. Den vil utløpe om %2$d dager.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">Kontoen utløper om %d dag.</item>
+        <item quantity="other">Kontoen utløper om %d dager.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">i går</item>
+        <item quantity="other">for %d dager siden</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="other">%d filtre</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Fjern valgt språk?</item>
+        <item quantity="other">Fjern valgte språk?</item>
+    </plurals>
+</resources>

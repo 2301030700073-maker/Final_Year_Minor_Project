@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="days">
+        <item quantity="one">%d روز</item>
+        <item quantity="other">%d روز</item>
+    </plurals>
+    <plurals name="deleted_downloads_toast">
+        <item quantity="one">%1$s بارگیری حذف شد</item>
+        <item quantity="other">%1$s بارگیری حذف شدند</item>
+    </plurals>
+    <plurals name="download_finished_notification">
+        <item quantity="one">بارگیری پایان یافت</item>
+        <item quantity="other">%s بارگیری پایان یافتند</item>
+    </plurals>
+    <plurals name="exo_controls_fastforward_by_amount_description">
+        <item quantity="one">%d ثانیه سریع به‌جلو بردن</item>
+        <item quantity="other">%d ثانیه سریع به‌جلو بردن</item>
+    </plurals>
+    <plurals name="exo_controls_rewind_by_amount_description">
+        <item quantity="one">%d ثانیه به‌عقب بردن</item>
+        <item quantity="other">%d ثانیه به‌عقب بردن</item>
+    </plurals>
+    <plurals name="export_subscriptions">
+        <item quantity="one">برون ریختن %d اشتراک…</item>
+        <item quantity="other">برون ریختن %d اشتراک…</item>
+    </plurals>
+    <plurals name="feed_group_dialog_selection_count">
+        <item quantity="one">%d مورد گزیده</item>
+        <item quantity="other">%d مورد گزیده</item>
+    </plurals>
+    <plurals name="hours">
+        <item quantity="one">%d ساعت</item>
+        <item quantity="other">%d ساعت</item>
+    </plurals>
+    <plurals name="import_subscriptions">
+        <item quantity="one">درون ریختن %d اشتراک…</item>
+        <item quantity="other">درون ریختن %d اشتراک…</item>
+    </plurals>
+    <plurals name="listening">
+        <item quantity="one">%s شنونده</item>
+        <item quantity="other">%s شنونده</item>
+    </plurals>
+    <plurals name="minutes">
+        <item quantity="one">%d دقیقه</item>
+        <item quantity="other">%d دقیقه</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d اعلان جدید</item>
+        <item quantity="other">%d اعلان جدید</item>
+    </plurals>
+    <plurals name="new_streams">
+        <item quantity="one">%s جریان جدید</item>
+        <item quantity="other">%s جریان جدید</item>
+    </plurals>
+    <plurals name="replies">
+        <item quantity="one">%s پاسخ</item>
+        <item quantity="other">%s پاسخ</item>
+    </plurals>
+    <plurals name="seconds">
+        <item quantity="one">%d ثانیه</item>
+        <item quantity="other">%d ثانیه</item>
+    </plurals>
+    <plurals name="subscribers">
+        <item quantity="one">%s مشترک</item>
+        <item quantity="other">%s مشترک</item>
+    </plurals>
+    <plurals name="videos">
+        <item quantity="one">%s ویدیو</item>
+        <item quantity="other">%s ویدیو</item>
+    </plurals>
+    <plurals name="views">
+        <item quantity="one">%s بازدید</item>
+        <item quantity="other">%s بازدید</item>
+    </plurals>
+    <plurals name="watching">
+        <item quantity="one">%s بیننده</item>
+        <item quantity="other">%s بیننده</item>
+    </plurals>
+</resources>

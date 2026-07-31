@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Ogni ora</item>
+        <item quantity="other">Tutte e %d ore</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Ogni minutu</item>
+        <item quantity="other">Tutti i %d minuti</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 messaghju</item>
+        <item quantity="other">%d messaghji</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Da veru, vulete squassà stu messaghju ?</item>
+        <item quantity="other">Da veru, vulete squassà i %1$d messaghji ?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Da veru, vulete dispiazzà stu messaghju versu u cartulare di i merzaghji ?</item>
+        <item quantity="other">Da veru, vulete dispiazzà i %1$d messaghji versu u cartulare di i merzaghji ?</item>
+    </plurals>
+    <plurals name="message_view_attachment_summary">
+        <item quantity="one">%1$d pezza ghjunta (%2$s)</item>
+        <item quantity="other">%1$d pezze ghjunte (%2$s)</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d messaghju novu</item>
+        <item quantity="other">%d messaghji novi</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">Riguarera di %d risultatu</item>
+        <item quantity="other">Riguarera di %d risultati</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">Riguarera di %1$d risultatu nant’à %2$d</item>
+        <item quantity="other">Riguarera di %1$d risultati nant’à %2$d</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">Per pudè impiegà u contu \"%s\" ci vole à pruvede a parolla d’intesa di u servitore.</item>
+        <item quantity="other">Per pudè impiegà u contu \"%s\" ci vole à pruvede e parolle d’intesa di u servitore.</item>
+    </plurals>
+</resources>

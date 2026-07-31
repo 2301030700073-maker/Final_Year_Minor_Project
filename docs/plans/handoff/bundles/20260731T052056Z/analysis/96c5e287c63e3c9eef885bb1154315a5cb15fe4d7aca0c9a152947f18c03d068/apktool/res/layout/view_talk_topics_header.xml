@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <FrameLayout android:id="@id/talkLeadImageContainer" android:layout_width="match_parent" android:layout_height="86.0dp" android:layout_marginBottom="16.0dp">
+        <org.wikipedia.views.FaceAndColorDetectImageView android:id="@id/talkLeadImage" android:layout_width="match_parent" android:layout_height="300.0dp" android:layout_marginTop="-100.0dp" android:scaleType="centerCrop" android:contentDescription="@string/image_content_description" />
+    </FrameLayout>
+    <org.wikipedia.views.WikiCardView android:id="@id/search_container" android:focusable="true" android:clickable="true" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16.0dp" android:layout_marginStart="16.0dp" android:layout_marginEnd="16.0dp" android:transitionName="@string/transition_search_bar" app:cardCornerRadius="22.0dp" app:elevation="0.0dp">
+        <ImageView android:layout_width="48.0dp" android:layout_height="48.0dp" android:scaleType="center" android:contentDescription="@string/talk_search_topics_hint" app:srcCompat="@drawable/ic_search_white_24dp" app:tint="?placeholder_color" />
+        <TextView android:textColor="?secondary_color" android:layout_gravity="center_vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/talk_search_topics_hint" android:layout_marginStart="48.0dp" android:layout_marginEnd="48.0dp" />
+        <ImageView android:layout_gravity="end" android:id="@id/talk_sort_button" android:background="?selectableItemBackground" android:focusable="true" android:clickable="true" android:layout_width="48.0dp" android:layout_height="48.0dp" android:scaleType="center" android:contentDescription="@string/talk_overflow_sort_by" app:srcCompat="@drawable/ic_baseline_tune_24" app:tint="?primary_color" />
+    </org.wikipedia.views.WikiCardView>
+</LinearLayout>

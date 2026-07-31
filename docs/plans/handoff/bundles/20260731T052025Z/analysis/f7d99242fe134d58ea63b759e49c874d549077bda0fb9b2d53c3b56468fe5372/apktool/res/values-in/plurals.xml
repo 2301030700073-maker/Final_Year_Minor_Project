@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="other">Setiap %d jam</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="other">Setiap %d menit</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="other">%d pesan</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="other">Apakah kamu benar-benar ingin menghapus %1$d pesan?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="other">Apakah Anda benar-benar ingin memindahkan %1$d pesan ke folder spam?</item>
+    </plurals>
+    <plurals name="message_view_attachment_summary">
+        <item quantity="other">%1$d Lampiran (%2$s)</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="other">%d pesan baru</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="other">Mengambil %d hasil</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="other">Mengambil %1$d dari %2$d hasil</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="other">Agar dapat menggunakan akun \"%s\", Anda perlu memberikan kata sandi peladen.</item>
+    </plurals>
+</resources>

@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="diff_years">
+        <item quantity="one">w zeszłym roku</item>
+        <item quantity="few">%d lata temu</item>
+        <item quantity="many">%d lat temu</item>
+        <item quantity="other">%d lat temu</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s bajt</item>
+        <item quantity="few">%s bajty</item>
+        <item quantity="many">%s bajtów</item>
+        <item quantity="other">%s bajta</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d edycja od %2$s r. (%3$s)</item>
+        <item quantity="few">%1$d edycje od %2$s r. (%3$s)</item>
+        <item quantity="many">%1$d edycji od %2$s r. (%3$s)</item>
+        <item quantity="other">%1$d edycji od %2$s r. (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">%1$d z 1 artykułu dostępny offline, %3$.2f MB</item>
+        <item quantity="few">%1$d z %2$d artykułów dostępnych offline, %3$.2f MB</item>
+        <item quantity="many">%1$d z %2$d artykułów dostępnych offline, %3$.2f MB</item>
+        <item quantity="other">%1$d z %2$d artykułów dostępnych offline, %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">%1$d z 1 artykułu dostępny offline</item>
+        <item quantity="few">%1$d z %2$d artykułów dostępnych offline</item>
+        <item quantity="many">%1$d z %2$d artykułów dostępnych offline</item>
+        <item quantity="other">%1$d z %2$d artykułów dostępnych offline</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 artykuł, %2$.2f MB</item>
+        <item quantity="few">%1$d artykuły, %2$.2f MB</item>
+        <item quantity="many">%1$d artykułów, %2$.2f MB</item>
+        <item quantity="other">%1$d artykułu, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 artykuł</item>
+        <item quantity="few">%d artykuły</item>
+        <item quantity="many">%d artykułów</item>
+        <item quantity="other">%d artykułu</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d nowe powiadomienie</item>
+        <item quantity="few">%d nowe powiadomienia</item>
+        <item quantity="many">%d nowych powiadomień</item>
+        <item quantity="other">%d nowego powiadomienia</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d wybrany</item>
+        <item quantity="few">%d wybrane</item>
+        <item quantity="many">%d wybranych</item>
+        <item quantity="other">%d wybranych</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Powiadomienie zarchiwizowane</item>
+        <item quantity="few">%d powiadomienia zarchiwizowane</item>
+        <item quantity="many">%d powiadomień zarchiwizowanych</item>
+        <item quantity="other">%d powiadomień zarchiwizowanych</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Pobieranie artykułu</item>
+        <item quantity="few">Pobieranie artykułów</item>
+        <item quantity="many">Pobieranie artykułów</item>
+        <item quantity="other">Pobieranie artykułów</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">pozostał %1$d artykuł</item>
+        <item quantity="few">pozostały %1$d artykuły</item>
+        <item quantity="many">pozostało %1$d artykułów</item>
+        <item quantity="other">pozostało %1$d artykułów</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Synchronizowanie listy</item>
+        <item quantity="few">Synchronizowanie list</item>
+        <item quantity="many">Synchronizowanie list</item>
+        <item quantity="other">Synchronizowanie list</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">pozostała %1$d lista</item>
+        <item quantity="few">pozostały %1$d listy</item>
+        <item quantity="many">pozostało %1$d list</item>
+        <item quantity="other">pozostało %1$d list</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">Synchronizuję %1$d listę…</item>
+        <item quantity="few">Synchronizuję %1$d listy</item>
+        <item quantity="many">Synchronizuję %1$d list</item>
+        <item quantity="other">Synchronizuję %1$d list</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Pobieranie %1$d artykułu...</item>
+        <item quantity="few">Pobieranie %1$d artykułów...</item>
+        <item quantity="many">Pobieranie %1$d artykułów...</item>
+        <item quantity="other">Pobieranie %1$d artykułów...</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d filtr</item>
+        <item quantity="few">%d filtry</item>
+        <item quantity="many">%d filtrów</item>
+        <item quantity="other">%d filtrów</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d edycja od %2$s r.</item>
+        <item quantity="few">%1$d edycje od %2$s r.</item>
+        <item quantity="many">%1$d edycji od %2$s r.</item>
+        <item quantity="other">%1$d edycji od %2$s r.</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d filtr</item>
+        <item quantity="few">%d filtry</item>
+        <item quantity="many">%d filtrów</item>
+        <item quantity="other">%d filtrów</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Ten artykuł nie będzie już dostępny w trybie offline.</item>
+        <item quantity="few">Te artykuły nie będą już dostępne w trybie offline.</item>
+        <item quantity="many">Te artykuły nie będą już dostępne w trybie offline.</item>
+        <item quantity="other">Te artykuły nie będą już dostępne w trybie offline.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Ten artykuł będzie teraz dostępny w trybie offline.</item>
+        <item quantity="few">Te artykuły będą teraz dostępne w trybie offline.</item>
+        <item quantity="many">Te artykuły będą teraz dostępne w trybie offline.</item>
+        <item quantity="other">Te artykuły będą teraz dostępne w trybie offline.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">Usunięto %d artykuł z listy</item>
+        <item quantity="few">Usunięto %d artykuły z listy</item>
+        <item quantity="many">Usunięto %d artykułów z listy</item>
+        <item quantity="other">Usunięto %d artykułów z listy</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">Usunięto %1$d artykuł z listy %2$s</item>
+        <item quantity="few">Usunięto %1$d artykuły z listy %2$s</item>
+        <item quantity="many">Usunięto %1$d artykułów z listy %2$s</item>
+        <item quantity="other">Usunięto %1$d artykułów z listy %2$s</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">Czy na pewno chcesz usunąć %d listę?</item>
+        <item quantity="few">Czy na pewno chcesz usunąć %d listy?</item>
+        <item quantity="many">Czy na pewno chcesz usunąć %d list?</item>
+        <item quantity="other">Czy na pewno chcesz usunąć %d listy?</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">Usunięto %d listę</item>
+        <item quantity="few">Usunięto %d listy</item>
+        <item quantity="many">Usunięto %d list</item>
+        <item quantity="other">Usunięto %d listy</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 wynik</item>
+        <item quantity="few">%d wyniki</item>
+        <item quantity="many">%d wyników</item>
+        <item quantity="other">%d wyników</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">Dodałeś(-aś) %d znak</item>
+        <item quantity="few">Dodałeś(-aś) %d znaki</item>
+        <item quantity="many">Dodałeś(-aś) %d znaków</item>
+        <item quantity="other">Dodałeś(-aś) %d znaków</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Wkład</item>
+        <item quantity="few">Wkład</item>
+        <item quantity="many">Wkład</item>
+        <item quantity="other">Wkład</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 wkład</item>
+        <item quantity="few">%d wkłady</item>
+        <item quantity="many">%d wkładów</item>
+        <item quantity="other">%d wkładów</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s znak</item>
+        <item quantity="few">%1$s znaki</item>
+        <item quantity="many">%1$s znaków</item>
+        <item quantity="other">%1$s znaków</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Widziano raz w ciągu ostatnich 30 dni.</item>
+        <item quantity="few">Widziano %s razy w ciągu ostatnich 30 dni.</item>
+        <item quantity="many">Widziano %s razy w ciągu ostatnich 30 dni.</item>
+        <item quantity="other">Widziano %s raza w ciągu ostatnich 30 dni.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">Edycja</item>
+        <item quantity="few">Edycje</item>
+        <item quantity="many">Edycji</item>
+        <item quantity="other">Edycji</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d dzień</item>
+        <item quantity="few">%d dni</item>
+        <item quantity="many">%d dni</item>
+        <item quantity="other">%d dnia</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">Dodałeś jeden znacznik</item>
+        <item quantity="few">Dodałeś %d znaczniki</item>
+        <item quantity="many">Dodałeś %d znaczników</item>
+        <item quantity="other">Dodałeś %d znacznika</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">Usunąłeś(-aś) %d znak</item>
+        <item quantity="few">Usunąłeś(-aś) %d znaki</item>
+        <item quantity="many">Usunąłeś(-aś) %d znaków</item>
+        <item quantity="other">Usunąłeś(-aś) %d znaków</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s znacznik</item>
+        <item quantity="few">%1$s znaczniki</item>
+        <item quantity="many">%1$s znaczników</item>
+        <item quantity="other">%1$s znacznika</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Ukryj odpowiedź</item>
+        <item quantity="few">Ukryj odpowiedzi (%d)</item>
+        <item quantity="many">Ukryj odpowiedzi (%d)</item>
+        <item quantity="other">Ukryj odpowiedzi (%d)</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Pokaż odpowiedź</item>
+        <item quantity="few">Pokaż odpowiedzi (%d)</item>
+        <item quantity="many">Pokaż odpowiedzi (%d)</item>
+        <item quantity="other">Pokaż odpowiedzi (%d)</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">Konto tymczasowe %1$s zostało utworzone po opublikowaniu Twojej edycji. Wygaśnie ono za %2$d dzień.</item>
+        <item quantity="few">Konto tymczasowe %1$s zostało utworzone po opublikowaniu Twojej edycji. Wygaśnie ono za %2$d dni.</item>
+        <item quantity="many">Konto tymczasowe %1$s zostało utworzone po opublikowaniu Twojej edycji. Wygaśnie ono za %2$d dni.</item>
+        <item quantity="other">Konto tymczasowe %1$s zostało utworzone po opublikowaniu Twojej edycji. Wygaśnie ono za %2$d dni.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">Konto wygaśnie za %d dzień.</item>
+        <item quantity="few">Konto wygaśnie za %d dni.</item>
+        <item quantity="many">Konto wygaśnie za %d dni.</item>
+        <item quantity="other">Konto wygaśnie za %d dnia.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">wczoraj</item>
+        <item quantity="few">%d dni temu</item>
+        <item quantity="many">%d dni temu</item>
+        <item quantity="other">%d dni temu</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d filtr</item>
+        <item quantity="few">%d filtry</item>
+        <item quantity="many">%d filtrów</item>
+        <item quantity="other">%d filtrów</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Usunąć wybrany język?</item>
+        <item quantity="few">Usunąć wybrane języki?</item>
+        <item quantity="many">Usunąć wybrane języki?</item>
+        <item quantity="other">Usunąć wybrane języki?</item>
+    </plurals>
+</resources>

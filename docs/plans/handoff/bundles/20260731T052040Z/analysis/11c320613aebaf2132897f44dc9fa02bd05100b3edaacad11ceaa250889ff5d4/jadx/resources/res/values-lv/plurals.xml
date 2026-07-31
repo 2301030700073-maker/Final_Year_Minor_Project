@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="days">
+        <item quantity="zero">%d dienas</item>
+        <item quantity="one">%d dienu</item>
+        <item quantity="other">%d dienas</item>
+    </plurals>
+    <plurals name="deleted_downloads_toast">
+        <item quantity="zero">Dzēstas %1$s lejupielādes</item>
+        <item quantity="one">Dzēsta %1$s lejupielāde</item>
+        <item quantity="other">Dzēstas %1$s lejupielādes</item>
+    </plurals>
+    <plurals name="download_finished_notification">
+        <item quantity="zero">%s lejupielādes pabeigtas</item>
+        <item quantity="one">%s lejupielāde pabeigta</item>
+        <item quantity="other">%s lejupielādes pabeigtas</item>
+    </plurals>
+    <plurals name="exo_controls_fastforward_by_amount_description">
+        <item quantity="zero">Pārtīt uz priekšu par %d sekundēm</item>
+        <item quantity="one">Pārtīt uz priekšu par %d sekundi</item>
+        <item quantity="other">Pārtīt uz priekšu par %d sekundēm</item>
+    </plurals>
+    <plurals name="exo_controls_rewind_by_amount_description">
+        <item quantity="zero">Attīt atpakaļ par %d sekundēm</item>
+        <item quantity="one">Attīt atpakaļ par %d sekundi</item>
+        <item quantity="other">Attīt atpakaļ par %d sekundēm</item>
+    </plurals>
+    <plurals name="export_subscriptions">
+        <item quantity="zero">Izgūst %d abonementus…</item>
+        <item quantity="one">Izgūst %d abonementu…</item>
+        <item quantity="other">Izgūst %d abonementus…</item>
+    </plurals>
+    <plurals name="feed_group_dialog_selection_count">
+        <item quantity="zero">%d atlasīti</item>
+        <item quantity="one">%d atlasīts</item>
+        <item quantity="other">%d atlasīti</item>
+    </plurals>
+    <plurals name="hours">
+        <item quantity="zero">%d stundas</item>
+        <item quantity="one">%d stundu</item>
+        <item quantity="other">%d stundas</item>
+    </plurals>
+    <plurals name="import_subscriptions">
+        <item quantity="zero">Ievieto %d abonementus…</item>
+        <item quantity="one">Ievieto %d abonementu…</item>
+        <item quantity="other">Ievieto %d abonementus…</item>
+    </plurals>
+    <plurals name="listening">
+        <item quantity="zero">%s klausītāju</item>
+        <item quantity="one">%s klausītājs</item>
+        <item quantity="other">%s klausītāji</item>
+    </plurals>
+    <plurals name="minutes">
+        <item quantity="zero">%d minūtes</item>
+        <item quantity="one">%d minūti</item>
+        <item quantity="other">%d minūtes</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="zero">%d jaunu paziņojumu</item>
+        <item quantity="one">%d jauns paziņojums</item>
+        <item quantity="other">%d jauni paziņojumi</item>
+    </plurals>
+    <plurals name="new_streams">
+        <item quantity="zero">%s jauni video/audio</item>
+        <item quantity="one">%s jauns video/audio</item>
+        <item quantity="other">%s jauni video/audio</item>
+    </plurals>
+    <plurals name="replies">
+        <item quantity="zero">%s atbildes</item>
+        <item quantity="one">%s atbilde</item>
+        <item quantity="other">%s atbildes</item>
+    </plurals>
+    <plurals name="seconds">
+        <item quantity="zero">%d sekundes</item>
+        <item quantity="one">%d sekundi</item>
+        <item quantity="other">%d sekundes</item>
+    </plurals>
+    <plurals name="subscribers">
+        <item quantity="zero">%s abonenti</item>
+        <item quantity="one">%s abonents</item>
+        <item quantity="other">%s abonenti</item>
+    </plurals>
+    <plurals name="videos">
+        <item quantity="zero">%s videoklipi</item>
+        <item quantity="one">%s videoklips</item>
+        <item quantity="other">%s videoklipi</item>
+    </plurals>
+    <plurals name="views">
+        <item quantity="zero">%s skatījumi</item>
+        <item quantity="one">%s skatījums</item>
+        <item quantity="other">%s skatījumi</item>
+    </plurals>
+    <plurals name="watching">
+        <item quantity="zero">%s skatītāji skatās</item>
+        <item quantity="one">%s skatītājs skatās</item>
+        <item quantity="other">%s skatītāji skatās</item>
+    </plurals>
+</resources>

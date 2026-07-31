@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="days">
+        <item quantity="one">%d ڕۆژ</item>
+        <item quantity="other">%d ڕۆژان</item>
+    </plurals>
+    <plurals name="deleted_downloads_toast">
+        <item quantity="one">%1$s دابەزێنراو سڕایەوە</item>
+        <item quantity="other">%1$s دابەزێنراو سڕانەوە</item>
+    </plurals>
+    <plurals name="download_finished_notification">
+        <item quantity="one">دابەزاندن تەواوبوو</item>
+        <item quantity="other">%s دابەزاندن تەواوبوون</item>
+    </plurals>
+    <plurals name="feed_group_dialog_selection_count">
+        <item quantity="one">%d دیار کراوه‌</item>
+        <item quantity="other">%d دیار کراون</item>
+    </plurals>
+    <plurals name="hours">
+        <item quantity="one">%d کاتژمێر</item>
+        <item quantity="other">%d کاتژمێران</item>
+    </plurals>
+    <plurals name="listening">
+        <item quantity="one">%s گوێبیست</item>
+        <item quantity="other">%s گوێبیستان</item>
+    </plurals>
+    <plurals name="minutes">
+        <item quantity="one">%d خولەک</item>
+        <item quantity="other">%d خولەكان</item>
+    </plurals>
+    <plurals name="new_streams">
+        <item quantity="one">%s پەخشی نوێ</item>
+        <item quantity="other">%s پەخشانی نوێ</item>
+    </plurals>
+    <plurals name="seconds">
+        <item quantity="one">%d چرکە</item>
+        <item quantity="other">%d چرکان</item>
+    </plurals>
+    <plurals name="subscribers">
+        <item quantity="one">%s بەژداری</item>
+        <item quantity="other">%s بەژدارییان</item>
+    </plurals>
+    <plurals name="videos">
+        <item quantity="one">%s ڤیدیۆ</item>
+        <item quantity="other">%s ڤیدیۆیان</item>
+    </plurals>
+    <plurals name="views">
+        <item quantity="one">‫%s بینراو</item>
+        <item quantity="other">‫%s بینراوان</item>
+    </plurals>
+    <plurals name="watching">
+        <item quantity="one">%s سه‌یر دەکات</item>
+        <item quantity="other">%s سه‌یر دەکەن</item>
+    </plurals>
+</resources>

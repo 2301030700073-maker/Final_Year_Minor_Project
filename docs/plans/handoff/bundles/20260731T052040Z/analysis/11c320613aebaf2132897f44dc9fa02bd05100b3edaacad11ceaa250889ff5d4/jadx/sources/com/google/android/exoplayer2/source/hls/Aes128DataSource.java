@@ -1,0 +1,93 @@
+package com.google.android.exoplayer2.source.hls;
+
+import android.net.Uri;
+import com.google.android.exoplayer2.upstream.DataSource;
+import com.google.android.exoplayer2.upstream.DataSourceInputStream;
+import com.google.android.exoplayer2.upstream.DataSpec;
+import com.google.android.exoplayer2.upstream.TransferListener;
+import com.google.android.exoplayer2.util.Assertions;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.util.List;
+import java.util.Map;
+import javax.crypto.Cipher;
+import javax.crypto.CipherInputStream;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+import okhttp3.internal._UtilJvmKt$$ExternalSyntheticLambda1;
+
+/* compiled from: r8-map-id-86a71dde26502018768275c3ef5c4d56379672d582e9c15e1a63fb997724bbe7 */
+@Deprecated
+/* loaded from: classes.dex */
+class Aes128DataSource implements DataSource {
+    private CipherInputStream cipherInputStream;
+    private final byte[] encryptionIv;
+    private final byte[] encryptionKey;
+    private final DataSource upstream;
+
+    public Aes128DataSource(DataSource dataSource, byte[] bArr, byte[] bArr2) {
+        this.upstream = dataSource;
+        this.encryptionKey = bArr;
+        this.encryptionIv = bArr2;
+    }
+
+    @Override // com.google.android.exoplayer2.upstream.DataSource
+    public final void addTransferListener(TransferListener transferListener) {
+        Assertions.checkNotNull(transferListener);
+        this.upstream.addTransferListener(transferListener);
+    }
+
+    @Override // com.google.android.exoplayer2.upstream.DataSource
+    public void close() {
+        if (this.cipherInputStream != null) {
+            this.cipherInputStream = null;
+            this.upstream.close();
+        }
+    }
+
+    public Cipher getCipherInstance() {
+        return Cipher.getInstance("AES/CBC/PKCS7Padding");
+    }
+
+    @Override // com.google.android.exoplayer2.upstream.DataSource
+    public final Map<String, List<String>> getResponseHeaders() {
+        return this.upstream.getResponseHeaders();
+    }
+
+    @Override // com.google.android.exoplayer2.upstream.DataSource
+    public final Uri getUri() {
+        return this.upstream.getUri();
+    }
+
+    @Override // com.google.android.exoplayer2.upstream.DataSource
+    public final long open(DataSpec dataSpec) {
+        try {
+            Cipher cipherInstance = getCipherInstance();
+            try {
+                cipherInstance.init(2, new SecretKeySpec(this.encryptionKey, "AES"), new IvParameterSpec(this.encryptionIv));
+                DataSourceInputStream dataSourceInputStream = new DataSourceInputStream(this.upstream, dataSpec);
+                this.cipherInputStream = new CipherInputStream(dataSourceInputStream, cipherInstance);
+                dataSourceInputStream.open();
+                return -1L;
+            } catch (InvalidAlgorithmParameterException | InvalidKeyException e) {
+                _UtilJvmKt$$ExternalSyntheticLambda1.m(e);
+                return 0L;
+            }
+        } catch (NoSuchAlgorithmException | NoSuchPaddingException e2) {
+            _UtilJvmKt$$ExternalSyntheticLambda1.m(e2);
+            return 0L;
+        }
+    }
+
+    @Override // com.google.android.exoplayer2.upstream.DataReader
+    public final int read(byte[] bArr, int i, int i2) {
+        Assertions.checkNotNull(this.cipherInputStream);
+        int read = this.cipherInputStream.read(bArr, i, i2);
+        if (read < 0) {
+            return -1;
+        }
+        return read;
+    }
+}

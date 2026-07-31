@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d вироиш аз %2$s (%3$s)</item>
+        <item quantity="other">%1$d вироишот аз %2$s (%3$s)</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d вироиш аз %2$s</item>
+        <item quantity="other">%1$d вироишот аз %2$s</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 саҳм</item>
+        <item quantity="other">%d саҳмҳо</item>
+    </plurals>
+</resources>

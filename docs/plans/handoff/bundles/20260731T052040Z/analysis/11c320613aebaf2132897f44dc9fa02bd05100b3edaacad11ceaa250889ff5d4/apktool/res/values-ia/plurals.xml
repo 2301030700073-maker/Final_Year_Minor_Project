@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="subscribers">
+        <item quantity="one">%s subscriptor</item>
+        <item quantity="other">%s subscriptores</item>
+    </plurals>
+    <plurals name="videos">
+        <item quantity="one">%s video</item>
+        <item quantity="other">%s videos</item>
+    </plurals>
+    <plurals name="views">
+        <item quantity="one">%s reproduction</item>
+        <item quantity="other">%s reproductiones</item>
+    </plurals>
+    <plurals name="watching">
+        <item quantity="one">%s visualisation</item>
+        <item quantity="other">%s visualisationes</item>
+    </plurals>
+</resources>

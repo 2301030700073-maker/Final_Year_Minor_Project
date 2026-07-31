@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout android:background="?selectableItemBackground" android:layout_width="match_parent" android:layout_height="wrap_content"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <LinearLayout android:orientation="vertical" android:padding="16.0dp" android:layout_width="match_parent" android:layout_height="wrap_content">
+        <ImageView android:id="@id/imageView" android:layout_width="match_parent" android:layout_height="100.0dp" android:scaleType="centerCrop" android:contentDescription="@null" />
+        <TextView android:textSize="12.0sp" android:textColor="?secondary_color" android:ellipsize="end" android:id="@id/imageDescription" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16.0dp" android:maxLines="1" android:lineSpacingExtra="4.0dp" />
+    </LinearLayout>
+    <ImageView android:id="@id/selectedIcon" android:visibility="gone" android:layout_width="24.0dp" android:layout_height="24.0dp" android:layout_margin="3.0dp" android:src="@drawable/ic_check_circle_black_24dp" android:contentDescription="@null" app:tint="?progressive_color" />
+</FrameLayout>

@@ -1,0 +1,36 @@
+package androidx.compose.foundation.gestures;
+
+/* compiled from: r8-map-id-86a71dde26502018768275c3ef5c4d56379672d582e9c15e1a63fb997724bbe7 */
+/* loaded from: classes.dex */
+public final class IndirectPointerInputDragCycleDetector$DragDetectionState$AwaitDown extends ScrollableKt {
+    public AwaitTouchSlop awaitTouchSlop;
+    public boolean consumedOnInitial;
+
+    /* JADX WARN: Failed to restore enum class, 'enum' modifier and super class removed */
+    /* JADX WARN: Unknown enum class pattern. Please report as an issue! */
+    /* compiled from: r8-map-id-86a71dde26502018768275c3ef5c4d56379672d582e9c15e1a63fb997724bbe7 */
+    public final class AwaitTouchSlop {
+        public static final /* synthetic */ AwaitTouchSlop[] $VALUES;
+        public static final AwaitTouchSlop No;
+        public static final AwaitTouchSlop NotInitialized;
+        public static final AwaitTouchSlop Yes;
+
+        static {
+            AwaitTouchSlop awaitTouchSlop = new AwaitTouchSlop("Yes", 0);
+            Yes = awaitTouchSlop;
+            AwaitTouchSlop awaitTouchSlop2 = new AwaitTouchSlop("No", 1);
+            No = awaitTouchSlop2;
+            AwaitTouchSlop awaitTouchSlop3 = new AwaitTouchSlop("NotInitialized", 2);
+            NotInitialized = awaitTouchSlop3;
+            $VALUES = new AwaitTouchSlop[]{awaitTouchSlop, awaitTouchSlop2, awaitTouchSlop3};
+        }
+
+        public static AwaitTouchSlop valueOf(String str) {
+            return (AwaitTouchSlop) Enum.valueOf(AwaitTouchSlop.class, str);
+        }
+
+        public static AwaitTouchSlop[] values() {
+            return (AwaitTouchSlop[]) $VALUES.clone();
+        }
+    }
+}

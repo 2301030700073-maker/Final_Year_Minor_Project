@@ -1,0 +1,423 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="one">%d dag</item>
+        <item quantity="other">%d dage</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="one">redigering sidste måned</item>
+        <item quantity="other">redigeringer sidste måned</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="one">redigering denne måned</item>
+        <item quantity="other">redigeringer denne måned</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="one">Redigering</item>
+        <item quantity="other">Redigeringer</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_views">
+        <item quantity="one">Visning af artikler, du har redigeret</item>
+        <item quantity="other">Visninger af artikler, du har redigeret</item>
+    </plurals>
+    <plurals name="activity_tab_impact_thanks">
+        <item quantity="one">tak</item>
+        <item quantity="other">tak</item>
+    </plurals>
+    <plurals name="activity_tab_impact_total_edits">
+        <item quantity="one">total redigering</item>
+        <item quantity="other">totale redigeringer</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="one">Sidste år</item>
+        <item quantity="other">%d år siden</item>
+    </plurals>
+    <plurals name="donation_reminders_text_articles">
+        <item quantity="one">%d artikel</item>
+        <item quantity="other">%d artikler</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s byte</item>
+        <item quantity="other">%s bytes</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d redigering siden %2$s (%3$s)</item>
+        <item quantity="other">%1$d redigeringer siden %2$s (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">%1$d af 1 artikel tilgængelig offline, %3$.2f MB</item>
+        <item quantity="other">%1$d af %2$d artikler tilgængelige offline, %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">%1$d af 1 artikel tilgængelig offline</item>
+        <item quantity="other">%1$d of %2$d artikler tilgængeelig offline</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 artikel, %2$.2f MB</item>
+        <item quantity="other">%1$d artikler, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 artikel</item>
+        <item quantity="other">%d artikler</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d ny notifikation</item>
+        <item quantity="other">%d nye notifikationer</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d valgt</item>
+        <item quantity="other">%d valgte</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Notifikation arkiveret</item>
+        <item quantity="other">%d notifikationer arkiveret</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Downloader artikel</item>
+        <item quantity="other">Downloader artikler</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">%1$d artikel tilbage</item>
+        <item quantity="other">%1$d artikler tilbage</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Synkroniserer læseliste</item>
+        <item quantity="other">Synkroniserer læselister</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">%1$d liste tilbage</item>
+        <item quantity="other">%1$d lister tilbage</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">Synkroniserer %1$d liste…</item>
+        <item quantity="other">Synkroniserer %1$d lister…</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Henter %1$d artikel…</item>
+        <item quantity="other">Henter %1$d artikler…</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 markeret som læst</item>
+        <item quantity="other">%d markeret som læst</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 markeret som ulæst</item>
+        <item quantity="other">%d markeret som ulæst</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="other">%d filtre</item>
+    </plurals>
+    <plurals name="on_this_day_game_stats_games_played">
+        <item quantity="one">Spil spillet</item>
+        <item quantity="other">Spil spillet</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d redigering siden %2$s</item>
+        <item quantity="other">%1$d redigeringer siden %2$s</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="other">%d filtre</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak">
+        <item quantity="one">%d dag</item>
+        <item quantity="other">%d dage</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final">
+        <item quantity="one">%1$d af %2$d</item>
+        <item quantity="other">%1$d af %2$d</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final_large">
+        <item quantity="one">%1$d af %2$d dag</item>
+        <item quantity="other">%1$d af %2$d dage</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Denne artikel vil ikke længere være tilgængelig lokalt.</item>
+        <item quantity="other">Disse artikler vil ikke længere være tilgængelige lokalt.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Denne artikel vil nu være tilgængelig lokalt.</item>
+        <item quantity="other">Disse artikler vil nu være tilgængelige lokalt.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d artikel fjernet fra listen</item>
+        <item quantity="other">%d artikler fjernet fra listen</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d artikel fjernet fra %2$s</item>
+        <item quantity="other">%1$d artikler fjernet fra %2$s</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">Er du sikker på, at du vil slette %d liste?</item>
+        <item quantity="other">Er du sikker på, at du vil slette %d lister?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">Eksport af læseliste mislykkedes</item>
+        <item quantity="other">Eksport af læselister mislykkedes</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Læseliste importeret</item>
+        <item quantity="other">Læselister importeret</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d liste slettet</item>
+        <item quantity="other">%d lister slettet</item>
+    </plurals>
+    <plurals name="recommended_reading_list_interest_pick_selected_articles">
+        <item quantity="one">%d valgt</item>
+        <item quantity="other">%d udvalgte</item>
+    </plurals>
+    <plurals name="recommended_reading_list_page_subtitle_articles">
+        <item quantity="one">• %d artikel</item>
+        <item quantity="other">• %d artikler</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 resultat</item>
+        <item quantity="other">%d resultater</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">Du tilføjede %d tegn</item>
+        <item quantity="other">Du tilføjede %d tegn</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Bidrag</item>
+        <item quantity="other">Bidrag</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 bidrag</item>
+        <item quantity="other">%d bidrag</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s tegn</item>
+        <item quantity="other">%1$s tegn</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Set en gang inden for de seneste 30 dage.</item>
+        <item quantity="other">Set %s gange de seneste 30 dage.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">Redigering</item>
+        <item quantity="other">Redigeringer</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d dag</item>
+        <item quantity="other">%d dage</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">Du tilføjede %d tag</item>
+        <item quantity="other">Du tilføjede %d tags</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">Du fjernede %d tegn</item>
+        <item quantity="other">Du fjernede %d tegn</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s tag</item>
+        <item quantity="other">%1$s tags</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Skjul svar</item>
+        <item quantity="other">Skjul svar (%d)</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Vis svar</item>
+        <item quantity="other">Vis svar (%d )</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">Er du sikker på, at du vil slette beskeden fra listen?</item>
+        <item quantity="other">Er du sikker på, at du vil slette beskederne fra listen?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">Beskeden er slettet</item>
+        <item quantity="other">Beskederne er slettet</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">Midlertidig konto %1$s blev oprettet efter din redigering blev offentliggjort. Den udløber om %2$d dag.</item>
+        <item quantity="other">Den midlertidige konto %1$s blev oprettet, efter din redigering blev offentliggjort. Den udløber om %2$d dage.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">Konto udløber om %d dag.</item>
+        <item quantity="other">Konto udløber om %d dage.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">i går</item>
+        <item quantity="other">for %d dage siden</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="other">%d filtre</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Fjern valgt sprog?</item>
+        <item quantity="other">Fjern valgte sprog?</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_interested_categories_title">
+        <item quantity="one">Kategori der interesserede mig</item>
+        <item quantity="other">Kategorier der interesserede mig</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_read_title">
+        <item quantity="one">Artikel læst</item>
+        <item quantity="other">Artikler læst</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_minutes_read_title">
+        <item quantity="one">Minut brugt på at læse</item>
+        <item quantity="other">Minutter brugt på at læse</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_most_read_article_title">
+        <item quantity="one">Artikel jeg læste mest</item>
+        <item quantity="other">Artikler jeg læste mest</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_total_edits_title">
+        <item quantity="one">Redigeret artikel</item>
+        <item quantity="other">Redigerede artikler</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_edits_title">
+        <item quantity="one">Ændring foretaget af bidragsyder</item>
+        <item quantity="other">Ændringer foretaget af bidragsydere</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_hours_spent_title">
+        <item quantity="one">Time brugt på læsning</item>
+        <item quantity="other">Timer brugt på læsning</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_most_read_title">
+        <item quantity="one">Mest læste artikel på den engelske Wikipedia</item>
+        <item quantity="other">Mest læste artikler på den engelske Wikipedia</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_articles_title">
+        <item quantity="one">Antal vist artikel</item>
+        <item quantity="other">Antal viste artikler</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_edits_title">
+        <item quantity="one">Redigering i appen</item>
+        <item quantity="other">Redigeringer i appen</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_wikipedia_per_minute_label">
+        <item quantity="one">%d gang i minuttet</item>
+        <item quantity="other">%d gange i minuttet</item>
+    </plurals>
+    <plurals name="year_in_review_slide_app_edited_times_headline">
+        <item quantity="one">Bidragsydre på de officielle Wikipedia-apps foretog %,d redigering</item>
+        <item quantity="other">bidragsydere på de officielle Wikipedia-apps foretog %,d redigeringer</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_first">
+        <item quantity="one">Wikipedia havde %,d artikel</item>
+        <item quantity="other">Wikipedia havde %,d artikler</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_second">
+        <item quantity="one">over %,d aktivt sprog i år. Du deltog sammen med millioner af andre for at udvide viden og udforske forskellige emner.</item>
+        <item quantity="other">over %,d aktive sprog i år. Du deltog sammen med millioner af andre for at udvide viden og udforske forskellige emner.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_headline">
+        <item quantity="one">Wikipedia var tilgængelig på mere end %,d sprog</item>
+        <item quantity="other">Wikipedia var tilgængelig på mere end %,d sprog</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_body">
+        <item quantity="one">I %1$d tilføjede frivillige %2$,d byte til den engelske Wikipedia. Summen af alt deres arbejde tilsammen fører til en støt forbedrende, faktabaseret og pålidelig vidensressource, som de giver til verden. Vi har alle viden at dele, &lt;a href=&quot;%3$s &quot;&gt;lærer dig hvordan du deltager&lt;/a&gt; .</item>
+        <item quantity="other">I %1$d tilføjede frivillige %2$,d bytes til den engelske Wikipedia. Summen af alt deres arbejde tilsammen fører til en støt forbedrende, faktabaseret og pålidelig vidensressource, som de giver til verden. Vi har alle viden at dele, &lt;a href=&quot;%3$s&quot;&gt;lærer dig hvordan du deltager&lt;/a&gt;.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_headline">
+        <item quantity="one">%,d byte tilføjet</item>
+        <item quantity="other">%,d bytes tilføjet</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_per_minute_headline">
+        <item quantity="one">Wikipedia blev redigeret %,d gange pr. minut</item>
+        <item quantity="other">Wikipedia blev redigeret %,d gange pr. minut</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_body">
+        <item quantity="one">Tak fordi du er en af de frivillige bidragsydre, der gør en forskel på Wikimedia-projekter rundt om i verden. Frivillige som dig har lavet %,d ændringer på tværs af over 300 forskellige sprogudgaver af Wikipedia.</item>
+        <item quantity="other">Tak fordi du er en af de frivillige bidragsydre, der gør en forskel på Wikimedia-projekter rundt om i verden. Frivillige som dig har lavet %,d ændringer på tværs af over 300 forskellige sprogudgaver af Wikipedia.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_headline">
+        <item quantity="one">Du redigerede %s gang</item>
+        <item quantity="other">Du redigerede %s gange</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_body">
+        <item quantity="one">Læsere over hele verden sætter pris på dine bidrag. I de sidste 2 måneder har artikler, du har redigeret, modtaget %,d samlede visninger. Takket være bidragsydere som dig er Wikipedia en støt forbedrende, faktabaseret og pålidelig vidensressource for verden.</item>
+        <item quantity="other">Læsere over hele verden sætter pris på dine bidrag. I de sidste 2 måneder har artikler, du har redigeret, modtaget %,d samlede visninger. Takket være bidragsydere som dig er Wikipedia en støt forbedrende, faktabaseret og pålidelig vidensressource for verden.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_headline">
+        <item quantity="one">Din redigering er blevet vist mere end %,d gange for nylig</item>
+        <item quantity="other">Dine redigeringer er blevet vist mere end %,d gange for nylig</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_first">
+        <item quantity="one">Frivillige foretog %,d ændring på tværs af over 300 forskellige sprogudgaver af Wikipedia.</item>
+        <item quantity="other">Frivillige foretog %,d ændringer på tværs af over 300 forskellige sprogudgaver af Wikipedia.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_second">
+        <item quantity="one">%,d ændring blev foretaget på engelsk Wikipedia. Hver time hver dag arbejder frivillige på at forbedre Wikipedia.</item>
+        <item quantity="other">%,d ændringer blev foretaget på engelsk Wikipedia. Hver time hver dag arbejder frivillige på at forbedre Wikipedia.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_headline">
+        <item quantity="one">Bidragsyder foretog %,d ændring i år</item>
+        <item quantity="other">Bidragsydere foretog %,d ændringer i år</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_first">
+        <item quantity="one">Personer brugte anslået %,d time</item>
+        <item quantity="other">Personer brugte anslået %,d timer</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_second">
+        <item quantity="one">—omkring %1$,d år!—læser engelsk Wikipedia på %2$d . Wikipedia er der, når du vil lære om vores verden i forandring, vinde et væddemål blandt venner eller besvare et nysgerrigt barns spørgsmål.</item>
+        <item quantity="other">—omkring %1$,d år!—læser engelsk Wikipedia på %2$d . Wikipedia er der, når du vil lære om vores verden i forandring, vinde et væddemål blandt venner eller besvare et nysgerrigt barns spørgsmål.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_headline">
+        <item quantity="one">Vi brugte %,d time på at læse</item>
+        <item quantity="other">Vi brugte %,d timer på at læse</item>
+    </plurals>
+    <plurals name="year_in_review_slide_global_saved_articles_headline">
+        <item quantity="one">App-brugere havde %,d gemt artikel</item>
+        <item quantity="other">App-brugere havde %,d gemte artikler</item>
+    </plurals>
+    <plurals name="year_in_review_slide_most_read_english_articles_body">
+        <item quantity="one">Når folk vil lære om vores verden, vender de sig mod Wikipedia. Den mest %1$d besøgte artikel på engelsk Wikipedia var: %2$s&lt;br/&gt; Læs mere i vores &lt;a href=&quot;%3$s &quot;&gt;dedicated blog post&lt;/a&gt; .</item>
+        <item quantity="other">Når folk vil lære om vores verden, vender de sig mod Wikipedia. De mest &lt;span class=&quot;notranslate&quot; translate=&quot;no&quot;&gt;%1$d besøgte artikler på engelsk Wikipedia var: %2$s&lt;br /&gt; Læs mere i vores &lt;a href=&quot;&lt;span class=&quot;notranslate&quot; translate=&quot;no&quot;&gt;%3$s &quot;&gt;dedicated blog post&lt;/a&gt;.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_body">
+        <item quantity="one">Disse artikler omfattede &lt;b&gt;%1$s&lt;/b&gt; , &lt;b&gt;%2$s&lt;/b&gt; og &lt;b&gt;%3$s&lt;/b&gt;. Hver gemt artikel afspejler dine interesser og hjælper med at opbygge en personlig vidensbase på Wikipedia.&lt;br /&gt;&lt;br /&gt;Aktive appbrugere havde %4$,d gemt artikel i år.</item>
+        <item quantity="other">Disse artikler omfattede &lt;b&gt;%1$s&lt;/b&gt;, &lt;b&gt;%2$s&lt;/b&gt; og &lt;b&gt;%3$s&lt;/b&gt;. Hver gemt artikel afspejler dine interesser og hjælper med at opbygge en personlig vidensbase på Wikipedia.&lt;br /&gt;&lt;br /&gt;Aktive appbrugere havde %4$,d gemte artikler i år.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_headline">
+        <item quantity="one">Du gemte %,d artikel</item>
+        <item quantity="other">Du gemte %,d artikler</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_first">
+        <item quantity="one">Personer brugte anslået %,d time</item>
+        <item quantity="other">Personer brugte anslået %,d timer</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_second">
+        <item quantity="one">—omkring %1$,d år!—læser engelsk Wikipedia på %2$d .</item>
+        <item quantity="other">—omkring %1$,d år!—læser engelsk Wikipedia på %2$d .</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_first">
+        <item quantity="one">Wikipedia havde %,d artikel</item>
+        <item quantity="other">Wikipedia havde %,d artikler</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_second">
+        <item quantity="one">over %,d aktivt sprog i år. Du deltog sammen med millioner af andre for at udvide viden og udforske forskellige emner.</item>
+        <item quantity="other">over %,d aktive sprog i år. Du deltog sammen med millioner af andre for at udvide viden og udforske forskellige emner.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_top">
+        <item quantity="one">Vi dømmer at det placerer dig blandt de %1$s %% mest aktive Wikipedia-læsere globalt. En gennemsnitlig person læser %2$,d artikel pr år.</item>
+        <item quantity="other">Vi dømmer at det placerer dig blandt de %1$s %% mest aktive Wikipedia-læsere globalt. En gennemsnitlig person læser %2$,d artikler pr år.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_first">
+        <item quantity="one">Du brugte %,d minut</item>
+        <item quantity="other">Du brugte %,d minutter</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_second">
+        <item quantity="one">læse %1$,d artikel i %2$d</item>
+        <item quantity="other">læse %1$,d artikler i %2$d</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_body">
+        <item quantity="one">Her var den artikel, du besøgte mest i %1$d: %2$s</item>
+        <item quantity="other">Her var de artikler, du besøgte mest i %1$d: %2$s</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_headline">
+        <item quantity="one">Din top artikel</item>
+        <item quantity="other">Dine top artikler</item>
+    </plurals>
+    <plurals name="year_in_review_slide_viewed_articles_times_headline">
+        <item quantity="one">App-brugere har set Wikipedia-artikler %,d gang</item>
+        <item quantity="other">App-brugere har set Wikipedia-artikler %,d gange</item>
+    </plurals>
+</resources>

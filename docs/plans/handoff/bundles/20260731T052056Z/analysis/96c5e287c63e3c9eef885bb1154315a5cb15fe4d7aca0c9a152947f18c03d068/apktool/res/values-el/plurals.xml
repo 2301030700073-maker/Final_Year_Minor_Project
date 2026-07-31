@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="one">%d ημέρα</item>
+        <item quantity="other">%d ημέρες</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="one">επεξεργασία τον τελευταίο μήνα</item>
+        <item quantity="other">επεξεργασίες τον τελευταίο μήνα</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="one">επεξεργασία αυτόν τον μήνα</item>
+        <item quantity="other">επεξεργασίες αυτόν τον μήνα</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="one">Επεξεργασία</item>
+        <item quantity="other">Επεξεργασίες</item>
+    </plurals>
+    <plurals name="activity_tab_impact_thanks">
+        <item quantity="one">ευχαριστία</item>
+        <item quantity="other">ευχαριστίες</item>
+    </plurals>
+    <plurals name="activity_tab_impact_total_edits">
+        <item quantity="one">συνολική επεξεργασία</item>
+        <item quantity="other">συνολικές επεξεργασίες</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="one">τελευταίο έτος</item>
+        <item quantity="other">%d χρόνια πριν</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s byte</item>
+        <item quantity="other">%s bytes</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d επεξεργασία από %2$s (%3$s)</item>
+        <item quantity="other">%1$d επεξεργασίες από %2$s (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">%1$d από 1 λήμμα διαθέσιμο εκτός σύνδεσης, %3$.2f MB</item>
+        <item quantity="other">%1$d από %2$d λήμματα διαθέσιμα εκτός σύνδεσης, %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">%1$d από 1 λήμμα διαθέσιμο εκτός σύνδεσης</item>
+        <item quantity="other">%1$d από %2$d λήμματα διαθέσιμα εκτός σύνδεσης</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 λήμμα, %2$.2f MB</item>
+        <item quantity="other">%1$d λήμματα, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 λήμμα</item>
+        <item quantity="other">%d λήμματα</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d νέα ειδοποίηση</item>
+        <item quantity="other">%d νέες ειδοποιήσεις</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d επιλεγμένο</item>
+        <item quantity="other">%d επιλεγμένα</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Λήψη λήμματος</item>
+        <item quantity="other">Λήψη λημμάτων</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">Έχει μείνει %1$d λήμμα</item>
+        <item quantity="other">Έχουν μείνει %1$d λήμματα</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Συγχρονισμός λίστας ανάγνωσης</item>
+        <item quantity="other">Συγχρονισμός λιστών ανάγνωσης</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">απομένει μια %1$d λίστα</item>
+        <item quantity="other">απομένουν %1$d λίστες</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">Συγχρονισμός %1$d λίστας σε εξέλιξη...</item>
+        <item quantity="other">Συγχρονισμός %1$d λιστών σε εξέλιξη...</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Λήψη %1$d λήμματος σε εξέλιξη...</item>
+        <item quantity="other">Λήψη %1$d λημμάτων σε εξέλιξη...</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 επισημάνθηκε ως αναγνωσμένη</item>
+        <item quantity="other">%d επισημάνθηκαν ως αναγνωσμένες</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 επισημάνθηκε ως μη αναγνωσμένη</item>
+        <item quantity="other">%d επισημάνθηκαν ως μη αναγνωσμένες</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d φίλτρο</item>
+        <item quantity="other">%d φίλτρα</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d επεξεργασία από %2$s</item>
+        <item quantity="other">%1$d επεξεργασίες από %2$s</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d φίλτρο</item>
+        <item quantity="other">%d φίλτρα</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Αυτό το λήμμα δεν θα είναι πλέον διαθέσιμο εκτός σύνδεσης.</item>
+        <item quantity="other">Αυτά τα λήμματα δεν θα είναι πλέον διαθέσιμα εκτός σύνδεσης.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Αυτό το λήμμα θα είναι πλέον διαθέσιμο εκτός σύνδεσης.</item>
+        <item quantity="other">Αυτά τα λήμματα θα είναι πλέον διαθέσιμα εκτός σύνδεσης.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d λήμμα αφαιρέθηκε από τη λίστα</item>
+        <item quantity="other">%d λήμματα αφαιρέθηκαν από τη λίστα</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d λήμμα αφαιρέθηκε από %2$s</item>
+        <item quantity="other">%1$d λήμματα αφαιρέθηκαν από %2$s</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d λίστα διαγράφηκε</item>
+        <item quantity="other">%d λίστες διαγράφηκαν</item>
+    </plurals>
+    <plurals name="recommended_reading_list_page_subtitle_articles">
+        <item quantity="one">• %d λήμμα</item>
+        <item quantity="other">• %d λήμματα</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 αποτέλεσμα</item>
+        <item quantity="other">%d αποτελέσματα</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">Προσθέσατε %d χαρακτήρα</item>
+        <item quantity="other">Προσθέσατε %d χαρακτήρες</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Συνεισφορά</item>
+        <item quantity="other">Συνεισφορές</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 συνεισφορά</item>
+        <item quantity="other">%d συνεισφορές</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s χαρακτήρας</item>
+        <item quantity="other">%1$s χαρακτήρες</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">Επεξεργασία</item>
+        <item quantity="other">Επεξεργασίες</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d ημέρα</item>
+        <item quantity="other">%d ημέρες</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">Πρόσθεσες %d ετικέτα</item>
+        <item quantity="other">Πρόσθεσες %d ετικέτες</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">Αφαιρέσατε %d χαρακτήρα</item>
+        <item quantity="other">Αφαιρέσατε %d χαρακτήρες</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s ετικέτα</item>
+        <item quantity="other">%1$s ετικέτες</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Απόκρυψη απάντησης</item>
+        <item quantity="other">Απόκρυψη απαντήσεων (%d)</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Εμφάνιση απάντησης</item>
+        <item quantity="other">Εμφάνιση απαντήσεων (%d)</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">Ο προσωρινός λογαριασμός %1$s δημιουργήθηκε μετά τη δημοσίευση της επεξεργασίας σας. Θα λήξει σε μία ημέρα.</item>
+        <item quantity="other">Ο προσωρινός λογαριασμός %1$s δημιουργήθηκε μετά τη δημοσίευση της επεξεργασίας σας. Θα λήξει σε %2$d ημέρες.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">Ο λογαριασμός θα λήξει σε μία ημέρα.</item>
+        <item quantity="other">Ο λογαριασμός θα λήξει σε %d ημέρες.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">χτες</item>
+        <item quantity="other">%d ημέρες πριν</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d φίλτρο</item>
+        <item quantity="other">%d φίλτρα</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Αφαίρεση επιλεγμένης γλώσσας;</item>
+        <item quantity="other">Αφαίρεση των επιλεγμένων γλωσσών;</item>
+    </plurals>
+</resources>

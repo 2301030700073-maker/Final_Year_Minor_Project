@@ -1,0 +1,30 @@
+package kotlinx.coroutines.channels;
+
+/* JADX WARN: Failed to restore enum class, 'enum' modifier and super class removed */
+/* JADX WARN: Unknown enum class pattern. Please report as an issue! */
+/* compiled from: r8-map-id-86a71dde26502018768275c3ef5c4d56379672d582e9c15e1a63fb997724bbe7 */
+/* loaded from: classes.dex */
+public final class BufferOverflow {
+    public static final /* synthetic */ BufferOverflow[] $VALUES;
+    public static final BufferOverflow DROP_LATEST;
+    public static final BufferOverflow DROP_OLDEST;
+    public static final BufferOverflow SUSPEND;
+
+    static {
+        BufferOverflow bufferOverflow = new BufferOverflow("SUSPEND", 0);
+        SUSPEND = bufferOverflow;
+        BufferOverflow bufferOverflow2 = new BufferOverflow("DROP_OLDEST", 1);
+        DROP_OLDEST = bufferOverflow2;
+        BufferOverflow bufferOverflow3 = new BufferOverflow("DROP_LATEST", 2);
+        DROP_LATEST = bufferOverflow3;
+        $VALUES = new BufferOverflow[]{bufferOverflow, bufferOverflow2, bufferOverflow3};
+    }
+
+    public static BufferOverflow valueOf(String str) {
+        return (BufferOverflow) Enum.valueOf(BufferOverflow.class, str);
+    }
+
+    public static BufferOverflow[] values() {
+        return (BufferOverflow[]) $VALUES.clone();
+    }
+}

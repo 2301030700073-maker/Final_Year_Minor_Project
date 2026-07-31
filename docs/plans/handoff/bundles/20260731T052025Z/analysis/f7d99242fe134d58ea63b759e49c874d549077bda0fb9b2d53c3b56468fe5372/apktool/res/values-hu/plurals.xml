@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Óránként</item>
+        <item quantity="other">%d óránként</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Percenként</item>
+        <item quantity="other">%d percenként</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 üzenet</item>
+        <item quantity="other">%d üzenet</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Valóban törölni szeretné ezt az üzenetet?</item>
+        <item quantity="other">Valóban törölni szeretne %1$d üzenetet?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Valóban át akarja helyezni ezt a levelet a spam mappába?</item>
+        <item quantity="other">Valóban át szeretne helyezni %1$d üzenetet a levélszemét mappába?</item>
+    </plurals>
+    <plurals name="message_view_attachment_summary">
+        <item quantity="one">%1$d Csatolmány (%2$s)</item>
+        <item quantity="other">%1$d Csatolmányok (%2$s)</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d új üzenet</item>
+        <item quantity="other">%d új üzenet</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">%d találat lekérése</item>
+        <item quantity="other">%d találat lekérése</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">%1$d/%2$d találat lekérése</item>
+        <item quantity="other">%1$d/%2$d találat lekérése</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">Ahhoz, hogy képes legyen használni a(z) „%s” fiókot, meg kell adnia a kiszolgáló jelszavát.</item>
+        <item quantity="other">Ahhoz, hogy képes legyen használni a(z) „%s” fiókot, meg kell adnia a kiszolgáló jelszavait.</item>
+    </plurals>
+</resources>

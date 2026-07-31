@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Elk uur</item>
+        <item quantity="other">Elke %d uur</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Elke minuut</item>
+        <item quantity="other">Elke %d minuten</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 bericht</item>
+        <item quantity="other">%d berichten</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Wilt u dit bericht echt verwijderen?</item>
+        <item quantity="other">Wilt u echt %1$d berichten verwijderen?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Wilt u dit bericht echt naar de map Ongewenst verplaatsen?</item>
+        <item quantity="other">Wilt u echt %1$d berichten naar de map Ongewenst verplaatsen?</item>
+    </plurals>
+    <plurals name="message_view_attachment_summary">
+        <item quantity="one">%1$d Bijlage (%2$s)</item>
+        <item quantity="other">%1$d Bijlagen (%2$s)</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d nieuw bericht</item>
+        <item quantity="other">%d nieuwe berichten</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">%d resultaat ophalen</item>
+        <item quantity="other">%d resultaten ophalen</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">%1$d van %2$d bericht ophalen</item>
+        <item quantity="other">%1$d van %2$d berichten ophalen</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">Om de account ‘%s’ te gebruiken moet u het wachtwoord van de server opgeven.</item>
+        <item quantity="other">Om de account ‘%s’ te gebruiken moet u de wachtwoorden van de server opgeven.</item>
+    </plurals>
+</resources>

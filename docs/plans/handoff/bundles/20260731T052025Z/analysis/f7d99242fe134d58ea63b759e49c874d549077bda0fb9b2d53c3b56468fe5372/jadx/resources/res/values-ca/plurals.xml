@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Cada hora</item>
+        <item quantity="many">Cada %d hores</item>
+        <item quantity="other">Cada %d hores</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Cada minut</item>
+        <item quantity="many">Cada %d minuts</item>
+        <item quantity="other">Cada %d minuts</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 missatge</item>
+        <item quantity="many">%d missatges</item>
+        <item quantity="other">%d missatges</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Realment voleu suprimir aquest missatge?</item>
+        <item quantity="many">Realment voleu suprimir %1$d missatges?</item>
+        <item quantity="other">Realment voleu suprimir %1$d missatges?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Realment voleu moure aquest missatge a la carpeta brossa?</item>
+        <item quantity="many">Realment voleu moure %1$d missatges a la carpeta brossa?</item>
+        <item quantity="other">Realment voleu moure %1$d missatges a la carpeta brossa?</item>
+    </plurals>
+    <plurals name="message_view_attachment_summary">
+        <item quantity="one">%1$d Adjunt (%2$s)</item>
+        <item quantity="many">%1$d Adjunts (%2$s)</item>
+        <item quantity="other">%1$d Adjunts (%2$s)</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d missatge nou</item>
+        <item quantity="many">%d missatges nous</item>
+        <item quantity="other">%d missatges nous</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">S&apos;està recuperant %d resultat</item>
+        <item quantity="many">S&apos;estan recuperant %d resultats</item>
+        <item quantity="other">S&apos;estan recuperant %d resultats</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">S&apos;està recuperant %1$d de %2$d resultats</item>
+        <item quantity="many">S&apos;estan recuperant %1$d de %2$d resultats</item>
+        <item quantity="other">S&apos;estan recuperant %1$d de %2$d resultats</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">Per poder fer servir el compte %s heu de proporcionar la contrasenya del servidor.</item>
+        <item quantity="many">Per poder fer servir el compte %s heu de proporcionar les contrasenyes del servidor.</item>
+        <item quantity="other">Per poder fer servir el compte %s heu de proporcionar les contrasenyes del servidor.</item>
+    </plurals>
+</resources>

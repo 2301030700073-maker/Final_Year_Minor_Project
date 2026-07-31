@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<org.wikipedia.views.WikiSwipeRefreshLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/talkRefreshView"
+    android:fitsSystemWindows="true"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/talkRecyclerView"
+            android:scrollbars="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="?attr/actionBarSize"/>
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:contentInsetEnd="0dp"
+            app:contentInsetStart="0dp"
+            style="@style/ToolbarStyle.Small"/>
+        <org.wikipedia.views.WikiErrorView
+            android:layout_gravity="center"
+            android:orientation="vertical"
+            android:id="@+id/talkErrorView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+        <com.google.android.material.progressindicator.LinearProgressIndicator
+            android:layout_gravity="top"
+            android:id="@+id/talkProgressBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:indeterminate="true"/>
+    </FrameLayout>
+</org.wikipedia.views.WikiSwipeRefreshLayout>

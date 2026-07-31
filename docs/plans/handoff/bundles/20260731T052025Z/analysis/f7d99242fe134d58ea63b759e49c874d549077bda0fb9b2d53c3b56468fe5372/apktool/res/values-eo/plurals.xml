@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Ĉiuhore</item>
+        <item quantity="other">Po unu fojo en %d horoj</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Ĉiuminute</item>
+        <item quantity="other">Po unu fojo en %d minutoj</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 mesaĝo</item>
+        <item quantity="other">%d mesaĝoj</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Ĉu vi certe volas forigi tiun ĉi mesaĝon?</item>
+        <item quantity="other">Ĉu vi certe volas forigi %1$d mesaĝojn?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Ĉu vi certe volas movi tiun ĉi mesaĝon al trudmesaĝujo (spamujo)?</item>
+        <item quantity="other">Ĉu vi certe volas movi %1$d mesaĝojn al trudmesaĝujo (spamujo)?</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d nova mesaĝo</item>
+        <item quantity="other">%d novaj mesaĝoj</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">Elŝutado de %d rezulto</item>
+        <item quantity="other">Elŝutado de %d rezultoj</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">Elŝutado de %1$d el %2$d rezulto</item>
+        <item quantity="other">Elŝutado de %1$d el %2$d rezultoj</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">Por uzi la konton “%s” vi devas enigi pasvorton.</item>
+        <item quantity="other">Por uzi la konton “%s” vi devas enigi pasvortojn.</item>
+    </plurals>
+</resources>

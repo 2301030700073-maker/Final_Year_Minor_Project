@@ -1,0 +1,423 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="one">%d ден</item>
+        <item quantity="other">%d дена</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="one">уредување минатиот месец</item>
+        <item quantity="other">уредувања минатиот месец</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="one">уредување месецов</item>
+        <item quantity="other">уредувања месецов</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="one">Уредување</item>
+        <item quantity="other">Уредувања</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_views">
+        <item quantity="one">Преглед на статии што сте ги уредиле</item>
+        <item quantity="other">Прегледи на статии што сте ги уредиле</item>
+    </plurals>
+    <plurals name="activity_tab_impact_thanks">
+        <item quantity="one">благодарница</item>
+        <item quantity="other">благодарници</item>
+    </plurals>
+    <plurals name="activity_tab_impact_total_edits">
+        <item quantity="one">вкупно уредување</item>
+        <item quantity="other">вкупно уредувања</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="one">Лани</item>
+        <item quantity="other">Пред %d години</item>
+    </plurals>
+    <plurals name="donation_reminders_text_articles">
+        <item quantity="one">%d статија</item>
+        <item quantity="other">%d статии</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s бајт</item>
+        <item quantity="other">%s бајти</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d уредување од %2$s наваму (%3$s)</item>
+        <item quantity="other">%1$d уредувања од %2$s наваму (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">%1$d од една вонмрежно достапна статија, %3$.2f МБ</item>
+        <item quantity="other">%1$d од %2$d вонмрежно достапни статии, %3$.2f МБ</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">%1$d од една вонмрежно достапна статија</item>
+        <item quantity="other">%1$d од %2$d вонмрежно достапни статии</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">Една статија, %2$.2f МБ</item>
+        <item quantity="other">%1$d статии, %2$.2f МБ</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 статија</item>
+        <item quantity="other">%d статии</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d ново известување</item>
+        <item quantity="other">%d нови известувања</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">Избрана %d</item>
+        <item quantity="other">Избрани %d</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Известувањето е архивирано</item>
+        <item quantity="other">Архивирани се %d известувања</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Преземање на статијата</item>
+        <item quantity="other">Преземање на статиите</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">Преостанува %1$d статија</item>
+        <item quantity="other">Преостануваат %1$d статии</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Усогласување на списокот за читање</item>
+        <item quantity="other">Усогласување на списоците за читање</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">Преостанува %1$d список</item>
+        <item quantity="other">Преостануваат %1$d списоци</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">Усогласувам %1$d список…</item>
+        <item quantity="other">Усогласувам %1$d списоци…</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Се презема %1$d статија…</item>
+        <item quantity="other">Се преземаат %1$d статии…</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 означено како прочитано</item>
+        <item quantity="other">%d означени како прочитани</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 означено како непрочитано</item>
+        <item quantity="other">%d означени како непрочитани</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d филтер</item>
+        <item quantity="other">%d филтри</item>
+    </plurals>
+    <plurals name="on_this_day_game_stats_games_played">
+        <item quantity="one">Одиграна игра</item>
+        <item quantity="other">Одиграни игри</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d уредување од %2$s наваму</item>
+        <item quantity="other">%1$d уредувања од %2$s наваму</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d филтер</item>
+        <item quantity="other">%d филтри</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak">
+        <item quantity="one">%d ден</item>
+        <item quantity="other">%d дена</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final">
+        <item quantity="one">%1$d од %2$d</item>
+        <item quantity="other">%1$d од %2$d</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final_large">
+        <item quantity="one">%1$d од %2$d ден</item>
+        <item quantity="other">%1$d од %2$d дена</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Статијава повеќе нема да биде достапна вонмрежно.</item>
+        <item quantity="other">Статииве повеќе нема да бидат достапни вонмрежно.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Статијава сега ќе биде достапна вонмрежно.</item>
+        <item quantity="other">Статииве сега ќе бидат достапни вонмрежно.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">Отстранета %d статија од списокот</item>
+        <item quantity="other">Отстранети %d статии од списокот</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">Отстранета %1$d статија од %2$s</item>
+        <item quantity="other">Отстранети %1$d статии од %2$s</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">Дали сигурно сакате да избришете %d список?</item>
+        <item quantity="other">Дали сигурно сакате да избришете %d списоци?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">Извозот на списокот за читање не успеа</item>
+        <item quantity="other">Извозот на списоците за читање не успеа</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Списокот за читање е увезен</item>
+        <item quantity="other">Списоците за читање се увезени</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d избришан список</item>
+        <item quantity="other">%d избришани списоци</item>
+    </plurals>
+    <plurals name="recommended_reading_list_interest_pick_selected_articles">
+        <item quantity="one">Избрана %d</item>
+        <item quantity="other">Избрани %d</item>
+    </plurals>
+    <plurals name="recommended_reading_list_page_subtitle_articles">
+        <item quantity="one">• %d статија</item>
+        <item quantity="other">• %d статии</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 ставка</item>
+        <item quantity="other">%d ставки</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">Додадовте %d знак</item>
+        <item quantity="other">Додадовте %d знаци</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Придонес</item>
+        <item quantity="other">Придонеси</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 придонес</item>
+        <item quantity="other">%d придонеси</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s знак</item>
+        <item quantity="other">%1$s знаци</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Посетена еднаш во последниве 30 дена.</item>
+        <item quantity="other">Посетена %s пати во последниве 30 дена.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">Уредување</item>
+        <item quantity="other">Уредувања</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d ден</item>
+        <item quantity="other">%d дена</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">Додадовте %d ознака</item>
+        <item quantity="other">Додадовте %d ознаки</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">Отстранивте %d знак</item>
+        <item quantity="other">Отстранивте %d знаци</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s ознака</item>
+        <item quantity="other">%1$s ознаки</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Скриј одговор</item>
+        <item quantity="other">Скриј одговори (%d)</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Прикажи одговор</item>
+        <item quantity="other">Прикажи одговори (%d)</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">Дали сигурно сакате да ја избришете пораката од списокот?</item>
+        <item quantity="other">Дали сигурно сакате да ги избришете пораките од списокот?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">Пораката е избришана</item>
+        <item quantity="other">Пораките се избришани</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">Создадена е привремената сметка %1$s откако беше објавено вашето уредување. Таа ќе истече за %2$d ден.</item>
+        <item quantity="other">Создадена е привремената сметка %1$s откако беше објавено вашето уредување. Таа ќе истече за %2$d дена.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">Сметката ќе истече за %d ден.</item>
+        <item quantity="other">Сметката ќе истече за %d дена.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">вчера</item>
+        <item quantity="other">пред %d дена</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d филтер</item>
+        <item quantity="other">%d филтри</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Да го отстранам избраниот јазик?</item>
+        <item quantity="other">Да ги отстранам избраните јазици?</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_interested_categories_title">
+        <item quantity="one">Категорија што ме интересираше</item>
+        <item quantity="other">Категории што ме интересираа</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_read_title">
+        <item quantity="one">Прочитана статија</item>
+        <item quantity="other">Прочитани статии</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_minutes_read_title">
+        <item quantity="one">Минута читање</item>
+        <item quantity="other">Минути читање</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_most_read_article_title">
+        <item quantity="one">Статијата што највеќе ја читав</item>
+        <item quantity="other">Статиите што највеќе ги читав</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_total_edits_title">
+        <item quantity="one">Уредена статија</item>
+        <item quantity="other">Уредени статии</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_edits_title">
+        <item quantity="one">Промена направена од уредниците</item>
+        <item quantity="other">Промени направени од уредниците</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_hours_spent_title">
+        <item quantity="one">Час поминат во читање</item>
+        <item quantity="other">Часови поминати во читање</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_most_read_title">
+        <item quantity="one">Најчитана статија на англиската Википедија</item>
+        <item quantity="other">Најчитани статии на англиската Википедија</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_articles_title">
+        <item quantity="one">Број на посетена статија</item>
+        <item quantity="other">Број на посетени статии</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_edits_title">
+        <item quantity="one">Уредување во прилог</item>
+        <item quantity="other">Уредувања во прилог</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_wikipedia_per_minute_label">
+        <item quantity="one">еднаш во минута</item>
+        <item quantity="other">%d пати во минута</item>
+    </plurals>
+    <plurals name="year_in_review_slide_app_edited_times_headline">
+        <item quantity="one">Уредниците од официјалните прилози на Википедија направија %,d уредување</item>
+        <item quantity="other">Уредниците од официјалните прилози на Википедија направија %,d уредувања</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_first">
+        <item quantity="one">Википедија имаше %,d статија</item>
+        <item quantity="other">Википедија имаше %,d статии</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_second">
+        <item quantity="one">на преку %,d активен јазик. Се придруживте на милиони луѓе во проширувањето на знаењето и истражувањето на различни теми.</item>
+        <item quantity="other">на преку %,d активни јазици. Се придруживте на милиони луѓе во проширувањето на знаењето и истражувањето на различни теми..</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_headline">
+        <item quantity="one">Википедија беше достапна на преку %,d јазик</item>
+        <item quantity="other">Википедија беше достапна на преку %,d јазици</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_body">
+        <item quantity="one">Во %1$d доброволците додадоа %2$,d бајт на англиската Википедија. Збирот на сета нивна заедничка работа е дар за светот кој води до веродостоен и фактографски извор на знаење кој постојано се подобрува. Сите ние имаме знаење за споделување, па затоа &lt;a href=&quot;%3$s&quot;&gt;дознајте како да учествувате&lt;/a&gt;.</item>
+        <item quantity="other">Во %1$d, доброволците додадоа %2$,d бајти to English Wikipedia. на англиската Википедија. Збирот на сета нивна заедничка работа е дар за светот кој води до веродостоен и фактографски извор на знаење кој постојано се подобрува. Сите ние имаме знаење за споделување, па затоа &lt;a href=&quot;%3$s&quot;&gt;дознајте како да учествувате&lt;/a&gt;.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_headline">
+        <item quantity="one">Додаден %,d бајт</item>
+        <item quantity="other">Додадени %,d бајти</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_per_minute_headline">
+        <item quantity="one">Википедија беше уредувана еднаш во минута</item>
+        <item quantity="other">Википедија беше уредувана %,d пати во минута</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_body">
+        <item quantity="one">Ви благодариме што сте меѓу доброволците кои оставаат свој печат на Викимедиините проекти ширум светот. Доброволците како вас направија %,d промена на 300 различни јазични изданија на Википедија.</item>
+        <item quantity="other">Ви благодариме што сте меѓу доброволците кои оставаат свој печат на Викимедиините проекти ширум светот. Доброволците како вас направија %,d промени на 300 различни јазични изданија на Википедија.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_headline">
+        <item quantity="one">Уредивте еднаш</item>
+        <item quantity="other">Уредивте %s пати</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_body">
+        <item quantity="one">Читателите ширум светот ги ценат вашите придонеси. Во изминативе 2 месеца, статиите што ги уредивте беа посетени вкупно еднаш. Благодарение на уредниците како вас Википедија постепено се подобрува како фактографски и веродостоен ресурс на знаења за светот.</item>
+        <item quantity="other">Читателите ширум светот ги ценат вашите придонеси. Во изминативе 2 месеца, статиите што ги уредивте беа посетени вкупно %,d пати. Благодарение на уредниците како вас Википедија постепено се подобрува како фактографски и веродостоен ресурс на знаења за светот.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_headline">
+        <item quantity="one">Вашето уредување беше посетено преку %,d пати во последно време</item>
+        <item quantity="other">Вашите уредувања беа посетени преку %,d пати во последно време</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_first">
+        <item quantity="one">Доброволците како вас направија %,d промена на 300 различни јазични изданија на Википедија.</item>
+        <item quantity="other">Доброволците како вас направија %,d промени на 300 различни јазични изданија на Википедија.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_second">
+        <item quantity="one">На англиската Википедија беше направена %,d промена. Секој час од секој ден, доброволците работат на подобрување на Википедија.</item>
+        <item quantity="other">На англиската Википедија беа направени %,d промени. Секој час од секој ден, доброволците работат на подобрување на Википедија..</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_headline">
+        <item quantity="one">Годинава уредниците направија %,d промена</item>
+        <item quantity="other">Годинава уредниците направија %,d промени</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_first">
+        <item quantity="one">Според проценката, луѓето проведоа %,d час</item>
+        <item quantity="other">Според проценката, луѓето проведоа %,d часа</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_second">
+        <item quantity="one">—околу %1$,d година!—читајќи ја англиската Википедија во %2$d г. Википедија ви стои на располагање кога сакате да дознаете нешто за нашиот променлив свет, да добиете облог со пријателите или да одговорите прашање на љубопитно дете.</item>
+        <item quantity="other">—околу %1$,d години!—читајќи ја англиската Википедија во %2$d г. Википедија ви стои на располагање кога сакате да дознаете нешто за нашиот променлив свет, да добиете облог со пријателите или да одговорите прашање на љубопитно дете.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_headline">
+        <item quantity="one">Проведовме %,d час читајќи</item>
+        <item quantity="other">Проведовме %,d часа читајќи</item>
+    </plurals>
+    <plurals name="year_in_review_slide_global_saved_articles_headline">
+        <item quantity="one">Корисниците на прилогот зачуваа %,d статија</item>
+        <item quantity="other">Корисниците на прилогот зачуваа %,d статии</item>
+    </plurals>
+    <plurals name="year_in_review_slide_most_read_english_articles_body">
+        <item quantity="one">Кога луѓето сакаат дознаат нешта за нашиот свет, тие се обраќаат кон Википедија. Најпосетената статија на англиската Википедија беше: %2$s. &lt;br /&gt;Прочитајте повеќе &lt;a href=&quot;%3$s&quot;&gt;на нашиот блоговска објава за ова&lt;/a&gt;.</item>
+        <item quantity="other">Кога луѓето сакаат дознаат нешта за нашиот свет, тие се обраќаат кон Википедија. Најпосетените %1$d статии на англиската Википедија беа: %2$s. &lt;br /&gt;Прочитајте повеќе &lt;a href=&quot;%3$s&quot;&gt;на нашиот блоговска објава за ова&lt;/a&gt;.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_body">
+        <item quantity="one">Во тие статии спаѓаат &lt;b&gt;%1$s&lt;/b&gt;, &lt;b&gt;%2$s&lt;/b&gt;, and &lt;b&gt;%3$s&lt;/b&gt;. Секоја зачувана статија ги одразува вашите интереси и гради лично прилагодена база на знаења на Википедија.&lt;br /&gt;&lt;br /&gt;Активните корисници на прилозите годинава имаа %4$,d зачувана статија.</item>
+        <item quantity="other">Во тие статии спаѓаат &lt;b&gt;%1$s&lt;/b&gt;, &lt;b&gt;%2$s&lt;/b&gt;, and &lt;b&gt;%3$s&lt;/b&gt;. Секоја зачувана статија ги одразува вашите интереси и гради лично прилагодена база на знаења на Википедија.&lt;br /&gt;&lt;br /&gt;Активните корисници на прилозите годинава имаа %4$,d зачувани статии.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_headline">
+        <item quantity="one">Зачувавте %,d статија</item>
+        <item quantity="other">Зачувавте %,d статии</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_first">
+        <item quantity="one">Според проценката, луѓето проведоа %,d час</item>
+        <item quantity="other">Според проценката, луѓето проведоа %,d часа</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_second">
+        <item quantity="one">—околу %1$,d година!—читајќи ја англиската Википедија во %2$d г.</item>
+        <item quantity="other">—околу %1$,d години!—читајќи ја англиската Википедија во %2$d г.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_first">
+        <item quantity="one">Годинава Википедија имаше %,d статија</item>
+        <item quantity="other">Годинава Википедија имаше %,d статии</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_second">
+        <item quantity="one">на преку %,d активен јазик. Се придруживте на милиони луѓе во проширувањето на знаењето и истражувањето на различни теми.</item>
+        <item quantity="other">на преку %,d активни јазици. Се придруживте на милиони луѓе во проширувањето на знаењето и истражувањето на различни теми..</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_top">
+        <item quantity="one">Проценуваме дека ова ве става во првите %1$s%% од читателите на Википедија глобално. Просечниот човек чита %2$,d статија годишно.</item>
+        <item quantity="other">Проценуваме дека ова ве става во првите %1$s%% од читателите на Википедија глобално. Просечниот човек чита %2$,d статии годишно.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_first">
+        <item quantity="one">Проведовте %,d минута</item>
+        <item quantity="other">Проведовте %,d минути</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_second">
+        <item quantity="one">читајќи %1$,d статија на %2$d</item>
+        <item quantity="other">читајќи %1$,d статии на %2$d</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_body">
+        <item quantity="one">Еве ја статијата што највеќе ја посетувавте во %1$d година: %2$s</item>
+        <item quantity="other">Еве ги статиите што највеќе ги посетувавте во %1$d година: %2$s</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_headline">
+        <item quantity="one">Вашата најпосетена статија</item>
+        <item quantity="other">Вашите најпосетени статии</item>
+    </plurals>
+    <plurals name="year_in_review_slide_viewed_articles_times_headline">
+        <item quantity="one">Корисниците на прилогот посетија Википедиини статии еднаш</item>
+        <item quantity="other">Корисниците на прилогот посетија Википедиини статии %,d пати</item>
+    </plurals>
+</resources>

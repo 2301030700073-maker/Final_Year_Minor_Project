@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="diff_years">
+        <item quantity="one">Par</item>
+        <item quantity="other">Verê %d serran</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 meqale, %2$.2f MB</item>
+        <item quantity="other">%1$d meqaleyi, %2$.2f MB</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d weçinaya</item>
+        <item quantity="other">%d weçineyay</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Meqale niyeno ro</item>
+        <item quantity="other">Meqaleyi niyenê ro</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">%1$d lista dariyê</item>
+        <item quantity="other">%1$d listey dariyay</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 netice</item>
+        <item quantity="other">%d neticeyi</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">İştiraj</item>
+        <item quantity="other">İştiraki</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 iştırak</item>
+        <item quantity="other">%d iştıraki</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d roce</item>
+        <item quantity="other">%d roci</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">vızêr</item>
+        <item quantity="other">%d roca veror</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">weçinaye zıwan wa wedariyo?</item>
+        <item quantity="other">Weçinaye zıwani wa wedariyê?</item>
+    </plurals>
+</resources>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">ஒவ்வொரு மணி நேரமும்</item>
+        <item quantity="other">ஒவ்வொரு %d மணிநேரமும்</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">ஒவ்வொரு நிமிடமும்</item>
+        <item quantity="other">ஒவ்வொரு %d நிமிடங்களும்</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 செய்தி</item>
+        <item quantity="other">%d செய்திகள்</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">\"%s\" கணக்கைப் பயன்படுத்த நீங்கள் சேவையக கடவுச்சொல்லை வழங்க வேண்டும்.</item>
+        <item quantity="other">\"%s\" கணக்கைப் பயன்படுத்த நீங்கள் சேவையக கடவுச்சொற்களை வழங்க வேண்டும்.</item>
+    </plurals>
+</resources>

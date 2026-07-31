@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="diff_years">
+        <item quantity="one">Былтыр</item>
+        <item quantity="other">%d джыл алгъа</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s байт</item>
+        <item quantity="other">%s байт</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%2$s джылдан бери %1$d тюзетиу (%3$s)</item>
+        <item quantity="other">%2$s джылдан бери %1$d тюзетиу (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">%1$d - 1 статья оффлайн барды, %3$.2f MB</item>
+        <item quantity="other">%1$d - %2$d статья оффлайн барды, %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">1 статьядан %1$d оффлайн джетиширчады</item>
+        <item quantity="other">%2$d статьядан %1$d оффлайн джетиширчады</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 статья, %2$.2f MB</item>
+        <item quantity="other">%1$d статья, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 статья</item>
+        <item quantity="other">%d статья</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d сайланды</item>
+        <item quantity="other">%d сайланды</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Хапарландырыу архив этилди</item>
+        <item quantity="other">%d хапарландырыу архив этилди</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Статья эндириледи</item>
+        <item quantity="other">статья эндириледи</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">%1$d статья къалды</item>
+        <item quantity="other">%1$d статья къалды</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Окъуу Тизме Синхронизация Этиледи</item>
+        <item quantity="other">Окъуу Тизме Синхронизация Этиледи</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">%1$d тизме къалды</item>
+        <item quantity="other">%1$d тизме къалды</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">%1$d тизме синхронизация этиле турады…</item>
+        <item quantity="other">%1$d тизме синхронизация этиле турады…</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">%1$d статья эндириле турады...</item>
+        <item quantity="other">%1$d статья эндирилетурады...</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 окъулгъанча белгиленди</item>
+        <item quantity="other">%d окъулгъанча белгиленди</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 окъулмагъанча белгиленди</item>
+        <item quantity="other">%d окъулмагъанча белгиленди</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d фильтр</item>
+        <item quantity="other">%d фильтр</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%2$s джылдан бери %1$d тюзетиу</item>
+        <item quantity="other">%2$s джылдан бери %1$d тюзетиу</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d фильтр</item>
+        <item quantity="other">%d фильтр</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Бу статьягъа энди оффлайн джетиширча тюлдю.</item>
+        <item quantity="other">Бу статьягъа энди оффлайн джетиширча тюлдю.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Бу статьягъа энди оффлайн джетиширчады.</item>
+        <item quantity="other">Бу статьягъа энди оффлайн джетиширчады.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d статья тизмеден къоратлды</item>
+        <item quantity="other">%d статья тизмеден къоратлды</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d бет %2$s тизмеден къоратылды</item>
+        <item quantity="other">%1$d бет %2$s тизмеден къоратылды</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">%d тизмени кетерирге излегенигизге ишексиизмсиз?</item>
+        <item quantity="other">%d тизмени кетерирге излегенигизге ишексиизмсиз?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">Окъуу тизме экспорт джетишимсиз болду</item>
+        <item quantity="other">Окъуу тизме экспорт джетишимсиз болду</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Окъуу тизме экспорт болду</item>
+        <item quantity="other">Окъуу тизме экспорт болду</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d тизме кетерилди</item>
+        <item quantity="other">%d тизме кетерилди</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 эсеб</item>
+        <item quantity="other">%d эсеб</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">%d символ къошдугъуз</item>
+        <item quantity="other">%d символ къошдугъуз</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">1 Къошум</item>
+        <item quantity="other">Къошум</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 къошум</item>
+        <item quantity="other">%d къошум</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s символ</item>
+        <item quantity="other">%1$s символ</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Ахыр 30 кюнде бир кере кёрюлдю.</item>
+        <item quantity="other">Ахыр 30 кюн ичинде %s кере кёрюлдю.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d кюн</item>
+        <item quantity="other">%d кюн</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">Сиз %d тег къошдугъуз</item>
+        <item quantity="other">Сиз added %d тег къошдугъуз</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">%d символ къоратдыгъыз</item>
+        <item quantity="other">%d символ къоратдыгъыз</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s тег</item>
+        <item quantity="other">%1$s тег</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Джууабны джашыр</item>
+        <item quantity="other">(%d) джууабны джашыр</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Джууабны кёргюз</item>
+        <item quantity="other">(%d) джууабны кёргюз</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">Билдириуню тизмеден кетерирге излегенигизге ишексизмисиз?</item>
+        <item quantity="other">Билдириуню тизмеден кетерирге излегенигизге ишексизмисиз?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">Билдириу кетерилген эди</item>
+        <item quantity="other">Билдириуле кетерилген эдиле</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">Боджаллы хыйсаб %1$s тюзетиулеригиз басмаланнгандан сора къуралгъанды. Болджалы %2$d кюнден чыгъарыкъды.</item>
+        <item quantity="other">Боджаллы хыйсаб %1$s тюзетиулеригиз басмаланнгандан сора къуралгъанды. Болджалы %2$d кюнден чыгъарыкъды.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">Хыйсабны болджалы %d кюнден чыгъарыкъды.</item>
+        <item quantity="other">Хыйсабны болджалы %d кюнден чыгъарыкъды.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">тюнюне</item>
+        <item quantity="other">%d кюн алгъа</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d фильтр</item>
+        <item quantity="other">%d фильтр</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Сайланнган тил къоратылсынмы?</item>
+        <item quantity="other">Сайланнган тилле къоратылсынмы?</item>
+    </plurals>
+</resources>

@@ -1,0 +1,8 @@
+package androidx.compose.ui.spatial;
+
+/* compiled from: r8-map-id-0bf79158388e53a51ca0182ea2539bd0412421e50b81f5daf687f0d2f9d1b594 */
+/* loaded from: classes.dex */
+public abstract class RectListKt {
+    public static final /* synthetic */ int $r8$clinit = 0;
+    public static final long TombStone = (Math.min(0, 1023) << 50) | 1125899906842623L;
+}

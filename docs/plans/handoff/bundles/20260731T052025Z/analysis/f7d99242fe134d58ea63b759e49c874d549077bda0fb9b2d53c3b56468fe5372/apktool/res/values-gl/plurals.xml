@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Cada hora</item>
+        <item quantity="other">Cada %d horas</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Cada minuto</item>
+        <item quantity="other">Cada %d minutos</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 mensaxe</item>
+        <item quantity="other">%d mensaxes</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Realmente queres eliminar esta mensaxe?</item>
+        <item quantity="other">Realmente queres elimnar %1$d mensaxes?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Realmente queres mover esta mensaxe ao cartafol de spam?</item>
+        <item quantity="other">Realmente queres mover as mensaxes %1$d ao cartafol de spam?</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d nova mensaxe</item>
+        <item quantity="other">%d novas mensaxes</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">Obtendo %d resultado</item>
+        <item quantity="other">Obtendo %d resultados</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">Obtendo %1$d de %2$d resultado</item>
+        <item quantity="other">Obtendo %1$d de %2$d resultados</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">Para poder usar a conta \"%s\" cómpre proporcionar o contrasinal do servidor.</item>
+        <item quantity="other">Para poder usar a conta \"%s\" cómpre proporcionar os contrasinais do servidor.</item>
+    </plurals>
+</resources>

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<merge android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <FrameLayout android:id="@id/view_description_edit_toolbar_container" android:background="?paper_color" android:layout_width="match_parent" android:layout_height="?actionBarSize">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="?actionBarSize">
+            <ImageView android:layout_gravity="center_vertical" android:id="@id/view_description_edit_cancel_button" android:background="?selectableItemBackgroundBorderless" android:padding="12.0dp" android:focusable="true" android:clickable="true" android:layout_width="48.0dp" android:layout_height="48.0dp" android:src="@drawable/ic_arrow_back_black_24dp" android:contentDescription="@string/description_edit_cancel_hint" android:layout_marginStart="4.0dp" app:tint="?primary_color" />
+            <TextView android:textSize="20.0sp" android:textStyle="bold" android:textColor="?primary_color" android:ellipsize="end" android:gravity="center_vertical" android:id="@id/view_description_edit_header" android:layout_width="0.0dp" android:layout_height="match_parent" android:layout_marginBottom="2.0dp" android:text="@string/description_edit_edit_description" android:maxLines="1" android:layout_weight="1.0" android:fontFamily="sans-serif" android:layout_marginStart="16.0dp" app:autoSizeMaxTextSize="20.0sp" app:autoSizeTextType="uniform" />
+            <TextView android:layout_gravity="center_vertical" android:id="@id/view_description_edit_save_button" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/description_edit_save" android:layout_marginEnd="4.0dp" style="@style/App.Button.Text" />
+        </LinearLayout>
+        <com.google.android.material.progressindicator.LinearProgressIndicator android:layout_gravity="bottom" android:id="@id/view_description_edit_progress_bar" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content" android:indeterminate="true" />
+    </FrameLayout>
+    <FrameLayout android:layout_width="match_parent" android:layout_height="match_parent">
+        <LinearLayout android:orientation="vertical" android:id="@id/view_description_editing" android:layout_width="match_parent" android:layout_height="match_parent">
+            <org.wikipedia.descriptions.DescriptionEditReviewView android:id="@id/view_description_edit_review_container" android:visibility="gone" android:layout_width="match_parent" android:layout_height="match_parent" />
+            <LinearLayout android:orientation="vertical" android:id="@id/view_description_edit_container" android:layout_width="match_parent" android:layout_height="match_parent">
+                <ScrollView android:id="@id/view_description_edit_scrollview" android:layout_width="match_parent" android:layout_height="0.0dp" android:layout_weight="1.0">
+                    <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content">
+                        <LinearLayout android:orientation="vertical" android:id="@id/view_description_edit_page_summary_container" android:background="?selectableItemBackground" android:paddingTop="15.0dp" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="28.0dp" android:paddingEnd="28.0dp" app:layout_constraintTop_toTopOf="parent">
+                            <TextView android:textSize="12.0sp" android:textColor="?placeholder_color" android:id="@id/view_description_edit_page_summary_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:fontFamily="sans-serif-medium" />
+                            <TextView android:textSize="16.0sp" android:textColor="?primary_color" android:ellipsize="end" android:gravity="start" android:id="@id/view_description_edit_page_summary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2.0dp" android:layout_marginBottom="8.0dp" android:maxLines="4" android:lineSpacingExtra="6.0sp" />
+                        </LinearLayout>
+                        <FrameLayout android:paddingTop="7.0dp" android:paddingBottom="7.0dp" android:clipChildren="false" android:clipToPadding="false" android:layout_width="match_parent" android:layout_height="wrap_content">
+                            <com.google.android.material.textfield.TextInputLayout android:gravity="start" android:id="@id/view_description_edit_text_layout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8.0dp" android:hint="@string/description_edit_text_hint" android:textAlignment="viewStart" android:layout_marginStart="16.0dp" android:layout_marginEnd="16.0dp" app:counterEnabled="true" app:counterMaxLength="@integer/description_max_chars" app:counterOverflowTextAppearance="@style/CounterOverflowTextAppearance" app:endIconContentDescription="@string/description_edit_voice_input_description" app:endIconDrawable="@drawable/ic_mic_black_24dp" app:endIconMode="custom" app:endIconTint="?placeholder_color" app:errorTextAppearance="@style/TextInputLayoutErrorTextAppearance">
+                                <com.google.android.material.chip.Chip android:id="@id/suggestedDescButton" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="-20.0dp" android:text="@string/description_edit_suggested_description_button_text" app:chipIcon="@drawable/ic_robot_24" app:chipIconSize="20.0dp" app:chipIconTint="?primary_color" style="@style/Chip.Accessible.Icon" />
+                                <org.wikipedia.views.PlainPasteEditText android:textSize="16.0sp" android:id="@id/view_description_edit_text" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLength="@integer/description_max_chars" android:lineSpacingExtra="6.0sp" android:inputType="textMultiLine" android:imeOptions="actionDone|flagNoExtractUi">
+                                    <requestFocus />
+                                </org.wikipedia.views.PlainPasteEditText>
+                            </com.google.android.material.textfield.TextInputLayout>
+                        </FrameLayout>
+                        <com.google.android.material.button.MaterialButton android:id="@id/learnMoreButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="48.0dp" android:text="@string/description_edit_learn_more" android:fontFamily="sans-serif" android:textAlignment="viewStart" android:layout_marginStart="12.0dp" android:layout_marginEnd="12.0dp" app:icon="@drawable/ic_open_in_new_black_24px" app:iconGravity="end" style="@style/App.Button.Text" />
+                    </LinearLayout>
+                </ScrollView>
+                <org.wikipedia.descriptions.DescriptionEditBottomBarView android:id="@id/view_description_edit_read_article_bar_container" android:background="?android:selectableItemBackground" android:focusable="true" android:clickable="true" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            </LinearLayout>
+        </LinearLayout>
+        <ScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="@dimen/activity_horizontal_margin" android:paddingEnd="@dimen/activity_horizontal_margin">
+            <include android:id="@id/captcha_container" android:visibility="gone" layout="@layout/group_captcha" />
+        </ScrollView>
+    </FrameLayout>
+</merge>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:icon="@drawable/ic_more_vert_white_24dp" android:id="@id/more_options" android:orderInCategory="101" android:title="@string/abc_action_menu_overflow_description" app:iconTint="?primary_color" app:showAsAction="always">
+        <menu>
+            <item android:icon="@drawable/ic_share" android:id="@id/menu_share_edit" android:title="@string/menu_option_share_edit" app:iconTint="?secondary_color" />
+            <item android:icon="@drawable/ic_content_copy_24" android:id="@id/menu_copy_link_to_clipboard" android:title="@string/menu_option_copy_link_to_clipboard" app:iconTint="?secondary_color" />
+            <item android:icon="@drawable/ic_icon_revision_history_apps" android:id="@id/menu_view_edit_history" android:title="@string/patroller_diff_menu_edit_history_title" app:iconTint="?secondary_color" />
+            <item android:icon="@drawable/ic_manage_template" android:id="@id/menu_saved_messages" android:title="@string/talk_warn_saved_messages" app:iconTint="?secondary_color" />
+            <item android:icon="@drawable/ic_report_flag" android:id="@id/menu_report_feature" android:title="@string/patroller_tasks_overflow_report" app:iconTint="?secondary_color" />
+            <item android:icon="@drawable/ic_info_outline_black_24dp" android:id="@id/menu_learn_more" android:title="@string/suggested_edits_learn_more" app:iconTint="?secondary_color" />
+        </menu>
+    </item>
+</menu>

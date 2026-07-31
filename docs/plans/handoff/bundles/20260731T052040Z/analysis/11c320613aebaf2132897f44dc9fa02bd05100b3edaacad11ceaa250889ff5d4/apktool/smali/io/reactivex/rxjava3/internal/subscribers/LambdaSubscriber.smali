@@ -1,0 +1,435 @@
+.class public final Lio/reactivex/rxjava3/internal/subscribers/LambdaSubscriber;
+.super Ljava/util/concurrent/atomic/AtomicReference;
+.source "r8-map-id-86a71dde26502018768275c3ef5c4d56379672d582e9c15e1a63fb997724bbe7"
+
+# interfaces
+.implements Lio/reactivex/rxjava3/core/FlowableSubscriber;
+.implements Lorg/reactivestreams/Subscription;
+.implements Lio/reactivex/rxjava3/disposables/Disposable;
+
+
+# static fields
+.field private static final serialVersionUID:J = -0x64a12a8486b15cccL
+
+
+# instance fields
+.field final onComplete:Lio/reactivex/rxjava3/functions/Action;
+
+.field final onError:Lio/reactivex/rxjava3/functions/Consumer;
+    .annotation system Ldalvik/annotation/Signature;
+        value = {
+            "Lio/reactivex/rxjava3/functions/Consumer;"
+        }
+    .end annotation
+.end field
+
+.field final onNext:Lio/reactivex/rxjava3/functions/Consumer;
+    .annotation system Ldalvik/annotation/Signature;
+        value = {
+            "Lio/reactivex/rxjava3/functions/Consumer;"
+        }
+    .end annotation
+.end field
+
+.field final onSubscribe:Lio/reactivex/rxjava3/functions/Consumer;
+    .annotation system Ldalvik/annotation/Signature;
+        value = {
+            "Lio/reactivex/rxjava3/functions/Consumer;"
+        }
+    .end annotation
+.end field
+
+
+# direct methods
+.method public constructor <init>(Lio/reactivex/rxjava3/functions/Consumer;Lio/reactivex/rxjava3/functions/Consumer;)V
+    .locals 1
+
+    .line 1
+    sget-object v0, Lio/reactivex/rxjava3/internal/functions/Functions;->EMPTY_ACTION:Landroidx/transition/Transition$1;
+
+    .line 2
+    .line 3
+    invoke-direct {p0}, Ljava/util/concurrent/atomic/AtomicReference;-><init>()V
+
+    .line 4
+    .line 5
+    .line 6
+    iput-object p1, p0, Lio/reactivex/rxjava3/internal/subscribers/LambdaSubscriber;->onNext:Lio/reactivex/rxjava3/functions/Consumer;
+
+    .line 7
+    .line 8
+    iput-object p2, p0, Lio/reactivex/rxjava3/internal/subscribers/LambdaSubscriber;->onError:Lio/reactivex/rxjava3/functions/Consumer;
+
+    .line 9
+    .line 10
+    iput-object v0, p0, Lio/reactivex/rxjava3/internal/subscribers/LambdaSubscriber;->onComplete:Lio/reactivex/rxjava3/functions/Action;
+
+    .line 11
+    .line 12
+    sget-object p1, Lio/reactivex/rxjava3/internal/operators/flowable/FlowableInternalHelper$RequestMax;->INSTANCE:Lio/reactivex/rxjava3/internal/operators/flowable/FlowableInternalHelper$RequestMax;
+
+    .line 13
+    .line 14
+    iput-object p1, p0, Lio/reactivex/rxjava3/internal/subscribers/LambdaSubscriber;->onSubscribe:Lio/reactivex/rxjava3/functions/Consumer;
+
+    .line 15
+    .line 16
+    return-void
+.end method
+
+
+# virtual methods
+.method public final cancel()V
+    .locals 0
+
+    .line 1
+    invoke-static {p0}, Lio/reactivex/rxjava3/internal/subscriptions/SubscriptionHelper;->cancel(Ljava/util/concurrent/atomic/AtomicReference;)Z
+
+    .line 2
+    .line 3
+    .line 4
+    return-void
+.end method
+
+.method public final dispose()V
+    .locals 0
+
+    .line 1
+    invoke-static {p0}, Lio/reactivex/rxjava3/internal/subscriptions/SubscriptionHelper;->cancel(Ljava/util/concurrent/atomic/AtomicReference;)Z
+
+    .line 2
+    .line 3
+    .line 4
+    return-void
+.end method
+
+.method public final isDisposed()Z
+    .locals 1
+
+    .line 1
+    invoke-virtual {p0}, Ljava/util/concurrent/atomic/AtomicReference;->get()Ljava/lang/Object;
+
+    .line 2
+    .line 3
+    .line 4
+    move-result-object p0
+
+    .line 5
+    sget-object v0, Lio/reactivex/rxjava3/internal/subscriptions/SubscriptionHelper;->CANCELLED:Lio/reactivex/rxjava3/internal/subscriptions/SubscriptionHelper;
+
+    .line 6
+    .line 7
+    if-ne p0, v0, :cond_0
+
+    .line 8
+    .line 9
+    const/4 p0, 0x1
+
+    .line 10
+    return p0
+
+    .line 11
+    :cond_0
+    const/4 p0, 0x0
+
+    .line 12
+    return p0
+.end method
+
+.method public final onComplete()V
+    .locals 2
+
+    .line 1
+    invoke-virtual {p0}, Ljava/util/concurrent/atomic/AtomicReference;->get()Ljava/lang/Object;
+
+    .line 2
+    .line 3
+    .line 4
+    move-result-object v0
+
+    .line 5
+    sget-object v1, Lio/reactivex/rxjava3/internal/subscriptions/SubscriptionHelper;->CANCELLED:Lio/reactivex/rxjava3/internal/subscriptions/SubscriptionHelper;
+
+    .line 6
+    .line 7
+    if-eq v0, v1, :cond_0
+
+    .line 8
+    .line 9
+    invoke-virtual {p0, v1}, Ljava/util/concurrent/atomic/AtomicReference;->lazySet(Ljava/lang/Object;)V
+
+    .line 10
+    .line 11
+    .line 12
+    :try_start_0
+    iget-object p0, p0, Lio/reactivex/rxjava3/internal/subscribers/LambdaSubscriber;->onComplete:Lio/reactivex/rxjava3/functions/Action;
+
+    .line 13
+    .line 14
+    invoke-interface {p0}, Lio/reactivex/rxjava3/functions/Action;->run()V
+    :try_end_0
+    .catchall {:try_start_0 .. :try_end_0} :catchall_0
+
+    .line 15
+    .line 16
+    .line 17
+    return-void
+
+    .line 18
+    :catchall_0
+    move-exception p0
+
+    .line 19
+    invoke-static {p0}, Lnet/newpipe/app/AppKt;->throwIfFatal(Ljava/lang/Throwable;)V
+
+    .line 20
+    .line 21
+    .line 22
+    invoke-static {p0}, Lkotlin/math/MathKt;->onError(Ljava/lang/Throwable;)V
+
+    .line 23
+    .line 24
+    .line 25
+    :cond_0
+    return-void
+.end method
+
+.method public final onError(Ljava/lang/Throwable;)V
+    .locals 3
+
+    .line 1
+    invoke-virtual {p0}, Ljava/util/concurrent/atomic/AtomicReference;->get()Ljava/lang/Object;
+
+    .line 2
+    .line 3
+    .line 4
+    move-result-object v0
+
+    .line 5
+    sget-object v1, Lio/reactivex/rxjava3/internal/subscriptions/SubscriptionHelper;->CANCELLED:Lio/reactivex/rxjava3/internal/subscriptions/SubscriptionHelper;
+
+    .line 6
+    .line 7
+    if-eq v0, v1, :cond_0
+
+    .line 8
+    .line 9
+    invoke-virtual {p0, v1}, Ljava/util/concurrent/atomic/AtomicReference;->lazySet(Ljava/lang/Object;)V
+
+    .line 10
+    .line 11
+    .line 12
+    :try_start_0
+    iget-object p0, p0, Lio/reactivex/rxjava3/internal/subscribers/LambdaSubscriber;->onError:Lio/reactivex/rxjava3/functions/Consumer;
+
+    .line 13
+    .line 14
+    invoke-interface {p0, p1}, Lio/reactivex/rxjava3/functions/Consumer;->accept(Ljava/lang/Object;)V
+    :try_end_0
+    .catchall {:try_start_0 .. :try_end_0} :catchall_0
+
+    .line 15
+    .line 16
+    .line 17
+    return-void
+
+    .line 18
+    :catchall_0
+    move-exception p0
+
+    .line 19
+    invoke-static {p0}, Lnet/newpipe/app/AppKt;->throwIfFatal(Ljava/lang/Throwable;)V
+
+    .line 20
+    .line 21
+    .line 22
+    new-instance v0, Lio/reactivex/rxjava3/exceptions/CompositeException;
+
+    .line 23
+    .line 24
+    const/4 v1, 0x2
+
+    .line 25
+    new-array v1, v1, [Ljava/lang/Throwable;
+
+    .line 26
+    .line 27
+    const/4 v2, 0x0
+
+    .line 28
+    aput-object p1, v1, v2
+
+    .line 29
+    .line 30
+    const/4 p1, 0x1
+
+    .line 31
+    aput-object p0, v1, p1
+
+    .line 32
+    .line 33
+    invoke-direct {v0, v1}, Lio/reactivex/rxjava3/exceptions/CompositeException;-><init>([Ljava/lang/Throwable;)V
+
+    .line 34
+    .line 35
+    .line 36
+    invoke-static {v0}, Lkotlin/math/MathKt;->onError(Ljava/lang/Throwable;)V
+
+    .line 37
+    .line 38
+    .line 39
+    return-void
+
+    .line 40
+    :cond_0
+    invoke-static {p1}, Lkotlin/math/MathKt;->onError(Ljava/lang/Throwable;)V
+
+    .line 41
+    .line 42
+    .line 43
+    return-void
+.end method
+
+.method public final onNext(Ljava/lang/Object;)V
+    .locals 1
+
+    .line 1
+    invoke-virtual {p0}, Lio/reactivex/rxjava3/internal/subscribers/LambdaSubscriber;->isDisposed()Z
+
+    .line 2
+    .line 3
+    .line 4
+    move-result v0
+
+    .line 5
+    if-nez v0, :cond_0
+
+    .line 6
+    .line 7
+    :try_start_0
+    iget-object v0, p0, Lio/reactivex/rxjava3/internal/subscribers/LambdaSubscriber;->onNext:Lio/reactivex/rxjava3/functions/Consumer;
+
+    .line 8
+    .line 9
+    invoke-interface {v0, p1}, Lio/reactivex/rxjava3/functions/Consumer;->accept(Ljava/lang/Object;)V
+    :try_end_0
+    .catchall {:try_start_0 .. :try_end_0} :catchall_0
+
+    .line 10
+    .line 11
+    .line 12
+    return-void
+
+    .line 13
+    :catchall_0
+    move-exception p1
+
+    .line 14
+    invoke-static {p1}, Lnet/newpipe/app/AppKt;->throwIfFatal(Ljava/lang/Throwable;)V
+
+    .line 15
+    .line 16
+    .line 17
+    invoke-virtual {p0}, Ljava/util/concurrent/atomic/AtomicReference;->get()Ljava/lang/Object;
+
+    .line 18
+    .line 19
+    .line 20
+    move-result-object v0
+
+    .line 21
+    check-cast v0, Lorg/reactivestreams/Subscription;
+
+    .line 22
+    .line 23
+    invoke-interface {v0}, Lorg/reactivestreams/Subscription;->cancel()V
+
+    .line 24
+    .line 25
+    .line 26
+    invoke-virtual {p0, p1}, Lio/reactivex/rxjava3/internal/subscribers/LambdaSubscriber;->onError(Ljava/lang/Throwable;)V
+
+    .line 27
+    .line 28
+    .line 29
+    :cond_0
+    return-void
+.end method
+
+.method public final onSubscribe(Lorg/reactivestreams/Subscription;)V
+    .locals 1
+
+    .line 1
+    invoke-static {p0, p1}, Lio/reactivex/rxjava3/internal/subscriptions/SubscriptionHelper;->setOnce(Ljava/util/concurrent/atomic/AtomicReference;Lorg/reactivestreams/Subscription;)Z
+
+    .line 2
+    .line 3
+    .line 4
+    move-result v0
+
+    .line 5
+    if-eqz v0, :cond_0
+
+    .line 6
+    .line 7
+    :try_start_0
+    iget-object v0, p0, Lio/reactivex/rxjava3/internal/subscribers/LambdaSubscriber;->onSubscribe:Lio/reactivex/rxjava3/functions/Consumer;
+
+    .line 8
+    .line 9
+    invoke-interface {v0, p0}, Lio/reactivex/rxjava3/functions/Consumer;->accept(Ljava/lang/Object;)V
+    :try_end_0
+    .catchall {:try_start_0 .. :try_end_0} :catchall_0
+
+    .line 10
+    .line 11
+    .line 12
+    return-void
+
+    .line 13
+    :catchall_0
+    move-exception v0
+
+    .line 14
+    invoke-static {v0}, Lnet/newpipe/app/AppKt;->throwIfFatal(Ljava/lang/Throwable;)V
+
+    .line 15
+    .line 16
+    .line 17
+    invoke-interface {p1}, Lorg/reactivestreams/Subscription;->cancel()V
+
+    .line 18
+    .line 19
+    .line 20
+    invoke-virtual {p0, v0}, Lio/reactivex/rxjava3/internal/subscribers/LambdaSubscriber;->onError(Ljava/lang/Throwable;)V
+
+    .line 21
+    .line 22
+    .line 23
+    :cond_0
+    return-void
+.end method
+
+.method public final request(J)V
+    .locals 0
+
+    .line 1
+    invoke-virtual {p0}, Ljava/util/concurrent/atomic/AtomicReference;->get()Ljava/lang/Object;
+
+    .line 2
+    .line 3
+    .line 4
+    move-result-object p0
+
+    .line 5
+    check-cast p0, Lorg/reactivestreams/Subscription;
+
+    .line 6
+    .line 7
+    invoke-interface {p0, p1, p2}, Lorg/reactivestreams/Subscription;->request(J)V
+
+    .line 8
+    .line 9
+    .line 10
+    return-void
+.end method

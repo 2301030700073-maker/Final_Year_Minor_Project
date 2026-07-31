@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Vsako uro</item>
+        <item quantity="two">Vsaki %d uri</item>
+        <item quantity="few">Vsake %d ure</item>
+        <item quantity="other">Vsakih %d ur</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Vsako minuto</item>
+        <item quantity="two">Vsaki %d minuti</item>
+        <item quantity="few">Vsake %d minute</item>
+        <item quantity="other">Vsakih %d minut</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">%d sporočilo</item>
+        <item quantity="two">%d sporočili</item>
+        <item quantity="few">%d sporočila</item>
+        <item quantity="other">%d sporočil</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Ali res želite izbrisati %1$d sporočilo?</item>
+        <item quantity="two">Ali res želite izbrisati %1$d sporočili?</item>
+        <item quantity="few">Ali res želite izbrisati %1$d sporočila?</item>
+        <item quantity="other">Ali res želite izbrisati %1$d sporočil?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Ali zares želiš premakniti %1$d sporočilo v mapo neželene pošte?</item>
+        <item quantity="two">Ali zares želiš premakniti %1$d sporočili v mapo neželene pošte?</item>
+        <item quantity="few">Ali zares želiš premakniti %1$d sporočila v mapo neželene pošte?</item>
+        <item quantity="other">Ali zares želiš premakniti %1$d sporočil v mapo neželene pošte?</item>
+    </plurals>
+    <plurals name="message_view_attachment_summary">
+        <item quantity="one">%1$d priloga (%2$s)</item>
+        <item quantity="two">%1$d prilogi (%2$s)</item>
+        <item quantity="few">%1$d priloge (%2$s)</item>
+        <item quantity="other">%1$d prilog (%2$s)</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d novo sporočilo</item>
+        <item quantity="two">%d novi sporočili</item>
+        <item quantity="few">%d nova sporočila</item>
+        <item quantity="other">%d novih sporočil</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">Poteka pridobivanje %d zadetka</item>
+        <item quantity="two">Poteka pridobivanje %d zadetkov</item>
+        <item quantity="few">Poteka pridobivanje %d zadetkov</item>
+        <item quantity="other">Poteka pridobivanje %d zadetkov</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">Poteka pridobivanje %1$d od %2$d zadetka</item>
+        <item quantity="two">Poteka pridobivanje %1$d od %2$d zadetkov</item>
+        <item quantity="few">Poteka pridobivanje %1$d od %2$d zadetkov</item>
+        <item quantity="other">Poteka pridobivanje %1$d od %2$d zadetkov</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">Za uporabo računa »%s« morate navesti geslo strežnika.</item>
+        <item quantity="two">Za uporabo računa »%s« morate navesti gesli strežnika.</item>
+        <item quantity="few">Za uporabo računa »%s« morate navesti gesla strežnika.</item>
+        <item quantity="other">Za uporabo računa »%s« morate navesti gesla strežnika.</item>
+    </plurals>
+</resources>

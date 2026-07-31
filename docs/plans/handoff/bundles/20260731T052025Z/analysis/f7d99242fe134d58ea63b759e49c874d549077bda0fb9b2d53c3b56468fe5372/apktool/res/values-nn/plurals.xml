@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="account_setup_options_email_check_frequency_hours">
+        <item quantity="one">Kvar time</item>
+        <item quantity="other">Kvar %d. time</item>
+    </plurals>
+    <plurals name="account_setup_options_email_check_frequency_minutes">
+        <item quantity="one">Kvart minutt</item>
+        <item quantity="other">Kvart %d. minutt</item>
+    </plurals>
+    <plurals name="account_setup_options_email_display_count_messages">
+        <item quantity="one">1 melding</item>
+        <item quantity="other">%d meldingar</item>
+    </plurals>
+    <plurals name="dialog_confirm_delete_messages">
+        <item quantity="one">Vil du verkeleg sletta denne meldinga?</item>
+        <item quantity="other">Vil du verkeleg sletta %1$d meldingar?</item>
+    </plurals>
+    <plurals name="dialog_confirm_spam_message">
+        <item quantity="one">Er du sikker på du vil flytte denne meldinga til søppelpost?</item>
+        <item quantity="other">Er du sikker på du vil flytte %1$d meldingar til søppelpost?</item>
+    </plurals>
+    <plurals name="message_view_attachment_summary">
+        <item quantity="one">%1$d Vedlegg (%2$s)</item>
+        <item quantity="other">%1$d Vedlegg (%2$s)</item>
+    </plurals>
+    <plurals name="notification_new_messages_title">
+        <item quantity="one">%d ny melding</item>
+        <item quantity="other">%d nye meldingar</item>
+    </plurals>
+    <plurals name="remote_search_downloading">
+        <item quantity="one">Hentar %d resultat</item>
+        <item quantity="other">Hentar %d resultatar</item>
+    </plurals>
+    <plurals name="remote_search_downloading_limited">
+        <item quantity="one">Hentar %1$d av %2$d resultat</item>
+        <item quantity="other">Hentar %1$d av %2$d resultat</item>
+    </plurals>
+    <plurals name="settings_import_password_prompt">
+        <item quantity="one">For å vere i stand til å bruke kontoen \"%s\" må du angje tenar-passordet.</item>
+        <item quantity="other">For å vere i stand til å bruke kontoen \"%s\" må du angje tenar-passorda.</item>
+    </plurals>
+</resources>

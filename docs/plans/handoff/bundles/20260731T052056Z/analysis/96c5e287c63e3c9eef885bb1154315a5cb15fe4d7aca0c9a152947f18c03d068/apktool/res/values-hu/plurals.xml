@@ -1,0 +1,423 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="one">%d nap</item>
+        <item quantity="other">%d nap</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="one">szerkesztés múlt hónapban</item>
+        <item quantity="other">szerkesztés múlt hónapban</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="one">szerkesztés ebben a hónapban</item>
+        <item quantity="other">szerkesztés ebben a hónapban</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="one">szerkesztés</item>
+        <item quantity="other">szerkesztés</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_views">
+        <item quantity="one">megtekintés az általad szerkesztett szócikkeken</item>
+        <item quantity="other">megtekintés az általad szerkesztett szócikkeken</item>
+    </plurals>
+    <plurals name="activity_tab_impact_thanks">
+        <item quantity="one">köszönet</item>
+        <item quantity="other">köszönet</item>
+    </plurals>
+    <plurals name="activity_tab_impact_total_edits">
+        <item quantity="one">összes szerkesztés</item>
+        <item quantity="other">összes szerkesztés</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="one">Tavaly</item>
+        <item quantity="other">%d éve</item>
+    </plurals>
+    <plurals name="donation_reminders_text_articles">
+        <item quantity="one">%d szócikk</item>
+        <item quantity="other">%d szócikk</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">egy bájt</item>
+        <item quantity="other">%s bájt</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d szerkesztés %2$s óta (%3$s)</item>
+        <item quantity="other">%1$d szerkesztés %2$s óta (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">1 szócikkből %1$d elérhető offline, %3$.2f MB</item>
+        <item quantity="other">%2$d szócikkből %1$d elérhető offline, %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">%2$d szócikkből %1$d elérhető offline</item>
+        <item quantity="other">%2$d szócikkből %1$d elérhető offline</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 szócikk, %2$.2f MB</item>
+        <item quantity="other">%1$d szócikk, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">%d szócikk</item>
+        <item quantity="other">%d szócikk</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d új értesítés</item>
+        <item quantity="other">%d új értesítés</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d kiválasztva</item>
+        <item quantity="other">%d kiválasztva</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Értesítés archiválva</item>
+        <item quantity="other">%d db értesítés archiválva</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Szócikk letöltése</item>
+        <item quantity="other">Szócikkek letöltése</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">%1$d szócikk maradt</item>
+        <item quantity="other">%1$d szócikk maradt</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Olvasólista frissítése</item>
+        <item quantity="other">Olvasólisták frissítése</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">%1$d lista van hátra</item>
+        <item quantity="other">%1$d lista van hátra</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">%1$d lista szinkronizálása…</item>
+        <item quantity="other">%1$d lista szinkronizálása…</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">%1$d szócikk letöltése…</item>
+        <item quantity="other">%1$d szócikk letöltése…</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 olvasottnak jelölve</item>
+        <item quantity="other">%d olvasottnak jelölve</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 nem olvasottnak jelölve</item>
+        <item quantity="other">%d nem olvasottnak jelölve</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d szűrő</item>
+        <item quantity="other">%d szűrő</item>
+    </plurals>
+    <plurals name="on_this_day_game_stats_games_played">
+        <item quantity="one">lejátszott játék</item>
+        <item quantity="other">lejátszott játék</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d szerkesztés %2$s óta</item>
+        <item quantity="other">%1$d szerkesztés %2$s óta</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d szűrő</item>
+        <item quantity="other">%d szűrő</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak">
+        <item quantity="one">%d nap</item>
+        <item quantity="other">%d nap</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final">
+        <item quantity="one">%1$d/%2$d</item>
+        <item quantity="other">%1$d/%2$d</item>
+    </plurals>
+    <plurals name="reading_challenge_small_widget_streak_final_large">
+        <item quantity="one">%1$d/%2$d nap</item>
+        <item quantity="other">%1$d/%2$d nap</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">A szócikk mostantól nem érhető el kapcsolat nélkül.</item>
+        <item quantity="other">A szócikkek mostantól nem érhetők el kapcsolat nélkül.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">A szócikk mostantól kapcsolat nélkül is elérhető.</item>
+        <item quantity="other">A szócikkek mostantól kapcsolat nélkül is elérhetők.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d szócikk eltávolítva a listáról</item>
+        <item quantity="other">%d szócikk eltávolítva a listáról</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d szócikk eltávolítva a(z) %2$s listáról</item>
+        <item quantity="other">%1$d szócikk eltávolítva a(z) %2$s listáról</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">Biztosan törölni szeretnél %d listát?</item>
+        <item quantity="other">Biztosan törölni szeretnél %d listát?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">Az olvasólista exportálása sikertelen</item>
+        <item quantity="other">Az olvasólisták exportálása sikertelen</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Olvasólista importálva</item>
+        <item quantity="other">Olvasólisták importálva</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d lista törölve</item>
+        <item quantity="other">%d lista törölve</item>
+    </plurals>
+    <plurals name="recommended_reading_list_interest_pick_selected_articles">
+        <item quantity="one">%d kiválasztva</item>
+        <item quantity="other">%d kiválasztva</item>
+    </plurals>
+    <plurals name="recommended_reading_list_page_subtitle_articles">
+        <item quantity="one">• %d szócikk</item>
+        <item quantity="other">• %d szócikk</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 találat</item>
+        <item quantity="other">%d találat</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">Hozzáadtál egy karaktert</item>
+        <item quantity="other">Hozzáadtál %d karaktert</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Közreműködés</item>
+        <item quantity="other">Közreműködés</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">egy közreműködés</item>
+        <item quantity="other">%d közreműködés</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s karakter</item>
+        <item quantity="other">%1$s karakter</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Megtekintve egyszer az elmúlt 30 napban.</item>
+        <item quantity="other">Megtekintve %s alkalommal az elmúlt 30 napban.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">szerkesztés</item>
+        <item quantity="other">szerkesztés</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d nap</item>
+        <item quantity="other">%d nap</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">Hozzáadtál %d címkét</item>
+        <item quantity="other">Hozzáadtál %d címkét</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">Eltávolítottál %d karaktert</item>
+        <item quantity="other">Eltávolítottál %d karaktert</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s tag</item>
+        <item quantity="other">%1$s tag</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Válasz elrejtése</item>
+        <item quantity="other">%d válasz elrejtése</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Válasz megjelenítése</item>
+        <item quantity="other">%d válasz megjelenítése</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">Biztosan törlöd az üzenetet a listáról?</item>
+        <item quantity="other">Biztosan törlöd az üzeneteket a listáról?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">Az üzenet törölve</item>
+        <item quantity="other">Az üzenetek törölve</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">A szerkesztésed közzététele után létrejött neked egy ideiglenes fiók %1$s néven. A fiók %2$d nap múlva jár le.</item>
+        <item quantity="other">A szerkesztésed közzététele után létrejött neked egy ideiglenes fiók %1$s néven. A fiók %2$d nap múlva jár le.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">A felhasználói fiókod %d nap múlva lejár.</item>
+        <item quantity="other">A felhasználói fiókod %d nap múlva lejár.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">tegnap</item>
+        <item quantity="other">%d napja</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d szűrő</item>
+        <item quantity="other">%d szűrő</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Eltávolítod a kijelölt nyelvet?</item>
+        <item quantity="other">Eltávolítod a kijelölt nyelveket?</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_interested_categories_title">
+        <item quantity="one">Engem érdeklő kategória</item>
+        <item quantity="other">Engem érdeklő kategóriák</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_read_title">
+        <item quantity="one">Elolvasott cikk</item>
+        <item quantity="other">Elolvasott cikkek</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_minutes_read_title">
+        <item quantity="one">Olvasással töltött perc</item>
+        <item quantity="other">Olvasással töltött percek</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_most_read_article_title">
+        <item quantity="one">Legtöbbet olvasott szócikkem</item>
+        <item quantity="other">Legtöbbet olvasott szócikkeim</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_total_edits_title">
+        <item quantity="one">Szerkesztések száma</item>
+        <item quantity="other">Szerkesztések száma</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_edits_title">
+        <item quantity="one">A szerkesztők által végrehajtott módosítások</item>
+        <item quantity="other">A szerkesztők által végrehajtott módosítások</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_hours_spent_title">
+        <item quantity="one">Olvasással töltött óra</item>
+        <item quantity="other">Olvasással töltött órák</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_most_read_title">
+        <item quantity="one">Az angol Wikipédia legolvasottabb szócikke</item>
+        <item quantity="other">Az angol Wikipédia legolvasottabb szócikkei</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_articles_title">
+        <item quantity="one">Megtekintett szócikkek száma</item>
+        <item quantity="other">Megtekintett szócikkek száma</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_edits_title">
+        <item quantity="one">Alkalmazáson belüli szerkesztés</item>
+        <item quantity="other">Alkalmazáson belüli szerkesztések</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_wikipedia_per_minute_label">
+        <item quantity="one">%d alkalommal percenként</item>
+        <item quantity="other">%d alkalommal percenként</item>
+    </plurals>
+    <plurals name="year_in_review_slide_app_edited_times_headline">
+        <item quantity="one">A hivatalos Wikipédia-alkalmazásokban a szerkesztők %,d szerkesztést hajtottak végre</item>
+        <item quantity="other">A hivatalos Wikipédia-alkalmazásokban a szerkesztők %,d szerkesztést hajtottak végre</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_first">
+        <item quantity="one">A Wikipédián %,d szócikk volt</item>
+        <item quantity="other">A Wikipédián %,d szócikk volt</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_second">
+        <item quantity="one">ebben az évben több mint %,d aktív nyelven. Olvasók millióihoz csatlakoztál a tudás bővítésében és a sokféle téma felfedezésében.</item>
+        <item quantity="other">ebben az évben több mint %,d aktív nyelven. Olvasók millióihoz csatlakoztál a tudás bővítésében és a sokféle téma felfedezésében.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_headline">
+        <item quantity="one">A Wikipédia több mint %,d nyelven volt elérhető</item>
+        <item quantity="other">A Wikipédia több mint %,d nyelven volt elérhető</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_body">
+        <item quantity="one">%1$d-ben az önkéntesek %2$,d bájtot adtak hozzá az angol Wikipédiához. Az összesített munkájuk eredménye egy folyamatosan fejlődő, tényeken alapuló és megbízható tudásforrás, amelyet a világnak adnak. Mindannyiunknak van megosztható tudása – &lt;a href=\"%3$s\">tudd meg, hogyan vehetsz részt&lt;/a>.</item>
+        <item quantity="other">%1$d-ben az önkéntesek %2$,d bájtot adtak hozzá az angol Wikipédiához. Az összesített munkájuk eredménye egy folyamatosan fejlődő, tényeken alapuló és megbízható tudásforrás, amelyet a világnak adnak. Mindannyiunknak van megosztható tudása – &lt;a href=\"%3$s\">tudd meg, hogyan vehetsz részt&lt;/a>.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_headline">
+        <item quantity="one">%,d bájt hozzáadva</item>
+        <item quantity="other">%,d bájt hozzáadva</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_per_minute_headline">
+        <item quantity="one">A Wikipédiát percenként %,d alkalommal szerkesztették</item>
+        <item quantity="other">A Wikipédiát percenként %,d alkalommal szerkesztették</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_body">
+        <item quantity="one">Köszönjük, hogy a világ minden táján változást hozó önkéntes szerkesztők egyike vagy a Wikimédia-projekteken. Az olyan önkéntesek, mint te, összesen %,d módosítást hajtottak végre a Wikipédia több mint 300 különböző nyelvi változatában.</item>
+        <item quantity="other">Köszönjük, hogy a világ minden táján változást hozó önkéntes szerkesztők egyike vagy a Wikimédia-projekteken. Az olyan önkéntesek, mint te, összesen %,d módosítást hajtottak végre a Wikipédia több mint 300 különböző nyelvi változatában.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_headline">
+        <item quantity="one">%s alkalommal szerkesztettél</item>
+        <item quantity="other">%s alkalommal szerkesztettél</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_body">
+        <item quantity="one">Az olvasók világszerte értékelik a hozzájárulásaidat. Az elmúlt 2 hónapban az általad szerkesztett szócikkek összesen %,d megtekintést értek el. Az olyan szerkesztőknek köszönhetően, mint te, a Wikipédia folyamatosan fejlődő, tényeken alapuló és megbízható tudásforrás a világ számára.</item>
+        <item quantity="other">Az olvasók világszerte értékelik a hozzájárulásaidat. Az elmúlt 2 hónapban az általad szerkesztett szócikkek összesen %,d megtekintést értek el. Az olyan szerkesztőknek köszönhetően, mint te, a Wikipédia folyamatosan fejlődő, tényeken alapuló és megbízható tudásforrás a világ számára.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_headline">
+        <item quantity="one">A szerkesztésedet mostanában több mint %,d alkalommal tekintették meg</item>
+        <item quantity="other">A szerkesztéseidet mostanában több mint %,d alkalommal tekintették meg</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_first">
+        <item quantity="one">Az önkéntesek %,d módosítást hajtottak végre a Wikipédia több mint 300 különböző nyelvi változatában.</item>
+        <item quantity="other">Az önkéntesek %,d módosítást hajtottak végre a Wikipédia több mint 300 különböző nyelvi változatában.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_second">
+        <item quantity="one">Az angol Wikipédián %,d módosítás történt. Az önkéntesek a nap minden órájában azon dolgoznak, hogy fejlesszék a Wikipédiát.</item>
+        <item quantity="other">Az angol Wikipédián %,d módosítás történt. Az önkéntesek a nap minden órájában azon dolgoznak, hogy fejlesszék a Wikipédiát.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_headline">
+        <item quantity="one">A szerkesztők idén %,d módosítást hajtottak végre</item>
+        <item quantity="other">A szerkesztők idén %,d módosítást hajtottak végre</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_first">
+        <item quantity="one">Becslések szerint az emberek %,d órát töltöttek</item>
+        <item quantity="other">Becslések szerint az emberek %,d órát töltöttek</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_second">
+        <item quantity="one">—nagyjából %1$,d év!—az angol Wikipédia olvasásával %2$d-ben. A Wikipédia akkor is ott van, amikor a változó világunkról szeretnél tanulni, megnyerni egy baráti fogadást, vagy megválaszolni egy kíváncsi gyerek kérdését.</item>
+        <item quantity="other">—nagyjából %1$,d év!—az angol Wikipédia olvasásával %2$d-ben. A Wikipédia akkor is ott van, amikor a változó világunkról szeretnél tanulni, megnyerni egy baráti fogadást, vagy megválaszolni egy kíváncsi gyerek kérdését.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_headline">
+        <item quantity="one">Összesen %,d órát töltöttünk olvasással</item>
+        <item quantity="other">Összesen %,d órát töltöttünk olvasással</item>
+    </plurals>
+    <plurals name="year_in_review_slide_global_saved_articles_headline">
+        <item quantity="one">Az alkalmazás felhasználóinak %,d elmentett szócikke volt</item>
+        <item quantity="other">Az alkalmazás felhasználóinak %,d elmentett szócikke volt</item>
+    </plurals>
+    <plurals name="year_in_review_slide_most_read_english_articles_body">
+        <item quantity="one">Amikor az emberek a világunkról szeretnének tanulni, a Wikipédiához fordulnak. Az angol Wikipédián a(z) %1$d leglátogatottabb szócikk ez volt: %2$s &lt;br />További részletekért olvasd el a &lt;a href=\"%3$s\">kapcsolódó blogbejegyzésünket&lt;/a>.</item>
+        <item quantity="other">Amikor az emberek a világunkról szeretnének tanulni, a Wikipédiához fordulnak. Az angol Wikipédián a(z) %1$d leglátogatottabb szócikk a következő volt: %2$s &lt;br />További részletekért olvasd el a &lt;a href=\"%3$s\">kapcsolódó blogbejegyzésünket&lt;/a>.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_body">
+        <item quantity="one">Ezek közé a szócikkek közé tartozott a(z) &lt;b>%1$s&lt;/b>, a(z) &lt;b>%2$s&lt;/b> és a(z) &lt;b>%3$s&lt;/b>. Minden elmentett szócikk tükrözi az érdeklődésedet, és segít egy személyre szabott tudásbázis felépítésében a Wikipédián.&lt;br />&lt;br />Az aktív alkalmazásfelhasználók idén átlagosan %4$,d szócikket mentettek el.</item>
+        <item quantity="other">Ezek közé a szócikkek közé tartozott a(z) &lt;b>%1$s&lt;/b>, a(z) &lt;b>%2$s&lt;/b> és a(z) &lt;b>%3$s&lt;/b>. Minden elmentett szócikk tükrözi az érdeklődésedet, és segít egy személyre szabott tudásbázis felépítésében a Wikipédián.&lt;br />&lt;br />Az aktív alkalmazásfelhasználók idén átlagosan %4$,d szócikket mentettek el.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_headline">
+        <item quantity="one">%,d szócikket mentettél el</item>
+        <item quantity="other">%,d szócikket mentettél el</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_first">
+        <item quantity="one">Becslések szerint az emberek %,d órát töltöttek</item>
+        <item quantity="other">Becslések szerint az emberek %,d órát töltöttek</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_second">
+        <item quantity="one">—nagyjából %1$,d év!—az angol Wikipédia olvasásával %2$d-ben.</item>
+        <item quantity="other">—nagyjából %1$,d év!—az angol Wikipédia olvasásával %2$d-ben.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_first">
+        <item quantity="one">A Wikipédián %,d szócikk volt</item>
+        <item quantity="other">A Wikipédián %,d szócikk volt</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_second">
+        <item quantity="one">ebben az évben több mint %,d aktív nyelven. Olvasók millióihoz csatlakoztál a tudás bővítésében és a sokféle téma felfedezésében.</item>
+        <item quantity="other">ebben az évben több mint %,d aktív nyelven. Olvasók millióihoz csatlakoztál a tudás bővítésében és a sokféle téma felfedezésében.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_top">
+        <item quantity="one">Becsléseink szerint ezzel világszerte a Wikipédia-olvasók felső %1$s%%-ába tartozol. Egy átlagos ember évente %2$,d szócikket olvas.</item>
+        <item quantity="other">Becsléseink szerint ezzel világszerte a Wikipédia-olvasók felső %1$s%%-ába tartozol. Egy átlagos ember évente %2$,d szócikket olvas.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_first">
+        <item quantity="one">Összesen %,d percet töltöttél</item>
+        <item quantity="other">Összesen %,d percet töltöttél</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_second">
+        <item quantity="one">—%1$,d szócikk olvasásával %2$d-ben.</item>
+        <item quantity="other">—%1$,d szócikk olvasásával %2$d-ben.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_body">
+        <item quantity="one">%1$d-ben ez volt az a szócikk, amelyet a legtöbbször olvastál: %2$s</item>
+        <item quantity="other">%1$d-ben ezek voltak azok a szócikkek, amelyeket a legtöbbször olvastál: %2$s</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_headline">
+        <item quantity="one">Legnépszerűbb szócikked</item>
+        <item quantity="other">Legnépszerűbb szócikkeid</item>
+    </plurals>
+    <plurals name="year_in_review_slide_viewed_articles_times_headline">
+        <item quantity="one">Az alkalmazás felhasználói %,d alkalommal tekintettek meg Wikipédia-szócikkeket</item>
+        <item quantity="other">Az alkalmazás felhasználói %,d alkalommal tekintettek meg Wikipédia-szócikkeket</item>
+    </plurals>
+</resources>

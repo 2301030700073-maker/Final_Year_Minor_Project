@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="days">
+        <item quantity="one">%d nap</item>
+        <item quantity="other">%d nap</item>
+    </plurals>
+    <plurals name="deleted_downloads_toast">
+        <item quantity="one">%1$s letöltés törölve</item>
+        <item quantity="other">%1$s letöltés törölve</item>
+    </plurals>
+    <plurals name="download_finished_notification">
+        <item quantity="one">Letöltés befejezve</item>
+        <item quantity="other">%s letöltés befejezve</item>
+    </plurals>
+    <plurals name="exo_controls_fastforward_by_amount_description">
+        <item quantity="one">Előretekerés %d másodperccel</item>
+        <item quantity="other">Előretekerés %d másodperccel</item>
+    </plurals>
+    <plurals name="exo_controls_rewind_by_amount_description">
+        <item quantity="one">Visszatekerés %d másodperccel</item>
+        <item quantity="other">Visszatekerés %d másodperccel</item>
+    </plurals>
+    <plurals name="export_subscriptions">
+        <item quantity="one">%d feliratkozás exportálása…</item>
+        <item quantity="other">%d feliratkozások exportálása…</item>
+    </plurals>
+    <plurals name="feed_group_dialog_selection_count">
+        <item quantity="one">%d kiválasztva</item>
+        <item quantity="other">%d kiválasztva</item>
+    </plurals>
+    <plurals name="hours">
+        <item quantity="one">%d óra</item>
+        <item quantity="other">%d óra</item>
+    </plurals>
+    <plurals name="import_subscriptions">
+        <item quantity="one">%d feliratkozás importálása…</item>
+        <item quantity="other">%d feliratkozások importálása…</item>
+    </plurals>
+    <plurals name="listening">
+        <item quantity="one">%s hallgató</item>
+        <item quantity="other">%s hallgató</item>
+    </plurals>
+    <plurals name="minutes">
+        <item quantity="one">%d perc</item>
+        <item quantity="other">%d perc</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d új értesítés</item>
+        <item quantity="other">%d új értesítés</item>
+    </plurals>
+    <plurals name="new_streams">
+        <item quantity="one">%s új elő közvetítés</item>
+        <item quantity="other">%s új elő közvetítés</item>
+    </plurals>
+    <plurals name="replies">
+        <item quantity="one">%s válasz</item>
+        <item quantity="other">%s válasz</item>
+    </plurals>
+    <plurals name="seconds">
+        <item quantity="one">%d másodperc</item>
+        <item quantity="other">%d másodperc</item>
+    </plurals>
+    <plurals name="subscribers">
+        <item quantity="one">%s feliratkozó</item>
+        <item quantity="other">%s feliratkozó</item>
+    </plurals>
+    <plurals name="videos">
+        <item quantity="one">%s videó</item>
+        <item quantity="other">%s videó</item>
+    </plurals>
+    <plurals name="views">
+        <item quantity="one">%s megtekintés</item>
+        <item quantity="other">%s megtekintés</item>
+    </plurals>
+    <plurals name="watching">
+        <item quantity="one">%s néző</item>
+        <item quantity="other">%s néző</item>
+    </plurals>
+</resources>

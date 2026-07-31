@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:orientation="vertical" android:background="?paper_color" android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <com.google.android.material.appbar.AppBarLayout android:id="@id/filePageToolbarContainer" android:background="?paper_color" android:layout_width="match_parent" android:layout_height="wrap_content" app:elevation="0.0dp">
+        <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <com.google.android.material.appbar.MaterialToolbar android:id="@id/toolbar" android:layout_width="0.0dp" android:layout_height="?actionBarSize" android:layout_weight="1.0" app:contentInsetEnd="0.0dp" app:contentInsetStart="0.0dp" app:layout_scrollFlags="scroll|enterAlways" />
+        </LinearLayout>
+    </com.google.android.material.appbar.AppBarLayout>
+    <org.wikipedia.views.WikiSwipeRefreshLayout android:id="@id/swipeRefreshLayout" android:layout_width="match_parent" android:layout_height="match_parent">
+        <ScrollView android:layout_width="match_parent" android:layout_height="match_parent">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content">
+                <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@id/progressBar" android:layout_width="match_parent" android:layout_height="wrap_content" android:indeterminate="true" />
+                <org.wikipedia.views.WikiErrorView android:layout_gravity="center" android:id="@id/errorView" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="32.0dp" />
+                <org.wikipedia.commons.FilePageView android:orientation="vertical" android:id="@id/filePageView" android:background="?paper_color" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            </LinearLayout>
+        </ScrollView>
+    </org.wikipedia.views.WikiSwipeRefreshLayout>
+</LinearLayout>

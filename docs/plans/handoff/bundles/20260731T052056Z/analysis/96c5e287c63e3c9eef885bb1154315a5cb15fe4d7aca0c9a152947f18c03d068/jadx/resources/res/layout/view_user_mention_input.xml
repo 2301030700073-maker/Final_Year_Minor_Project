@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<merge xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/inputTextLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="@string/talk_reply_hint"
+        app:errorTextAppearance="@style/TextInputLayoutErrorTextAppearance">
+        <org.wikipedia.views.UserMentionEditText
+            android:textColorHighlight="?attr/addition_color"
+            android:id="@+id/inputEditText"
+            android:paddingTop="24dp"
+            android:paddingBottom="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="textMultiLine"
+            android:imeOptions="flagNoExtractUi|actionNone"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            style="@style/P"/>
+    </com.google.android.material.textfield.TextInputLayout>
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/userListRecycler"
+        android:visibility="gone"
+        android:scrollbars="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="144dp"
+        android:layout_marginTop="8dp"/>
+</merge>

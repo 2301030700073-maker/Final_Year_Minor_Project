@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="other">%1$d suntiangan sajak %2$s</item>
+    </plurals>
+</resources>

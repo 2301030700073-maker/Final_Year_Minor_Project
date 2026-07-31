@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:orientation="vertical" android:background="?paper_color" android:layout_width="match_parent" android:layout_height="wrap_content"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <LinearLayout android:orientation="horizontal" android:background="?selectableItemBackground" android:layout_width="match_parent" android:layout_height="48.0dp">
+        <org.wikipedia.views.LangCodeView android:id="@id/placesFilterLangCode" android:paddingLeft="10.0dp" android:paddingRight="10.0dp" android:layout_width="48.0dp" android:layout_height="match_parent" android:layout_marginStart="14.0dp" android:paddingHorizontal="10.0dp" />
+        <TextView android:textColor="?primary_color" android:gravity="center_vertical" android:id="@id/placesFilterTitle" android:layout_width="0.0dp" android:layout_height="46.0dp" android:layout_weight="1.0" android:layout_marginStart="12.0dp" style="@style/P" />
+        <ImageView android:id="@id/placesFilterRadio" android:padding="12.0dp" android:visibility="invisible" android:layout_width="48.0dp" android:layout_height="48.0dp" android:src="@drawable/ic_baseline_radio_button_checked_24" android:contentDescription="@null" app:tint="?progressive_color" />
+    </LinearLayout>
+    <View android:layout_gravity="bottom" android:background="?border_color" android:layout_width="match_parent" android:layout_height="0.5dp" />
+</LinearLayout>

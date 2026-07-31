@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:orientation="vertical" android:fitsSystemWindows="true" android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <FrameLayout android:id="@id/toolbarContainer" android:background="?paper_color" android:layout_width="match_parent" android:layout_height="?actionBarSize" android:elevation="1.0dp">
+        <com.google.android.material.appbar.MaterialToolbar android:id="@id/toolbar" android:layout_width="match_parent" android:layout_height="?actionBarSize" android:transitionName="@string/transition_search_bar" app:navigationIcon="@drawable/ic_arrow_back_black_24dp" app:navigationIconTint="?primary_color">
+            <org.wikipedia.views.CabSearchView android:id="@id/searchCabView" android:layout_width="match_parent" android:layout_height="match_parent" android:inputType="text" android:imeOptions="actionGo|flagNoExtractUi" android:layout_marginEnd="2.0dp" app:defaultQueryHint="@string/templates_search_hint" app:iconifiedByDefault="false" app:searchHintIcon="@null" app:searchIcon="@null">
+                <requestFocus />
+            </org.wikipedia.views.CabSearchView>
+            <TextView android:textColor="?progressive_color" android:gravity="center" android:layout_gravity="end" android:id="@id/insertTemplateButton" android:background="?android:selectableItemBackground" android:paddingLeft="16.0dp" android:paddingRight="16.0dp" android:focusable="true" android:visibility="gone" android:clickable="true" android:layout_width="wrap_content" android:layout_height="match_parent" android:text="@string/templates_insert_button" android:paddingHorizontal="16.0dp" style="@style/H3.Button" />
+        </com.google.android.material.appbar.MaterialToolbar>
+        <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@id/searchProgressBar" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content" android:indeterminate="true" />
+    </FrameLayout>
+    <FrameLayout android:layout_width="match_parent" android:layout_height="match_parent">
+        <androidx.recyclerview.widget.RecyclerView android:id="@id/templateRecyclerView" android:scrollbars="vertical" android:layout_width="match_parent" android:layout_height="match_parent" />
+        <TextView android:layout_gravity="center|top" android:id="@id/emptyMessage" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="32.0dp" android:text="@string/search_no_results_found" />
+        <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent">
+            <androidx.fragment.app.FragmentContainerView android:name="org.wikipedia.edit.templates.InsertTemplateFragment" android:id="@id/insertTemplateFragment" android:layout_width="match_parent" android:layout_height="match_parent" />
+        </LinearLayout>
+    </FrameLayout>
+</LinearLayout>

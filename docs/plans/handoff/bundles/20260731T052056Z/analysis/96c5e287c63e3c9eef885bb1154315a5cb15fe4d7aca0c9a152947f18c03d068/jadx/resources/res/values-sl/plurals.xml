@@ -1,0 +1,303 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="diff_years">
+        <item quantity="one">Prejšnje leto</item>
+        <item quantity="two">Pred dvema letoma</item>
+        <item quantity="few">Pred %d leti</item>
+        <item quantity="other">Pred %d leti</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s zlog</item>
+        <item quantity="two">%s zloga</item>
+        <item quantity="few">%s zlogov</item>
+        <item quantity="other">%s zlogov</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d urejanje od %2$s (%3$s)</item>
+        <item quantity="two">%1$d urejanji od %2$s (%3$s)</item>
+        <item quantity="few">%1$d urejanja od %2$s (%3$s)</item>
+        <item quantity="other">%1$d urejanj od %2$s (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">Brez povezave je na voljo %1$d od 1 članka, %3$.2f MB</item>
+        <item quantity="two">Brez povezave je na voljo %1$d od 2 člankov, %3$.2f MB</item>
+        <item quantity="few">Brez povezave je na voljo %1$d od %2$d člankov, %3$.2f MB</item>
+        <item quantity="other">Brez povezave je na voljo %1$d od %2$d člankov, %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">Brez povezave je na voljo %1$d od 1 članka</item>
+        <item quantity="two">Brez povezave je na voljo %1$d od 2 člankov</item>
+        <item quantity="few">Brez povezave je na voljo %1$d od %2$d člankov</item>
+        <item quantity="other">Brez povezave je na voljo %1$d od %2$d člankov</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 članek, %2$.2f MB</item>
+        <item quantity="two">%1$d članka, %2$.2f MB</item>
+        <item quantity="few">%1$d članki, %2$.2f MB</item>
+        <item quantity="other">%1$d člankov, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 članek</item>
+        <item quantity="two">%d članka</item>
+        <item quantity="few">%d članki</item>
+        <item quantity="other">%d člankov</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d novo obvestilo</item>
+        <item quantity="two">%d novi obvestili</item>
+        <item quantity="few">%d nova obvestila</item>
+        <item quantity="other">%d novih obvestil</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d izbrana</item>
+        <item quantity="two">%d izbrani</item>
+        <item quantity="few">%d izbrane</item>
+        <item quantity="other">%d izbranih</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Obvestilo arhivirano</item>
+        <item quantity="two">Obvestili arhivirani</item>
+        <item quantity="few">%d obvestila arhivirana</item>
+        <item quantity="other">%d obvestila arhivirana</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Prenašam članek</item>
+        <item quantity="two">Prenašam članka</item>
+        <item quantity="few">Prenašam članke</item>
+        <item quantity="other">Prenašam članke</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">Preostal je še %1$d članek</item>
+        <item quantity="two">Preostala sta še %1$d članka</item>
+        <item quantity="few">Preostali so še %1$d članki</item>
+        <item quantity="other">Preostalo je še %1$d člankov</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Sinhroniziranje bralnega seznama</item>
+        <item quantity="two">Sinhroniziranje bralnih seznamov</item>
+        <item quantity="few">Sinhroniziranje bralnih seznamov</item>
+        <item quantity="other">Sinhroniziranje bralnih seznamov</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">Preostal je še %1$d seznam</item>
+        <item quantity="two">Preostala sta še %1$d seznama</item>
+        <item quantity="few">Preostali so še %1$d seznami</item>
+        <item quantity="other">Preostalo je še %1$d seznamov</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">Sinhroniziram %1$d seznam …</item>
+        <item quantity="two">Sinhroniziram %1$d seznama …</item>
+        <item quantity="few">Sinhroniziram %1$d sezname …</item>
+        <item quantity="other">Sinhroniziram %1$d sezname …</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Prenašam %1$d članek …</item>
+        <item quantity="two">Prenašam %1$d članka …</item>
+        <item quantity="few">Prenašam %1$d članke …</item>
+        <item quantity="other">Prenašam %1$d članke …</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 označeno kot prebrano</item>
+        <item quantity="two">%d označeni kot prebrani</item>
+        <item quantity="few">%d označena kot prebrana</item>
+        <item quantity="other">%d označenih kot prebrana</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 označeno kot neprebrano</item>
+        <item quantity="two">2 označeni kot neprebrano</item>
+        <item quantity="few">%d označenih kot neprebrano</item>
+        <item quantity="other">%d označenih kot neprebrano</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="two">%d filtra</item>
+        <item quantity="few">%d filtri</item>
+        <item quantity="other">%d filtrov</item>
+    </plurals>
+    <plurals name="on_this_day_game_stats_games_played">
+        <item quantity="one">Odigrana igra</item>
+        <item quantity="two">Odigrane igre</item>
+        <item quantity="few">Odigrane igre</item>
+        <item quantity="other">Odigrane igre</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d urejanje od %2$s</item>
+        <item quantity="two">%1$d urejanji od %2$s</item>
+        <item quantity="few">%1$d urejanja od %2$s</item>
+        <item quantity="other">%1$d urejanj od %2$s</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="two">%d filtra</item>
+        <item quantity="few">%d filtri</item>
+        <item quantity="other">%d filtrov</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Članek ne bo več na voljo brez povezave.</item>
+        <item quantity="two">Članka ne bosta več na voljo brez povezave.</item>
+        <item quantity="few">Članki ne bodo več na voljo brez povezave.</item>
+        <item quantity="other">Članki ne bodo več na voljo brez povezave.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Članek bo zdaj na voljo brez povezave.</item>
+        <item quantity="two">Članka bosta zdaj na voljo brez povezave.</item>
+        <item quantity="few">Članki bodo zdaj na voljo brez povezave.</item>
+        <item quantity="other">Članki bodo zdaj na voljo brez povezave.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d članek odstranjen s seznama</item>
+        <item quantity="two">%d članka odstranjena s seznama</item>
+        <item quantity="few">%d članki odstranjeni s seznama</item>
+        <item quantity="other">%d člankov odstranjenih s seznama</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d članek odstranjen s seznama %2$s</item>
+        <item quantity="two">%1$d članka odstranjena s seznama %2$s</item>
+        <item quantity="few">%1$d članki odstranjeni s seznama %2$s</item>
+        <item quantity="other">%1$d člankov odstranjenih s seznama %2$s</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">Ste prepričani, da želite izbrisati %d seznam?</item>
+        <item quantity="two">Ste prepričani, da želite izbrisati %d seznama</item>
+        <item quantity="few">Ste prepričani, da želite izbrisati %d sezname</item>
+        <item quantity="other">Ste prepričani, da želite izbrisati %d sezname?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">Izvoz bralnega seznama je spodletel</item>
+        <item quantity="two">Izvoz bralnih seznamov je spodletel</item>
+        <item quantity="few">Izvoz bralnih seznamov je spodletel</item>
+        <item quantity="other">Izvoz bralnih seznamov je spodletel</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Bralni seznam je uvožen</item>
+        <item quantity="two">Bralna seznama sta uvožena</item>
+        <item quantity="few">Bralni seznami so uvoženi</item>
+        <item quantity="other">Bralni seznami so uvoženi</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d seznam izbrisan</item>
+        <item quantity="two">%d seznama izbrisana</item>
+        <item quantity="few">%d seznami izbrisani</item>
+        <item quantity="other">%d seznamov izbrisanih</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 zadetek</item>
+        <item quantity="two">%d zadetka</item>
+        <item quantity="few">%d zadetki</item>
+        <item quantity="other">%d zadetkov</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">Dodali ste %d znak</item>
+        <item quantity="two">Dodali ste %d znaka</item>
+        <item quantity="few">Dodali ste %d znake</item>
+        <item quantity="other">Dodali ste %d znakov</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Prispevek</item>
+        <item quantity="two">Prispevki</item>
+        <item quantity="few">Prispevki</item>
+        <item quantity="other">Prispevki</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">1 prispevek</item>
+        <item quantity="two">%d prispevka</item>
+        <item quantity="few">%d prispevki</item>
+        <item quantity="other">%d prispevkov</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s znak</item>
+        <item quantity="two">%1$s znaka</item>
+        <item quantity="few">%1$s znaki</item>
+        <item quantity="other">%1$s znakov</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Ogledano enkrat v preteklih 30 dnevih</item>
+        <item quantity="two">Ogledano dvakrat v preteklih 30 dnevih</item>
+        <item quantity="few">Ogledano %s-krat v preteklih 30 dnevih.</item>
+        <item quantity="other">Ogledano %s-krat v preteklih 30 dnevih.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">Urejanje</item>
+        <item quantity="two">Urejanji</item>
+        <item quantity="few">Urejanja</item>
+        <item quantity="other">Urejanj</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d dan</item>
+        <item quantity="two">%d dneva</item>
+        <item quantity="few">%d dnevi</item>
+        <item quantity="other">%d dni</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">Dodali ste %d oznako</item>
+        <item quantity="two">Dodali ste %d oznaki</item>
+        <item quantity="few">Dodali ste %d oznake</item>
+        <item quantity="other">Dodali ste %d oznak</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">Odstranili ste %d znak</item>
+        <item quantity="two">Odstranili ste %d znaka</item>
+        <item quantity="few">Odstranili ste %d znake</item>
+        <item quantity="other">Odstranili ste %d znakov</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s oznaka</item>
+        <item quantity="two">%1$s oznaki</item>
+        <item quantity="few">%1$s oznake</item>
+        <item quantity="other">%1$s oznak</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Skrij odgovor</item>
+        <item quantity="two">Skrij odgovora</item>
+        <item quantity="few">Skrij odgovore (%d)</item>
+        <item quantity="other">Skrij odgovore (%d)</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Prikaži odgovor</item>
+        <item quantity="two">Prikaži odgovora</item>
+        <item quantity="few">Prikaži odgovore (%d)</item>
+        <item quantity="other">Prikaži odgovore (%d)</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">Ali res želite to sporočilo odstraniti s seznama?</item>
+        <item quantity="two">Ali res želite ti sporočili odstraniti s seznama</item>
+        <item quantity="few">Ali res želite ta sporočila odstraniti s seznama</item>
+        <item quantity="other">Ali res želite ta sporočila odstraniti s seznama?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">Sporočilo je izbrisano</item>
+        <item quantity="two">Sporočila so izbrisana</item>
+        <item quantity="few">Sporočila so izbrisana</item>
+        <item quantity="other">Sporočila so izbrisana</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">Začasni račun %1$s je bil ustvarjen po objavi vašega urejanja. Njegova veljavnost bo potekla čez %2$d dan.</item>
+        <item quantity="two">Začasni račun %1$s je bil ustvarjen po objavi vašega urejanja. Njegova veljavnost bo potekla čez %2$d dni.</item>
+        <item quantity="few">Začasni račun %1$s je bil ustvarjen po objavi vašega urejanja. Njegova veljavnost bo potekla čez %2$d dni.</item>
+        <item quantity="other">Začasni račun %1$s je bil ustvarjen po objavi vašega urejanja. Njegova veljavnost bo potekla čez %2$d dni.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">Račun bo potekel čez %d dan.</item>
+        <item quantity="two">Račun bo potekel čez %d dni.</item>
+        <item quantity="few">Račun bo potekel čez %d dni.</item>
+        <item quantity="other">Račun bo potekel čez %d dni.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">včeraj</item>
+        <item quantity="two">pred %d dnevoma</item>
+        <item quantity="few">pred %d dnevi</item>
+        <item quantity="other">pred %d dnevi</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="two">%d filtra</item>
+        <item quantity="few">%d filtri</item>
+        <item quantity="other">%d filtrov</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Odstranim izbrani jezik?</item>
+        <item quantity="two">Odstranim izbrana jezika</item>
+        <item quantity="few">Odstranim izbrane jezike</item>
+        <item quantity="other">Odstranim izbrane jezike?</item>
+    </plurals>
+</resources>

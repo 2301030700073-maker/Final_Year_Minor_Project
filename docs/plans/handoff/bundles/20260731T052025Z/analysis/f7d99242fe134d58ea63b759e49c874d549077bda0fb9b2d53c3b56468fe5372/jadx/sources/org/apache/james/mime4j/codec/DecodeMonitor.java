@@ -1,0 +1,12 @@
+package org.apache.james.mime4j.codec;
+
+/* compiled from: r8-map-id-0bf79158388e53a51ca0182ea2539bd0412421e50b81f5daf687f0d2f9d1b594 */
+/* loaded from: classes.dex */
+public class DecodeMonitor {
+    public static final DecodeMonitor SILENT = new DecodeMonitor();
+
+    /* compiled from: r8-map-id-0bf79158388e53a51ca0182ea2539bd0412421e50b81f5daf687f0d2f9d1b594 */
+    /* renamed from: org.apache.james.mime4j.codec.DecodeMonitor$1, reason: invalid class name */
+    public final class AnonymousClass1 extends DecodeMonitor {
+    }
+}

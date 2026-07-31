@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="days">
+        <item quantity="one">%d día</item>
+        <item quantity="many">%d días</item>
+        <item quantity="other">%d días</item>
+    </plurals>
+    <plurals name="deleted_downloads_toast">
+        <item quantity="one">Descarga %1$s eliminada</item>
+        <item quantity="many">Descargas %1$s eliminadas</item>
+        <item quantity="other">Descargas %1$s eliminadas</item>
+    </plurals>
+    <plurals name="download_finished_notification">
+        <item quantity="one">Descarga finalizada</item>
+        <item quantity="many">%s descargas finalizadas</item>
+        <item quantity="other">%s descargas finalizadas</item>
+    </plurals>
+    <plurals name="exo_controls_fastforward_by_amount_description">
+        <item quantity="one">Avanzar %d segundo</item>
+        <item quantity="other">Avanzar %d segundos</item>
+    </plurals>
+    <plurals name="exo_controls_rewind_by_amount_description">
+        <item quantity="one">Retroceder %d segundo</item>
+        <item quantity="other">Retroceder %d segundos</item>
+    </plurals>
+    <plurals name="export_subscriptions">
+        <item quantity="one">Exportando la suscripción %d…</item>
+        <item quantity="many">Exportando %d suscripciones…</item>
+        <item quantity="other">Exportando %d suscripciones…</item>
+    </plurals>
+    <plurals name="feed_group_dialog_selection_count">
+        <item quantity="one">%d seleccionado</item>
+        <item quantity="many">%d seleccionados</item>
+        <item quantity="other">%d seleccionados</item>
+    </plurals>
+    <plurals name="hours">
+        <item quantity="one">%d hora</item>
+        <item quantity="many">%d horas</item>
+        <item quantity="other">%d horas</item>
+    </plurals>
+    <plurals name="import_subscriptions">
+        <item quantity="one">Importando la suscripción %d…</item>
+        <item quantity="many">Importando %d suscripciones…</item>
+        <item quantity="other">Importando %d suscripciones…</item>
+    </plurals>
+    <plurals name="listening">
+        <item quantity="one">%s oyente</item>
+        <item quantity="many">%s oyentes</item>
+        <item quantity="other">%s oyentes</item>
+    </plurals>
+    <plurals name="minutes">
+        <item quantity="one">%d minuto</item>
+        <item quantity="many">%d minutos</item>
+        <item quantity="other">%d minutos</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d notificación nueva</item>
+        <item quantity="other">%d notificaciones nuevas</item>
+    </plurals>
+    <plurals name="new_streams">
+        <item quantity="one">%s nuevo directo</item>
+        <item quantity="many">%s nuevos directos</item>
+        <item quantity="other">%s nuevos directos</item>
+    </plurals>
+    <plurals name="replies">
+        <item quantity="one">%s respuesta</item>
+        <item quantity="many">%s respuestas</item>
+        <item quantity="other">%s respuestas</item>
+    </plurals>
+    <plurals name="seconds">
+        <item quantity="one">%d segundo</item>
+        <item quantity="many">%d segundos</item>
+        <item quantity="other">%d segundos</item>
+    </plurals>
+    <plurals name="subscribers">
+        <item quantity="one">%s suscriptor</item>
+        <item quantity="many">%s suscriptores</item>
+        <item quantity="other">%s suscriptores</item>
+    </plurals>
+    <plurals name="videos">
+        <item quantity="one">%s vídeo</item>
+        <item quantity="many">%s vídeos</item>
+        <item quantity="other">%s vídeos</item>
+    </plurals>
+    <plurals name="views">
+        <item quantity="one">%s vista</item>
+        <item quantity="many">%s vistas</item>
+        <item quantity="other">%s vistas</item>
+    </plurals>
+    <plurals name="watching">
+        <item quantity="one">Visualización %s</item>
+        <item quantity="many">Visualizaciones %s</item>
+        <item quantity="other">Visualizaciones %s</item>
+    </plurals>
+</resources>

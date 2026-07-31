@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 оқылған деп белгіленді</item>
+        <item quantity="other">%d оқылған деп белгіленді</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 оқылмаған деп белгіленді</item>
+        <item quantity="other">%d оқылмаған деп белгіленді</item>
+    </plurals>
+</resources>

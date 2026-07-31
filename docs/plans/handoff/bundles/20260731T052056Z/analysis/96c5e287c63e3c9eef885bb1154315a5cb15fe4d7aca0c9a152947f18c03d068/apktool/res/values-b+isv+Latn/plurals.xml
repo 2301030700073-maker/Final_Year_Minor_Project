@@ -1,0 +1,598 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="one">%d denj</item>
+        <item quantity="few">%d dnja</item>
+        <item quantity="many">%d dnjev</item>
+        <item quantity="other">%d dnjev</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="one">pravka v prošlom měsecu</item>
+        <item quantity="few">pravky v prošlom měsecu</item>
+        <item quantity="many">pravok v prošlom měsecu</item>
+        <item quantity="other">pravok v prošlom měsecu</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="one">pravka v tutom měsecu</item>
+        <item quantity="few">pravky v tutom měsecu</item>
+        <item quantity="many">pravok v tutom měsecu</item>
+        <item quantity="other">pravok v tutom měsecu</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="one">Pravka</item>
+        <item quantity="few">Pravky</item>
+        <item quantity="many">Pravok</item>
+        <item quantity="other">Pravok</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_views">
+        <item quantity="one">Izobraženje člankov, ktore vy jeste izpravili</item>
+        <item quantity="other">Izobraženij člankov, ktore vy jeste izpravili</item>
+    </plurals>
+    <plurals name="activity_tab_impact_total_edits">
+        <item quantity="one">pravka vkupno</item>
+        <item quantity="few">pravky vkupno</item>
+        <item quantity="many">pravok vkupno</item>
+        <item quantity="other">pravok vkupno</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="one">V prošlom godu</item>
+        <item quantity="few">%d lěta tomu nazad</item>
+        <item quantity="many">%d lět tomu nazad</item>
+        <item quantity="other">%d lět tomu nazad</item>
+    </plurals>
+    <plurals name="donation_reminders_text_articles">
+        <item quantity="one">%d članok</item>
+        <item quantity="few">%d članky</item>
+        <item quantity="many">%d člankov</item>
+        <item quantity="other">%d ćlankov</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s bajt.</item>
+        <item quantity="few">%s bajty.</item>
+        <item quantity="many">%s bajtov.</item>
+        <item quantity="other">%s bajtov.</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">%1$d pravka od %2$s (%3$s)</item>
+        <item quantity="few">%1$d pravky od %2$s (%3$s)</item>
+        <item quantity="many">%1$d pravok od %2$s (%3$s)</item>
+        <item quantity="other">%1$d pravok od %2$s (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail">
+        <item quantity="one">%1$d iz 1 članka dostupny oflajn, %3$.2f MB</item>
+        <item quantity="few">%1$d iz %2$d člankov dostupnyh onlajn, %3$.2f MB</item>
+        <item quantity="many">%1$d iz %2$d člankov dostupnyh onlajn, %3$.2f MB</item>
+        <item quantity="other">%1$d iz %2$d člankov dostupnyh onlajn, %3$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">%1$d iz 1 članka dostupny oflajn</item>
+        <item quantity="few">%1$d iz %2$d člankov dostupnyh onlajn</item>
+        <item quantity="many">%1$d iz %2$d člankov dostupnyh onlajn</item>
+        <item quantity="other">%1$d iz %2$d člankov dostupnyh onlajn</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">1 članok, %2$.2f MB</item>
+        <item quantity="few">%1$d članky, %2$.2f MB</item>
+        <item quantity="many">%1$d člankov, %2$.2f MB</item>
+        <item quantity="other">%1$d člankov, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">1 članok</item>
+        <item quantity="few">%d članky</item>
+        <item quantity="many">%d člankov</item>
+        <item quantity="other">%d ćlankov</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">Izbrany %d</item>
+        <item quantity="few">Izbrane %d</item>
+        <item quantity="many">Izbranyh %d</item>
+        <item quantity="other">Izbranyh %d</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Uvědomjenje arhivovano</item>
+        <item quantity="few">%d uvědomenja arhivovane</item>
+        <item quantity="many">%d uvědomjenij arhivovanyh</item>
+        <item quantity="other">%d uvědomjenij arhivovanyh</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Daunlodovanje članka</item>
+        <item quantity="few">Daunlodovanje člankov</item>
+        <item quantity="many">Daunlodovanje člankov</item>
+        <item quantity="other">Daunlodovanje člankov</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">Ostavaje %1$d članok</item>
+        <item quantity="few">Ostavajut %1$d članky</item>
+        <item quantity="many">Ostavajut %1$d člankov</item>
+        <item quantity="other">Ostavajut %1$d člankov</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Sinhronizacija spiska za čitanje</item>
+        <item quantity="few">Sinhronizacija spiskov za čitanje</item>
+        <item quantity="many">Sinhronizacija spiskov za čitanje</item>
+        <item quantity="other">Sinhronizacija spiskov za čitanje</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">Ostavaje %1$d spisok</item>
+        <item quantity="few">Ostavajut %1$d spisky</item>
+        <item quantity="many">Ostavajut %1$d spiskov</item>
+        <item quantity="other">Ostavajut %1$d spiskov</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">Sinhronizacija %1$d spiska za čitanje...</item>
+        <item quantity="few">Sinhronizacija %1$d spiskov za čitanje...</item>
+        <item quantity="many">Sinhronizacija %1$d spiskov za čitanje...</item>
+        <item quantity="other">Sinhronizacija %1$d spiskov za čitanje...</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Daunlodovanje %1$d članka</item>
+        <item quantity="few">Daunlodovanje %1$d člankov</item>
+        <item quantity="many">Daunlodovanje %1$d člankov</item>
+        <item quantity="other">Daunlodovanje %1$d člankov</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 označeno kako pročitano</item>
+        <item quantity="few">%d označene kako pročitane</item>
+        <item quantity="many">%d označenyh kako pročitane</item>
+        <item quantity="other">%d označenyh kako pročitane</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 označeno kako nepročitano</item>
+        <item quantity="few">%d označene kako nepročitane</item>
+        <item quantity="many">%d označenyh kako nepročitane</item>
+        <item quantity="other">%d označenyh kako nepročitane</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">%d filtr</item>
+        <item quantity="few">%d filtry</item>
+        <item quantity="many">%d filtrov</item>
+        <item quantity="other">%d filtrov</item>
+    </plurals>
+    <plurals name="on_this_day_game_stats_games_played">
+        <item quantity="one">Izgrana igra</item>
+        <item quantity="few">Igrane igry</item>
+        <item quantity="many">Igrane igry</item>
+        <item quantity="other">Igrane igry</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">%1$d pravka od %2$s</item>
+        <item quantity="few">%1$d pravky od %2$s</item>
+        <item quantity="many">%1$d pravok od %2$s</item>
+        <item quantity="other">%1$d pravok od %2$s</item>
+    </plurals>
+    <plurals name="patroller_tasks_filters_number_of_filters">
+        <item quantity="one">%d filtr</item>
+        <item quantity="few">%d filtry</item>
+        <item quantity="many">%d filtrov</item>
+        <item quantity="other">%d filtrov</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Tutoj članok veče ne bude dostupny oflajn.</item>
+        <item quantity="few">Tute članky veče ne budut dostupne oflajn.</item>
+        <item quantity="many">Tute članky veče ne budut dostupne oflajn.</item>
+        <item quantity="other">Tute članky veče ne budut dostupne oflajn.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Tutoj članok tutčas bude dostupny oflajn.</item>
+        <item quantity="few">Tute članky tutčas budut dostupne oflajn.</item>
+        <item quantity="many">Tute članky tutčas budut dostupne oflajn.</item>
+        <item quantity="other">Tute članky tutčas budut dostupne oflajn.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">%d članok odstranjeny iz spiska</item>
+        <item quantity="few">%d članky odstranjene iz spiska</item>
+        <item quantity="many">%d člankov odstranjenyh iz spiska</item>
+        <item quantity="other">%d člankov odstranjenyh iz spiska</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">%1$d članok odstranjeny iz spiska %2$s</item>
+        <item quantity="few">%1$d članky odstranjene iz spiska %2$s</item>
+        <item quantity="many">%1$d člankov odstranjenyh iz spiska %2$s</item>
+        <item quantity="other">%1$d člankov odstranjenyh iz spiska %2$s</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">Jeste li uvěrjeni, že hočete odstraniti %d spisok?</item>
+        <item quantity="few">Jeste li uvěrjeni, že hočete odstraniti %d spisky?</item>
+        <item quantity="many">Jeste li uvěrjeni, že hočete odstraniti %d spiskov?</item>
+        <item quantity="other">Jeste li uvěrjeni, že hočete odstraniti %d spiskov?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">Eksportovanje spiska za čitanje ne udalo se</item>
+        <item quantity="few">Eksportovanje spiskov za čitanje ne udalo se</item>
+        <item quantity="many">Eksportovanje spiskov za čitanje ne udalo se</item>
+        <item quantity="other">Eksportovanje spiskov za čitanje ne udalo se</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Spisok za čitanje jest importovany</item>
+        <item quantity="few">Spisky za čitanje sut importovane</item>
+        <item quantity="many">Spisky za čitanje sut importovane</item>
+        <item quantity="other">Spisky za čitanje sut importovane</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">%d spisok odstranjeny</item>
+        <item quantity="few">%d spisky odstranjene</item>
+        <item quantity="many">%dspiskov odstranjenyh</item>
+        <item quantity="other">%dspiskov odstranjenyh</item>
+    </plurals>
+    <plurals name="recommended_reading_list_interest_pick_selected_articles">
+        <item quantity="one">Izbrany %d</item>
+        <item quantity="few">Izbrane %d</item>
+        <item quantity="many">Izbranyh %d</item>
+        <item quantity="other">Izbranyh %d</item>
+    </plurals>
+    <plurals name="recommended_reading_list_page_subtitle_articles">
+        <item quantity="one">• %d članok</item>
+        <item quantity="few">• %d članky</item>
+        <item quantity="many">• %d člankov</item>
+        <item quantity="other">• %d ćlankov</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">1 rezultat</item>
+        <item quantity="few">%d rezultaty</item>
+        <item quantity="other">%d rezultatov</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">Vy jeste dodali %d znak</item>
+        <item quantity="few">Vy jeste dodali %d znaky</item>
+        <item quantity="many">Vy jeste dodali %d znakov</item>
+        <item quantity="other">Vy jeste dodali %d znakov</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">Vklad</item>
+        <item quantity="few">Vklad</item>
+        <item quantity="many">Vklad</item>
+        <item quantity="other">Vklad</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">jedna pravka</item>
+        <item quantity="few">%d pravky</item>
+        <item quantity="many">%d pravok</item>
+        <item quantity="other">%d pravok</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">%1$s znak</item>
+        <item quantity="few">%1$s znaky</item>
+        <item quantity="many">%1$s znakov</item>
+        <item quantity="other">%1$s znakov</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Izobražena jednokratno v tečenju poslědnjih 30 dnjev.</item>
+        <item quantity="few">Izobražena %s-kratno v tečenju poslědnjih 30 dnjev.</item>
+        <item quantity="many">Izobražena %s-kratno v tečenju poslědnjih 30 dnjev.</item>
+        <item quantity="other">Izobražena %s-kratno v tečenju poslědnjih 30 dnjev.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">Pravka</item>
+        <item quantity="few">Pravky</item>
+        <item quantity="many">Pravok</item>
+        <item quantity="other">Pravok</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">%d denj</item>
+        <item quantity="few">%d dnja</item>
+        <item quantity="many">%d dnjev</item>
+        <item quantity="other">%d dnjev</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">Vy jeste dodali %d tag</item>
+        <item quantity="few">Vy jeste dodali %d tagy</item>
+        <item quantity="many">Vy jeste dodali %d tagov</item>
+        <item quantity="other">Vy jeste dodali %d tagov</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">Vy jeste odstranili %d znak</item>
+        <item quantity="few">Vy jeste odstranili %d znaky</item>
+        <item quantity="many">Vy jeste odstranili %d znakov</item>
+        <item quantity="other">Vy jeste odstranili %d znakov</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">%1$s tag</item>
+        <item quantity="few">%1$s tagy</item>
+        <item quantity="many">%1$s tagov</item>
+        <item quantity="other">%1$s tagov</item>
+    </plurals>
+    <plurals name="talk_hide_replies_count">
+        <item quantity="one">Skryti odgovor</item>
+        <item quantity="few">Skryti odgovory (%d)</item>
+        <item quantity="many">Skryti odgovory (%d)</item>
+        <item quantity="other">Skryti odgovory (%d)</item>
+    </plurals>
+    <plurals name="talk_show_replies_count">
+        <item quantity="one">Pokazati odgovor</item>
+        <item quantity="few">Pokazati odgovory (%d)</item>
+        <item quantity="many">Pokazati odgovory (%d)</item>
+        <item quantity="other">Pokazati odgovory (%d)</item>
+    </plurals>
+    <plurals name="talk_templates_message_delete_description">
+        <item quantity="one">Jeste li vy uvěrjeni, že hočete odstraniti soobčenje iz spiska?</item>
+        <item quantity="other">Jeste li vy uvěrjeni, že hočete odstraniti soobčenja iz spiska?</item>
+    </plurals>
+    <plurals name="talk_templates_message_deleted">
+        <item quantity="one">Soobčenje jest odstranjeno</item>
+        <item quantity="few">Soobčenja sut odstranjene</item>
+        <item quantity="many">Soobčenja sut odstranjene</item>
+        <item quantity="other">Soobčenja sut odstranjene</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">Začasno koristničsko konto %1$s bylo stvorjeno poslě publikacije vašej pravky. Obdobje tutogo konta izteče črěz %2$d denj.</item>
+        <item quantity="few">Začasno koristničsko konto %1$s bylo stvorjeno poslě publikacije vašej pravky. Obdobje tutogo konta izteče črěz %2$d dni.</item>
+        <item quantity="many">Začasno koristničsko konto %1$s bylo stvorjeno poslě publikacije vašej pravky. Obdobje tutogo konta izteče črěz %2$d dnjev.</item>
+        <item quantity="other">Začasno koristničsko konto %1$s bylo stvorjeno poslě publikacije vašej pravky. Obdobje tutogo konta izteče črěz %2$d dnjev.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">Obdobje koristničskogo konta izteče črěz %d denj.</item>
+        <item quantity="few">Obdobje koristničskogo konta izteče črěz %d dni.</item>
+        <item quantity="many">Obdobje koristničskogo konta izteče črěz %d dnjev.</item>
+        <item quantity="other">Obdobje koristničskogo konta izteče črěz %d dnjev.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">včera</item>
+        <item quantity="few">%d dni tomu nazad</item>
+        <item quantity="many">%d dnjev tomu nazad</item>
+        <item quantity="other">%d dnjev tomu nazad</item>
+    </plurals>
+    <plurals name="watchlist_number_of_filters">
+        <item quantity="one">%d filtr</item>
+        <item quantity="few">%d filtry</item>
+        <item quantity="many">%d filtrov</item>
+        <item quantity="other">%d filtrov</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Odstraniti izbrany jezyk?</item>
+        <item quantity="few">Odstraniti izbrane jezyky?</item>
+        <item quantity="many">Odstraniti izbrane jezyky?</item>
+        <item quantity="other">Odstraniti izbrane jezyky?</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_interested_categories_title">
+        <item quantity="one">Kategorija, ktora me interesovala</item>
+        <item quantity="few">Kategorije, ktore me interesovali</item>
+        <item quantity="many">Kategorije, ktore me interesovali</item>
+        <item quantity="other">Kategorije, ktore me interesovali</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_articles_read_title">
+        <item quantity="one">Pročitany članok</item>
+        <item quantity="few">Pročitane članky</item>
+        <item quantity="many">Pročitane članky</item>
+        <item quantity="other">Pročitane članky</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_minutes_read_title">
+        <item quantity="one">Minuta provedena čitanjem</item>
+        <item quantity="few">Minuty provedne čitanjem</item>
+        <item quantity="many">Minuty provedne čitanjem</item>
+        <item quantity="other">Minuty provedne čitanjem</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_most_read_article_title">
+        <item quantity="one">Članok, ktory jesm pročital(a) najčestěje</item>
+        <item quantity="few">Članky, ktore jesm pročital(a) najčestěje</item>
+        <item quantity="many">Članky, ktore jesm pročital(a) najčestěje</item>
+        <item quantity="other">Članky, ktore jesm pročital(a) najčestěje</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_in_total_edits_title">
+        <item quantity="one">Redaktovanje članka</item>
+        <item quantity="few">Redaktovanja člankov</item>
+        <item quantity="many">Redaktovanja člankov</item>
+        <item quantity="other">Redaktovanja člankov</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_edits_title">
+        <item quantity="one">Izměna sdělana redaktorami</item>
+        <item quantity="few">Izměny sdělane redaktorami</item>
+        <item quantity="many">Izměny sdělane redaktorami</item>
+        <item quantity="other">Izměny sdělane redaktorami</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_hours_spent_title">
+        <item quantity="one">Časina provedena s čitanjem</item>
+        <item quantity="few">Časiny provedene s čitanjem</item>
+        <item quantity="many">Časiny provedene s čitanjem</item>
+        <item quantity="other">Časiny provedene s čitanjem</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_en_most_read_title">
+        <item quantity="one">Najčitanějši članok v anglijskoj Vikipediji</item>
+        <item quantity="few">Najčitanějše članky v anglijskoj Vikipediji</item>
+        <item quantity="many">Najčitanějše članky v anglijskoj Vikipediji</item>
+        <item quantity="other">Najčitanějše članky v anglijskoj Vikipediji</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_articles_title">
+        <item quantity="one">Kolikost prěgleděnyh člankov</item>
+        <item quantity="few">Kolikost prěgleděnyh člankov</item>
+        <item quantity="many">Kolikost prěgleděnyh člankov</item>
+        <item quantity="other">Kolikost prěgleděnyh člankov</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_edits_title">
+        <item quantity="one">Pravka sdělana črěz aplikaciju</item>
+        <item quantity="few">Pravky sdělane črěz aplikaciju</item>
+        <item quantity="many">Pravky sdělane črěz aplikaciju</item>
+        <item quantity="other">Pravky sdělane črěz aplikaciju</item>
+    </plurals>
+    <plurals name="year_in_review_highlights_logged_out_non_en_wikipedia_per_minute_label">
+        <item quantity="one">%d raz na minutu</item>
+        <item quantity="few">%d razy na minutu</item>
+        <item quantity="many">%d razov na minutu</item>
+        <item quantity="other">%d razov na minutu</item>
+    </plurals>
+    <plurals name="year_in_review_slide_app_edited_times_headline">
+        <item quantity="one">Redaktori oficialnyh aplikacij Vikipedije sdělali %,d pravku</item>
+        <item quantity="few">Redaktori oficialnyh aplikacij Vikipedije sdělali %,d pravky</item>
+        <item quantity="many">Redaktori oficialnyh aplikacij Vikipedije sdělali %,d pravok</item>
+        <item quantity="other">Redaktori oficialnyh aplikacij Vikipedije sdělali %,d pravok</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_first">
+        <item quantity="one">Vikipedija iměla %,d članok</item>
+        <item quantity="few">Vikipedija iměla %,d članky</item>
+        <item quantity="many">Vikipedija iměla %,d člankov</item>
+        <item quantity="other">Vikipedija iměla %,d člankov</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_body_second">
+        <item quantity="one">srěd ponad %,d aktivnom jezyku v tutom godu. Vy prisjedinili se do milionov ljudij, ktori razširjajut znanje i izslědyvajut različne temy.</item>
+        <item quantity="few">srěd ponad %,d aktivnyh jezykov v tutom godu. Vy prisjedinili se do milionov ljudij, ktori razširjajut znanje i izslědyvajut različne temy.</item>
+        <item quantity="many">srěd ponad %,d aktivnyh jezykov v tutom godu. Vy prisjedinili se do milionov ljudij, ktori razširjajut znanje i izslědyvajut različne temy.</item>
+        <item quantity="other">srěd ponad %,d aktivnyh jezykov v tutom godu. Vy prisjedinili se do milionov ljudij, ktori razširjajut znanje i izslědyvajut različne temy.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_available_languages_headline">
+        <item quantity="one">Vikipedija byla dostupna na ponad %,d jezyku</item>
+        <item quantity="few">Vikipedija byla dostupna na ponad %,d jezykah</item>
+        <item quantity="many">Vikipedija byla dostupna na ponad %,d jezykah</item>
+        <item quantity="other">Vikipedija byla dostupna na ponad %,d jezykah</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_body">
+        <item quantity="one">V %1$d godu dobrovoljci dodali %2$,d bajt v anglijsku Vikipediju. Vsa jihna rabota zajedno dovodi k postojanno ulěpšajemomu, věrodostojnomu i osnovanomu na faktah izvoru znanja, ktory davajut světu. My vsi imajemo znanje, ktorym možemo poděliti se. &lt;a href=\"%3$s\">Dovědte se, kako vy možete učestvovati&lt;/a>.</item>
+        <item quantity="few">V %1$d godu dobrovoljci dodali %2$,d bajty v anglijsku Vikipediju. Vsa jihna rabota zajedno dovodi k postojanno ulěpšajemomu, věrodostojnomu i osnovanomu na faktah izvoru znanja, ktory davajut světu. My vsi imajemo znanje, ktorym možemo poděliti se. &lt;a href=\"%3$s\">Dovědte se, kako vy možete učestvovati&lt;/a>.</item>
+        <item quantity="many">V %1$d godu dobrovoljci dodali %2$,d bajtov v anglijsku Vikipediju. Vsa jihna rabota zajedno dovodi k postojanno ulěpšajemomu, věrodostojnomu i osnovanomu na faktah izvoru znanja, ktory davajut světu. My vsi imajemo znanje, ktorym možemo poděliti se. &lt;a href=\"%3$s\">Dovědte se, kako vy možete učestvovati&lt;/a>.</item>
+        <item quantity="other">V %1$d godu dobrovoljci dodali %2$,d bajt v anglijsku Vikipediju. Vsa jihna rabota zajedno dovodi k postojanno ulěpšajemomu, věrodostojnomu i osnovanomu na faktah izvoru znanja, ktory davajut světu. My vsi imajemo znanje, ktorym možemo poděliti se. &lt;a href=\"%3$s\">Dovědte se, kako vy možete učestvovati&lt;/a>.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_bytes_added_headline">
+        <item quantity="one">Dodany %,d bajt</item>
+        <item quantity="few">Dodane %,d bajty</item>
+        <item quantity="many">Dodanyh %,d bajtov</item>
+        <item quantity="other">Dodanyh %,d bajtov</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_per_minute_headline">
+        <item quantity="one">Vikipedija byla redaktovana %,d raz na minutu</item>
+        <item quantity="few">Vikipedija byla redaktovana %,d razy na minutu</item>
+        <item quantity="many">Vikipedija byla redaktovana %,d razov na minutu</item>
+        <item quantity="other">Vikipedija byla redaktovana %,d razov na minutu</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_body">
+        <item quantity="one">Hvala vam, že vy naležite do redaktorov-dobrovoljcev, ktori ostavjajut svoju pečat v Wikimedia-projektah po vsem světu. Dobrovoljci, kako vy, sdělali %,d izměnu v ponad 300 različnyh jezyčnyh izdanjah Vikipedije.</item>
+        <item quantity="few">Hvala vam, že vy naležite do redaktorov-dobrovoljcev, ktori ostavjajut svoju pečat v Wikimedia-projektah po vsem světu. Dobrovoljci, kako vy, sdělali %,d izměny v ponad 300 različnyh jezyčnyh izdanjah Vikipedije.</item>
+        <item quantity="many">Hvala vam, že vy naležite do redaktorov-dobrovoljcev, ktori ostavjajut svoju pečat v Wikimedia-projektah po vsem světu. Dobrovoljci, kako vy, sdělali %,d izměn v ponad 300 različnyh jezyčnyh izdanjah Vikipedije.</item>
+        <item quantity="other">Hvala vam, že vy naležite do redaktorov-dobrovoljcev, ktori ostavjajut svoju pečat v Wikimedia-projektah po vsem světu. Dobrovoljci, kako vy, sdělali %,d izměn v ponad 300 različnyh jezyčnyh izdanjah Vikipedije.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edited_times_headline">
+        <item quantity="one">Vy jeste redaktovali %s raz</item>
+        <item quantity="few">Vy jeste redaktovali %s razy</item>
+        <item quantity="many">Vy jeste redaktovali %s razov</item>
+        <item quantity="other">Vy jeste redaktovali %s razov</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_body">
+        <item quantity="one">Čitatelji po vsem světu cěnet vaš vklad. V tečenju poslědnjih 2 měsecev izpravjenje vami članky vkupno iměli %,d prěgled. Blagodareči takym redaktoram, kako vy, Vikipedia jest postojanno ulěpšajuči se, věrodostojny i osnovany na faktah izvor znanja za ves svět.</item>
+        <item quantity="few">Čitatelji po vsem světu cěnet vaš vklad. V tečenju poslědnjih 2 měsecev izpravjenje vami članky vkupno iměli %,d prěgledy. Blagodareči takym redaktoram, kako vy, Vikipedia jest postojanno ulěpšajuči se, věrodostojny i osnovany na faktah izvor znanja za ves svět.</item>
+        <item quantity="many">Čitatelji po vsem světu cěnet vaš vklad. V tečenju poslědnjih 2 měsecev izpravjenje vami članky vkupno iměli %,d prěgledov. Blagodareči takym redaktoram, kako vy, Vikipedia jest postojanno ulěpšajuči se, věrodostojny i osnovany na faktah izvor znanja za ves svět.</item>
+        <item quantity="other">Čitatelji po vsem světu cěnet vaš vklad. V tečenju poslědnjih 2 měsecev izpravjenje vami članky vkupno iměli %,d prěgledov. Blagodareči takym redaktoram, kako vy, Vikipedia jest postojanno ulěpšajuči se, věrodostojny i osnovany na faktah izvor znanja za ves svět.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_edits_viewed_times_headline">
+        <item quantity="one">Vaša pravka byla prěgleděna ponad %,d-kratno ili veče v poslědnjem času</item>
+        <item quantity="few">Vaše pravky byli prěgleděne ponad %,d-kratno ili veče v poslědnjem času</item>
+        <item quantity="many">Vaše pravky byli prěgleděne ponad %,d-kratno ili veče v poslědnjem času</item>
+        <item quantity="other">Vaše pravky byli prěgleděne ponad %,d-kratno ili veče v poslědnjem času</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_first">
+        <item quantity="one">Dobrovoljci sdělali %,d izměnu v ponad 300 različnyh jezyčnyh izdanjah Vikipedije.</item>
+        <item quantity="few">Dobrovoljci sdělali %,d izměny v ponad 300 različnyh jezyčnyh izdanjah Vikipedije.</item>
+        <item quantity="many">Dobrovoljci sdělali %,d izměn v ponad 300 različnyh jezyčnyh izdanjah Vikipedije.</item>
+        <item quantity="other">Dobrovoljci sdělali %,d izměn v ponad 300 različnyh jezyčnyh izdanjah Vikipedije.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_body_second">
+        <item quantity="one">V anglijskoj Vikipediji byla sdělana %,d izměna. Vsakodnevno vo vsaku časinu dobrovoljci rabotajut nad ulěpšenjem Vikipedije.</item>
+        <item quantity="few">V anglijskoj Vikipediji byli sdělane %,d izměny. Vsakodnevno vo vsaku časinu dobrovoljci rabotajut nad ulěpšenjem Vikipedije.</item>
+        <item quantity="many">V anglijskoj Vikipediji bylo sdělanyh %,d izměn. Vsakodnevno vo vsaku časinu dobrovoljci rabotajut nad ulěpšenjem Vikipedije.</item>
+        <item quantity="other">V anglijskoj Vikipediji bylo sdělanyh %,d izměn. Vsakodnevno vo vsaku časinu dobrovoljci rabotajut nad ulěpšenjem Vikipedije.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_edited_times_headline">
+        <item quantity="one">Redaktori sdělali %,d izměnu v tutom godu</item>
+        <item quantity="few">Redaktori sdělali %,d izměny v tutom godu</item>
+        <item quantity="many">Redaktori sdělali %,d izměn v tutom godu</item>
+        <item quantity="other">Redaktori sdělali %,d izměn v tutom godu</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_first">
+        <item quantity="one">Ljudi provedli priblizno %,d časinu</item>
+        <item quantity="few">Ljudi provedli priblizno %,d časiny</item>
+        <item quantity="many">Ljudi provedli priblizno %,d časin</item>
+        <item quantity="other">Ljudi provedli priblizno %,d časin</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_body_second">
+        <item quantity="one">– okolo %1$,d goda – čitajuči anglijsku Vikipediju v %2$d g. Vikipedija služi vam, kogda vy hočete dověděti se veče o našem izměnjajučem světu, izigrati zaklad srěd prijateljev ili odgovoriti na pytanje ljubopytnogo děteta.</item>
+        <item quantity="few">– okolo %1$,d lět – čitajuči anglijsku Vikipediju v %2$d g. Vikipedija služi vam, kogda vy hočete dověděti se veče o našem izměnjajučem světu, izigrati zaklad srěd prijateljev ili odgovoriti na pytanje ljubopytnogo děteta.</item>
+        <item quantity="many">– okolo %1$,d lět – čitajuči anglijsku Vikipediju v %2$d g. Vikipedija služi vam, kogda vy hočete dověděti se veče o našem izměnjajučem světu, izigrati zaklad srěd prijateljev ili odgovoriti na pytanje ljubopytnogo děteta.</item>
+        <item quantity="other">– okolo %1$,d lět – čitajuči anglijsku Vikipediju v %2$d g. Vikipedija služi vam, kogda vy hočete dověděti se veče o našem izměnjajučem světu, izigrati zaklad srěd prijateljev ili odgovoriti na pytanje ljubopytnogo děteta.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_english_reading_hours_headline">
+        <item quantity="one">My jesmo provedli %,d časinu čitajuči</item>
+        <item quantity="few">My jesmo provedli %,d časiny čitajuči</item>
+        <item quantity="many">My jesmo provedli %,d časin čitajuči</item>
+        <item quantity="other">My jesmo provedli %,d časin čitajuči</item>
+    </plurals>
+    <plurals name="year_in_review_slide_global_saved_articles_headline">
+        <item quantity="one">Koristniki aplikacije iměli %,d zapisany članok</item>
+        <item quantity="few">Koristniki aplikacije iměli %,d zapisane članky</item>
+        <item quantity="many">Koristniki aplikacije iměli %,d zapisanyh člankov</item>
+        <item quantity="other">Koristniki aplikacije iměli %,d zapisanyh člankov</item>
+    </plurals>
+    <plurals name="year_in_review_slide_most_read_english_articles_body">
+        <item quantity="one">Kogda ljudi hočet poznati naš svět, oni obračajut se k Vikipediji. %1$d najčestěje posěčeny članok anglijskoj Vikipedije byl: %2$s &lt;br /> Pročitajte veče v našem &lt;a href=\"%3$s\">blogpostu&lt;/a>.</item>
+        <item quantity="few">Kogda ljudi hočet poznati naš svět, oni obračajut se k Vikipediji. %1$d najčestěje posěčene članky angijskoj Vikipedije byli: %2$s &lt;br /> Pročitajte veče v našem &lt;a href=\"%3$s\">blogpostu&lt;/a>.</item>
+        <item quantity="many">Kogda ljudi hočet poznati naš svět, oni obračajut se k Vikipediji. %1$dajčestěje posěčene članky angijskoj Vikipedije byli: %2$s &lt;br /> Pročitajte veče v našem &lt;a href=\"%3$s\">blogpostu&lt;/a>.</item>
+        <item quantity="other">Kogda ljudi hočet poznati naš svět, oni obračajut se k Vikipediji. %1$d najčestěje posěčene članky angijskoj Vikipedije byli: %2$s &lt;br /> Pročitajte veče v našem &lt;a href=\"%3$s\">blogpostu&lt;/a>.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_body">
+        <item quantity="one">Srěd tyh člankov sut &lt;b>%1$s&lt;/b>, &lt;b>%2$s&lt;/b> i &lt;b>%3$s&lt;/b>. Vsaky zapisany članok jest odbitje vaših interesov i pomagaje stvoriti personalizovanu bazu znanja v Vikipediji.&lt;br />&lt;br />Aktivni koristniki aplikacije zapisali %4$,d članok v tutom godu.</item>
+        <item quantity="few">Srěd tyh člankov sut &lt;b>%1$s&lt;/b>, &lt;b>%2$s&lt;/b> i &lt;b>%3$s&lt;/b>. Vsaky zapisany članok jest odbitje vaših interesov i pomagaje stvoriti personalizovanu bazu znanja v Vikipediji.&lt;br />&lt;br />Aktivni koristniki aplikacije zapisali %4$,d članky v tutom godu.</item>
+        <item quantity="many">Srěd tyh člankov sut &lt;b>%1$s&lt;/b>, &lt;b>%2$s&lt;/b> i &lt;b>%3$s&lt;/b>. Vsaky zapisany članok jest odbitje vaših interesov i pomagaje stvoriti personalizovanu bazu znanja v Vikipediji.&lt;br />&lt;br />Aktivni koristniki aplikacije zapisali %4$,d člankov v tutom godu.</item>
+        <item quantity="other">Srěd tyh člankov sut &lt;b>%1$s&lt;/b>, &lt;b>%2$s&lt;/b> i &lt;b>%3$s&lt;/b>. Vsaky zapisany članok jest odbitje vaših interesov i pomagaje stvoriti personalizovanu bazu znanja v Vikipediji.&lt;br />&lt;br />Aktivni koristniki aplikacije zapisali %4$,d članok v tutom godu.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_saved_articles_headline">
+        <item quantity="one">Vy jeste zapisali %,d članok</item>
+        <item quantity="few">Vy jeste zapisali %,d članky</item>
+        <item quantity="many">Vy jeste zapisali %,d člankov</item>
+        <item quantity="other">Vy jeste zapisali %,d člankov</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_first">
+        <item quantity="one">Ljudi provedli priblizno %,d časinu</item>
+        <item quantity="few">Ljudi provedli priblizno %,d časiny</item>
+        <item quantity="many">Ljudi provedli priblizno %,d časin</item>
+        <item quantity="other">Ljudi provedli priblizno %,d časin</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_english_second">
+        <item quantity="one">– okolo %1$,d goda – čitajuči anglijsku Vikipediju v %2$d g.</item>
+        <item quantity="few">– okolo %1$,d lět – čitajuči anglijsku Vikipediju v %2$d g.</item>
+        <item quantity="many">– okolo %1$,d lět – čitajuči anglijsku Vikipediju v %2$d g.</item>
+        <item quantity="other">– okolo %1$,d lět – čitajuči anglijsku Vikipediju v %2$d g.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_first">
+        <item quantity="one">Vikipedija iměla %,d članok</item>
+        <item quantity="few">Vikipedija iměla %,d članky</item>
+        <item quantity="many">Vikipedija iměla %,d člankov</item>
+        <item quantity="other">Vikipedija iměla %,d člankov</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_global_second">
+        <item quantity="one">srěd ponad %,d aktivnom jezyku v tutom godu. Vy prisjedinili se do milionov ljudij, ktori razširjajut znanje i izslědyvajut različne temy.</item>
+        <item quantity="few">srěd ponad %,d aktivnyh jezykov v tutom godu. Vy prisjedinili se do milionov ljudij, ktori razširjajut znanje i izslědyvajut različne temy.</item>
+        <item quantity="many">srěd ponad %,d aktivnyh jezykov v tutom godu. Vy prisjedinili se do milionov ljudij, ktori razširjajut znanje i izslědyvajut različne temy.</item>
+        <item quantity="other">srěd ponad %,d aktivnyh jezykov v tutom godu. Vy prisjedinili se do milionov ljudij, ktori razširjajut znanje i izslědyvajut različne temy.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_body_top">
+        <item quantity="one">Po našej ocěnkě vy naležite do %1$s%% najaktivnějših čitateljev Vikipedije na světu. Srědnjestatističny člověk čitaje %2$,d članok na god.</item>
+        <item quantity="few">Po našej ocěnkě vy naležite do %1$s%% najaktivnějših čitateljev Vikipedije na světu. Srědnjestatističny člověk čitaje %2$,d članky na god.</item>
+        <item quantity="many">Po našej ocěnkě vy naležite do %1$s%% najaktivnějših čitateljev Vikipedije na světu. Srědnjestatističny člověk čitaje %2$,d člankov na god.</item>
+        <item quantity="other">Po našej ocěnkě vy naležite do %1$s%% najaktivnějših čitateljev Vikipedije na světu. Srědnjestatističny člověk čitaje %2$,d člankov na god.</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_first">
+        <item quantity="one">Vy jeste provedli %,d minutu</item>
+        <item quantity="few">Vy jeste provedli %,d minuty</item>
+        <item quantity="many">Vy jeste provedli %,d minut</item>
+        <item quantity="other">Vy jeste provedli %,d minut</item>
+    </plurals>
+    <plurals name="year_in_review_slide_spent_minutes_reading_headline_second">
+        <item quantity="one">čitajuči %1$,d članok v %2$d godu</item>
+        <item quantity="few">čitajuči %1$,d članky v %2$d godu</item>
+        <item quantity="many">čitajuči %1$,d člankov v %2$d godu</item>
+        <item quantity="other">čitajuči %1$,d člankov v %2$d godu</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_body">
+        <item quantity="one">\"Tuto jest članok, ktory vy jeste posětili načestěje v godu %1$d: %2$s</item>
+        <item quantity="few">Tuto sut članky, ktore vy jeste posětili načestěje v godu %1$d: %2$s</item>
+        <item quantity="many">Tuto sut članky, ktore vy jeste posětili načestěje v godu %1$d: %2$s</item>
+        <item quantity="other">Tuto sut članky, ktore vy jeste posětili načestěje v godu %1$d: %2$s</item>
+    </plurals>
+    <plurals name="year_in_review_slide_top_articles_headline">
+        <item quantity="one">Vaš ljubimy članok</item>
+        <item quantity="few">Vaše ljubime članky</item>
+        <item quantity="many">Vaše ljubime članky</item>
+        <item quantity="other">Vaše ljubime članky</item>
+    </plurals>
+    <plurals name="year_in_review_slide_viewed_articles_times_headline">
+        <item quantity="one">Koristniki aplikacije prěgleděli članky Vikipedije %,d raz</item>
+        <item quantity="few">Koristniki aplikacije prěgleděli članky Vikipedije %,d razy</item>
+        <item quantity="many">Koristniki aplikacije prěgleděli članky Vikipedije %,d razov</item>
+        <item quantity="other">Koristniki aplikacije prěgleděli članky Vikipedije %,d razov</item>
+    </plurals>
+</resources>

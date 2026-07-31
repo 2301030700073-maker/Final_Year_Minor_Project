@@ -1,0 +1,168 @@
+package androidx.compose.runtime;
+
+import androidx.collection.MutableScatterSet;
+import androidx.collection.ScatterSet;
+import androidx.compose.runtime.Recomposer;
+import androidx.compose.runtime.collection.ScatterSetWrapper;
+import androidx.compose.runtime.snapshots.StateObjectImpl;
+import java.util.Set;
+import kotlin.Unit;
+import kotlin.collections.CollectionsKt;
+import kotlin.jvm.functions.Function2;
+import kotlinx.coroutines.CancellableContinuation;
+import kotlinx.coroutines.CancellableContinuationImpl;
+import kotlinx.coroutines.channels.SendChannel;
+
+/* compiled from: r8-map-id-86a71dde26502018768275c3ef5c4d56379672d582e9c15e1a63fb997724bbe7 */
+/* loaded from: classes.dex */
+public final /* synthetic */ class Updater$$ExternalSyntheticLambda0 implements Function2 {
+    public final /* synthetic */ int $r8$classId;
+    public final /* synthetic */ Object f$0;
+
+    public /* synthetic */ Updater$$ExternalSyntheticLambda0(MovableContent movableContent, Object obj) {
+        this.$r8$classId = 7;
+        this.f$0 = obj;
+    }
+
+    private final Object invoke$androidx$compose$runtime$Recomposer$recompositionRunner$2$$ExternalSyntheticLambda0(Object obj, Object obj2) {
+        CancellableContinuation cancellableContinuation;
+        Recomposer recomposer = (Recomposer) this.f$0;
+        Set set = (Set) obj;
+        synchronized (recomposer.stateLock) {
+            try {
+                if (((Recomposer.State) recomposer._state.getValue()).compareTo(Recomposer.State.Idle) >= 0) {
+                    MutableScatterSet mutableScatterSet = recomposer.snapshotInvalidations;
+                    if (set instanceof ScatterSetWrapper) {
+                        ScatterSet scatterSet = ((ScatterSetWrapper) set).set;
+                        Object[] objArr = scatterSet.elements;
+                        long[] jArr = scatterSet.metadata;
+                        int length = jArr.length - 2;
+                        if (length >= 0) {
+                            int i = 0;
+                            while (true) {
+                                long j = jArr[i];
+                                if ((((~j) << 7) & j & (-9187201950435737472L)) != -9187201950435737472L) {
+                                    int i2 = 8 - ((~(i - length)) >>> 31);
+                                    for (int i3 = 0; i3 < i2; i3++) {
+                                        if ((255 & j) < 128) {
+                                            Object obj3 = objArr[(i << 3) + i3];
+                                            if (!(obj3 instanceof StateObjectImpl) || ((StateObjectImpl) obj3).m176isReadInh_f27i8$runtime(1)) {
+                                                mutableScatterSet.add(obj3);
+                                            }
+                                        }
+                                        j >>= 8;
+                                    }
+                                    if (i2 != 8) {
+                                        break;
+                                    }
+                                }
+                                if (i == length) {
+                                    break;
+                                }
+                                i++;
+                            }
+                        }
+                    } else {
+                        for (Object obj4 : set) {
+                            if (!(obj4 instanceof StateObjectImpl) || ((StateObjectImpl) obj4).m176isReadInh_f27i8$runtime(1)) {
+                                mutableScatterSet.add(obj4);
+                            }
+                        }
+                    }
+                    cancellableContinuation = recomposer.deriveStateLocked();
+                } else {
+                    cancellableContinuation = null;
+                }
+            } catch (Throwable th) {
+                throw th;
+            }
+        }
+        if (cancellableContinuation != null) {
+            ((CancellableContinuationImpl) cancellableContinuation).resumeWith(Unit.INSTANCE);
+        }
+        return Unit.INSTANCE;
+    }
+
+    private final Object invoke$androidx$compose$runtime$SingleSubscriptionSnapshotFlowManager$$ExternalSyntheticLambda1(Object obj, Object obj2) {
+        SendChannel sendChannel;
+        SingleSubscriptionSnapshotFlowManager singleSubscriptionSnapshotFlowManager = (SingleSubscriptionSnapshotFlowManager) this.f$0;
+        Set set = (Set) obj;
+        synchronized (singleSubscriptionSnapshotFlowManager.value) {
+            try {
+                MutableScatterSet mutableScatterSet = singleSubscriptionSnapshotFlowManager.watchSet;
+                if (mutableScatterSet == null) {
+                    if (CollectionsKt.contains(set, singleSubscriptionSnapshotFlowManager.soleWatchedObject)) {
+                        sendChannel = singleSubscriptionSnapshotFlowManager.subscribedChannel;
+                    }
+                    sendChannel = null;
+                } else {
+                    Object[] objArr = mutableScatterSet.elements;
+                    long[] jArr = mutableScatterSet.metadata;
+                    int length = jArr.length - 2;
+                    if (length >= 0) {
+                        int i = 0;
+                        loop0: while (true) {
+                            long j = jArr[i];
+                            if ((((~j) << 7) & j & (-9187201950435737472L)) != -9187201950435737472L) {
+                                int i2 = 8 - ((~(i - length)) >>> 31);
+                                for (int i3 = 0; i3 < i2; i3++) {
+                                    if ((255 & j) < 128 && set.contains(objArr[(i << 3) + i3])) {
+                                        sendChannel = singleSubscriptionSnapshotFlowManager.subscribedChannel;
+                                        break loop0;
+                                    }
+                                    j >>= 8;
+                                }
+                                if (i2 != 8) {
+                                    break;
+                                }
+                            }
+                            if (i == length) {
+                                break;
+                            }
+                            i++;
+                        }
+                    }
+                    sendChannel = null;
+                }
+            } catch (Throwable th) {
+                throw th;
+            }
+        }
+        if (sendChannel != null) {
+            sendChannel.mo691trySendJP2dKIU(Unit.INSTANCE);
+        }
+        return Unit.INSTANCE;
+    }
+
+    /* JADX WARN: Code restructure failed: missing block: B:53:0x0108, code lost:
+    
+        if (r4 == null) goto L44;
+     */
+    /* JADX WARN: Multi-variable type inference failed */
+    /* JADX WARN: Removed duplicated region for block: B:53:0x0108  */
+    /* JADX WARN: Removed duplicated region for block: B:54:0x010f  */
+    /* JADX WARN: Removed duplicated region for block: B:72:0x023a  */
+    /* JADX WARN: Removed duplicated region for block: B:74:? A[RETURN, SYNTHETIC] */
+    @Override // kotlin.jvm.functions.Function2
+    /*
+        Code decompiled incorrectly, please refer to instructions dump.
+        To view partially-correct add '--show-bad-code' argument
+    */
+    public final java.lang.Object invoke(java.lang.Object r30, java.lang.Object r31) {
+        /*
+            Method dump skipped, instructions count: 1560
+            To view this dump add '--comments-level debug' option
+        */
+        throw new UnsupportedOperationException("Method not decompiled: androidx.compose.runtime.Updater$$ExternalSyntheticLambda0.invoke(java.lang.Object, java.lang.Object):java.lang.Object");
+    }
+
+    public /* synthetic */ Updater$$ExternalSyntheticLambda0(Object obj, int i) {
+        this.$r8$classId = i;
+        this.f$0 = obj;
+    }
+
+    public /* synthetic */ Updater$$ExternalSyntheticLambda0(Object obj, int i, int i2) {
+        this.$r8$classId = i2;
+        this.f$0 = obj;
+    }
+}

@@ -1,0 +1,179 @@
+.class public final Lio/reactivex/rxjava3/internal/functions/Functions$EmptyRunnable;
+.super Ljava/lang/Object;
+.source "r8-map-id-86a71dde26502018768275c3ef5c4d56379672d582e9c15e1a63fb997724bbe7"
+
+# interfaces
+.implements Ljava/lang/Runnable;
+
+
+# instance fields
+.field public final synthetic $r8$classId:I
+
+
+# direct methods
+.method public synthetic constructor <init>(I)V
+    .locals 0
+
+    .line 1
+    iput p1, p0, Lio/reactivex/rxjava3/internal/functions/Functions$EmptyRunnable;->$r8$classId:I
+
+    .line 2
+    .line 3
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    .line 4
+    .line 5
+    .line 6
+    return-void
+.end method
+
+.method private final run$com$google$common$util$concurrent$InterruptibleTask$DoNothingRunnable()V
+    .locals 0
+
+    .line 1
+    return-void
+.end method
+
+.method private final run$io$reactivex$rxjava3$internal$functions$Functions$EmptyRunnable()V
+    .locals 0
+
+    .line 1
+    return-void
+.end method
+
+
+# virtual methods
+.method public final run()V
+    .locals 1
+
+    .line 1
+    iget p0, p0, Lio/reactivex/rxjava3/internal/functions/Functions$EmptyRunnable;->$r8$classId:I
+
+    .line 2
+    .line 3
+    packed-switch p0, :pswitch_data_0
+
+    .line 4
+    .line 5
+    .line 6
+    return-void
+
+    .line 7
+    :pswitch_0
+    :try_start_0
+    const-string p0, "EmojiCompat.EmojiCompatInitializer.run"
+
+    .line 8
+    .line 9
+    sget-object v0, Landroidx/core/os/TraceCompat;->sIsTagEnabledMethod:Ljava/lang/reflect/Method;
+
+    .line 10
+    .line 11
+    invoke-static {p0}, Landroid/os/Trace;->beginSection(Ljava/lang/String;)V
+
+    .line 12
+    .line 13
+    .line 14
+    invoke-static {}, Landroidx/emoji2/text/EmojiCompat;->isConfigured()Z
+
+    .line 15
+    .line 16
+    .line 17
+    move-result p0
+
+    .line 18
+    if-eqz p0, :cond_0
+
+    .line 19
+    .line 20
+    invoke-static {}, Landroidx/emoji2/text/EmojiCompat;->get()Landroidx/emoji2/text/EmojiCompat;
+
+    .line 21
+    .line 22
+    .line 23
+    move-result-object p0
+
+    .line 24
+    invoke-virtual {p0}, Landroidx/emoji2/text/EmojiCompat;->load()V
+    :try_end_0
+    .catchall {:try_start_0 .. :try_end_0} :catchall_0
+
+    .line 25
+    .line 26
+    .line 27
+    :cond_0
+    invoke-static {}, Landroid/os/Trace;->endSection()V
+
+    .line 28
+    .line 29
+    .line 30
+    return-void
+
+    .line 31
+    :catchall_0
+    move-exception p0
+
+    .line 32
+    sget-object v0, Landroidx/core/os/TraceCompat;->sIsTagEnabledMethod:Ljava/lang/reflect/Method;
+
+    .line 33
+    .line 34
+    invoke-static {}, Landroid/os/Trace;->endSection()V
+
+    .line 35
+    .line 36
+    .line 37
+    throw p0
+
+    .line 38
+    :pswitch_1
+    return-void
+
+    .line 39
+    :pswitch_data_0
+    .packed-switch 0x0
+        :pswitch_1
+        :pswitch_0
+    .end packed-switch
+.end method
+
+.method public toString()Ljava/lang/String;
+    .locals 1
+
+    .line 1
+    iget v0, p0, Lio/reactivex/rxjava3/internal/functions/Functions$EmptyRunnable;->$r8$classId:I
+
+    .line 2
+    .line 3
+    packed-switch v0, :pswitch_data_0
+
+    .line 4
+    .line 5
+    .line 6
+    invoke-super {p0}, Ljava/lang/Object;->toString()Ljava/lang/String;
+
+    .line 7
+    .line 8
+    .line 9
+    move-result-object p0
+
+    .line 10
+    return-object p0
+
+    .line 11
+    :pswitch_0
+    const-string p0, "EmptyRunnable"
+
+    .line 12
+    .line 13
+    return-object p0
+
+    .line 14
+    nop
+
+    .line 15
+    :pswitch_data_0
+    .packed-switch 0x0
+        :pswitch_0
+    .end packed-switch
+.end method

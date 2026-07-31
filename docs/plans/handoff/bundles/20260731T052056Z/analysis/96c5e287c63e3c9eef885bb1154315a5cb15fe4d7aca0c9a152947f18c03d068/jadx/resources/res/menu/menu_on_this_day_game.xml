@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:icon="@drawable/outline_notification_add_24"
+        android:id="@+id/menu_notifications"
+        android:title="@string/on_this_day_game_menu_notifications"
+        app:iconTint="?attr/paper_color"
+        app:showAsAction="always"/>
+    <item
+        android:icon="@drawable/ic_more_vert_white_24dp"
+        android:id="@+id/empty"
+        android:title="@string/nav_item_more"
+        app:iconTint="?attr/paper_color"
+        app:showAsAction="ifRoom">
+        <menu>
+            <item
+                android:icon="@drawable/volume_up_24dp"
+                android:id="@+id/menu_volume"
+                android:title="@string/on_this_day_game_sound_on"
+                app:iconTint="?attr/secondary_color"
+                app:showAsAction="always"/>
+            <item
+                android:icon="@drawable/baseline_info_24"
+                android:id="@+id/menu_learn_more"
+                android:title="@string/on_this_day_game_menu_info"
+                app:iconTint="?attr/secondary_color"
+                app:showAsAction="always"/>
+            <item
+                android:icon="@drawable/ic_report_flag"
+                android:id="@+id/menu_report_feature"
+                android:title="@string/on_this_day_game_menu_feedback"
+                app:iconTint="?attr/secondary_color"
+                app:showAsAction="always"/>
+        </menu>
+    </item>
+</menu>

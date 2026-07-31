@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:gravity="start|center" android:orientation="horizontal" android:background="?colorSurfaceContainerHighest" android:layout_width="match_parent" android:layout_height="wrap_content"
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <View android:id="@id/chip" android:layout_width="6.0dp" android:layout_height="match_parent" />
+    <com.google.android.material.textview.MaterialTextView android:textAppearance="?textAppearanceTitleMedium" android:ellipsize="end" android:id="@id/name" android:paddingTop="8.0dp" android:paddingBottom="8.0dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:singleLine="true" android:paddingStart="18.0dp" android:paddingEnd="4.0dp" />
+</LinearLayout>

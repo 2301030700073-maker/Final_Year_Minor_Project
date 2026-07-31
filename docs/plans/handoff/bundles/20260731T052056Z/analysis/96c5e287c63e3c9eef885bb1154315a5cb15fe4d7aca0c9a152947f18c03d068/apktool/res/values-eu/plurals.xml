@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="activity_tab_impact_best_streak_text">
+        <item quantity="one">egun %d</item>
+        <item quantity="other">%d egun</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_last_month">
+        <item quantity="one">aurreko hileko edizioa</item>
+        <item quantity="other">aurreko hileko edizioak</item>
+    </plurals>
+    <plurals name="activity_tab_impact_edits_this_month">
+        <item quantity="one">hilabete honetako edizioa</item>
+        <item quantity="other">hilabete honetako edizioak</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_edits">
+        <item quantity="one">edizioa</item>
+        <item quantity="other">edizioak</item>
+    </plurals>
+    <plurals name="activity_tab_impact_recent_activity_views">
+        <item quantity="one">Editatu dituzun artikuluen ikustaldia</item>
+        <item quantity="other">Editatu dituzun artikuluen ikustaldiak</item>
+    </plurals>
+    <plurals name="diff_years">
+        <item quantity="one">Iaz</item>
+        <item quantity="other">Orain dela %d urte</item>
+    </plurals>
+    <plurals name="edit_diff_bytes">
+        <item quantity="one">%s byte</item>
+        <item quantity="other">%s byte</item>
+    </plurals>
+    <plurals name="edits_since_year_per_wiki">
+        <item quantity="one">aldaketa bat %2$stik (%3$s)</item>
+        <item quantity="other">%1$d aldaketa %2$stik (%3$s)</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_detail_without_size">
+        <item quantity="one">1 artikulutik %1$d lineaz kanpo eskuragarri</item>
+        <item quantity="other">%1$d %2$d lineaz kanpo eskuragarri</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary">
+        <item quantity="one">artikulu 1, %2$.2f MB</item>
+        <item quantity="other">%1$d artikulu, %2$.2f MB</item>
+    </plurals>
+    <plurals name="format_reading_list_statistical_summary_without_size">
+        <item quantity="one">artikulu 1</item>
+        <item quantity="other">%d artikulu</item>
+    </plurals>
+    <plurals name="mtrl_badge_content_description">
+        <item quantity="one">%d jakinarazpen berri</item>
+        <item quantity="other">%d jakinarazpen berri</item>
+    </plurals>
+    <plurals name="multi_items_selected">
+        <item quantity="one">%d hautatuta</item>
+        <item quantity="other">%d hautatuta</item>
+    </plurals>
+    <plurals name="notification_archive_message">
+        <item quantity="one">Jakinarazpena artxibatuta</item>
+        <item quantity="other">%d jakinarazpen artxibatuta</item>
+    </plurals>
+    <plurals name="notification_channel_name">
+        <item quantity="one">Artikulua deskargatzen</item>
+        <item quantity="other">Artikuluak deskargatzen</item>
+    </plurals>
+    <plurals name="notification_syncing_description">
+        <item quantity="one">Artikulu bat geratzen da</item>
+        <item quantity="other">%1$d artikulu geratzen dira</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_channel_name">
+        <item quantity="one">Irakurketa zerrenda sinkronizatzen</item>
+        <item quantity="other">Irakurketa zerrendak sinkronizatzen</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_description">
+        <item quantity="one">Zerrenda %1$d faltan…</item>
+        <item quantity="other">%1$d zerrenda faltan...</item>
+    </plurals>
+    <plurals name="notification_syncing_reading_list_title">
+        <item quantity="one">Zerrenda %1$d sinkronizatzen…</item>
+        <item quantity="other">%1$d zerrenda sinkronizatzen…</item>
+    </plurals>
+    <plurals name="notification_syncing_title">
+        <item quantity="one">Artikulu bat deskargatzen...</item>
+        <item quantity="other">%1$d artikulu deskargatzen...</item>
+    </plurals>
+    <plurals name="notifications_mark_as_read_plural">
+        <item quantity="one">1 irakurrita bezala markatu da</item>
+        <item quantity="other">%d irakurrita bezala markatu dira</item>
+    </plurals>
+    <plurals name="notifications_mark_as_unread_plural">
+        <item quantity="one">1 irakurri gabe gisa markatu da</item>
+        <item quantity="other">%d irakurri gabe gisa markatu dira</item>
+    </plurals>
+    <plurals name="notifications_number_of_filters">
+        <item quantity="one">iragazki %d</item>
+        <item quantity="other">%d iragazki</item>
+    </plurals>
+    <plurals name="page_edit_history_article_edits_since_year">
+        <item quantity="one">aldaketa bat %2$stik</item>
+        <item quantity="other">%1$d aldaketa %2$stik</item>
+    </plurals>
+    <plurals name="reading_list_article_not_offline_message">
+        <item quantity="one">Artikulu hau ez da eskuragarri izango konexiorik gabe.</item>
+        <item quantity="other">Artikulu hauek ez dira eskuragarri izango konexiorik gabe.</item>
+    </plurals>
+    <plurals name="reading_list_article_offline_message">
+        <item quantity="one">Artikulu hau konexiorik gabe erabiltzeko eskuragarri dago.</item>
+        <item quantity="other">Artikulu hauek ez dira eskuragarriak izango konexiorik gabe.</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted">
+        <item quantity="one">artikulu %d kendu da zerrendatik</item>
+        <item quantity="other">%d artikulu kendu dira zerrendatik</item>
+    </plurals>
+    <plurals name="reading_list_articles_deleted_from_list">
+        <item quantity="one">artikulu %1$d kendu da %2$s zerrendatik</item>
+        <item quantity="other">%1$d artikulu kendu dira %2$s zerrendatik</item>
+    </plurals>
+    <plurals name="reading_list_delete_lists_confirm_dialog_message">
+        <item quantity="one">Ziur zaude zerrenda %d ezabatu nahi duzula?</item>
+        <item quantity="other">Ziur zaude %d zerrenda ezabatu nahi dituzula?</item>
+    </plurals>
+    <plurals name="reading_list_export_failed_message">
+        <item quantity="one">Irakurketa-zerrenda esportatzeak huts egin du</item>
+        <item quantity="other">Irakurketa-zerrenden esportazioak huts egin du</item>
+    </plurals>
+    <plurals name="reading_list_import_success_message">
+        <item quantity="one">Irakurketa-zerrenda inportatuta</item>
+        <item quantity="other">Irakurketa-zerrendak inportatuta</item>
+    </plurals>
+    <plurals name="reading_lists_deleted_message">
+        <item quantity="one">zerrenda %d ezabatuta</item>
+        <item quantity="other">%d zerrenda ezabatuta</item>
+    </plurals>
+    <plurals name="search_results_count">
+        <item quantity="one">Emaitza 1</item>
+        <item quantity="other">%d emaitza</item>
+    </plurals>
+    <plurals name="suggested_edits_added_contribution_label">
+        <item quantity="one">karaktere %d gehitu duzu</item>
+        <item quantity="other">%d karaktere gehitu dituzu</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution">
+        <item quantity="one">aldaketa bat</item>
+        <item quantity="other">aldaketak</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_count">
+        <item quantity="one">aldaketa bat</item>
+        <item quantity="other">%d aldaketa</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_diff_count_text">
+        <item quantity="one">karaktere %1$s</item>
+        <item quantity="other">%1$s karaktere</item>
+    </plurals>
+    <plurals name="suggested_edits_contribution_seen_times">
+        <item quantity="one">Azken 30 egunetan behin ikusia.</item>
+        <item quantity="other">Azken 30 egunetan %s aldiz ikusia.</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_frequency">
+        <item quantity="one">Edizioa</item>
+        <item quantity="other">Edizioak</item>
+    </plurals>
+    <plurals name="suggested_edits_edit_streak_detail_text">
+        <item quantity="one">egun %d</item>
+        <item quantity="other">%d egun</item>
+    </plurals>
+    <plurals name="suggested_edits_image_tag_contribution_label">
+        <item quantity="one">etiketa %d gehitu duzu</item>
+        <item quantity="other">%d etiketa gehitu dituzu</item>
+    </plurals>
+    <plurals name="suggested_edits_removed_contribution_label">
+        <item quantity="one">karaktere %d kendu duzu</item>
+        <item quantity="other">%d karaktere kendu dituzu</item>
+    </plurals>
+    <plurals name="suggested_edits_tags_diff_count_text">
+        <item quantity="one">izar %1$s</item>
+        <item quantity="other">%1$s izar</item>
+    </plurals>
+    <plurals name="temp_account_created">
+        <item quantity="one">%1$s aldi baterako kontua zure edizioa argitaratu ondoren sortu da. %2$d egun barru iraungiko da.</item>
+        <item quantity="other">%1$s aldi baterako kontua zure edizioa argitaratu ondoren sortu da. egun %2$d barru iraungiko da.</item>
+    </plurals>
+    <plurals name="temp_account_expiry">
+        <item quantity="one">Kontua %d egun barru iraungiko da.</item>
+        <item quantity="other">Kontua egun %d barru iraungiko da.</item>
+    </plurals>
+    <plurals name="view_continue_reading_card_subtitle">
+        <item quantity="one">Atzo</item>
+        <item quantity="other">Orain dela %d egun</item>
+    </plurals>
+    <plurals name="wikipedia_languages_remove_dialog_title">
+        <item quantity="one">Aukeratutako hizkuntza kendu?</item>
+        <item quantity="other">Aukeratutako hizkuntzak kendu?</item>
+    </plurals>
+</resources>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView android:layout_width="match_parent" android:layout_height="wrap_content"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <com.google.android.material.textfield.TextInputLayout android:id="@id/feedbackInputContainer" android:paddingLeft="24.0dp" android:paddingTop="12.0dp" android:paddingRight="24.0dp" android:paddingBottom="12.0dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/patroller_diff_feedback_dialog_input_hint" android:paddingHorizontal="24.0dp" android:paddingVertical="12.0dp">
+        <org.wikipedia.views.PlainPasteEditText android:textSize="16.0sp" android:id="@id/feedbackInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textCapSentences">
+            <requestFocus />
+        </org.wikipedia.views.PlainPasteEditText>
+    </com.google.android.material.textfield.TextInputLayout>
+</ScrollView>

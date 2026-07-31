@@ -133,8 +133,8 @@ A `failed` status halts the pipeline with the full `StageResult` printed/logged 
 ## CLI shape
 
 ```
-python -m cli run --apk path/to/target.apk --justification ACADEMIC_TRAINING_TARGET [--skip-dynamic] [--device <serial>] [--target <name>]
-python -m cli calibration-report [--ground-truth path/to/ground_truth.yaml]
+PYTHONPATH=src uv run python -m cli run --apk path/to/target.apk --justification ACADEMIC_TRAINING_TARGET [--skip-dynamic] [--device <serial>] [--target <name>]
+PYTHONPATH=src uv run python -m cli calibration-report [--ground-truth path/to/ground_truth.yaml]
 ```
 
 Phase 4 added the second command (FR-9.2) - Typer's single-command auto-collapse (true for Phases 1-3, when `run` was the only registered command) stopped applying the moment `calibration-report` was added, which broke every hardcoded bare-command invocation that assumed it (`scripts/collect_verification_bundle.py`, `README.md` - both fixed alongside this doc). Revised here rather than left to silently mislead, per this project's evidence-over-assertion discipline.

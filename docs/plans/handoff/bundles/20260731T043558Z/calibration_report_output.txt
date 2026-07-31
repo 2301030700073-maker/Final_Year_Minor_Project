@@ -11,5 +11,5 @@ ground-truthed category-observations exist across all known targets. Read bucket
 rates as directional at best, not as a reliable estimate of 
 confidence-vs-accuracy.
 
-Calibration report: outputs/reports/calibration/20260731T042634Z.md
+Calibration report: outputs/reports/calibration/20260731T043625Z.md
 

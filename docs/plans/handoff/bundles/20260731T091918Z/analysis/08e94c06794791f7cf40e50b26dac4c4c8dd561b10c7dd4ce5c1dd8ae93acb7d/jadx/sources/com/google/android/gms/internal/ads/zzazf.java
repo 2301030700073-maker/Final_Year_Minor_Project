@@ -1,0 +1,21 @@
+package com.google.android.gms.internal.ads;
+
+import java.lang.reflect.InvocationTargetException;
+
+/* compiled from: com.google.android.gms:play-services-ads@@24.7.0 */
+/* loaded from: classes3.dex */
+public final class zzazf extends zzazr {
+    public zzazf(zzayd zzaydVar, String str, String str2, zzauc zzaucVar, int i, int i2) {
+        super(zzaydVar, "8W5EiIZWvw8ca0gdEf2baMelwD0v1LgWFEv6AqIRDGIzRlZJKgzzVYcusXATxgKN", "ZXwHOojdfPkjtU4/T1kRX8Zucxdzz/LL+/XimOcPDrc=", zzaucVar, i, 3);
+    }
+
+    @Override // com.google.android.gms.internal.ads.zzazr
+    protected final void zza() throws IllegalAccessException, InvocationTargetException {
+        zzaxj zzaxjVar = new zzaxj((String) this.zze.invoke(null, this.zza.zzb(), Boolean.valueOf(((Boolean) com.google.android.gms.ads.internal.client.zzbd.zzc().zzd(zzbeu.zzdr)).booleanValue())));
+        zzauc zzaucVar = this.zzd;
+        synchronized (zzaucVar) {
+            zzaucVar.zzc(zzaxjVar.zza);
+            zzaucVar.zzP(zzaxjVar.zzb);
+        }
+    }
+}

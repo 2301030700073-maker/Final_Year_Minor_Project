@@ -1,0 +1,15 @@
+package com.google.android.gms.internal.ads;
+
+/* compiled from: com.google.android.gms:play-services-ads@@24.7.0 */
+/* loaded from: classes3.dex */
+final /* synthetic */ class zzfen implements zzfda {
+    static final /* synthetic */ zzfen zza = new zzfen();
+
+    private /* synthetic */ zzfen() {
+    }
+
+    @Override // com.google.android.gms.internal.ads.zzfda
+    public final /* synthetic */ void zza(Object obj) {
+        ((zzbyr) obj).zzf();
+    }
+}

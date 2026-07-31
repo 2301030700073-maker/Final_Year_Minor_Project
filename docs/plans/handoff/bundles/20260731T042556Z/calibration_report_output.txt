@@ -1,0 +1,15 @@
+                              Calibration Summary                               
+┏━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━┓
+┃          ┃ Tier 1          ┃ Tier 2          ┃               ┃           ┃   ┃
+┃ Category ┃ confirmation    ┃ precision       ┃ Tier 2 recall ┃ Tier 2 F1 ┃ n ┃
+┡━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━┩
+│ root     │ 0.60 (3/5)      │ 1.00            │ 1.00          │ 1.00      │ 4 │
+│ ssl      │ N/A (0/0)       │ N/A             │ N/A           │ N/A       │ 4 │
+└──────────┴─────────────────┴─────────────────┴───────────────┴───────────┴───┘
+Calibration curve is a skeleton, not a statistically robust result - only 8 
+ground-truthed category-observations exist across all known targets. Read bucket
+rates as directional at best, not as a reliable estimate of 
+confidence-vs-accuracy.
+
+Calibration report: outputs/reports/calibration/20260731T042634Z.md
+

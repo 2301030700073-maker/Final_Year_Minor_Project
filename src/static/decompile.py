@@ -55,6 +55,19 @@ def _count_java_files(jadx_dir: Path) -> int:
     return sum(1 for p in jadx_dir.rglob("*.java") if p.is_file())
 
 
+def _has_real_cached_content(jadx_dir: Path, apktool_dir: Path) -> bool:
+    """A cache hit needs more than the directories existing - confirmed real
+    bug: jadx_dir/apktool_dir can exist as a hollow shell (contents gone,
+    directory itself untouched - disk cleanup, a race, manual deletion, cause
+    unconfirmed) while the sidecar still, correctly per its own contract,
+    reports stats from the original run. Trusting directory-existence alone
+    silently turned that into a cache "hit" with zero real content behind
+    it - static_scan() then walks an empty tree and reports NEITHER, which
+    is indistinguishable from a genuine "nothing found" result but means
+    something completely different."""
+    return _count_java_files(jadx_dir) > 0 and (apktool_dir / "AndroidManifest.xml").exists()
+
+
 def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
     start = time.monotonic()
     try:
@@ -64,8 +77,15 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         apktool_dir = target_dir / "apktool"
         status_sidecar = target_dir / STATUS_SIDECAR_NAME
 
+        cache_was_hollow = False
         if jadx_dir.exists() and apktool_dir.exists():
-            return _cached_result(start, jadx_dir, apktool_dir, status_sidecar)
+            if _has_real_cached_content(jadx_dir, apktool_dir):
+                return _cached_result(start, jadx_dir, apktool_dir, status_sidecar)
+            # Exists but hollow - don't trust it, and don't leave ambiguous
+            # stale state behind either. Clear it and re-decompile for real.
+            shutil.rmtree(jadx_dir, ignore_errors=True)
+            shutil.rmtree(apktool_dir, ignore_errors=True)
+            cache_was_hollow = True
 
         jadx = _require_tool("jadx")
         apktool = _require_tool("apktool")
@@ -120,6 +140,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
             start, jadx_dir, apktool_dir, cached=False,
             decompile_completeness=completeness, jadx_exit_code=jadx_returncode,
             jadx_file_count=jadx_file_count, jadx_error_tail=error_tail,
+            recovered_from_hollow_cache=cache_was_hollow,
         )
     except subprocess.CalledProcessError as exc:
         # Only apktool's check=True can still raise here - jadx's own
@@ -140,6 +161,7 @@ def _result(
     start: float, jadx_dir: Path, apktool_dir: Path, cached: bool,
     decompile_completeness: str = "complete", jadx_exit_code: int = 0,
     jadx_file_count: int | None = None, jadx_error_tail: str | None = None,
+    recovered_from_hollow_cache: bool = False,
 ) -> StageResult:
     if jadx_file_count is None:
         jadx_file_count = _count_java_files(jadx_dir)
@@ -154,6 +176,7 @@ def _result(
             "partial": decompile_completeness != "complete",
             "jadx_exit_code": jadx_exit_code,
             "jadx_file_count": jadx_file_count,
+            "recovered_from_hollow_cache": recovered_from_hollow_cache,
             "jadx_error_tail": jadx_error_tail,
         },
         duration_ms=int((time.monotonic() - start) * 1000),

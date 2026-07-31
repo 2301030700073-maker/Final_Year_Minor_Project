@@ -78,6 +78,7 @@ def test_decompile_tolerates_partial_jadx_output_when_real_files_were_written(tm
     assert result.evidence["jadx_exit_code"] == 1
     assert "OutOfMemoryError" in result.evidence["jadx_error_tail"]
     assert Path(result.evidence["manifest_path"]).exists()
+    assert result.evidence["recovered_from_hollow_cache"] is False  # a genuine first-time decompile, not a recovery
 
 
 def test_decompile_total_failure_when_jadx_writes_zero_files(tmp_path, monkeypatch):
@@ -105,6 +106,7 @@ def test_decompile_cache_hit_preserves_partial_label_from_sidecar(tmp_path):
     (target_dir / "jadx").mkdir(parents=True)
     (target_dir / "jadx" / "SomeClass.java").write_text("class SomeClass {}")
     (target_dir / "apktool").mkdir(parents=True)
+    (target_dir / "apktool" / "AndroidManifest.xml").write_text("<manifest/>")
     (target_dir / "decompile_status.json").write_text(json.dumps({
         "decompile_completeness": "partial",
         "jadx_exit_code": 1,
@@ -125,7 +127,9 @@ def test_decompile_cache_hit_defaults_to_complete_when_no_sidecar_exists(tmp_pat
     # (the old code could never cache anything else), not a guess.
     target_dir = tmp_path / "prephase4"
     (target_dir / "jadx").mkdir(parents=True)
+    (target_dir / "jadx" / "SomeClass.java").write_text("class SomeClass {}")
     (target_dir / "apktool").mkdir(parents=True)
+    (target_dir / "apktool" / "AndroidManifest.xml").write_text("<manifest/>")
 
     result = decompile(tmp_path / "old.apk", tmp_path, "prephase4")
 
@@ -138,13 +142,56 @@ def test_decompile_uses_cache_without_needing_toolchain(tmp_path):
     apk_hash = "deadbeef"
     target_dir = tmp_path / apk_hash
     (target_dir / "jadx").mkdir(parents=True)
+    (target_dir / "jadx" / "SomeClass.java").write_text("class SomeClass {}")
     (target_dir / "apktool").mkdir(parents=True)
+    (target_dir / "apktool" / "AndroidManifest.xml").write_text("<manifest/>")
 
     result = decompile(tmp_path / "fake.apk", tmp_path, apk_hash)
 
     assert result.status == "success"
     assert result.evidence["cached"] is True
     assert result.evidence["manifest_path"].endswith("AndroidManifest.xml")
+
+
+def test_decompile_detects_hollow_cache_and_recompiles_instead_of_trusting_it(tmp_path, monkeypatch):
+    # Real bug this pins down: the PropertyGuru bundle showed a cache hit
+    # (jadx_dir/apktool_dir both existed) reporting a fresh success against
+    # a jadx_dir with ZERO real .java files, even though the sidecar still
+    # claimed a prior 27,720-file partial decompile - the underlying source
+    # tree had gone empty (cause unconfirmed) while the directory itself
+    # stayed. static_scan() then walked nothing and reported NEITHER with
+    # zero real evidence, indistinguishable from a genuine negative result.
+    apk_hash = "hollowcache"
+    target_dir = tmp_path / apk_hash
+    (target_dir / "jadx").mkdir(parents=True)  # exists, but empty - no .java files
+    (target_dir / "apktool").mkdir(parents=True)  # exists, but no AndroidManifest.xml
+    (target_dir / "decompile_status.json").write_text(json.dumps({
+        "decompile_completeness": "partial", "jadx_exit_code": 1,
+        "jadx_file_count": 27720, "jadx_error_tail": "OutOfMemoryError",
+    }))
+
+    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, capture_output, text, check):
+        if cmd[0].endswith("jadx"):
+            jadx_dir = Path(cmd[2])
+            jadx_dir.mkdir(parents=True, exist_ok=True)
+            (jadx_dir / "RealClass.java").write_text("class RealClass {}")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        apktool_dir = Path(cmd[4])
+        apktool_dir.mkdir(parents=True, exist_ok=True)
+        (apktool_dir / "AndroidManifest.xml").write_text("<manifest/>")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
+
+    result = decompile(tmp_path / "huge.apk", tmp_path, apk_hash)
+
+    # Not trusted as a cache hit - re-decompiled for real instead.
+    assert result.evidence["cached"] is False
+    assert result.evidence["recovered_from_hollow_cache"] is True
+    assert result.evidence["jadx_file_count"] == 1
+    assert result.evidence["decompile_completeness"] == "complete"
 
 
 def test_require_tool_raises_loudly_when_missing():

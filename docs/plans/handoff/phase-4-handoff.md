@@ -37,7 +37,7 @@ The open item from round 3 ("re-run PropertyGuru once more to confirm the SSL nu
 
 **One honest caveat carried forward:** `ROOT_ONLY` is derived from a *partial* decompile (27,720 files, jadx exit 1); absence of SSL signature matches on partial coverage cannot rule out pinning code that never decompiled. The claim being made is "the 0.90 was a false positive and is gone," not "PropertyGuru is provably pinning-free."
 
-**Round-4 step 2 (re-run the 4 known targets) now done.** Fresh bundles for the original UnCrackable1/2/3 APKs and PropertyGuru: `20260731T044158Z`, `20260731T044210Z`, `20260731T044224Z`, `20260731T044237Z`. All three UnCrackable targets classify `ROOT_ONLY` and the real Frida bypass **dynamically confirmed** root (`Root bypassed: True`) — verification_state `dynamically_confirmed`, not just static. PropertyGuru is `ROOT_ONLY` with dynamic `SKIPPED` (honest, no bypass script for a non-target). Calibration Tier 2 root is now `precision 1.00 / recall 1.00 / F1 1.00` at `n=7`; SSL remains `N/A` (0/0), correctly, since nothing has been predicted SSL-positive.
+**Round-4 step 2 (re-run the 4 known targets) now done.** Fresh bundles for the original UnCrackable1/2/3 APKs and PropertyGuru: `20260731T044158Z`, `20260731T044210Z`, `20260731T044224Z`, `20260731T044237Z`. All three UnCrackable targets classify `ROOT_ONLY` and the real Frida bypass **dynamically confirmed** root (`Root bypassed: True`) — verification_state `dynamically_confirmed`, not just static. PropertyGuru is `ROOT_ONLY` with dynamic `SKIPPED` (honest, no bypass script for a non-target). Calibration Tier 2 root is now `precision 1.00 / recall 1.00 / F1 1.00` at `n=7`; SSL remains `N/A` (0/0), correctly, since nothing has been predicted SSL-positive. *(Superseded 2026-07-31 — see "Latest verification session" below: AndroGoat is now predicted SSL-positive, DETECTED 0.80.)*
 
 ## What changed
 
@@ -51,7 +51,7 @@ The open item from round 3 ("re-run PropertyGuru once more to confirm the SSL nu
 
 Run it with `PYTHONPATH=src uv run python -m cli calibration-report` - **note the CLI is now two commands**, `run` (the existing pipeline, unchanged in behavior) and `calibration-report` (new). This is a real, breaking change to the invocation shape if you have anything scripted around the old bare-command form - `run.sh` and `scripts/collect_verification_bundle.py` are both already updated; nothing else in this repo should need touching, but if you have your own local scripts calling `python -m cli --apk ...` directly, they need `run` inserted after `cli` (and the `PYTHONPATH=src` prefix, matching README - the bare `uv run python -m cli` form does not resolve the `cli` module from the repo root).
 
-Today's real numbers, computed against the actual accumulated evidence: Tier 2 root precision/recall/F1 = 1.0 at n=4 (3 UnCrackable targets correctly positive, Contacts correctly negative) - but every real observation sits at confidence ~0.00 or exactly 0.80, so the confidence-calibration curve has zero evidence anywhere near the 0.7 threshold itself. That's the honest caveat to read off it, not "well-calibrated." SSL's Tier 2 precision/recall are `N/A` (0/0) - nothing has ever been predicted SSL-positive yet, which is correct, not a bug.
+Today's real numbers, computed against the actual accumulated evidence: Tier 2 root precision/recall/F1 = 1.0 at n=4 (3 UnCrackable targets correctly positive, Contacts correctly negative) - but every real observation sits at confidence ~0.00 or exactly 0.80, so the confidence-calibration curve has zero evidence anywhere near the 0.7 threshold itself. That's the honest caveat to read off it, not "well-calibrated." SSL's Tier 2 precision/recall are `N/A` (0/0) - nothing has ever been predicted SSL-positive yet, which is correct, not a bug. *(Superseded 2026-07-31 — AndroGoat is now the first predicted SSL-positive, DETECTED 0.80; see "Latest verification session" below. SSL metrics remain N/A because Tier-1 needs a real bypass success-check and Tier-2 excludes the partial-decompile SSL observations.)*
 
 **`scripts/collect_verification_bundle.py`** now also computes and exports a calibration snapshot on every run (`calibration_report_output.txt`, `calibration_runs_snapshot.json` - a portable JSON dump of the `runs` table's calibration-relevant columns, not the raw binary `.db`), since the accumulating calibration dataset is otherwise the project's least-regenerable artifact with no git-committed backup at all.
 
@@ -106,3 +106,46 @@ git push
 - Schema migration tooling (Alembic or similar) - no evidence of need yet.
 - apktool partial-output tolerance - only jadx gets this treatment; no real evidence motivates extending it to apktool.
 - JSON→SQLite backfill - the calibration dataset starts fresh from whatever you run from here forward, deliberately, not migrated from old bundles.
+
+## Latest verification session — 2026-07-31 (SSL positive-control)
+
+The reference machine ran a fresh from-scratch verification of all four `APK_Test/` targets, then sourced and validated intentional SSL-pinning training apps to close the previously-open SSL detection gap. Everything below is backed by pushed bundles/commits.
+
+### All four SSL signatures are now proven to fire on genuine code
+
+| Signature | Weight | Validated on |
+|---|---|---|
+| `okhttp_certificate_pinner` (`CertificatePinner.Builder(`) | 0.5 | AndroGoat — SSL **DETECTED 0.80** |
+| `certificate_pin_hash_literal` (`sha256/…`) | 0.3 | AndroGoat |
+| `network_security_config_pinset` (`<pin-set>`) | 0.5 | RS_CertPinning — SSL 0.50 Inconclusive |
+| `custom_trustmanager_checkservertrusted` (`implements X509TrustManager`) | 0.3 | Conversations — SSL 0.30 Inconclusive |
+
+Prior to this, Tier-1 SSL was `N/A (0/0)` and **no** SSL signature had ever fired on a genuine pinner. This closes that validation gap.
+
+### Two concrete design findings (for the confidence-semantics / attribution design pass)
+
+1. **A network-security-config-only pinner is capped at 0.50 and can never reach `DETECTED` (0.7).** RS_CertPinning is a dedicated cert-pinning app pinning solely via a framework-level `<pin-set>` — the most definitive mechanism on Android — yet scores 0.50 → Inconclusive, because it has no second signature to stack. AndroGoat reached DETECTED only because OkHttp pinning (0.5) plus pin-hash literals (0.3) stacked to 0.8. Same issue applies to an OkHttp-only pinner (0.5 alone).
+2. **The root-side analogue:** InsecureBankv2 has genuine app-owned root detection (`PostLogin.java` `which su` + `/system/app/Superuser.apk`) that scores **0.60 → Inconclusive**, just under the 0.7 threshold. Both are cases where a real, unambiguous signal stays below `DETECTED` — worth deciding if that's intended.
+
+### React Native structural blind spot (correction to earlier R8 framing)
+PropertyGuru is a **React Native** app — its business logic lives in `assets/index.android.bundle` (JS), architecturally invisible to a Java static scan regardless of decompile quality or obfuscation. Its 27,720 decompiled files are largely the bundled SDK/Runtime; the own-package (`com.allproperty`, 41 files) has zero root/SSL indicators. This is a fundamental coverage limit, not an obfuscation issue, and cannot be reached by smali or `.so` scanning.
+
+### Ground-truth additions (first-ever `ssl: true`)
+`config/ground_truth.yaml` now has 7 entries; new ones registered with independently-verified `true` values and `null` where a partial decompile can't prove absence (no forced `false`):
+- **AndroGoat** `a47a8b0d…`: `root: true, ssl: true`
+- **RS_CertPinning** `bea63726…`: `root: null, ssl: true`
+- **InsecureBankv2** `771cdae4…`: `root: true, ssl: null`
+
+### Honest caveat: SSL metrics are unchanged (`N/A`)
+The new `ssl: true` ground truth does **not** move calibration metrics, by design:
+- **Tier 1** SSL needs *dynamic* bypass confirmation — `success_checks/*.py` still hardcode `ssl_bypassed=None` (not implemented). Only a real SSL bypass success-check changes this.
+- **Tier 2** SSL excludes the new observations because both SSL-pinning apps partial-decompiled (`ssl=4` excluded for partial decompile — the collaborator's own exclusion rule, working as intended).
+
+### Pushed evidence
+Bundles: `20260731T121305Z` (AndroGoat), `20260731T121900Z` (RS_CertPinning), `20260731T122244Z` (Vapour), `20260731T122254Z` (InsecureBankv2). Commits: `ca8da1d33` (4 from-scratch targets), `d1e25e779` (AndroGoat), `0a6256387` (RS_CertPinning), `c17dd7266` (Vapour + InsecureBankv2), `71fb320a3` (ground truth).
+
+### Open items for the collaborator
+- Decide whether a single definitive pinning signal (netsec pin-set) should carry enough weight to cross `DETECTED` on its own (weights vs. 0.7 threshold).
+- Implement a real SSL bypass success-check so Tier-1 SSL can move off `N/A`.
+- Register a *fully-decompiling* SSL pinner, or revisit the partial-decompile Tier-2 exclusion, to validate Tier-2 SSL.
+- AndroGoat + RS_CertPinning now stand as the canonical SSL positives; Vapour/Tutanota as SSL negatives; Conversations as a weak-positive (custom TrustManager, not pinning) data point.

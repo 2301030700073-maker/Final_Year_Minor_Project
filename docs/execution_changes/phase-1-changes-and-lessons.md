@@ -485,3 +485,29 @@ This failure is distinct from the jadx issues above — it was a malformed APK, 
 | **Partial decompile** | jadx processed 20,571 classes with 33 errors (0.16%) — pipeline now accepts partial output |
 
 The collaborator's partial-decompile fix (`78bcf0e35`) was critical: previously jadx's 33 errors (0.16% failure rate) would have caused a total pipeline halt, discarding 27,720 successfully decompiled Java files. Now the pipeline continues with a `decompile_completeness: "partial"` marker and scans whatever decompiled.
+
+## Post-Phase 4 SSL Positive-Control Validation (2026-07-31)
+
+Follow-up to the above. The old `BOTH`/SSL 0.90 result above was later confirmed a **false positive** (all OkHttp matches traced to the bundled library, not PropertyGuru's code) and the signatures were revised. This session sourced intentionally-vulnerable training apps to validate the revised SSL signatures against *genuine* pinning — the first time any SSL signature had fired on real code.
+
+### PropertyGuru re-run (post-fix): ROOT_ONLY, not BOTH
+Fresh run now classifies **`ROOT_ONLY`** — root 1.00 (all 13 matches attributed to bundled SDKs: Sentry, Expo, Firebase Crashlytics, play/gms; the app's own `com.allproperty` package has zero root/SSL indicators) and SSL correctly dropped to 0.00. Dynamic SKIPPED (no bypass script for a non-target). It **partial-decompiles** (27,720 files, exit 1) rather than failing outright — the report template's stale "failed to decompile" claim was corrected.
+
+### SSL signatures validated on genuine pinning apps
+| App | SSL | Mechanism validated |
+|---|---|---|
+| **AndroGoat** (OWASP MASTG) | **DETECTED 0.80** | `CertificatePinner.Builder(` + `sha256/…` pin hashes, in own code |
+| **RS_CertPinning** (Redshift) | 0.50 Inconclusive | framework `<pin-set>` in `network_security_config.xml` |
+| **Conversations** (F-Droid XMPP) | 0.30 Inconclusive | custom `implements X509TrustManager` (TOFU, not pinning) |
+| **Vapour** (Redshift) | 0.00 | clean SSL negative |
+| **InsecureBankv2** | 0.00 SSL / root 0.60 Inconclusive | genuine root check (`which su`, Superuser.apk) below DETECTED |
+
+### Two weighting findings
+1. **A network-security-config-only pinner is capped at 0.50 → Inconclusive and can never reach `DETECTED` (0.7)**, because it has no second signature to stack — even though framework-level pinning is the most definitive mechanism. AndroGoat only reached DETECTED via 0.5+0.3 stacking.
+2. **Root analogue:** InsecureBankv2's genuine app-owned root detection scores 0.60, just under the 0.7 threshold.
+
+### React Native structural blind spot (correction to an earlier R8 framing)
+PropertyGuru's logic lives in `assets/index.android.bundle` (JS) — architecturally invisible to a Java static scan, so no smali or `.so` scanning can reach it. The 41-file own package reflects heavy bundling, not just obfuscation.
+
+### Evidence
+Bundles `20260731T121305Z` (AndroGoat), `20260731T121900Z` (RS_CertPinning), `20260731T122244Z` (Vapour), `20260731T122254Z` (InsecureBankv2). Ground truth added first `ssl: true` entries (see `phase-4-handoff.md`). SSL calibration metrics remain `N/A` — Tier-1 needs a real SSL bypass success-check (not implemented), Tier-2 excludes the partial-decompile observations by design.

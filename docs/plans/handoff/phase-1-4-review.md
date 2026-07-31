@@ -25,7 +25,7 @@ This document states, per phase, **what is working (with proof), what is missing
 
 ### Working (proof)
 - Decompile (jadx/apktool) with hash-caching, partial-output tolerance, and the hollow-cache fix. Proof: real PropertyGuru run rebuilt the hollow cache and hit it as a 123ms cache hit (`20260731T043558Z/cli_output.txt`, `decompile.py:58-88`); commits `20f5b5fda`, `7ad74f9d8`.
-- Signature matcher + weighted confidence + decision engine: root and SSL evidence with file:line, per-category confidence, `ROOT_ONLY`/`SSL_ONLY`/`BOTH`/`NEITHER`. Proof: 145 unit tests pass; UnCrackable reports show correct decisions and evidence lines.
+- Signature matcher + weighted confidence + decision engine: root and SSL evidence with file:line, per-category confidence, `ROOT_ONLY`/`SSL_ONLY`/`BOTH`/`NEITHER`. Proof: 150 unit tests pass; UnCrackable reports show correct decisions and evidence lines.
 - SSL false-positive fix validated non-vacuously: over PropertyGuru's real 27,720-file tree, the pre-fix patterns matched 151× and the post-fix patterns match 0×; genuine pinning still matches (tests). Proof: `20260731T043558Z/reports/.../ee52fa64.md`, `tests/unit/test_signatures.py`.
 
 ### Missing (gap → solution)
@@ -83,7 +83,17 @@ This document states, per phase, **what is working (with proof), what is missing
 | SSL 0.90→0.00 (PropertyGuru), attribution line | `docs/plans/handoff/bundles/20260731T043558Z/reports/08e94c06.../ee52fa64.md` |
 | Hollow-cache + graceful-dynamic fixes | commits `20f5b5fda`, `7ad74f9d8`; `20260731T043558Z/cli_output.txt` |
 | 7 real F-Droid apps all NEITHER | bundles `20260731T052025Z` (K-9), `052040Z` (NewPipe), `052056Z` (Wikipedia) + reports for Mullvad/Conversations/Tutanota/Nextcloud |
-| 145 unit tests pass | `uv run pytest tests/unit` |
+| 150 unit tests pass | `uv run pytest tests/unit` |
 | Calibration root Tier 2 = 1.00/1.00/1.00 at n=8 | `PYTHONPATH=src uv run python -m cli calibration-report` |
 
 **Out of scope:** no core code changes, no Phases 5-7, no new phase. This document is the review deliverable for the collaborator to decide what to fix.
+
+## Corrections + verification update — 2026-07-31
+
+Facts verified on the reference machine after this review was written; the review's own "nothing asserted without a cite" standard applied back to it.
+
+- **"7 real F-Droid apps all NEITHER" is overstated — only 3 have pushed evidence.** Only K-9, NewPipe, and Wikipedia have real bundles; the claimed Mullvad/Conversations/Tutanota/Nextcloud reports have zero trace in the repo. All three evidenced controls are `partial` decompiles, so they're excluded from Tier-2 (matching the exclusion design). (Collaborator confirmed this independently.)
+- **Calibration `n` moved:** root Tier-2 is now `1.00/1.00/1.00` at **n=15** (was n=8 above), root Tier-1 confirmation `0.88 (14/16)`.
+- **All four SSL signatures are now validated on genuine code** (SSL detection path proven to fire — see `phase-4-handoff.md` "Latest verification session"): AndroGoat (okhttp + pin-hash, SSL DETECTED 0.80), RS_CertPinning (netsec pin-set, 0.50), Conversations (custom TrustManager, 0.30).
+- **Ground truth now has its first `ssl: true` entries** (AndroGoat, RS_CertPinning) plus InsecureBankv2 root — see `phase-4-handoff.md`.
+- **PropertyGuru re-decompiled successfully this session** (27,720 files, partial, exit 1) — it no longer "fails outright"; the report template's stale claim was corrected (`src/report/generator.py`).

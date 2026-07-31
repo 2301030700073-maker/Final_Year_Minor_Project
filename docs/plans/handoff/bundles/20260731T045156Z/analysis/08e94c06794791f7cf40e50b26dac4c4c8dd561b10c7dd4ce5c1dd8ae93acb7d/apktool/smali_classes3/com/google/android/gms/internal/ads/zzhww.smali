@@ -1,0 +1,31 @@
+.class public interface abstract Lcom/google/android/gms/internal/ads/zzhww;
+.super Ljava/lang/Object;
+.source "com.google.android.gms:play-services-ads-api@@24.7.0"
+
+# interfaces
+.implements Lcom/google/android/gms/internal/ads/zzhxa;
+
+
+# virtual methods
+.method public abstract zze(I)Lcom/google/android/gms/internal/ads/zzhww;
+.end method
+
+.method public abstract zzf(I)I
+.end method
+
+.method public abstract zzg(II)I
+.end method
+
+.method public bridge synthetic zzh(I)Lcom/google/android/gms/internal/ads/zzhxa;
+    .locals 0
+
+    .line 1
+    invoke-interface {p0, p1}, Lcom/google/android/gms/internal/ads/zzhww;->zze(I)Lcom/google/android/gms/internal/ads/zzhww;
+
+    move-result-object p1
+
+    return-object p1
+.end method
+
+.method public abstract zzi(I)V
+.end method

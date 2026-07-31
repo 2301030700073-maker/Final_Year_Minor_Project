@@ -9,6 +9,7 @@ from jinja2 import Template
 
 from calibration.report import CalibrationReport
 from common import ClassificationResult, CorrelationResult, StageResult, VerificationResult
+from report import attribution as attribution_module
 
 TEMPLATE = Template("""\
 # Analysis Report
@@ -29,6 +30,11 @@ TEMPLATE = Template("""\
 {% for e in classification.root.evidence -%}
 - `{{ e.signature_id }}` at {{ e.file }}:{{ e.line_or_offset }} - `{{ e.matched_text }}`
 {% endfor %}
+{% if root_attribution and root_attribution.all_third_party -%}
+> **Attribution:** all {{ root_attribution.third_party }} root-detection matches are in bundled third-party libraries ({{ root_attribution.vendors | join(', ') }}), none in the app's own package (`{{ root_attribution.app_package }}`) - consistent with SDK telemetry/fraud-detection root-checks, not necessarily the app's own anti-tampering logic.
+{% elif root_attribution and root_attribution.mixed -%}
+> **Attribution:** root-detection matches split across the app's own package ({{ root_attribution.app_owned }}) and bundled third-party libraries ({{ root_attribution.third_party }}: {{ root_attribution.vendors | join(', ') }}).
+{% endif %}
 ### SSL-pinning
 - Confidence: {{ "%.2f"|format(classification.ssl.confidence) }} -> {{ "DETECTED" if classification.ssl.detected else "Inconclusive" }}
 {% for e in classification.ssl.evidence -%}
@@ -107,10 +113,20 @@ def generate_report(
         dynamic_skip_reason=dynamic_skip_reason,
         correlation=correlation,
         stage_results=stage_results,
+        root_attribution=_root_attribution(metadata, classification),
         **_decompile_summary(stage_results),
     )
     report_path.write_text(content, encoding="utf-8")
     return report_path
+
+
+def _root_attribution(metadata: dict, classification: ClassificationResult) -> dict | None:
+    """Classify root-detection evidence as app-owned vs bundled third-party, so
+    the report can say plainly when a DETECTED root verdict is entirely from
+    bundled SDKs (real PropertyGuru case) rather than the app's own logic.
+    Returns None when there's no root evidence to attribute."""
+    package_name = (metadata.get("package") or {}).get("package_name", "")
+    return attribution_module.attribute_root_evidence(package_name, classification.root.evidence)
 
 
 def _decompile_summary(stage_results: list[StageResult]) -> dict:

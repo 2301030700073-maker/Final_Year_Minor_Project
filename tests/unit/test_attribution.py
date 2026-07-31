@@ -1,0 +1,84 @@
+"""Pure attribution logic - no device, no toolchain, unit-testable anywhere."""
+
+from dataclasses import dataclass
+
+from report import attribution
+
+
+@dataclass
+class _FakeEvidence:
+    file: str
+
+
+PG = "com.allproperty.android.consumer.my"
+
+
+def test_derive_namespace_from_sources_path():
+    ns = attribution.derive_namespace("sources/io/sentry/android/core/internal/util/RootChecker.java")
+    assert ns == "io.sentry.android.core.internal.util"
+
+
+def test_derive_namespace_stops_at_class_filename():
+    ns = attribution.derive_namespace("sources/com/allproperty/foo/Bar.java")
+    assert ns == "com.allproperty.foo"
+
+
+def test_derive_namespace_none_for_bare_filename():
+    assert attribution.derive_namespace("Bar.java") is None
+    assert attribution.derive_namespace("") is None
+
+
+def test_known_third_party_vendors():
+    assert attribution.is_known_third_party("io.sentry.android.core") is True
+    assert attribution.is_known_third_party("com.google.android.gms.ads") is True
+    assert attribution.is_known_third_party("expo.modules.device") is True
+    assert attribution.is_known_third_party("com.allproperty.android.consumer.my") is False
+    # UnCrackable's own root code - MUST NOT be called third-party even though
+    # its namespace differs from its manifest package (owasp.mstg.uncrackable1).
+    assert attribution.is_known_third_party("sg.vantagepoint.a") is False
+
+
+def test_attribute_all_third_party_flags_it():
+    # The real PropertyGuru case: every match is a recognized SDK.
+    evidence = [
+        _FakeEvidence("sources/io/sentry/android/core/internal/util/RootChecker.java"),
+        _FakeEvidence("sources/expo/modules/device/DeviceModule.java"),
+        _FakeEvidence("sources/com/google/firebase/crashlytics/internal/common/CommonUtils.java"),
+    ]
+    result = attribution.attribute_root_evidence(PG, evidence)
+    assert result["app_owned"] == 0
+    assert result["third_party"] == 3
+    assert result["all_third_party"] is True
+    assert result["mixed"] is False
+    assert result["vendors"] == ["com.google", "expo.modules", "io.sentry"]
+
+
+def test_attribute_app_own_code_not_flagged_third_party():
+    # UnCrackable's root code lives under sg.vantagepoint, not its manifest
+    # package - this must be treated as the app's own code, never third-party.
+    evidence = [
+        _FakeEvidence("sources/sg/vantagepoint/a/c.java"),
+        _FakeEvidence("sources/sg/vantagepoint/a/c.java"),
+    ]
+    result = attribution.attribute_root_evidence("owasp.mstg.uncrackable1", evidence)
+    assert result["app_owned"] == 2
+    assert result["third_party"] == 0
+    assert result["all_third_party"] is False
+    assert result["mixed"] is False
+    assert result["vendors"] == []
+
+
+def test_attribute_mixed_app_and_third_party():
+    evidence = [
+        _FakeEvidence("sources/sg/vantagepoint/util/RootDetection.java"),
+        _FakeEvidence("sources/io/sentry/android/core/internal/util/RootChecker.java"),
+    ]
+    result = attribution.attribute_root_evidence("owasp.mstg.uncrackable1", evidence)
+    assert result["app_owned"] == 1
+    assert result["third_party"] == 1
+    assert result["all_third_party"] is False
+    assert result["mixed"] is True
+
+
+def test_attribute_no_evidence_returns_none():
+    assert attribution.attribute_root_evidence(PG, []) is None

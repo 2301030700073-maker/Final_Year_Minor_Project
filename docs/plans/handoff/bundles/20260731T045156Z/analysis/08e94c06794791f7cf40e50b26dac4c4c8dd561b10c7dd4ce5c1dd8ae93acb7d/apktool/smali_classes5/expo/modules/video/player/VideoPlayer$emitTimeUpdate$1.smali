@@ -1,0 +1,239 @@
+.class final Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;
+.super Lkotlin/coroutines/jvm/internal/SuspendLambda;
+.source "VideoPlayer.kt"
+
+# interfaces
+.implements Lkotlin/jvm/functions/Function2;
+
+
+# annotations
+.annotation system Ldalvik/annotation/EnclosingMethod;
+    value = Lexpo/modules/video/player/VideoPlayer;->emitTimeUpdate()V
+.end annotation
+
+.annotation system Ldalvik/annotation/InnerClass;
+    accessFlags = 0x18
+    name = null
+.end annotation
+
+.annotation system Ldalvik/annotation/Signature;
+    value = {
+        "Lkotlin/coroutines/jvm/internal/SuspendLambda;",
+        "Lkotlin/jvm/functions/Function2<",
+        "Lkotlinx/coroutines/CoroutineScope;",
+        "Lkotlin/coroutines/Continuation<",
+        "-",
+        "Lkotlin/Unit;",
+        ">;",
+        "Ljava/lang/Object;",
+        ">;"
+    }
+.end annotation
+
+.annotation runtime Lkotlin/Metadata;
+    d1 = {
+        "\u0000\n\n\u0000\n\u0002\u0010\u0002\n\u0002\u0018\u0002\u0010\u0000\u001a\u00020\u0001*\u00020\u0002H\n"
+    }
+    d2 = {
+        "<anonymous>",
+        "",
+        "Lkotlinx/coroutines/CoroutineScope;"
+    }
+    k = 0x3
+    mv = {
+        0x2,
+        0x0,
+        0x0
+    }
+    xi = 0x30
+.end annotation
+
+.annotation runtime Lkotlin/coroutines/jvm/internal/DebugMetadata;
+    c = "expo.modules.video.player.VideoPlayer$emitTimeUpdate$1"
+    f = "VideoPlayer.kt"
+    i = {}
+    l = {}
+    m = "invokeSuspend"
+    n = {}
+    s = {}
+.end annotation
+
+
+# instance fields
+.field label:I
+
+.field final synthetic this$0:Lexpo/modules/video/player/VideoPlayer;
+
+
+# direct methods
+.method constructor <init>(Lexpo/modules/video/player/VideoPlayer;Lkotlin/coroutines/Continuation;)V
+    .locals 0
+    .annotation system Ldalvik/annotation/Signature;
+        value = {
+            "(",
+            "Lexpo/modules/video/player/VideoPlayer;",
+            "Lkotlin/coroutines/Continuation<",
+            "-",
+            "Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;",
+            ">;)V"
+        }
+    .end annotation
+
+    iput-object p1, p0, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;->this$0:Lexpo/modules/video/player/VideoPlayer;
+
+    const/4 p1, 0x2
+
+    invoke-direct {p0, p1, p2}, Lkotlin/coroutines/jvm/internal/SuspendLambda;-><init>(ILkotlin/coroutines/Continuation;)V
+
+    return-void
+.end method
+
+
+# virtual methods
+.method public final create(Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Lkotlin/coroutines/Continuation;
+    .locals 1
+    .annotation system Ldalvik/annotation/Signature;
+        value = {
+            "(",
+            "Ljava/lang/Object;",
+            "Lkotlin/coroutines/Continuation<",
+            "*>;)",
+            "Lkotlin/coroutines/Continuation<",
+            "Lkotlin/Unit;",
+            ">;"
+        }
+    .end annotation
+
+    new-instance p1, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;
+
+    iget-object v0, p0, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;->this$0:Lexpo/modules/video/player/VideoPlayer;
+
+    invoke-direct {p1, v0, p2}, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;-><init>(Lexpo/modules/video/player/VideoPlayer;Lkotlin/coroutines/Continuation;)V
+
+    check-cast p1, Lkotlin/coroutines/Continuation;
+
+    return-object p1
+.end method
+
+.method public bridge synthetic invoke(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+    .locals 0
+
+    check-cast p1, Lkotlinx/coroutines/CoroutineScope;
+
+    check-cast p2, Lkotlin/coroutines/Continuation;
+
+    invoke-virtual {p0, p1, p2}, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;->invoke(Lkotlinx/coroutines/CoroutineScope;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+
+    move-result-object p1
+
+    return-object p1
+.end method
+
+.method public final invoke(Lkotlinx/coroutines/CoroutineScope;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+    .locals 0
+    .annotation system Ldalvik/annotation/Signature;
+        value = {
+            "(",
+            "Lkotlinx/coroutines/CoroutineScope;",
+            "Lkotlin/coroutines/Continuation<",
+            "-",
+            "Lkotlin/Unit;",
+            ">;)",
+            "Ljava/lang/Object;"
+        }
+    .end annotation
+
+    invoke-virtual {p0, p1, p2}, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;->create(Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Lkotlin/coroutines/Continuation;
+
+    move-result-object p1
+
+    check-cast p1, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;
+
+    sget-object p2, Lkotlin/Unit;->INSTANCE:Lkotlin/Unit;
+
+    invoke-virtual {p1, p2}, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;->invokeSuspend(Ljava/lang/Object;)Ljava/lang/Object;
+
+    move-result-object p1
+
+    return-object p1
+.end method
+
+.method public final invokeSuspend(Ljava/lang/Object;)Ljava/lang/Object;
+    .locals 8
+
+    invoke-static {}, Lkotlin/coroutines/intrinsics/IntrinsicsKt;->getCOROUTINE_SUSPENDED()Ljava/lang/Object;
+
+    .line 416
+    iget v0, p0, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;->label:I
+
+    if-nez v0, :cond_0
+
+    invoke-static {p1}, Lkotlin/ResultKt;->throwOnFailure(Ljava/lang/Object;)V
+
+    .line 417
+    new-instance p1, Lexpo/modules/video/records/TimeUpdate;
+
+    iget-object v0, p0, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;->this$0:Lexpo/modules/video/player/VideoPlayer;
+
+    invoke-virtual {v0}, Lexpo/modules/video/player/VideoPlayer;->getPlayer()Landroidx/media3/exoplayer/ExoPlayer;
+
+    move-result-object v0
+
+    invoke-interface {v0}, Landroidx/media3/exoplayer/ExoPlayer;->getCurrentPosition()J
+
+    move-result-wide v0
+
+    long-to-double v0, v0
+
+    const-wide v2, 0x408f400000000000L    # 1000.0
+
+    div-double v2, v0, v2
+
+    iget-object v0, p0, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;->this$0:Lexpo/modules/video/player/VideoPlayer;
+
+    invoke-virtual {v0}, Lexpo/modules/video/player/VideoPlayer;->getCurrentOffsetFromLive()Ljava/lang/Float;
+
+    move-result-object v4
+
+    iget-object v0, p0, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;->this$0:Lexpo/modules/video/player/VideoPlayer;
+
+    invoke-virtual {v0}, Lexpo/modules/video/player/VideoPlayer;->getCurrentLiveTimestamp()Ljava/lang/Long;
+
+    move-result-object v5
+
+    iget-object v0, p0, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;->this$0:Lexpo/modules/video/player/VideoPlayer;
+
+    invoke-virtual {v0}, Lexpo/modules/video/player/VideoPlayer;->getBufferedPosition()D
+
+    move-result-wide v6
+
+    move-object v1, p1
+
+    invoke-direct/range {v1 .. v7}, Lexpo/modules/video/records/TimeUpdate;-><init>(DLjava/lang/Float;Ljava/lang/Long;D)V
+
+    .line 418
+    iget-object v0, p0, Lexpo/modules/video/player/VideoPlayer$emitTimeUpdate$1;->this$0:Lexpo/modules/video/player/VideoPlayer;
+
+    new-instance v1, Lexpo/modules/video/player/PlayerEvent$TimeUpdated;
+
+    invoke-direct {v1, p1}, Lexpo/modules/video/player/PlayerEvent$TimeUpdated;-><init>(Lexpo/modules/video/records/TimeUpdate;)V
+
+    check-cast v1, Lexpo/modules/video/player/PlayerEvent;
+
+    invoke-static {v0, v1}, Lexpo/modules/video/player/VideoPlayer;->access$sendEvent(Lexpo/modules/video/player/VideoPlayer;Lexpo/modules/video/player/PlayerEvent;)V
+
+    .line 419
+    sget-object p1, Lkotlin/Unit;->INSTANCE:Lkotlin/Unit;
+
+    return-object p1
+
+    .line 416
+    :cond_0
+    new-instance p1, Ljava/lang/IllegalStateException;
+
+    const-string v0, "call to \'resume\' before \'invoke\' with coroutine"
+
+    invoke-direct {p1, v0}, Ljava/lang/IllegalStateException;-><init>(Ljava/lang/String;)V
+
+    throw p1
+.end method

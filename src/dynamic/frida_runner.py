@@ -68,7 +68,24 @@ def run_dynamic_stage(
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
-        script_names = SCRIPTS_BY_TARGET_ACTION[target][action]
+        script_names = SCRIPTS_BY_TARGET_ACTION.get(target, {}).get(action)
+        if script_names is None:
+            # Unknown target, or a known target with no script for this action:
+            # that's not a pipeline error, it's just nothing we can bypass.
+            # Degrade gracefully instead of a bare KeyError halting the whole
+            # run - surfaced honestly in the report as "not dynamically
+            # verified" with the reason, never silently. Confirmed real failure
+            # mode against a production app run with an unrecognized --target.
+            return StageResult(
+                stage="dynamic", status="skipped",
+                evidence={
+                    "reason": (
+                        f"no bypass script available for target '{target}' "
+                        f"(action {action.value}) - not dynamically verified"
+                    )
+                },
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
         device, session, pid = attach(device_serial, package_name)
 
         def on_message(message, data):

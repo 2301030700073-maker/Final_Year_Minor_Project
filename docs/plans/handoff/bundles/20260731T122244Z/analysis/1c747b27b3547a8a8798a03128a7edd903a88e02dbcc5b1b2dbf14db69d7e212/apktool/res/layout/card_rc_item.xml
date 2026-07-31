@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView android:id="@id/singleItemCardView" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_margin="5.0dp" android:elevation="8.0dp" app:cardBackgroundColor="@color/color2" app:cardCornerRadius="4.0dp"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <LinearLayout android:orientation="vertical" android:background="@color/color2" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_margin="3.0dp">
+        <TextView android:textColor="@color/black" android:id="@id/card_name" android:background="@color/color2" android:padding="3.0dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Card Name" />
+        <LinearLayout android:orientation="horizontal" android:background="@color/color2" android:layout_width="match_parent" android:layout_height="wrap_content" android:weightSum="2.0">
+            <ImageView android:id="@id/card_pic" android:padding="2.0dp" android:layout_width="100.0dp" android:layout_height="100.0dp" android:src="@drawable/ic_baseline_credit_card_24" />
+            <LinearLayout android:orientation="vertical" android:background="@color/color2" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_margin="3.0dp">
+                <TextView android:textColor="@color/black" android:id="@id/card_nummber" android:background="@color/color2" android:padding="3.0dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Card Number" android:layout_weight="1.0" />
+                <LinearLayout android:orientation="horizontal" android:background="@color/color2" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_margin="3.0dp">
+                    <TextView android:textColor="@color/black" android:id="@id/Expire_date" android:background="@color/color2" android:padding="3.0dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Expiry date" android:layout_weight="1.0" />
+                    <TextView android:textColor="@color/black" android:id="@id/card_cvv" android:background="@color/color2" android:padding="3.0dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="CVV" android:layout_weight="1.0" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</androidx.cardview.widget.CardView>

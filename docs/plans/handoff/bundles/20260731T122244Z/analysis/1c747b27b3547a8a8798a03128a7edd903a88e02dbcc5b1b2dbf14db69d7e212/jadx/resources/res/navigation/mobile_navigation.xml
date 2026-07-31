@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/mobile_navigation"
+    app:startDestination="@+id/nav_home">
+    <fragment
+        android:label="@string/menu_home"
+        android:name="com.redshift.rs_vapourtraining.ui.home.HomeFragment"
+        android:id="@+id/nav_home"/>
+    <fragment
+        android:label="@string/menu_store"
+        android:name="com.redshift.rs_vapourtraining.ui.Store.StoreFragment"
+        android:id="@+id/nav_store"/>
+    <fragment
+        android:label="@string/menu_creds"
+        android:name="com.redshift.rs_vapourtraining.ui.BuyCredits.BuyCreditsFragment"
+        android:id="@+id/nav_buy_creds"/>
+    <fragment
+        android:label="@string/menu_cards"
+        android:name="com.redshift.rs_vapourtraining.ui.AddCards.AddCardsFragment"
+        android:id="@+id/nav_add_cards"/>
+</navigation>

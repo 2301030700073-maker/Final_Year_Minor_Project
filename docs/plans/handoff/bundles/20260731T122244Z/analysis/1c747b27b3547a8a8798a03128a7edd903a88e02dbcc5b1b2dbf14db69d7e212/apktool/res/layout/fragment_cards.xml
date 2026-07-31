@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout android:layout_width="match_parent" android:layout_height="match_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <LinearLayout android:orientation="vertical" android:background="@color/color2" android:layout_width="match_parent" android:layout_height="match_parent" android:layout_weight="1.0">
+        <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_margin="3.0dp">
+            <TextView android:textSize="25.0sp" android:layout_gravity="left" android:id="@id/textView9" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="User Cards:" />
+            <TextView android:textSize="25.0sp" android:layout_gravity="left" android:id="@id/blank" android:layout_width="97.0dp" android:layout_height="wrap_content" android:text="" />
+            <Button android:layout_gravity="right" android:id="@id/add_card" android:layout_width="206.0dp" android:layout_height="wrap_content" android:text="Add Card" android:layout_weight="1.0" />
+        </LinearLayout>
+        <RelativeLayout android:background="@color/color1" android:layout_width="match_parent" android:layout_height="match_parent">
+            <androidx.recyclerview.widget.RecyclerView android:id="@id/idRVCardsOwned" android:background="@android:color/transparent" android:layout_width="match_parent" android:layout_height="match_parent" />
+        </RelativeLayout>
+    </LinearLayout>
+    <TextView android:textSize="20.0sp" android:id="@id/text_cards" android:layout_width="match_parent" android:layout_height="wrap_content" android:textAlignment="center" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintTop_toTopOf="parent" />
+</androidx.constraintlayout.widget.ConstraintLayout>

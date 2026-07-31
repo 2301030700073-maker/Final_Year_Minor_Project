@@ -1,0 +1,466 @@
+{
+  "classification": {
+    "action": "ROOT_ONLY",
+    "root": {
+      "confidence": 0.8,
+      "detected": true,
+      "evidence": [
+        {
+          "signature_id": "root_build_tags_test_keys",
+          "file": "sources/sg/vantagepoint/a/b.java",
+          "line_or_offset": 19,
+          "matched_text": "test-keys"
+        },
+        {
+          "signature_id": "root_su_via_path_env_check",
+          "file": "sources/sg/vantagepoint/a/b.java",
+          "line_or_offset": 10,
+          "matched_text": "new File(str, \"su\").exists()"
+        },
+        {
+          "signature_id": "root_known_indicator_files",
+          "file": "sources/sg/vantagepoint/a/b.java",
+          "line_or_offset": 23,
+          "matched_text": "/system/app/Superuser.apk"
+        }
+      ]
+    },
+    "ssl": {
+      "confidence": 0.0,
+      "detected": false,
+      "evidence": []
+    },
+    "threshold": 0.7
+  },
+  "verification": {
+    "root_bypassed": true,
+    "ssl_bypassed": null,
+    "evidence_lines": {
+      "hooks_installed": "all three hooked",
+      "hook_fired_sg.vantagepoint.a.b.a": "sg.vantagepoint.a.b.a: forced_result=false",
+      "hook_fired_sg.vantagepoint.a.b.b": "sg.vantagepoint.a.b.b: forced_result=false",
+      "hook_fired_sg.vantagepoint.a.b.c": "sg.vantagepoint.a.b.c: forced_result=false",
+      "hook_fired_sg.vantagepoint.a.a.a": "sg.vantagepoint.a.a.a: forced_result=false",
+      "anti_debug_poll_neutralized": "android.os.Debug.isDebuggerConnected: forced_result=false - NOT root-detection evidence, hooked only as a defensive precaution against the anti-debug watchdog thread"
+    }
+  },
+  "correlation": {
+    "matches": true,
+    "mismatches": []
+  },
+  "stage_results": [
+    {
+      "stage": "ingest",
+      "status": "success",
+      "evidence": {
+        "hashes": {
+          "sha256": "4c7980ef1f6cc29508f38417c2a5b5b7721eeb4a3d7f00a0c1a08f5192fa6ddd",
+          "sha1": "f9b4d88a7e0c99f3007579622be9255ca26833ff",
+          "md5": "f9f31bfe8df27eb74cdb8f14fd7c85df"
+        },
+        "size_bytes": 901022,
+        "package": {
+          "package_name": "owasp.mstg.uncrackable2",
+          "version_code": "1",
+          "version_name": "1.0",
+          "min_sdk": "19",
+          "target_sdk": "28",
+          "permissions": []
+        },
+        "signer": {
+          "v1_verified": true,
+          "v2_verified": true,
+          "v3_verified": false,
+          "certificate_dn": "CN=Jeroen Willemsen, OU=OMTG, O=OWASP, L=Amsterdam, C=NL",
+          "certificate_sha256": "cbe68ab87d64341c3fc78119dc1229e8aa86f93fdb2c33aa61252fd491485b1d"
+        }
+      },
+      "error": null,
+      "duration_ms": 172
+    },
+    {
+      "stage": "audit",
+      "status": "success",
+      "evidence": {
+        "timestamp": "2026-07-30T02:52:52.561975+00:00",
+        "apk_hash": "4c7980ef1f6cc29508f38417c2a5b5b7721eeb4a3d7f00a0c1a08f5192fa6ddd",
+        "justification": "ACADEMIC_TRAINING_TARGET",
+        "operator": "2301030700073-maker",
+        "tool_version": "0.1.0",
+        "git_commit": "2c3627564a63c0ea322d2908c3ff333c9ab487b3"
+      },
+      "error": null,
+      "duration_ms": 0
+    },
+    {
+      "stage": "decompile",
+      "status": "success",
+      "evidence": {
+        "jadx_output": "outputs/analysis/4c7980ef1f6cc29508f38417c2a5b5b7721eeb4a3d7f00a0c1a08f5192fa6ddd/jadx",
+        "apktool_output": "outputs/analysis/4c7980ef1f6cc29508f38417c2a5b5b7721eeb4a3d7f00a0c1a08f5192fa6ddd/apktool",
+        "manifest_path": "outputs/analysis/4c7980ef1f6cc29508f38417c2a5b5b7721eeb4a3d7f00a0c1a08f5192fa6ddd/apktool/AndroidManifest.xml",
+        "cached": true
+      },
+      "error": null,
+      "duration_ms": 0
+    },
+    {
+      "stage": "static_scan",
+      "status": "success",
+      "evidence": {},
+      "error": null,
+      "duration_ms": 253
+    },
+    {
+      "stage": "manifest_parse",
+      "status": "success",
+      "evidence": {},
+      "error": null,
+      "duration_ms": 0
+    },
+    {
+      "stage": "decision_engine",
+      "status": "success",
+      "evidence": {},
+      "error": null,
+      "duration_ms": 0
+    },
+    {
+      "stage": "dynamic",
+      "status": "success",
+      "evidence": {
+        "scripts_applied": [
+          "root_bypass_uncrackable2.js"
+        ],
+        "pid": 17677,
+        "frida_messages": [
+          {
+            "type": "send",
+            "payload": {
+              "hook": "sg.vantagepoint.a.b",
+              "status": "all three hooked"
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "sg.vantagepoint.a.b.a",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "sg.vantagepoint.a.b.b",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "sg.vantagepoint.a.b.c",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "sg.vantagepoint.a.a.a",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          },
+          {
+            "type": "send",
+            "payload": {
+              "hook": "android.os.Debug.isDebuggerConnected",
+              "forced_result": false
+            }
+          }
+        ],
+        "target": "uncrackable2"
+      },
+      "error": null,
+      "duration_ms": 8123
+    }
+  ]
+}

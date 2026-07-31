@@ -1,0 +1,26 @@
+version: 3.0.1
+apkFileName: propertyguru-2026-5-4.apk
+usesFramework:
+  ids:
+  - 1
+sdkInfo:
+  minSdkVersion: 25
+  targetSdkVersion: 35
+versionInfo:
+  versionCode: 202301724
+  versionName: 2026.5.4
+resourcesInfo:
+  packageId: 127
+doNotCompress:
+- arsc
+- jpg
+- png
+- so
+- META-INF/native-image/io.sentry/sentry/native-image.properties
+- assets/dexopt/baseline.prof
+- assets/dexopt/baseline.profm
+- assets/index.android.bundle
+- okhttp3/internal/publicsuffix/publicsuffixes.gz
+- res/raw/_screen_myproperty_src_screens_landing_images_2_myproppropcard.lottie
+- res/raw/_screen_myproperty_src_screens_landing_images_4_myproppushnotif.lottie
+- res/raw/_screen_myproperty_src_screens_landing_images_5_agentproposals.lottie

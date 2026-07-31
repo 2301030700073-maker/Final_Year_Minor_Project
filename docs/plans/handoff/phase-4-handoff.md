@@ -37,6 +37,8 @@ The open item from round 3 ("re-run PropertyGuru once more to confirm the SSL nu
 
 **One honest caveat carried forward:** `ROOT_ONLY` is derived from a *partial* decompile (27,720 files, jadx exit 1); absence of SSL signature matches on partial coverage cannot rule out pinning code that never decompiled. The claim being made is "the 0.90 was a false positive and is gone," not "PropertyGuru is provably pinning-free."
 
+**Round-4 step 2 (re-run the 4 known targets) now done.** Fresh bundles for the original UnCrackable1/2/3 APKs and PropertyGuru: `20260731T044158Z`, `20260731T044210Z`, `20260731T044224Z`, `20260731T044237Z`. All three UnCrackable targets classify `ROOT_ONLY` and the real Frida bypass **dynamically confirmed** root (`Root bypassed: True`) — verification_state `dynamically_confirmed`, not just static. PropertyGuru is `ROOT_ONLY` with dynamic `SKIPPED` (honest, no bypass script for a non-target). Calibration Tier 2 root is now `precision 1.00 / recall 1.00 / F1 1.00` at `n=7`; SSL remains `N/A` (0/0), correctly, since nothing has been predicted SSL-positive.
+
 ## What changed
 
 **SQLite replaces flat JSON.** `src/storage/db.py` (new) - two tables, `apks` and `runs`, not the full 7-table schema `high-level-architecture.md` originally previewed for later phases (corrected there, same "revise rather than silently diverge" pattern as the FR-2.4/FR-2.5 corrections). `storage/results.py` keeps its exact public interface (`save_metadata`, `existing_metadata`, `save_run`) - nothing about how you invoke the pipeline changes. The DB file lives at `outputs/analysis/results.db` (already covered by `.gitignore`'s `outputs/` and bare `*.db` lines - no new ignore rules needed).

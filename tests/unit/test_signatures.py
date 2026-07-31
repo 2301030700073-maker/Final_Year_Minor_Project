@@ -215,3 +215,67 @@ def test_scan_records_correct_line_number(tmp_path):
     matches = [e for e in evidence.root_evidence if e.signature_id == "root_build_tags_test_keys"]
     assert len(matches) == 1
     assert matches[0].line_or_offset == 3
+
+
+def test_scan_no_longer_matches_okhttps_own_library_internals(tmp_path):
+    """Regression test locking in the fix for a real false positive: a real
+    production app (PropertyGuru) scored SSL confidence 0.90 purely from
+    okhttp_certificate_pinner/custom_trustmanager_checkservertrusted
+    matching OkHttp's OWN bundled library source, not app-level pinning
+    code. Lines quoted verbatim from the real decompiled evidence -
+    CertificatePinner.java:75 (a jadx-generated comment referencing the
+    class's own fully-qualified name) and OkHttpClient.java (X509TrustManager
+    used only as a field/parameter type, never `implements`)."""
+    (tmp_path / "CertificatePinner.java").write_text(
+        "        check$okhttp(hostname, new Function0<List<? extends X509Certificate>>() { "
+        "// from class: okhttp3.CertificatePinner$check$1\n"
+    )
+    (tmp_path / "OkHttpClient.java").write_text(
+        "    private final X509TrustManager x509TrustManager;\n"
+        "    public final X509TrustManager getX509TrustManager() {\n"
+        "        return this.x509TrustManager;\n"
+        "    }\n"
+    )
+    (tmp_path / "AndroidCertificateChainCleaner.java").write_text(
+        "            List<X509Certificate> checkServerTrusted = this.x509TrustManagerExtensions."
+        "checkServerTrusted((X509Certificate[]) chain.toArray(new X509Certificate[0]), \"RSA\", hostname);\n"
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")
+
+    evidence = scan(tmp_path, signatures)
+
+    assert evidence.ssl_confidence == 0
+    assert evidence.ssl_evidence == []
+
+
+def test_scan_still_matches_genuine_certificate_pinner_configuration(tmp_path):
+    # The fix must not throw out real positives - actual pin configuration
+    # (the Builder() construction call an app makes to set real pins) still
+    # has to match.
+    (tmp_path / "NetworkModule.java").write_text(
+        "        CertificatePinner pinner = new CertificatePinner.Builder()\n"
+        "            .add(\"example.com\", \"sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\")\n"
+        "            .build();\n"
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")
+
+    evidence = scan(tmp_path, signatures)
+
+    matched_ids = {e.signature_id for e in evidence.ssl_evidence}
+    assert "okhttp_certificate_pinner" in matched_ids
+    assert "certificate_pin_hash_literal" in matched_ids
+    assert evidence.ssl_confidence >= 0.7  # a genuine, fully-configured pinning setup clears threshold
+
+
+def test_scan_still_matches_genuine_custom_trustmanager_implementation(tmp_path):
+    (tmp_path / "PinningTrustManager.java").write_text(
+        "public class PinningTrustManager implements X509TrustManager {\n"
+        "    public void checkServerTrusted(X509Certificate[] chain, String authType) {}\n"
+        "}\n"
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")
+
+    evidence = scan(tmp_path, signatures)
+
+    matched_ids = {e.signature_id for e in evidence.ssl_evidence}
+    assert "custom_trustmanager_checkservertrusted" in matched_ids

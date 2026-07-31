@@ -4,22 +4,47 @@
 # at all (its documented behavior is mainly root/debugger detection plus
 # an encrypted secret; a NEITHER/Inconclusive result for this category
 # is a legitimate, correct outcome, not evidence something's broken).
+#
+# okhttp_certificate_pinner and custom_trustmanager_checkservertrusted were
+# revised after a real production app (PropertyGuru, 151MB, bundles OkHttp)
+# scored SSL confidence 0.90 from these two signatures alone - confirmed
+# false positive, not a real finding, by reading the actual matched files
+# directly: every "okhttp3.CertificatePinner" match traced to OkHttp's OWN
+# library source (including CertificatePinner.java matching its own class
+# name in its own defining file), and every "X509TrustManager" match was a
+# type reference (import/field/parameter/getter) inside OkHttp's plumbing
+# for ACCEPTING a caller-supplied TrustManager, never an actual `implements
+# X509TrustManager`. The 3 "checkServerTrusted" matches were a coincidentally-
+# named local variable calling Android's own platform API
+# (X509TrustManagerExtensions.checkServerTrusted), unrelated to pinning.
+# Neither signature had ever been validated against real SSL-related code
+# before this - UnCrackable1-3 have none at all. Revised, not silently
+# patched - see docs/plans/handoff/phase-4-handoff.md.
 
 - id: okhttp_certificate_pinner
   category: ssl
   weight: 0.5
-  pattern_type: class_reference
+  pattern_type: regex
   patterns:
-    - "okhttp3.CertificatePinner"
-  evidence_type: bytecode_class
+    # Requires the actual Builder() construction call, not just the bare
+    # class name existing (which matches OkHttp's own library code, always
+    # present whenever OkHttp is bundled, pinning configured or not).
+    - 'CertificatePinner\.Builder\s*\('
+  evidence_type: bytecode_string
 
 - id: custom_trustmanager_checkservertrusted
   category: ssl
-  weight: 0.4
+  weight: 0.3
   pattern_type: regex
   patterns:
-    - 'X509TrustManager'
-    - 'checkServerTrusted'
+    # Requires the class declaration itself to state it implements the
+    # interface - not just a reference to the type (a parameter, field,
+    # getter, or import), which is common in any code that merely ACCEPTS
+    # a caller-supplied TrustManager without implementing one itself.
+    # Still not proof of pinning specifically (a custom implementation can
+    # exist for other trust-decision reasons) - lower weight than before
+    # reflects that remaining ambiguity honestly rather than overclaiming.
+    - 'implements\s+[\w<>,\s.]*X509TrustManager'
   evidence_type: bytecode_string
 
 - id: network_security_config_pinset

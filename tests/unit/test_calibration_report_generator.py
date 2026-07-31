@@ -26,3 +26,19 @@ def test_generate_calibration_report_writes_file_with_expected_content(tmp_path)
     assert "abc123" in content
     assert "N/A (no data)" in content  # ssl Tier 1 confirmation rate - never attempted
     assert "SSL bypass verification" in content or "ssl_bypassed=None" in content
+
+
+def test_generate_calibration_report_omits_ssl_note_once_flag_is_false():
+    # Confirms the field genuinely drives the template - not a dead field
+    # duplicated by hardcoded prose (a real gap this closes: the field
+    # existed but nothing ever read it).
+    from dataclasses import replace
+    report = compute_calibration_report(
+        runs=[], ground_truth={}, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+    report = replace(report, ssl_verification_not_implemented=False)
+
+    from report.generator import CALIBRATION_TEMPLATE
+    content = CALIBRATION_TEMPLATE.render(report=report)
+
+    assert "No `success_checks/*.py` module implements SSL bypass verification yet" not in content

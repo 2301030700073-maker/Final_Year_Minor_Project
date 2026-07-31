@@ -193,7 +193,9 @@ Bucket edges always include the real decision threshold explicitly - the one bou
 {% endfor %}
 ## Notes
 
+{% if report.ssl_verification_not_implemented -%}
 - No `success_checks/*.py` module implements SSL bypass verification yet (all three hardcode `ssl_bypassed=None` unconditionally) - an empty/zero SSL Tier 1 result above means "not built yet," not "0% success rate."
+{% endif -%}
 - "Zero false positives" is not a claim this system makes (ADR-0006) - these numbers are measured, improving, and only as reliable as the sample size shown above.
 """)
 

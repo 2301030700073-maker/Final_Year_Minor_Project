@@ -66,6 +66,28 @@ def _git_commit_hash() -> str:
         return "unknown"
 
 
+def _git_last_commit_touching(path: Path) -> str:
+    """The commit that actually last changed `path`, not whatever HEAD
+    happens to be at computation time - stamping HEAD implied a false
+    precision about which exact version of the file a report was computed
+    against, since HEAD moves on every unrelated commit even when the file
+    itself hasn't changed in days."""
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%H", "--", str(path)],
+            capture_output=True, text=True, check=True,
+        )
+        commit = result.stdout.strip()
+        if not commit:
+            return "unknown (no commit history for this file)"
+        dirty = subprocess.run(
+            ["git", "diff", "--quiet", "--", str(path)], capture_output=True,
+        ).returncode != 0
+        return f"{commit} (uncommitted changes present)" if dirty else commit
+    except Exception:
+        return "unknown"
+
+
 def _operator_identity() -> str:
     try:
         result = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True, check=True)
@@ -107,8 +129,16 @@ def run(
     skip_dynamic: bool = typer.Option(False, "--skip-dynamic", help="Skip the dynamic analysis stage"),
     device_serial: Optional[str] = typer.Option(None, "--device", help="Specific device/emulator serial"),
     target: str = typer.Option(
-        "uncrackable1", "--target",
-        help="Which target app this run is analyzing - selects both the Frida bypass script and the success-check module",
+        ..., "--target",
+        help=(
+            "Which target app this run is analyzing - selects the Frida bypass script and "
+            "success-check module. Required, no default: a real app silently analyzed under "
+            "uncrackable1's assumptions would load hooks for classes that don't exist in it, "
+            "producing a misleading correlation mismatch instead of an honest 'not attempted' "
+            "(a real bug this fixes). An unrecognized target (anything other than uncrackable1/2/3) "
+            "is fine and expected for real apps - the dynamic stage degrades gracefully to "
+            "'skipped, no bypass script available' rather than failing."
+        ),
     ),
 ):
     stage_results: list[StageResult] = []
@@ -248,7 +278,7 @@ def calibration_report(
     report = compute_calibration_report(
         runs, gt_entries,
         generated_at=datetime.now(timezone.utc).isoformat(),
-        ground_truth_commit=_git_commit_hash(),
+        ground_truth_commit=_git_last_commit_touching(ground_truth),
     )
 
     def _fmt(rate: float | None) -> str:

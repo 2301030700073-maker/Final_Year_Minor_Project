@@ -87,7 +87,14 @@ class CalibrationReport:
     calibration_curve: dict[Category, list[CalibrationCurveBucket]]
     excluded_no_ground_truth: dict[Category, int] = field(default_factory=dict)
     excluded_partial_decompile: dict[Category, int] = field(default_factory=dict)
-    ssl_verification_not_implemented: bool = True  # see module docstring in dynamic/success_checks/*.py
+    # Manually maintained, not derived from run data - whether any
+    # success_checks/*.py module implements real SSL bypass verification is
+    # a fact about the current codebase, not something a run's data can
+    # tell you (all three currently hardcode ssl_bypassed=None). Flip to
+    # False once a real SSL success-check exists; nothing here would ever
+    # do that automatically, so this must be updated by hand and reviewed
+    # if it ever silently goes stale.
+    ssl_verification_not_implemented: bool = True
     skeleton_warning: str = ""
 
 

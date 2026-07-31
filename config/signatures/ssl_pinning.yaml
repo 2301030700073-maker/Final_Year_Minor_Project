@@ -62,3 +62,19 @@
   patterns:
     - 'sha256/[A-Za-z0-9+/]{20,}={0,2}'
   evidence_type: bytecode_string
+
+- id: network_security_config_pin_digest
+  category: ssl
+  weight: 0.3
+  pattern_type: regex
+  patterns:
+    # Android Network Security Config pins (the framework-enforced mechanism)
+    # are <pin digest="SHA-256">base64</pin>, NOT OkHttp's "sha256/..." form -
+    # so certificate_pin_hash_literal above can never see them. This matches
+    # the real NSC pin element directly. The strict `digest="SHA-256">` anchor
+    # only occurs inside a <pin-set> pin, keeping false positives low. Added
+    # after RS_CertPinning (ground-truth ssl:true) scored only 0.5 from
+    # network_security_config_pinset alone: a definitive framework-enforced
+    # <pin-set> with real SHA-256 pins was invisible to the old hash signature.
+    - 'digest="SHA-256">[A-Za-z0-9+/]{20,}={0,2}'
+  evidence_type: resource_xml

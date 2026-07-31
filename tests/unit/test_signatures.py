@@ -267,6 +267,36 @@ def test_scan_still_matches_genuine_certificate_pinner_configuration(tmp_path):
     assert evidence.ssl_confidence >= 0.7  # a genuine, fully-configured pinning setup clears threshold
 
 
+def test_scan_matches_network_security_config_pinning(tmp_path):
+    """Lock in the NSC pin-format gap (the definitive, framework-enforced
+    mechanism the old hash signature ignored). A real res/xml/
+    network_security_config.xml <pin-set> with SHA-256 pin digests must clear
+    the 0.7 threshold - the exact format RS_CertPinning uses (ground-truth
+    ssl:true). Mirrors the OkHttp case above for the NSC path. Line quoted
+    verbatim from RS_CertPinning's real decompiled config."""
+    xml_dir = tmp_path / "res" / "xml"
+    xml_dir.mkdir(parents=True)
+    (xml_dir / "network_security_config.xml").write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<network-security-config>\n'
+        '    <domain-config cleartextTrafficPermitted="false">\n'
+        '        <domain includeSubdomains="true">redshift.co.za</domain>\n'
+        '        <pin-set expiration="2022-12-12">\n'
+        '            <pin digest="SHA-256">I5BOcK7tESNS+BBUyECFrINDAEmtrUjoo/YVT539mP0=</pin>\n'
+        '        </pin-set>\n'
+        '    </domain-config>\n'
+        '</network-security-config>\n'
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")
+
+    evidence = scan(tmp_path, signatures)
+
+    matched_ids = {e.signature_id for e in evidence.ssl_evidence}
+    assert "network_security_config_pinset" in matched_ids
+    assert "network_security_config_pin_digest" in matched_ids
+    assert evidence.ssl_confidence >= 0.7
+
+
 def test_scan_still_matches_genuine_custom_trustmanager_implementation(tmp_path):
     (tmp_path / "PinningTrustManager.java").write_text(
         "public class PinningTrustManager implements X509TrustManager {\n"

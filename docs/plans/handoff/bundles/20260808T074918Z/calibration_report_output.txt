@@ -1,0 +1,12 @@
+                                 Calibration Summary                                  
+┏━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━┓
+┃ Category ┃ Tier 1 confirmation ┃ Tier 2 precision ┃ Tier 2 recall ┃ Tier 2 F1 ┃ n  ┃
+┡━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━┩
+│ root     │ 0.90 (19/21)        │ 1.00             │ 1.00          │ 1.00      │ 20 │
+│ ssl      │ 1.00 (1/1)          │ N/A              │ N/A           │ N/A       │ 20 │
+└──────────┴─────────────────────┴──────────────────┴───────────────┴───────────┴────┘
+Note: ssl Tier 2 is N/A - 10 ground-truth observation(s) were excluded as partial decompiles; a Tier-2 verdict needs an 
+ssl:true target that decompiles completely, otherwise there is no true-positive to measure precision/recall against.
+
+Calibration report: outputs/reports/calibration/20260808T074938Z.md
+

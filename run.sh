@@ -159,7 +159,7 @@ if $ALL_OK && ! $SKIP_PIPELINE && ! $CHECK_ONLY; then
     echo ""
     echo "─── 8. Run pipeline ───"
     uv sync 2>/dev/null
-    python -u scripts/collect_verification_bundle.py \
+    uv run python -u scripts/collect_verification_bundle.py \
         --apk "$APK_FILE" \
         --justification ACADEMIC_TRAINING_TARGET \
         --target "$TARGET" 2>&1

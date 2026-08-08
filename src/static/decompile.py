@@ -8,9 +8,16 @@ DEX). Previously this was indistinguishable from "wrote nothing at all" and
 discarded wholesale as status=failed, even though static analysis could
 have scanned what DID decompile. "Wrote zero files" is still a hard
 failure - this only tolerates a crash that left real, scannable output
-behind. apktool gets no such tolerance yet: no real evidence motivates it
-(same evidence-before-building discipline FR-2.4/FR-2.5 were dropped
-under).
+behind. The same partial-tolerance now applies to apktool (D2): an apktool
+crash that still wrote AndroidManifest.xml keeps the jadx output and marks
+the run partial; apktool writing nothing is still a hard failure.
+
+Both tools run under a timeout (D1 - a hung/OOM jadx must fail loudly, not
+hang forever, per NFR-1) and stream output to a log file rather than
+buffering it in RAM via capture_output (D3 - a successful 151MB decompile
+can otherwise hold megabytes of progress text that only the last 4KB are
+ever used). Only the hollow half of a hollow cache is re-decompiled (D5),
+and a successful apktool that wrote no manifest is treated as failure (D4).
 """
 
 from __future__ import annotations
@@ -24,6 +31,14 @@ from pathlib import Path
 from common import StageResult
 
 STATUS_SIDECAR_NAME = "decompile_status.json"
+
+# D1: hard ceilings so a hung tool fails loudly instead of hanging forever.
+# jadx gets more headroom - it is the slower, more memory-hungry of the two,
+# and large/obfuscated APKs (the module's own PropertyGuru note) push it.
+JADX_TIMEOUT = 600
+APKTOOL_TIMEOUT = 300
+
+_TIMEOUT_RC = -9  # sentinel for "killed by our timeout", distinct from any real exit code
 
 
 def _require_tool(name: str) -> str:
@@ -68,6 +83,36 @@ def _has_real_cached_content(jadx_dir: Path, apktool_dir: Path) -> bool:
     return _count_java_files(jadx_dir) > 0 and (apktool_dir / "AndroidManifest.xml").exists()
 
 
+def _run_tool_logged(cmd: list[str], log_path: Path, timeout_s: int, what: str) -> tuple[int, str]:
+    """Run one tool, streaming its combined stdout+stderr to log_path (D3 -
+    capture_output would buffer megabytes of progress text in RAM that only
+    the tail is ever used). Returns (returncode, log_text). returncode is the
+    process exit code, or _TIMEOUT_RC if it was killed by the timeout (D1)."""
+    log_path = Path(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "w", encoding="utf-8") as logf:
+        try:
+            proc = subprocess.run(
+                cmd, stdout=logf, stderr=subprocess.STDOUT, timeout=timeout_s,
+            )
+            returncode = proc.returncode
+        except subprocess.TimeoutExpired:
+            logf.write(f"\n[{what} timed out after {timeout_s}s - process killed]\n")
+            returncode = _TIMEOUT_RC
+    return returncode, (log_path.read_text(encoding="utf-8") if log_path.exists() else "")
+
+
+def _build_error_tail(jadx_rc: int, jadx_log: str, apktool_rc: int, apktool_log: str) -> str | None:
+    """Combine whatever failed (jadx, apktool, or both) into one error tail;
+    None when both succeeded and there is nothing to surface."""
+    parts = []
+    if jadx_rc != 0:
+        parts.append(f"jadx exited {jadx_rc}\n{_tail(jadx_log)}")
+    if apktool_rc != 0:
+        parts.append(f"apktool exited {apktool_rc}\n{_tail(apktool_log)}")
+    return None if not parts else "\n".join(parts)
+
+
 def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
     start = time.monotonic()
     try:
@@ -81,26 +126,24 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         if jadx_dir.exists() and apktool_dir.exists():
             if _has_real_cached_content(jadx_dir, apktool_dir):
                 return _cached_result(start, jadx_dir, apktool_dir, status_sidecar)
-            # Exists but hollow - don't trust it, and don't leave ambiguous
-            # stale state behind either. Clear it and re-decompile for real.
-            shutil.rmtree(jadx_dir, ignore_errors=True)
-            shutil.rmtree(apktool_dir, ignore_errors=True)
             cache_was_hollow = True
 
         jadx = _require_tool("jadx")
         apktool = _require_tool("apktool")
 
-        jadx_returncode = 0
-        jadx_stdout = jadx_stderr = ""
-        try:
-            proc = subprocess.run(
-                [jadx, "-d", str(jadx_dir), str(apk_path)],
-                capture_output=True, text=True, check=True,
+        # D5: re-decompile only the half that is missing or hollow. A hollow
+        # half is cleared before re-running so no ambiguous stale state is
+        # left behind; a valid half (real .java / a real manifest already on
+        # disk from a prior partial run) is reused rather than thrown away.
+        jadx_log = target_dir / "jadx.log"
+        if _count_java_files(jadx_dir) > 0:
+            jadx_returncode, jadx_log_text = 0, ""  # reuse existing valid jadx output
+        else:
+            if jadx_dir.exists():
+                shutil.rmtree(jadx_dir, ignore_errors=True)
+            jadx_returncode, jadx_log_text = _run_tool_logged(
+                [jadx, "-d", str(jadx_dir), str(apk_path)], jadx_log, JADX_TIMEOUT, "jadx",
             )
-            jadx_stdout, jadx_stderr = proc.stdout, proc.stderr
-        except subprocess.CalledProcessError as exc:
-            jadx_returncode = exc.returncode
-            jadx_stdout, jadx_stderr = exc.stdout or "", exc.stderr or ""
 
         jadx_file_count = _count_java_files(jadx_dir)
 
@@ -111,7 +154,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                 stage="decompile", status="failed", evidence={},
                 error=(
                     f"jadx exited {jadx_returncode} and produced no usable output\n"
-                    f"stdout: {_tail(jadx_stdout)}\nstderr: {_tail(jadx_stderr)}"
+                    f"log: {_tail(jadx_log_text)}"
                 ),
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
@@ -119,17 +162,38 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         # jadx either fully succeeded, or crashed but left real output behind -
         # apktool runs either way, since its failure modes are independent of
         # jadx's.
-        subprocess.run(
-            [apktool, "d", "-f", "-o", str(apktool_dir), str(apk_path)],
-            capture_output=True, text=True, check=True,
-        )
+        apktool_log = target_dir / "apktool.log"
+        if (apktool_dir / "AndroidManifest.xml").exists():
+            apktool_returncode, apktool_log_text = 0, ""  # reuse existing valid apktool output
+        else:
+            if apktool_dir.exists():
+                shutil.rmtree(apktool_dir, ignore_errors=True)
+            apktool_returncode, apktool_log_text = _run_tool_logged(
+                [apktool, "d", "-f", "-o", str(apktool_dir), str(apk_path)], apktool_log, APKTOOL_TIMEOUT, "apktool",
+            )
 
-        completeness = "complete" if jadx_returncode == 0 else "partial"
-        error_tail = None if jadx_returncode == 0 else _tail(jadx_stderr)
+        # D4: apktool succeeded but wrote no manifest, or crashed before
+        # writing one - either way there is nothing for parse_manifest to
+        # read and nothing for the scan's apktool pass to walk. Hard fail.
+        if not (apktool_dir / "AndroidManifest.xml").exists():
+            return StageResult(
+                stage="decompile", status="failed", evidence={},
+                error=(
+                    f"apktool exited {apktool_returncode} and produced no "
+                    f"AndroidManifest.xml\nlog: {_tail(apktool_log_text)}"
+                ),
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
+
+        # A failure on either side degrades the whole run to partial (D2);
+        # only when both exit 0 is the decompile complete.
+        completeness = "complete" if (jadx_returncode == 0 and apktool_returncode == 0) else "partial"
+        error_tail = _build_error_tail(jadx_returncode, jadx_log_text, apktool_returncode, apktool_log_text)
         status_sidecar.write_text(
             json.dumps({
                 "decompile_completeness": completeness,
                 "jadx_exit_code": jadx_returncode,
+                "apktool_exit_code": apktool_returncode,
                 "jadx_file_count": jadx_file_count,
                 "jadx_error_tail": error_tail,
             }, indent=2),
@@ -139,18 +203,13 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         return _result(
             start, jadx_dir, apktool_dir, cached=False,
             decompile_completeness=completeness, jadx_exit_code=jadx_returncode,
-            jadx_file_count=jadx_file_count, jadx_error_tail=error_tail,
-            recovered_from_hollow_cache=cache_was_hollow,
-        )
-    except subprocess.CalledProcessError as exc:
-        # Only apktool's check=True can still raise here - jadx's own
-        # CalledProcessError is caught and inspected above.
-        return StageResult(
-            stage="decompile", status="failed", evidence={},
-            error=f"{exc}\nstdout: {_tail(exc.stdout)}\nstderr: {_tail(exc.stderr)}",
-            duration_ms=int((time.monotonic() - start) * 1000),
+            apktool_exit_code=apktool_returncode, jadx_file_count=jadx_file_count,
+            jadx_error_tail=error_tail, recovered_from_hollow_cache=cache_was_hollow,
         )
     except Exception as exc:
+        # _require_tool RuntimeError, unexpected filesystem/JSON errors. No
+        # CalledProcessError can reach here - both tools run check=False and
+        # report via returncode (see _run_tool_logged).
         return StageResult(
             stage="decompile", status="failed", evidence={}, error=str(exc),
             duration_ms=int((time.monotonic() - start) * 1000),
@@ -160,8 +219,8 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
 def _result(
     start: float, jadx_dir: Path, apktool_dir: Path, cached: bool,
     decompile_completeness: str = "complete", jadx_exit_code: int = 0,
-    jadx_file_count: int | None = None, jadx_error_tail: str | None = None,
-    recovered_from_hollow_cache: bool = False,
+    apktool_exit_code: int = 0, jadx_file_count: int | None = None,
+    jadx_error_tail: str | None = None, recovered_from_hollow_cache: bool = False,
 ) -> StageResult:
     if jadx_file_count is None:
         jadx_file_count = _count_java_files(jadx_dir)
@@ -175,6 +234,7 @@ def _result(
             "decompile_completeness": decompile_completeness,
             "partial": decompile_completeness != "complete",
             "jadx_exit_code": jadx_exit_code,
+            "apktool_exit_code": apktool_exit_code,
             "jadx_file_count": jadx_file_count,
             "recovered_from_hollow_cache": recovered_from_hollow_cache,
             "jadx_error_tail": jadx_error_tail,
@@ -195,6 +255,7 @@ def _cached_result(start: float, jadx_dir: Path, apktool_dir: Path, status_sidec
                 start, jadx_dir, apktool_dir, cached=True,
                 decompile_completeness=data.get("decompile_completeness", "unknown"),
                 jadx_exit_code=data.get("jadx_exit_code", 0),
+                apktool_exit_code=data.get("apktool_exit_code", 0),
                 jadx_file_count=data.get("jadx_file_count"),
                 jadx_error_tail=data.get("jadx_error_tail"),
             )

@@ -15,12 +15,11 @@ def test_decompile_surfaces_real_stderr_not_just_the_generic_exit_message(tmp_pa
     # subprocess.run and then silently discarded by str(exc).
     monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
 
-    def fake_run(cmd, capture_output, text, check):
-        raise subprocess.CalledProcessError(
-            returncode=1, cmd=cmd,
-            output="decompiling class 1500 of 1563...\n",
-            stderr="java.lang.OutOfMemoryError: Java heap space\n\tat jadx.core.dex.nodes.ClassNode...",
-        )
+    def fake_run(cmd, stdout, stderr, timeout):
+        # Output now streams to the log file (D3) instead of being captured.
+        stdout.write("decompiling class 1500 of 1563...\n")
+        stdout.write("java.lang.OutOfMemoryError: Java heap space\n\tat jadx.core.dex.nodes.ClassNode...")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
 
     monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
 
@@ -51,17 +50,15 @@ def test_decompile_tolerates_partial_jadx_output_when_real_files_were_written(tm
     # indistinguishable from "wrote nothing" and discarded wholesale.
     monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
 
-    def fake_run(cmd, capture_output, text, check):
+    def fake_run(cmd, stdout, stderr, timeout):
         if cmd[0].endswith("jadx"):
             jadx_dir = Path(cmd[2])
             jadx_dir.mkdir(parents=True, exist_ok=True)
             (jadx_dir / "AuthService.java").write_text("class AuthService {}")
             (jadx_dir / "WebkitPackage.java").write_text("class WebkitPackage {}")
-            raise subprocess.CalledProcessError(
-                returncode=1, cmd=cmd,
-                output="decompiling class 1563 of 2000...\n",
-                stderr="java.lang.OutOfMemoryError: Java heap space",
-            )
+            stdout.write("decompiling class 1563 of 2000...\n")
+            stdout.write("java.lang.OutOfMemoryError: Java heap space")
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
         apktool_dir = Path(cmd[4])
         apktool_dir.mkdir(parents=True, exist_ok=True)
         (apktool_dir / "AndroidManifest.xml").write_text("<manifest/>")
@@ -87,8 +84,9 @@ def test_decompile_total_failure_when_jadx_writes_zero_files(tmp_path, monkeypat
     # tolerated partial.
     monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
 
-    def fake_run(cmd, capture_output, text, check):
-        raise subprocess.CalledProcessError(returncode=1, cmd=cmd, output="", stderr="immediate crash")
+    def fake_run(cmd, stdout, stderr, timeout):
+        stdout.write("immediate crash")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
 
     monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
 
@@ -172,7 +170,7 @@ def test_decompile_detects_hollow_cache_and_recompiles_instead_of_trusting_it(tm
 
     monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
 
-    def fake_run(cmd, capture_output, text, check):
+    def fake_run(cmd, stdout, stderr, timeout):
         if cmd[0].endswith("jadx"):
             jadx_dir = Path(cmd[2])
             jadx_dir.mkdir(parents=True, exist_ok=True)
@@ -192,6 +190,52 @@ def test_decompile_detects_hollow_cache_and_recompiles_instead_of_trusting_it(tm
     assert result.evidence["recovered_from_hollow_cache"] is True
     assert result.evidence["jadx_file_count"] == 1
     assert result.evidence["decompile_completeness"] == "complete"
+
+
+def test_decompile_times_out_loudly_when_jadx_hangs(tmp_path, monkeypatch):
+    # D1: a hung jadx must fail loudly with the timeout stated, not hang the
+    # whole pipeline silently (NFR-1).
+    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, stdout, stderr, timeout):
+        raise subprocess.TimeoutExpired(cmd, timeout=timeout)
+
+    monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
+
+    result = decompile(tmp_path / "hang.apk", tmp_path, "hangs")
+
+    assert result.status == "failed"
+    assert "timed out" in result.error
+
+
+def test_decompile_reuses_valid_jadx_and_reruns_only_hollow_apktool(tmp_path, monkeypatch):
+    # D5: when only one half of the cache is hollow, the valid half (real .java
+    # files here) is reused - jadx is expensive and must not be re-run just
+    # because apktool's half went stale.
+    apk_hash = "d5partial"
+    target_dir = tmp_path / apk_hash
+    (target_dir / "jadx").mkdir(parents=True)
+    (target_dir / "jadx" / "Existing.java").write_text("class Existing {}")
+    (target_dir / "apktool").mkdir(parents=True)  # hollow - no manifest
+
+    calls = []
+
+    def fake_run(cmd, stdout, stderr, timeout):
+        calls.append(cmd[0])
+        apktool_dir = Path(cmd[4])
+        apktool_dir.mkdir(parents=True, exist_ok=True)
+        (apktool_dir / "AndroidManifest.xml").write_text("<manifest/>")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
+
+    result = decompile(tmp_path / "huge.apk", tmp_path, apk_hash)
+
+    assert result.status == "success"
+    assert result.evidence["jadx_file_count"] == 1  # existing jadx output reused
+    assert not any(c.endswith("jadx") for c in calls)  # jadx never re-run
+    assert result.evidence["apktool_exit_code"] == 0
 
 
 def test_require_tool_raises_loudly_when_missing():

@@ -67,7 +67,7 @@ def run_aapt2_dump(apk_path: Path) -> str:
     aapt2 = _require_tool("aapt2")
     result = subprocess.run(
         [aapt2, "dump", "badging", str(apk_path)],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, timeout=30,
     )
     return result.stdout
 
@@ -76,7 +76,7 @@ def run_apksigner_verify(apk_path: Path) -> str:
     apksigner = _require_tool("apksigner")
     result = subprocess.run(
         [apksigner, "verify", "--verbose", "--print-certs", str(apk_path)],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, timeout=30,
     )
     return result.stdout
 
@@ -119,6 +119,10 @@ def parse_signer_info(raw: str) -> SignerInfo:
     v2 = _verified("v2 scheme (APK Signature Scheme v2)")
     v3 = _verified("v3 scheme (APK Signature Scheme v3)")
 
+    # NOTE: first-signer only. apksigner --print-certs may list multiple signers;
+    # re.search captures only signer #1's DN/digest. Acceptable for the current
+    # signing-anomaly signal (report shows the signing scheme + primary cert), but
+    # multi-signer APKs are under-documented here.
     dn_match = re.search(r"certificate DN:\s*(.+)", raw)
     sha256_match = re.search(r"certificate SHA-256 digest:\s*([0-9a-fA-F:]+)", raw)
 
@@ -145,6 +149,15 @@ def ingest(apk_path: Path) -> StageResult:
         hashes = compute_hashes(apk_path)
         size = file_size(apk_path)
         package_metadata = parse_aapt2_output(run_aapt2_dump(apk_path))
+        # The downstream dynamic stage hands package_name to frida_runner.attach() ->
+        # device.spawn([None]); a None here would only surface as a confusing runtime
+        # error there, not at the cause. Fail loudly at ingest instead (NFR-1).
+        if package_metadata.package_name is None:
+            return StageResult(
+                stage="ingest", status="failed", evidence={},
+                error="could not extract package name from aapt2 badging",
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
         signer_info = parse_signer_info(run_apksigner_verify(apk_path))
 
         evidence = {

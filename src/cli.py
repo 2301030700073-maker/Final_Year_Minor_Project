@@ -7,7 +7,9 @@ literal ordering: ingest runs before the audit record rather than after,
 so the audit log can carry the real APK hash instead of a raw file path -
 ingest is identification, not security analysis, so it doesn't need to be
 gated behind the authorization check the way decompilation/scanning/
-classification/dynamic-bypass do (ADR-0005/FR-8.2).
+classification/dynamic-bypass do (ADR-0005/FR-8.2). A failed ingest still
+writes an `ingest_failed` audit event (with the hash if computed) so the
+attempt is never invisible (ADR-0005).
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from audit.attestation import record_authorization
+from audit.attestation import record_authorization, record_ingest_failure
 from calibration.ground_truth import DEFAULT_PATH as DEFAULT_GROUND_TRUTH_PATH
 from calibration.ground_truth import load_ground_truth
 from calibration.report import compute_calibration_report
@@ -153,6 +155,18 @@ def run(
     stage_results.append(ingest_result)
     _print_stage(ingest_result)
     if ingest_result.status == "failed":
+        # ADR-0005: a failed ingest is still an analysis attempt and must be
+        # traceable. record_authorization runs after ingest (so it can carry the
+        # real hash), so a failed ingest would otherwise leave zero audit trail -
+        # write a dedicated ingest_failed event with the hash if it was computed.
+        record_ingest_failure(
+            audit_log_path=AUDIT_LOG_PATH,
+            apk_hash=(ingest_result.evidence.get("hashes") or {}).get("sha256"),
+            justification=justification,
+            operator=operator,
+            git_commit=git_commit,
+            error=ingest_result.error or "ingest failed",
+        )
         _halt(stage_results)
 
     apk_hash = ingest_result.evidence["hashes"]["sha256"]

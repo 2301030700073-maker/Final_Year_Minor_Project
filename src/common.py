@@ -51,7 +51,9 @@ class ClassificationResult:
     action: Action
     root: CategoryVerdict
     ssl: CategoryVerdict
-    threshold: float
+    threshold: float = 0.7
+    root_threshold: float = 0.7
+    ssl_threshold: float = 0.7
 
 
 @dataclass

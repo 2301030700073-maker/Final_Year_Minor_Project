@@ -52,6 +52,18 @@ def test_root_only_ssl_evidence_retained():
     assert result.ssl.evidence == SOME_EVIDENCE  # retained even though not detected
 
 
+def test_per_category_thresholds_are_independent():
+    # 4-3: root and ssl no longer share one threshold. At root_threshold=0.8
+    # vs ssl_threshold=0.5, a 0.7-root/0.6-ssl evidence set is ssl-only.
+    evidence = StaticEvidence(root_confidence=0.7, ssl_confidence=0.6)
+    result = classify(evidence, root_threshold=0.8, ssl_threshold=0.5)
+    assert result.root.detected is False   # 0.7 < 0.8
+    assert result.ssl.detected is True     # 0.6 >= 0.5
+    assert result.action == Action.SSL_ONLY
+    assert result.root_threshold == 0.8
+    assert result.ssl_threshold == 0.5
+
+
 def test_confidence_capped_at_one():
     # StaticEvidence itself is responsible for capping (see signatures.scan);
     # decision_engine just has to not choke on / misclassify an edge value.

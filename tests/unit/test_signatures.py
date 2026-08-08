@@ -1,8 +1,27 @@
 from pathlib import Path
 
+import pytest
+
 from static.signatures import load_signatures, scan
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_load_signatures_rejects_unknown_category_loudly(tmp_path):
+    # 4-2: a mistyped category ("Root" instead of "root") used to silently
+    # no-op - scan() matches neither branch, so the signature was dead and
+    # detection silently weaker. Must fail loudly at load instead.
+    (tmp_path / "bad.yaml").write_text(
+        "---\n"
+        "- id: mistyped\n"
+        "  category: Root\n"
+        "  weight: 0.5\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: [x]\n"
+        "  evidence_type: bytecode_string\n"
+    )
+    with pytest.raises(ValueError, match="invalid category"):
+        load_signatures(tmp_path / "bad.yaml")
 
 
 def test_load_signatures_reads_real_root_detection_yaml():

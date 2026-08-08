@@ -12,6 +12,9 @@ from common import Evidence, StaticEvidence
 
 SCANNED_SUFFIXES = (".java", ".xml")
 
+VALID_CATEGORIES = {"root", "ssl"}
+VALID_PATTERN_TYPES = {"string_literal", "class_reference", "regex"}
+
 
 @dataclass
 class Signature:
@@ -23,10 +26,42 @@ class Signature:
     evidence_type: str
 
 
+def _validate_signature_entry(entry: dict, path: Path) -> None:
+    """Reject a signature that would otherwise silently no-op or crash scan.
+    The category check is the critical one (4-2): scan() guards on
+    category=="root"/"ssl", so a mistyped value ("Root", "both", "pinning")
+    matches neither branch - the signature is silently dead and detection is
+    silently weaker. Fail loudly at load instead (ADR-0001/principle 3)."""
+    sig_id = entry.get("id", "<unnamed>")
+    category = entry.get("category")
+    if category not in VALID_CATEGORIES:
+        raise ValueError(
+            f"{path}: signature '{sig_id}' has invalid category '{category}' - "
+            f"must be one of {sorted(VALID_CATEGORIES)}"
+        )
+    weight = entry.get("weight")
+    if weight is None or not isinstance(weight, (int, float)) or not (0 <= weight <= 1):
+        raise ValueError(
+            f"{path}: signature '{sig_id}' has invalid weight '{weight}' - must be a number in [0, 1]"
+        )
+    pattern_type = entry.get("pattern_type")
+    if pattern_type not in VALID_PATTERN_TYPES:
+        raise ValueError(
+            f"{path}: signature '{sig_id}' has invalid pattern_type '{pattern_type}' - "
+            f"must be one of {sorted(VALID_PATTERN_TYPES)}"
+        )
+    if not entry.get("patterns"):
+        raise ValueError(f"{path}: signature '{sig_id}' has no patterns")
+
+
 def load_signatures(path: Path) -> list[Signature]:
     with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or []
-    return [Signature(**entry) for entry in raw]
+    signatures = []
+    for entry in raw:
+        _validate_signature_entry(entry, path)
+        signatures.append(Signature(**entry))
+    return signatures
 
 
 def _line_matches(line: str, signature: Signature) -> str | None:

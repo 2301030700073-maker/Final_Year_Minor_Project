@@ -24,7 +24,7 @@ TEMPLATE = Template("""\
 
 ## Classification
 
-**Decision:** {{ classification.action.value }} (threshold {{ classification.threshold }}){% if decompile_completeness == "partial" %} - **CAUTION: based on a PARTIAL decompile ({{ jadx_file_count }} files, jadx exit {{ jadx_exit_code }}) - see Limitations**{% endif %}
+**Decision:** {{ classification.action.value }} (root threshold {{ classification.root_threshold }}, ssl threshold {{ classification.ssl_threshold }}){% if decompile_completeness == "partial" %} - **CAUTION: based on a PARTIAL decompile ({{ jadx_file_count }} files, jadx exit {{ jadx_exit_code }}) - see Limitations**{% endif %}
 
 ### Root-detection
 - Confidence: {{ "%.2f"|format(classification.root.confidence) }} -> {{ "DETECTED" if classification.root.detected else "Inconclusive" }}

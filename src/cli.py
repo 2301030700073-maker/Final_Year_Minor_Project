@@ -40,7 +40,7 @@ from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
 from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
 from ingest.metadata import ingest
 from report.generator import generate_calibration_report, generate_report
-from static.decision_engine import classify
+from static.decision_engine import DEFAULT_THRESHOLD, classify
 from static.decompile import decompile
 from static.manifest import parse_manifest
 from static.signatures import load_signatures, scan
@@ -91,6 +91,24 @@ def _git_last_commit_touching(path: Path) -> str:
         return f"{commit} (uncommitted changes present)" if dirty else commit
     except Exception:
         return "unknown"
+
+
+def _load_thresholds() -> tuple[float, float]:
+    """Per-category detection thresholds from config/settings.yaml (4-3), so
+    root and ssl can be tuned/calibrated independently instead of sharing one
+    hardcoded number. Thresholds are a tuning knob, not pipeline-fatal input -
+    a missing/unreadable section falls back to the engine default rather than
+    failing the run."""
+    try:
+        import yaml
+        with open("config/settings.yaml", encoding="utf-8") as f:
+            thresholds = (yaml.safe_load(f) or {}).get("thresholds", {})
+        return (
+            float(thresholds.get("root", DEFAULT_THRESHOLD)),
+            float(thresholds.get("ssl", DEFAULT_THRESHOLD)),
+        )
+    except (OSError, ValueError, TypeError, yaml.YAMLError):
+        return DEFAULT_THRESHOLD, DEFAULT_THRESHOLD
 
 
 def _operator_identity() -> str:
@@ -210,9 +228,24 @@ def run(
     apktool_output = Path(decompile_result.evidence["apktool_output"])
     manifest_path = Path(decompile_result.evidence["manifest_path"])
 
+    # --- load signature sets ---
+    # Wrapped (4-1): a malformed/unvalidated YAML raises inside load_signatures,
+    # so it must become a loud StageResult and halt - not a raw traceback with
+    # no StageResult and an invisible attempt (NFR-1).
+    root_sig_stage, root_signatures = _wrap_stage(
+        "signature_load", load_signatures, Path("config/signatures/root_detection.yaml")
+    )
+    ssl_sig_stage, ssl_signatures = _wrap_stage(
+        "signature_load", load_signatures, Path("config/signatures/ssl_pinning.yaml")
+    )
+    stage_results.append(root_sig_stage)
+    stage_results.append(ssl_sig_stage)
+    _print_stage(root_sig_stage)
+    _print_stage(ssl_sig_stage)
+    if root_sig_stage.status == "failed" or ssl_sig_stage.status == "failed":
+        _halt(stage_results)
+
     # --- static signature scan + manifest ---
-    root_signatures = load_signatures(Path("config/signatures/root_detection.yaml"))
-    ssl_signatures = load_signatures(Path("config/signatures/ssl_pinning.yaml"))
     scan_stage, static_evidence = _wrap_stage(
         "static_scan", scan, [jadx_output, apktool_output], root_signatures + ssl_signatures
     )
@@ -227,8 +260,11 @@ def run(
     # manifest parsing failure is non-fatal to classification (signatures already scanned
     # the raw manifest text as part of static_scan's apktool_output pass) - log it but continue.
 
-    # --- decision engine ---
-    classify_stage, classification = _wrap_stage("decision_engine", classify, static_evidence)
+    # --- decision engine (per-category thresholds, 4-3) ---
+    root_threshold, ssl_threshold = _load_thresholds()
+    classify_stage, classification = _wrap_stage(
+        "decision_engine", classify, static_evidence, root_threshold, ssl_threshold
+    )
     stage_results.append(classify_stage)
     _print_stage(classify_stage)
     if classify_stage.status == "failed":

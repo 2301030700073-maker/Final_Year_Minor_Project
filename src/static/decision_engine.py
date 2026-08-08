@@ -7,9 +7,16 @@ from common import Action, CategoryVerdict, ClassificationResult, StaticEvidence
 DEFAULT_THRESHOLD = 0.7
 
 
-def classify(static_evidence: StaticEvidence, threshold: float = DEFAULT_THRESHOLD) -> ClassificationResult:
-    root_detected = static_evidence.root_confidence >= threshold
-    ssl_detected = static_evidence.ssl_confidence >= threshold
+def classify(
+    static_evidence: StaticEvidence,
+    root_threshold: float = DEFAULT_THRESHOLD,
+    ssl_threshold: float = DEFAULT_THRESHOLD,
+) -> ClassificationResult:
+    """Independent per-category detection thresholds (4-3) - root and ssl are
+    distinct signal classes and should be tunable/calibrated separately, not
+    forced to share one number the way settings.yaml already anticipated."""
+    root_detected = static_evidence.root_confidence >= root_threshold
+    ssl_detected = static_evidence.ssl_confidence >= ssl_threshold
 
     root = CategoryVerdict(
         confidence=static_evidence.root_confidence,
@@ -31,4 +38,7 @@ def classify(static_evidence: StaticEvidence, threshold: float = DEFAULT_THRESHO
     else:
         action = Action.NEITHER
 
-    return ClassificationResult(action=action, root=root, ssl=ssl, threshold=threshold)
+    return ClassificationResult(
+        action=action, root=root, ssl=ssl,
+        threshold=root_threshold, root_threshold=root_threshold, ssl_threshold=ssl_threshold,
+    )

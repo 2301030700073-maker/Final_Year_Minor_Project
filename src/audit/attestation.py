@@ -3,25 +3,77 @@
 Phase 1: a flat, append-only JSONL file. Migrated into a real SQL
 `audit_log` table when Phase 4 introduces SQLite for everything else -
 see ADR-0005 for why this isn't a database table yet.
+
+Integrity: records are hash-chained. Each line carries `prev_hash` (the
+previous record's `record_hash`) and its own `record_hash` computed over
+the canonicalized record (including prev_hash), so any edit, deletion, or
+reorder is detectable. `verify_audit_log()` re-derives the chain; a CLI
+`verify-audit-log` command surfaces it (A1/A5). Each append is fsynced so
+a crash cannot silently drop the last record (A4).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from common import StageResult
 
-VALID_JUSTIFICATION_PREFIXES = ("OWN_APP", "CTF", "AUTHORIZED_ENGAGEMENT:", "ACADEMIC_TRAINING_TARGET")
+# Exact-match categories (no suffix allowed); AUTHORIZED_ENGAGEMENT: is the
+# only one that takes a suffix id (see validate_justification).
+EXACT_JUSTIFICATIONS = ("OWN_APP", "CTF", "ACADEMIC_TRAINING_TARGET")
+AUTHORIZED_ENGAGEMENT_PREFIX = "AUTHORIZED_ENGAGEMENT:"
 
 
 def validate_justification(justification: str) -> bool:
-    return any(
-        justification == prefix or justification.startswith(prefix)
-        for prefix in VALID_JUSTIFICATION_PREFIXES
-    )
+    if justification in EXACT_JUSTIFICATIONS:
+        return True
+    if justification.startswith(AUTHORIZED_ENGAGEMENT_PREFIX):
+        # Requires a real suffix id, not a bare prefix.
+        return len(justification) > len(AUTHORIZED_ENGAGEMENT_PREFIX)
+    return False
+
+
+def _canonical(record: dict) -> str:
+    """Deterministic serialization over every field except `record_hash`
+    (which is computed over this), so the hash is stable across dict ordering."""
+    base = {k: v for k, v in record.items() if k != "record_hash"}
+    return json.dumps(base, sort_keys=True, separators=(",", ":"))
+
+
+def _last_record_hash(audit_log_path: Path) -> str | None:
+    """Hash of the last record, to chain the next one onto (None when empty)."""
+    try:
+        with open(audit_log_path, encoding="utf-8") as f:
+            prev_hash: str | None = None
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    prev_hash = json.loads(line).get("record_hash")
+                except json.JSONDecodeError:
+                    prev_hash = None
+            return prev_hash
+    except FileNotFoundError:
+        return None
+
+
+def _append_audit_record(audit_log_path: Path, record: dict) -> None:
+    """Append one hash-chained record with an fsync (A4: flush() alone only
+    reaches the OS page cache; a crash right after would silently drop it)."""
+    audit_log_path = Path(audit_log_path)
+    audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+    record["prev_hash"] = _last_record_hash(audit_log_path)
+    record["record_hash"] = hashlib.sha256(_canonical(record).encode()).hexdigest()
+    with open(audit_log_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, sort_keys=True) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def record_authorization(
@@ -38,7 +90,7 @@ def record_authorization(
             stage="audit", status="failed", evidence={},
             error=(
                 f"invalid --justification '{justification}' - must be one of "
-                f"{VALID_JUSTIFICATION_PREFIXES} (AUTHORIZED_ENGAGEMENT: takes a suffix id)"
+                f"{', '.join(EXACT_JUSTIFICATIONS)} or {AUTHORIZED_ENGAGEMENT_PREFIX}<id>"
             ),
             duration_ms=int((time.monotonic() - start) * 1000),
         )
@@ -51,12 +103,7 @@ def record_authorization(
         "tool_version": tool_version,
         "git_commit": git_commit,
     }
-
-    audit_log_path = Path(audit_log_path)
-    audit_log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(audit_log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
-        f.flush()
+    _append_audit_record(audit_log_path, record)
 
     return StageResult(
         stage="audit", status="success", evidence=record,
@@ -91,8 +138,47 @@ def record_ingest_failure(
         "git_commit": git_commit,
         "error": error,
     }
-    audit_log_path = Path(audit_log_path)
-    audit_log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(audit_log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
-        f.flush()
+    _append_audit_record(audit_log_path, record)
+
+
+def verify_audit_log(audit_log_path: Path) -> dict:
+    """Re-derive the hash chain and report integrity. Returns a dict and never
+    raises on corrupt content - it collects every error it finds. Records
+    written before hashing existed are counted as `legacy` (unchainable) and
+    don't fail the check on their own."""
+    path = Path(audit_log_path)
+    if not path.is_file():
+        return {"valid": True, "total": 0, "chained": 0, "legacy": 0, "errors": []}
+
+    errors: list[str] = []
+    total = chained = legacy = 0
+    prev_hash: str | None = None
+
+    with open(path, encoding="utf-8") as f:
+        for lineno, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            total += 1
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError as exc:
+                errors.append(f"line {lineno}: invalid JSON: {exc}")
+                continue
+            record_hash = rec.get("record_hash")
+            prev = rec.get("prev_hash")
+            # Legacy = written before hashing existed (no record_hash key at
+            # all). The first hashed record legitimately has prev_hash=None -
+            # that's the chain anchor, not a legacy record - so it still gets
+            # its record_hash verified.
+            if "record_hash" not in rec or "prev_hash" not in rec:
+                legacy += 1
+                continue
+            chained += 1
+            if hashlib.sha256(_canonical(rec).encode()).hexdigest() != record_hash:
+                errors.append(f"line {lineno}: record_hash mismatch (record edited)")
+            if prev != prev_hash:
+                errors.append(f"line {lineno}: prev_hash breaks the chain (record inserted/deleted)")
+            prev_hash = record_hash
+
+    return {"valid": not errors, "total": total, "chained": chained, "legacy": legacy, "errors": errors}

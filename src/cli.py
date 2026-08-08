@@ -14,6 +14,7 @@ attempt is never invisible (ADR-0005).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 import uuid
@@ -25,7 +26,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from audit.attestation import record_authorization, record_ingest_failure
+from audit.attestation import record_authorization, record_ingest_failure, verify_audit_log
 from calibration.ground_truth import DEFAULT_PATH as DEFAULT_GROUND_TRUTH_PATH
 from calibration.ground_truth import load_ground_truth
 from calibration.report import compute_calibration_report
@@ -93,11 +94,24 @@ def _git_last_commit_touching(path: Path) -> str:
 
 
 def _operator_identity() -> str:
+    """Who ran this - prefer an explicit env identity, fall back to git config,
+    and fail loudly if neither resolves (A6). An unverifiable "unknown" operator
+    is not an acceptable attestation for a dual-use tool (ADR-0005); NFR-1 says
+    such a failure should halt the run, not silently log a spoofable blank."""
+    env_identity = os.environ.get("ANALYSIS_OPERATOR")
+    if env_identity:
+        return env_identity
     try:
         result = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True, check=True)
-        return result.stdout.strip() or "unknown"
+        name = result.stdout.strip()
+        if name:
+            return name
     except Exception:
-        return "unknown"
+        pass
+    raise RuntimeError(
+        "could not determine operator identity - set ANALYSIS_OPERATOR or "
+        "git config user.name before running (ADR-0005 requires a verifiable 'who ran it')"
+    )
 
 
 def _print_stage(result: StageResult) -> None:
@@ -332,6 +346,27 @@ def calibration_report(
 
     output_path = generate_calibration_report(report, CALIBRATION_REPORTS_ROOT)
     console.print(f"\n[bold green]Calibration report: {output_path}[/bold green]")
+
+
+@app.command("verify-audit-log")
+def verify_audit_log_cmd(
+    audit_log: Path = typer.Option(
+        AUDIT_LOG_PATH, "--audit-log",
+        help="Path to the audit log to verify",
+    ),
+) -> None:
+    """Parse the audit log and re-derive its hash chain to confirm no record
+    was edited, deleted, or reordered (A1/A5 - tamper-evidence for ADR-0005)."""
+    result = verify_audit_log(audit_log)
+    if result["errors"]:
+        console.print("[bold red]Audit log integrity FAILED:[/bold red]")
+        for err in result["errors"]:
+            console.print(f"  [red]{err}[/red]")
+        raise typer.Exit(code=1)
+    console.print(
+        f"[green]Audit log OK[/green] - {result['total']} record(s), "
+        f"{result['chained']} chained, {result['legacy']} legacy"
+    )
 
 
 if __name__ == "__main__":

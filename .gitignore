@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 .env
 .pytest_cache/
+# Generated analysis/reports/audit output - never commit (a stray `git add .`
+# would otherwise sweep the full audit history + APK analysis into the repo).
+outputs/
 *.objection.apk
 *-debuggable.apk
 tools/objection_cache/

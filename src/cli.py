@@ -30,7 +30,7 @@ from audit.attestation import record_authorization, record_ingest_failure, verif
 from calibration.ground_truth import DEFAULT_PATH as DEFAULT_GROUND_TRUTH_PATH
 from calibration.ground_truth import load_ground_truth
 from calibration.report import compute_calibration_report
-from common import Action, StageResult, VerificationResult
+from common import Action, Evidence, StageResult, VerificationResult
 from dynamic import correlation as correlation_module
 from dynamic import device
 from dynamic import frida_runner
@@ -42,7 +42,7 @@ from ingest.metadata import ingest
 from report.generator import generate_calibration_report, generate_report
 from static.decision_engine import DEFAULT_THRESHOLD, classify
 from static.decompile import decompile
-from static.manifest import parse_manifest
+from static.manifest import ManifestInfo, parse_manifest
 from static.signatures import load_signatures, scan
 from storage.results import load_runs_for_calibration, save_metadata, save_run
 
@@ -91,6 +91,27 @@ def _git_last_commit_touching(path: Path) -> str:
         return f"{commit} (uncommitted changes present)" if dirty else commit
     except Exception:
         return "unknown"
+
+
+# 5-1: a declared android:networkSecurityConfig is an independent SSL-pinning
+# signal (a prerequisite for config-based pinning) - modest weight, matching
+# the lower signature weights, since NSC presence alone doesn't prove pinning.
+NSC_SIGNAL_WEIGHT = 0.2
+
+
+def _apply_manifest_ssl_signal(static_evidence, manifest_info) -> None:
+    """Feed a declared network security config into the SSL evidence before
+    classification, giving the manifest stage real downstream effect instead of
+    being computed-and-discarded (5-1). No-op when there is no manifest/NSC."""
+    if manifest_info is None or manifest_info.network_security_config is None:
+        return
+    static_evidence.ssl_evidence.append(Evidence(
+        signature_id="manifest_network_security_config",
+        file=str(manifest_info.network_security_config),
+        line_or_offset="manifest",
+        matched_text=manifest_info.network_security_config,
+    ))
+    static_evidence.ssl_confidence = min(1.0, static_evidence.ssl_confidence + NSC_SIGNAL_WEIGHT)
 
 
 def _load_thresholds() -> tuple[float, float]:
@@ -257,8 +278,13 @@ def run(
     manifest_stage, manifest_info = _wrap_stage("manifest_parse", parse_manifest, manifest_path)
     stage_results.append(manifest_stage)
     _print_stage(manifest_stage)
-    # manifest parsing failure is non-fatal to classification (signatures already scanned
-    # the raw manifest text as part of static_scan's apktool_output pass) - log it but continue.
+    # 5-1: a successful manifest parse now feeds the SSL evidence (NSC presence)
+    # before classification and surfaces in the report - so a failed parse is a
+    # real, visible absence, not a silent no-op. Still non-fatal to classification
+    # (signatures already scanned the raw manifest text as part of static_scan's
+    # apktool_output pass) - log it but continue without the manifest signal.
+    if manifest_stage.status == "success":
+        _apply_manifest_ssl_signal(static_evidence, manifest_info)
 
     # --- decision engine (per-category thresholds, 4-3) ---
     root_threshold, ssl_threshold = _load_thresholds()
@@ -315,6 +341,7 @@ def run(
         correlation=correlation_result,
         stage_results=stage_results,
         output_dir=REPORTS_ROOT,
+        manifest=manifest_info if manifest_stage.status == "success" else None,
     )
     save_run(ANALYSIS_ROOT, apk_hash, run_id, {
         "classification": classification,

@@ -124,6 +124,26 @@ def test_generate_report_flags_partial_decompile_prominently(tmp_path):
     assert "lower bound" in content.lower()
 
 
+def test_generate_report_surfaces_manifest_fields(tmp_path):
+    from static.manifest import ManifestInfo
+    manifest = ManifestInfo(debuggable=True, network_security_config="@xml/network_security_config")
+
+    report_path = generate_report(
+        run_id="manifest", apk_hash="mft001", timestamp="2026-07-30T12:00:00",
+        metadata={
+            "hashes": {"sha256": "mft001"},
+            "package": {"package_name": "test.app"},
+            "signer": {"v1_verified": True, "v2_verified": True, "v3_verified": False, "certificate_sha256": "aa"},
+        },
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path, manifest=manifest,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "**Debuggable:** yes" in content
+    assert "@xml/network_security_config" in content
+
+
 def test_generate_report_complete_decompile_shows_no_caution_badge(tmp_path):
     stage_results = [StageResult(
         stage="decompile", status="success",

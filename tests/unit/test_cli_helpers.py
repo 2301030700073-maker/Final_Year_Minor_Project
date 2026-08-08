@@ -1,7 +1,29 @@
 import subprocess
 from pathlib import Path
 
-from cli import _git_last_commit_touching, _wrap_stage
+from cli import _apply_manifest_ssl_signal, _git_last_commit_touching, _wrap_stage
+from common import StaticEvidence
+from static.manifest import ManifestInfo
+
+
+def test_apply_manifest_ssl_signal_adds_nsc_evidence_and_weight():
+    evidence = StaticEvidence()
+    manifest = ManifestInfo(debuggable=False, network_security_config="@xml/network_security_config")
+
+    _apply_manifest_ssl_signal(evidence, manifest)
+
+    assert evidence.ssl_confidence == 0.2  # NSC_SIGNAL_WEIGHT
+    assert evidence.ssl_evidence[0].signature_id == "manifest_network_security_config"
+    assert evidence.ssl_evidence[0].matched_text == "@xml/network_security_config"
+
+
+def test_apply_manifest_ssl_signal_noops_without_nsc():
+    evidence = StaticEvidence()
+
+    _apply_manifest_ssl_signal(evidence, ManifestInfo(debuggable=False, network_security_config=None))
+
+    assert evidence.ssl_confidence == 0
+    assert evidence.ssl_evidence == []
 
 
 def test_git_last_commit_touching_returns_the_files_own_commit_not_head(monkeypatch):

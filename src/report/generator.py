@@ -10,6 +10,7 @@ from jinja2 import Template
 from calibration.report import CalibrationReport
 from common import ClassificationResult, CorrelationResult, StageResult, VerificationResult
 from report import attribution as attribution_module
+from static.manifest import ManifestInfo
 
 TEMPLATE = Template("""\
 # Analysis Report
@@ -21,6 +22,10 @@ TEMPLATE = Template("""\
 **Version:** {{ metadata.package.version_name }} (code {{ metadata.package.version_code }})
 **SDK:** min={{ metadata.package.min_sdk }}, target={{ metadata.package.target_sdk }}
 **Signing:** v1={{ "yes" if metadata.signer.v1_verified else "no" }}, v2={{ "yes" if metadata.signer.v2_verified else "no" }}, v3={{ "yes" if metadata.signer.v3_verified else "no" }}; cert SHA-256: {{ metadata.signer.certificate_sha256 or "unknown" }}
+{% if manifest -%}
+**Debuggable:** {{ "yes" if manifest.debuggable else "no" }}
+**Network security config:** {{ manifest.network_security_config or "none" }}
+{% endif %}
 
 ## Classification
 
@@ -100,6 +105,7 @@ def generate_report(
     stage_results: list[StageResult],
     output_dir: Path,
     dynamic_skip_reason: str | None = None,
+    manifest: ManifestInfo | None = None,
 ) -> Path:
     output_dir = Path(output_dir) / apk_hash
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -116,6 +122,7 @@ def generate_report(
         stage_results=stage_results,
         root_attribution=_root_attribution(metadata, classification),
         **_decompile_summary(stage_results),
+        manifest=manifest,
     )
     report_path.write_text(content, encoding="utf-8")
     return report_path

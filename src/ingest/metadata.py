@@ -129,7 +129,10 @@ def tool_versions() -> dict[str, str]:
     optional tool cannot fail ingest."""
     versions: dict[str, str] = {}
     for name, flag in (
-        ("aapt2", "--version"),
+        # aapt2 takes a subcommand ("aapt2 version"), unlike the other three
+        # tools which accept "--version" - a bare "--version" is an unknown
+        # option for aapt2 and would record a garbage string, not the version.
+        ("aapt2", "version"),
         ("apksigner", "--version"),
         ("jadx", "--version"),
         ("apktool", "--version"),

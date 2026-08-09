@@ -52,6 +52,19 @@ def _validate_signature_entry(entry: dict, path: Path) -> None:
         )
     if not entry.get("patterns"):
         raise ValueError(f"{path}: signature '{sig_id}' has no patterns")
+    if pattern_type == "regex":
+        # RESID-4B: a typo'd regex (e.g. an unclosed group) would otherwise pass
+        # load and raise re.error mid-scan, killing a good APK's whole static
+        # pass. Compile now so an authoring error fails loudly at load, the
+        # same way the other three hand-authored fields already do.
+        for pattern in entry["patterns"]:
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise ValueError(
+                    f"{path}: signature '{sig_id}' has an invalid regex pattern "
+                    f"{pattern!r} - {exc}"
+                ) from exc
 
 
 def load_signatures(path: Path) -> list[Signature]:
@@ -97,19 +110,27 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
     roots = [Path(r) for r in roots]
     evidence = StaticEvidence()
     files = _collect_files(roots)
+    # RESID-4C: record how many files were actually walked, so a negative from
+    # a near-empty corpus is distinguishable from a full-scan clean result.
+    evidence.scanned_file_count = len(files)
 
-    for signature in signatures:
-        matched_for_signature = False
-        for file_path, root in files:
-            try:
-                lines = file_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-            except OSError:
-                continue
-            for line_number, line in enumerate(lines, start=1):
+    # RESID-4A: read each file once and match every line against all
+    # signatures, instead of looping signatures-outer (which re-read each file
+    # once per signature - N sigs x M files full-file reads). Same results,
+    # ~Nx fewer reads. Confidence is still added once per matched signature,
+    # tracked via a seen-set.
+    matched_signatures: set[str] = set()
+    for file_path, root in files:
+        try:
+            lines = file_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            continue
+        for line_number, line in enumerate(lines, start=1):
+            for signature in signatures:
                 matched_text = _line_matches(line, signature)
                 if matched_text is None:
                     continue
-                matched_for_signature = True
+                matched_signatures.add(signature.id)
                 item = Evidence(
                     signature_id=signature.id,
                     file=str(file_path.relative_to(root)),
@@ -121,7 +142,8 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
                 elif signature.category == "ssl":
                     evidence.ssl_evidence.append(item)
 
-        if matched_for_signature:
+    for signature in signatures:
+        if signature.id in matched_signatures:
             if signature.category == "root":
                 evidence.root_confidence = min(1.0, evidence.root_confidence + signature.weight)
             elif signature.category == "ssl":

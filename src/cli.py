@@ -129,12 +129,23 @@ def _load_thresholds() -> tuple[float, float]:
         import yaml
         with open("config/settings.yaml", encoding="utf-8") as f:
             thresholds = (yaml.safe_load(f) or {}).get("thresholds", {})
-        return (
-            float(thresholds.get("root", DEFAULT_THRESHOLD)),
-            float(thresholds.get("ssl", DEFAULT_THRESHOLD)),
-        )
+        root = float(thresholds.get("root", DEFAULT_THRESHOLD))
+        ssl = float(thresholds.get("ssl", DEFAULT_THRESHOLD))
     except (OSError, ValueError, TypeError, yaml.YAMLError):
         return DEFAULT_THRESHOLD, DEFAULT_THRESHOLD
+    # RESID-4D: a threshold is the one hand-authored input that was never
+    # range-checked - a typo like root: 1.5 or -0.2 silently pinned detection
+    # always-NEITHER / always-DETECTED with no error, unlike every other config
+    # input (signatures, justification, manifest root) which fails loudly.
+    # Validate after the missing/unreadable fallback, so a bad *value* raises
+    # instead of being swallowed by the fallback guard.
+    for name, value in (("root", root), ("ssl", ssl)):
+        if not (0 <= value <= 1):
+            raise ValueError(
+                f"config/settings.yaml: threshold '{name}' = {value} is out of range - "
+                f"must be in [0, 1]"
+            )
+    return root, ssl
 
 
 def _operator_identity() -> str:

@@ -1,9 +1,24 @@
+import io
 import subprocess
 from pathlib import Path
 
-from cli import _apply_manifest_ssl_signal, _git_last_commit_touching, _wrap_stage
+import pytest
+
+from cli import _apply_manifest_ssl_signal, _git_last_commit_touching, _load_thresholds, _wrap_stage
 from common import StaticEvidence
 from static.manifest import ManifestInfo
+
+
+def _fake_settings(monkeypatch, body: str):
+    """Point cli._load_thresholds at an in-memory settings.yaml body."""
+    real_open = open
+
+    def fake_open(path, *args, **kwargs):
+        if str(path).endswith("settings.yaml"):
+            return io.StringIO(body)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", fake_open)
 
 
 def test_apply_manifest_ssl_signal_adds_nsc_evidence_and_weight():
@@ -15,6 +30,21 @@ def test_apply_manifest_ssl_signal_adds_nsc_evidence_and_weight():
     assert evidence.ssl_confidence == 0.2  # NSC_SIGNAL_WEIGHT
     assert evidence.ssl_evidence[0].signature_id == "manifest_network_security_config"
     assert evidence.ssl_evidence[0].matched_text == "@xml/network_security_config"
+
+
+def test_load_thresholds_rejects_out_of_range_value_loudly(monkeypatch):
+    # RESID-4D: a typo'd threshold (root: 1.5) must raise, not silently pin
+    # detection on/off - thresholds are the one hand-authored input that was
+    # never range-checked.
+    _fake_settings(monkeypatch, "thresholds:\n  root: 1.5\n  ssl: 0.7\n")
+
+    with pytest.raises(ValueError, match="out of range"):
+        _load_thresholds()
+
+
+def test_load_thresholds_accepts_valid_range(monkeypatch):
+    _fake_settings(monkeypatch, "thresholds:\n  root: 0.6\n  ssl: 0.8\n")
+    assert _load_thresholds() == (0.6, 0.8)
 
 
 def test_apply_manifest_ssl_signal_noops_without_nsc():

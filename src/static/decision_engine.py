@@ -41,4 +41,5 @@ def classify(
     return ClassificationResult(
         action=action, root=root, ssl=ssl,
         threshold=root_threshold, root_threshold=root_threshold, ssl_threshold=ssl_threshold,
+        scanned_file_count=static_evidence.scanned_file_count,
     )

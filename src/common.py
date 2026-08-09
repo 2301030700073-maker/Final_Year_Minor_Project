@@ -30,6 +30,12 @@ class StaticEvidence:
     ssl_confidence: float = 0.0
     root_evidence: list[Evidence] = field(default_factory=list)
     ssl_evidence: list[Evidence] = field(default_factory=list)
+    # RESID-4C: how many files scan() actually walked. A partial decompile that
+    # yields few files returns a NEITHER indistinguishable from a full scan that
+    # genuinely found nothing - carrying the count lets reporting/calibration
+    # discount a degenerate negative instead of certifying absence from a tiny
+    # corpus.
+    scanned_file_count: int = 0
 
 
 class Action(str, Enum):
@@ -54,6 +60,9 @@ class ClassificationResult:
     threshold: float = 0.7
     root_threshold: float = 0.7
     ssl_threshold: float = 0.7
+    # RESID-4C: carried through from StaticEvidence so the report can show how
+    # many files a verdict was based on (see scan()).
+    scanned_file_count: int = 0
 
 
 @dataclass

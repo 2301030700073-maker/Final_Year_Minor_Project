@@ -68,6 +68,54 @@ def test_scan_no_matches_gives_zero_confidence_and_no_evidence(tmp_path):
 
     assert evidence.root_confidence == 0
     assert evidence.root_evidence == []
+    assert evidence.scanned_file_count == 1  # RESID-4C
+
+
+def test_load_signatures_rejects_invalid_regex_loudly(tmp_path):
+    # RESID-4B: an authoring error in a regex (unclosed group) must fail at
+    # load, before any APK is touched - not re.error mid-scan.
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        "- id: broken\n"
+        "  category: root\n"
+        "  weight: 0.5\n"
+        "  pattern_type: regex\n"
+        "  patterns:\n"
+        "    - '(unclosed'\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="invalid regex"):
+        load_signatures(bad)
+
+
+def test_scan_counts_files_and_accumulates_weight_once_per_signature(tmp_path):
+    # RESID-4A/4C: the inverted loop must (a) still add weight once per matched
+    # signature even when the same signature matches on multiple lines, and
+    # (b) record the real scanned file count.
+    sig_yaml = tmp_path / "sigs.yaml"
+    sig_yaml.write_text(
+        "- id: root_su\n"
+        "  category: root\n"
+        "  weight: 0.8\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['/system/bin/su']\n"
+        "  evidence_type: root\n",
+        encoding="utf-8",
+    )
+    two_lines = tmp_path / "Main.java"
+    two_lines.write_text(
+        "String a = \"/system/bin/su\";\n"
+        "String b = \"/system/bin/su\";\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "Other.java").write_text("class Other {}\n")
+
+    evidence = scan(tmp_path, load_signatures(sig_yaml))
+
+    assert evidence.scanned_file_count == 2  # the two .java files, .yaml excluded
+    assert evidence.root_confidence == 0.8   # weight added once, not per line
+    assert len(evidence.root_evidence) == 2  # but every matching line is recorded
 
 
 def test_scan_matches_real_uncrackable1_root_detection_code(tmp_path):

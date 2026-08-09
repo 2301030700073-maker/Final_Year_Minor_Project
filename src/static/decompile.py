@@ -60,6 +60,26 @@ def _tail(text: str, max_chars: int = 4000) -> str:
     return f"...(truncated, {len(text)} chars total)...\n{text[-max_chars:]}"
 
 
+def _tail_file(log_path: Path, max_chars: int = 4000) -> str:
+    """Read only the last max_chars of a log *without* loading the whole file
+    into RAM (RESID-3A). read_text re-read the entire multi-MB log just to keep
+    the last 4 KB, only partially meeting D3's streaming/avoidance intent. Seek
+    to the tail window and read that directly instead. Returns the same shape
+    as _tail (a truncation marker when the log is longer than the window)."""
+    try:
+        size = log_path.stat().st_size
+    except FileNotFoundError:
+        return ""
+    if size == 0:
+        return ""
+    if size <= max_chars:
+        return log_path.read_text(encoding="utf-8")
+    with open(log_path, "rb") as f:
+        f.seek(size - max_chars)
+        tail = f.read().decode("utf-8", errors="replace")
+    return f"...(truncated, {size} bytes total)...\n{tail}"
+
+
 def _count_java_files(jadx_dir: Path) -> int:
     """Ground truth for 'did jadx leave anything real behind' - real files
     on disk, not jadx's own progress-log text (an unstable format across
@@ -99,17 +119,19 @@ def _run_tool_logged(cmd: list[str], log_path: Path, timeout_s: int, what: str) 
         except subprocess.TimeoutExpired:
             logf.write(f"\n[{what} timed out after {timeout_s}s - process killed]\n")
             returncode = _TIMEOUT_RC
-    return returncode, (log_path.read_text(encoding="utf-8") if log_path.exists() else "")
+    return returncode, _tail_file(log_path)
 
 
 def _build_error_tail(jadx_rc: int, jadx_log: str, apktool_rc: int, apktool_log: str) -> str | None:
     """Combine whatever failed (jadx, apktool, or both) into one error tail;
     None when both succeeded and there is nothing to surface."""
     parts = []
+    # jadx_log/apktool_log are already tails (see _run_tool_logged), so no
+    # extra _tail() wrapper here - a second one would just add a nested marker.
     if jadx_rc != 0:
-        parts.append(f"jadx exited {jadx_rc}\n{_tail(jadx_log)}")
+        parts.append(f"jadx exited {jadx_rc}\n{jadx_log}")
     if apktool_rc != 0:
-        parts.append(f"apktool exited {apktool_rc}\n{_tail(apktool_log)}")
+        parts.append(f"apktool exited {apktool_rc}\n{apktool_log}")
     return None if not parts else "\n".join(parts)
 
 
@@ -154,7 +176,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                 stage="decompile", status="failed", evidence={},
                 error=(
                     f"jadx exited {jadx_returncode} and produced no usable output\n"
-                    f"log: {_tail(jadx_log_text)}"
+                    f"log: {jadx_log_text}"
                 ),
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
@@ -180,7 +202,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                 stage="decompile", status="failed", evidence={},
                 error=(
                     f"apktool exited {apktool_returncode} and produced no "
-                    f"AndroidManifest.xml\nlog: {_tail(apktool_log_text)}"
+                    f"AndroidManifest.xml\nlog: {apktool_log_text}"
                 ),
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
@@ -264,7 +286,10 @@ def _cached_result(start: float, jadx_dir: Path, apktool_dir: Path, status_sidec
             # itself is untouched and valid; a bookkeeping glitch alone
             # isn't reason to halt the pipeline (falls back to "complete"
             # below, same as the no-sidecar case).
-    # No sidecar at all: a justified inference, not a guess - pre-Phase-4
-    # code could only ever cache a fully complete result (there was no code
-    # path that could leave a partial result cached before this change).
-    return _result(start, jadx_dir, apktool_dir, cached=True)
+    # No sidecar at all: the completeness of the cached output is not provable
+    # from the output alone (jadx leaves no exit code behind once the process
+    # is gone). RESID-3B: do NOT assume "complete" - that would launder a
+    # partial decompile into calibration as a full scan. Report "unknown" so
+    # calibration excludes it (a negative from an unknown-completeness scan is
+    # not proof of absence), rather than guessing the safest-sounding value.
+    return _result(start, jadx_dir, apktool_dir, cached=True, decompile_completeness="unknown")

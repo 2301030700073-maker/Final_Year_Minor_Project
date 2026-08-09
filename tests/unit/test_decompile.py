@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from static.decompile import _require_tool, _tail, decompile
+from static.decompile import _require_tool, _tail, _tail_file, decompile
 
 
 def test_decompile_surfaces_real_stderr_not_just_the_generic_exit_message(tmp_path, monkeypatch):
@@ -41,6 +41,26 @@ def test_tail_truncates_long_output_but_keeps_the_end():
 def test_tail_leaves_short_output_untouched():
     assert _tail("short message") == "short message"
     assert _tail("") == ""
+
+
+def test_tail_file_reads_only_the_tail_window(tmp_path):
+    # RESID-3A: _tail_file must return the tail without loading the whole log
+    # into RAM - verify it seeks to the last window and marks truncation.
+    log = tmp_path / "jadx.log"
+    log.write_text("A" * 100 + "FINAL_ERROR_LINE", encoding="utf-8")
+
+    result = _tail_file(log, max_chars=20)
+
+    assert "FINAL_ERROR_LINE" in result  # the end survives
+    assert "(truncated" in result         # truncation is made explicit
+    assert len(result) < 100              # the full 100-char body was NOT returned
+
+
+def test_tail_file_returns_full_small_log_and_empty_for_missing(tmp_path):
+    log = tmp_path / "small.log"
+    log.write_text("short", encoding="utf-8")
+    assert _tail_file(log) == "short"
+    assert _tail_file(tmp_path / "missing.log") == ""
 
 
 def test_decompile_tolerates_partial_jadx_output_when_real_files_were_written(tmp_path, monkeypatch):
@@ -119,10 +139,11 @@ def test_decompile_cache_hit_preserves_partial_label_from_sidecar(tmp_path):
     assert result.evidence["jadx_file_count"] == 1
 
 
-def test_decompile_cache_hit_defaults_to_complete_when_no_sidecar_exists(tmp_path):
-    # Pre-Phase-4 cache directories (or any cache hit predating this
-    # change) have no sidecar at all - a justified inference of "complete"
-    # (the old code could never cache anything else), not a guess.
+def test_decompile_cache_hit_is_unknown_when_no_sidecar_exists(tmp_path):
+    # RESID-3B: a cache hit with no sidecar must NOT be assumed "complete" -
+    # the completeness of cached output is unprovable once the jadx process is
+    # gone, and guessing "complete" would launder a partial decompile into
+    # calibration as a full scan. Report "unknown" so calibration excludes it.
     target_dir = tmp_path / "prephase4"
     (target_dir / "jadx").mkdir(parents=True)
     (target_dir / "jadx" / "SomeClass.java").write_text("class SomeClass {}")
@@ -132,8 +153,24 @@ def test_decompile_cache_hit_defaults_to_complete_when_no_sidecar_exists(tmp_pat
     result = decompile(tmp_path / "old.apk", tmp_path, "prephase4")
 
     assert result.evidence["cached"] is True
-    assert result.evidence["decompile_completeness"] == "complete"
-    assert result.evidence["partial"] is False
+    assert result.evidence["decompile_completeness"] == "unknown"
+    assert result.evidence["partial"] is True  # unknown != complete, so partial
+
+
+def test_decompile_cache_hit_is_unknown_when_sidecar_unparseable(tmp_path):
+    # RESID-3B: an unreadable/corrupt sidecar is the same as a missing one -
+    # completeness can't be proven, so it must be "unknown", not "complete".
+    target_dir = tmp_path / "corrupt"
+    (target_dir / "jadx").mkdir(parents=True)
+    (target_dir / "jadx" / "SomeClass.java").write_text("class SomeClass {}")
+    (target_dir / "apktool").mkdir(parents=True)
+    (target_dir / "apktool" / "AndroidManifest.xml").write_text("<manifest/>")
+    (target_dir / "status.json").write_text("not json{{", encoding="utf-8")
+
+    result = decompile(tmp_path / "old.apk", tmp_path, "corrupt")
+
+    assert result.evidence["cached"] is True
+    assert result.evidence["decompile_completeness"] == "unknown"
 
 
 def test_decompile_uses_cache_without_needing_toolchain(tmp_path):

@@ -1,6 +1,13 @@
 import json
 
-from audit.attestation import record_authorization, validate_justification, verify_audit_log
+import pytest
+
+from audit.attestation import (
+    record_authorization,
+    record_run_completion,
+    validate_justification,
+    verify_audit_log,
+)
 
 
 def test_validate_justification_accepts_known_values():
@@ -88,3 +95,57 @@ def test_verify_audit_log_detects_tampering(tmp_path):
     result = verify_audit_log(log_path)
     assert result["valid"] is False
     assert any("record_hash mismatch" in e for e in result["errors"])
+
+
+def test_record_run_completion_appends_chained_outcome_record(tmp_path):
+    # LIM-A: the run-outcome record must close start->end - authorization
+    # alone left the trail silent on whether the analysis completed or what
+    # it found. Verify it lands, carries the result, and stays hash-chained.
+    log_path = tmp_path / "audit_log.jsonl"
+    record_authorization(log_path, "OWN_APP", "hash1", "op", "commit1")
+
+    result = record_run_completion(
+        audit_log_path=log_path,
+        run_id="run-abc", apk_hash="hash1",
+        justification="OWN_APP", operator="op", git_commit="commit1",
+        action="ROOT_ONLY",
+        stage_statuses={"ingest": "success", "audit": "success", "dynamic": "success"},
+        verification="root_bypassed=True, ssl_bypassed=None",
+    )
+
+    assert result.status == "success"
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    rec = json.loads(lines[1])
+    assert rec["event"] == "run_completed"
+    assert rec["run_id"] == "run-abc"
+    assert rec["action"] == "ROOT_ONLY"
+    assert rec["stage_statuses"]["dynamic"] == "success"
+
+    verified = verify_audit_log(log_path)
+    assert verified["valid"] is True
+    assert verified["chained"] == 2  # completion chains onto the authorization record
+
+
+def test_authorized_engagement_requires_non_blank_id(tmp_path):
+    # LIM-C: self-attested engagement id must be non-blank - a bare prefix or
+    # a prefix + whitespace-only id must be rejected.
+    assert validate_justification("AUTHORIZED_ENGAGEMENT:") is False
+    assert validate_justification("AUTHORIZED_ENGAGEMENT:   ") is False
+    assert validate_justification("AUTHORIZED_ENGAGEMENT:eng-123") is True
+
+
+def test_corrupt_tail_line_fails_append_loudly(tmp_path):
+    # LIM-D: a malformed trailing line must not silently reset the hash chain
+    # (which would hide tampering) - record_authorization must surface it as a
+    # failed StageResult instead of appending an unanchored record.
+    log_path = tmp_path / "audit_log.jsonl"
+    log_path.write_text("this is not valid json\n", encoding="utf-8")
+
+    result = record_authorization(log_path, "OWN_APP", "hash1", "op", "commit1")
+
+    assert result.status == "failed"
+    assert "corrupt" in result.error
+    # Nothing appended - the bad tail was not papered over.
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1

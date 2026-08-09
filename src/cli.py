@@ -26,7 +26,12 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from audit.attestation import record_authorization, record_ingest_failure, verify_audit_log
+from audit.attestation import (
+    record_authorization,
+    record_ingest_failure,
+    record_run_completion,
+    verify_audit_log,
+)
 from calibration.ground_truth import DEFAULT_PATH as DEFAULT_GROUND_TRUTH_PATH
 from calibration.ground_truth import load_ground_truth
 from calibration.report import compute_calibration_report
@@ -351,6 +356,26 @@ def run(
         "git_commit": git_commit,
         "target": target,
     })
+
+    # --- audit: run-outcome record (LIM-A) ---
+    # Close the traceability loop start->end: ADR-0005's "every attempt
+    # traceable" is incomplete if the log records who authorized the run but
+    # never whether it completed or what it found. Record the decision action,
+    # per-stage statuses, and the dynamic-verification result before reporting.
+    record_run_completion(
+        audit_log_path=AUDIT_LOG_PATH,
+        run_id=run_id,
+        apk_hash=apk_hash,
+        justification=justification,
+        operator=operator,
+        git_commit=git_commit,
+        action=classification.action.value,
+        stage_statuses={s.stage: s.status for s in stage_results},
+        verification=(
+            f"root_bypassed={verification.root_bypassed}, ssl_bypassed={verification.ssl_bypassed}"
+            if verification else "not run"
+        ),
+    )
 
     console.print(f"\n[bold green]Report: {report_path}[/bold green]")
 

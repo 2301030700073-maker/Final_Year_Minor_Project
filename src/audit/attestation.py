@@ -33,8 +33,12 @@ def validate_justification(justification: str) -> bool:
     if justification in EXACT_JUSTIFICATIONS:
         return True
     if justification.startswith(AUTHORIZED_ENGAGEMENT_PREFIX):
-        # Requires a real suffix id, not a bare prefix.
-        return len(justification) > len(AUTHORIZED_ENGAGEMENT_PREFIX)
+        # Requires a non-blank suffix id, not a bare prefix (LIM-C). This is
+        # deliberate *self-attestation*: the id is operator-supplied and not
+        # validated against an engagement registry - that is a documented
+        # scope decision, not a bug, because there is no registry to validate
+        # against in this single-operator tool. We only reject an empty id.
+        return len(justification.strip()) > len(AUTHORIZED_ENGAGEMENT_PREFIX)
     return False
 
 
@@ -45,8 +49,19 @@ def _canonical(record: dict) -> str:
     return json.dumps(base, sort_keys=True, separators=(",", ":"))
 
 
+# Per-path tail-hash cache (LIM-B). The CLI is single-process and only ever
+# appends, so the last seen `record_hash` stays valid between appends - this
+# turns a whole-file rescan on every append (O(n²)) into one read per path.
+# A path is read once, on first use in the process, then maintained here.
+_last_hash_by_path: dict[str, str | None] = {}
+
+
 def _last_record_hash(audit_log_path: Path) -> str | None:
     """Hash of the last record, to chain the next one onto (None when empty)."""
+    key = str(audit_log_path)
+    if key in _last_hash_by_path:
+        return _last_hash_by_path[key]
+
     try:
         with open(audit_log_path, encoding="utf-8") as f:
             prev_hash: str | None = None
@@ -56,10 +71,17 @@ def _last_record_hash(audit_log_path: Path) -> str | None:
                     continue
                 try:
                     prev_hash = json.loads(line).get("record_hash")
-                except json.JSONDecodeError:
-                    prev_hash = None
+                except json.JSONDecodeError as exc:
+                    # LIM-D: a malformed trailing line is an integrity break.
+                    # Never silently reset the chain to None - that would let
+                    # the next record anchor to nothing and hide the corruption.
+                    raise ValueError(
+                        f"audit log corrupt: line is not valid JSON ({exc}): {line}"
+                    ) from exc
+            _last_hash_by_path[key] = prev_hash
             return prev_hash
     except FileNotFoundError:
+        _last_hash_by_path[key] = None
         return None
 
 
@@ -74,6 +96,8 @@ def _append_audit_record(audit_log_path: Path, record: dict) -> None:
         f.write(json.dumps(record, sort_keys=True) + "\n")
         f.flush()
         os.fsync(f.fileno())
+    # Keep the cache in sync so the next append chains in O(1), not O(log-size).
+    _last_hash_by_path[str(audit_log_path)] = record["record_hash"]
 
 
 def record_authorization(
@@ -103,8 +127,61 @@ def record_authorization(
         "tool_version": tool_version,
         "git_commit": git_commit,
     }
-    _append_audit_record(audit_log_path, record)
+    try:
+        _append_audit_record(audit_log_path, record)
+    except ValueError as exc:
+        # LIM-D: a corrupt log (e.g. a malformed tail line) must fail this
+        # record loudly as a StageResult, not raise a raw traceback.
+        return StageResult(
+            stage="audit", status="failed", evidence={}, error=str(exc),
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
 
+    return StageResult(
+        stage="audit", status="success", evidence=record,
+        duration_ms=int((time.monotonic() - start) * 1000),
+    )
+
+
+def record_run_completion(
+    audit_log_path: Path,
+    run_id: str,
+    apk_hash: str,
+    justification: str,
+    operator: str,
+    git_commit: str,
+    action: str,
+    stage_statuses: dict,
+    verification: str,
+    tool_version: str = "0.1.0",
+) -> StageResult:
+    """Append the run-outcome record (LIM-A). ADR-0005 demands every analysis
+    attempt be traceable, but the trail previously recorded only authorization
+    and ingest failures - never whether a run completed or what it found, so a
+    completed analysis was untraceable end-to-end. This closes start -> end by
+    recording the run id, per-stage statuses, the decision action, and the
+    dynamic-verification result."""
+    start = time.monotonic()
+    record = {
+        "event": "run_completed",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "run_id": run_id,
+        "apk_hash": apk_hash,
+        "justification": justification,
+        "operator": operator,
+        "tool_version": tool_version,
+        "git_commit": git_commit,
+        "action": action,
+        "stage_statuses": stage_statuses,
+        "verification": verification,
+    }
+    try:
+        _append_audit_record(audit_log_path, record)
+    except ValueError as exc:
+        return StageResult(
+            stage="audit", status="failed", evidence={}, error=str(exc),
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
     return StageResult(
         stage="audit", status="success", evidence=record,
         duration_ms=int((time.monotonic() - start) * 1000),

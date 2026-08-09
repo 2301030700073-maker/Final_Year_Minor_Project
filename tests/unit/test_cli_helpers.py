@@ -21,13 +21,18 @@ def _fake_settings(monkeypatch, body: str):
     monkeypatch.setattr("builtins.open", fake_open)
 
 
-def test_apply_manifest_ssl_signal_adds_nsc_evidence_and_weight():
+def test_apply_manifest_ssl_signal_records_nsc_evidence_without_weight():
+    # RESID-4E: a bare NSC declaration is a prerequisite for config-based
+    # pinning, not pinning evidence itself - it gets an attribution evidence
+    # line but zero confidence contribution. Adding +0.2 here double-counted
+    # the same NSC on apps that both declared and configured real <pin-set>
+    # entries (the content signatures already credit those).
     evidence = StaticEvidence()
     manifest = ManifestInfo(debuggable=False, network_security_config="@xml/network_security_config")
 
     _apply_manifest_ssl_signal(evidence, manifest)
 
-    assert evidence.ssl_confidence == 0.2  # NSC_SIGNAL_WEIGHT
+    assert evidence.ssl_confidence == 0  # declaration alone contributes no weight
     assert evidence.ssl_evidence[0].signature_id == "manifest_network_security_config"
     assert evidence.ssl_evidence[0].matched_text == "@xml/network_security_config"
 
@@ -45,6 +50,14 @@ def test_load_thresholds_rejects_out_of_range_value_loudly(monkeypatch):
 def test_load_thresholds_accepts_valid_range(monkeypatch):
     _fake_settings(monkeypatch, "thresholds:\n  root: 0.6\n  ssl: 0.8\n")
     assert _load_thresholds() == (0.6, 0.8)
+
+
+def test_load_thresholds_missing_section_falls_back_to_default(monkeypatch):
+    # RESID-4D: an absent thresholds section is not an active typo - it falls
+    # back to the engine default rather than failing. Only an out-of-range
+    # explicit value fails loudly (the active-typo case, covered above).
+    _fake_settings(monkeypatch, "some: unrelated\n")
+    assert _load_thresholds() == (0.7, 0.7)
 
 
 def test_apply_manifest_ssl_signal_noops_without_nsc():

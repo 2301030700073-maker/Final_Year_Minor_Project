@@ -28,7 +28,7 @@ def test_save_metadata_upserts_rather_than_duplicating(tmp_path):
 
 def test_save_run_serializes_dataclasses_and_enums(tmp_path):
     verdict = CategoryVerdict(confidence=0.9, detected=True, evidence=[])
-    classification = ClassificationResult(action=Action.ROOT_ONLY, root=verdict, ssl=verdict, threshold=0.7)
+    classification = ClassificationResult(action=Action.ROOT_ONLY, root=verdict, ssl=verdict)
 
     path = save_run(tmp_path, "abc123", "run1", {"classification": classification, "stage_results": []})
 
@@ -43,7 +43,7 @@ def test_save_run_serializes_dataclasses_and_enums(tmp_path):
 
 def test_save_run_promotes_calibration_fields_to_indexed_columns(tmp_path):
     verdict = CategoryVerdict(confidence=0.9, detected=True, evidence=[])
-    classification = ClassificationResult(action=Action.ROOT_ONLY, root=verdict, ssl=verdict, threshold=0.7)
+    classification = ClassificationResult(action=Action.ROOT_ONLY, root=verdict, ssl=verdict)
 
     save_run(tmp_path, "abc123", "run1", {"classification": classification, "stage_results": []})
 
@@ -59,7 +59,7 @@ def test_save_run_promotes_calibration_fields_to_indexed_columns(tmp_path):
 def test_save_run_records_decompile_completeness_from_stage_results(tmp_path):
     from common import StageResult
     verdict = CategoryVerdict(confidence=0.0, detected=False, evidence=[])
-    classification = ClassificationResult(action=Action.NEITHER, root=verdict, ssl=verdict, threshold=0.7)
+    classification = ClassificationResult(action=Action.NEITHER, root=verdict, ssl=verdict)
     stage_results = [StageResult(
         stage="decompile", status="success",
         evidence={"decompile_completeness": "partial", "jadx_file_count": 1563, "jadx_exit_code": 1},
@@ -75,7 +75,7 @@ def test_save_run_records_decompile_completeness_from_stage_results(tmp_path):
 
 def test_save_run_flags_anomaly_from_verification_evidence_lines(tmp_path):
     verdict = CategoryVerdict(confidence=0.8, detected=True, evidence=[])
-    classification = ClassificationResult(action=Action.ROOT_ONLY, root=verdict, ssl=verdict, threshold=0.7)
+    classification = ClassificationResult(action=Action.ROOT_ONLY, root=verdict, ssl=verdict)
     verification = {"root_bypassed": False, "ssl_bypassed": None, "evidence_lines": {"anomaly": "contradiction"}}
 
     save_run(tmp_path, "abc123", "run3", {

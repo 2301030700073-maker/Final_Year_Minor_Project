@@ -95,7 +95,11 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
             apk_sha256=apk_hash,
             timestamp=datetime.now(timezone.utc).isoformat(),
             action=classification.get("action"),
-            threshold=classification.get("threshold"),
+            # RESID-4G: the single `threshold` field was removed from
+            # ClassificationResult (it was redundant with root_threshold/
+            # ssl_threshold and only ever carried root). The DB column keeps
+            # persisting the root decision threshold to preserve its meaning.
+            threshold=classification.get("root_threshold"),
             root_confidence=root.get("confidence"),
             root_detected=root.get("detected"),
             ssl_confidence=ssl.get("confidence"),

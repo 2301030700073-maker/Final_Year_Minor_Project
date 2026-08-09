@@ -118,6 +118,65 @@ def test_scan_counts_files_and_accumulates_weight_once_per_signature(tmp_path):
     assert len(evidence.root_evidence) == 2  # but every matching line is recorded
 
 
+def test_scan_caps_evidence_per_signature_but_keeps_weight(tmp_path):
+    # RESID-4F: a signature that matches thousands of lines (e.g. a shared
+    # literal across bundled library files) must not produce one Evidence row
+    # per match - the report/DB would drown in near-identical rows. Cap the
+    # recorded matches while still crediting the weight exactly once.
+    sig_yaml = tmp_path / "sigs.yaml"
+    sig_yaml.write_text(
+        "- id: root_su\n"
+        "  category: root\n"
+        "  weight: 0.8\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['/system/bin/su']\n"
+        "  evidence_type: root\n",
+        encoding="utf-8",
+    )
+    many = tmp_path / "Many.java"
+    many.write_text("String s = \"/system/bin/su\";\n" * 200, encoding="utf-8")
+
+    evidence = scan(tmp_path, load_signatures(sig_yaml))
+
+    assert evidence.root_confidence == 0.8  # weight added once, not per line
+    assert len(evidence.root_evidence) == 50  # capped at MAX_EVIDENCE_PER_SIGNATURE
+
+
+def test_scan_reads_each_file_only_once(tmp_path, monkeypatch):
+    # RESID-4A: the inverted loop must read each file exactly once regardless of
+    # signature count - not once per signature (N sigs x M files full-file reads).
+    # Patch read_text to count calls and assert it equals the file count, not
+    # files x signatures. The .yaml signature file is excluded by suffix, so only
+    # the two .java files are read.
+    (tmp_path / "A.java").write_text('String s = "/system/bin/su";\n', encoding="utf-8")
+    (tmp_path / "B.java").write_text('String t = "/system/bin/su";\n', encoding="utf-8")
+    sig_yaml = tmp_path / "sigs.yaml"
+    sig_yaml.write_text(
+        "- id: root_su\n"
+        "  category: root\n"
+        "  weight: 0.8\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['/system/bin/su']\n"
+        "  evidence_type: root\n",
+        encoding="utf-8",
+    )
+    signatures = load_signatures(sig_yaml)
+
+    calls = {"n": 0}
+    real_read_text = Path.read_text
+
+    def counting_read_text(self, *args, **kwargs):
+        calls["n"] += 1
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+    evidence = scan(tmp_path, signatures)
+
+    assert calls["n"] == 2  # A.java + B.java, each read once
+    assert evidence.root_confidence == 0.8
+
+
 def test_scan_matches_real_uncrackable1_root_detection_code(tmp_path):
     """Regression test using the actual decompiled UnCrackable1 source
     (sg/vantagepoint/a/c.java), pulled from a real collaborator run and

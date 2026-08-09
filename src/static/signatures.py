@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,6 +15,14 @@ SCANNED_SUFFIXES = (".java", ".xml")
 
 VALID_CATEGORIES = {"root", "ssl"}
 VALID_PATTERN_TYPES = {"string_literal", "class_reference", "regex"}
+
+# RESID-4F: cap the number of recorded matches per signature. A signature like
+# root_su_binary_paths can match the same literal across thousands of bundled
+# library files; every match is a full Evidence row in the report and DB. The
+# first N matches carry all the information (same signature, same weight) -
+# the rest add bulk without signal. Confidence is unaffected: it is added once
+# per matched signature, not per match (see the matched_signatures set).
+MAX_EVIDENCE_PER_SIGNATURE = 50
 
 
 @dataclass
@@ -120,6 +129,7 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
     # ~Nx fewer reads. Confidence is still added once per matched signature,
     # tracked via a seen-set.
     matched_signatures: set[str] = set()
+    evidence_counts: dict[str, int] = defaultdict(int)
     for file_path, root in files:
         try:
             lines = file_path.read_text(encoding="utf-8", errors="ignore").splitlines()
@@ -131,6 +141,13 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
                 if matched_text is None:
                     continue
                 matched_signatures.add(signature.id)
+                # RESID-4F: record at most MAX_EVIDENCE_PER_SIGNATURE matches per
+                # signature - enough to attribute the finding, not thousands of
+                # near-identical rows. Weight is unaffected (added below once
+                # per signature via matched_signatures).
+                if evidence_counts[signature.id] >= MAX_EVIDENCE_PER_SIGNATURE:
+                    continue
+                evidence_counts[signature.id] += 1
                 item = Evidence(
                     signature_id=signature.id,
                     file=str(file_path.relative_to(root)),

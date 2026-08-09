@@ -98,16 +98,15 @@ def _git_last_commit_touching(path: Path) -> str:
         return "unknown"
 
 
-# 5-1: a declared android:networkSecurityConfig is an independent SSL-pinning
-# signal (a prerequisite for config-based pinning) - modest weight, matching
-# the lower signature weights, since NSC presence alone doesn't prove pinning.
-NSC_SIGNAL_WEIGHT = 0.2
-
-
 def _apply_manifest_ssl_signal(static_evidence, manifest_info) -> None:
-    """Feed a declared network security config into the SSL evidence before
-    classification, giving the manifest stage real downstream effect instead of
-    being computed-and-discarded (5-1). No-op when there is no manifest/NSC."""
+    """Record a declared android:networkSecurityConfig as SSL evidence so the
+    report can show it (5-1) - but give it no confidence weight. A bare
+    declaration is only a prerequisite for config-based pinning, not pinning
+    evidence itself; real pinning is credited by the content signatures
+    (network_security_config_pinset / network_security_config_pin_digest) when
+    actual <pin-set> entries are present. Adding weight here double-counted the
+    same NSC on any app that both declared and configured it (RESID-4E). No-op
+    when there is no manifest/NSC."""
     if manifest_info is None or manifest_info.network_security_config is None:
         return
     static_evidence.ssl_evidence.append(Evidence(
@@ -116,7 +115,6 @@ def _apply_manifest_ssl_signal(static_evidence, manifest_info) -> None:
         line_or_offset="manifest",
         matched_text=manifest_info.network_security_config,
     ))
-    static_evidence.ssl_confidence = min(1.0, static_evidence.ssl_confidence + NSC_SIGNAL_WEIGHT)
 
 
 def _load_thresholds() -> tuple[float, float]:

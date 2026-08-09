@@ -8,7 +8,7 @@ def _classification():
         evidence=[Evidence(signature_id="root_su_binary_paths", file="Main.java", line_or_offset=42, matched_text="/system/bin/su")],
     )
     ssl = CategoryVerdict(confidence=0.2, detected=False, evidence=[])
-    return ClassificationResult(action=Action.ROOT_ONLY, root=root, ssl=ssl, threshold=0.7)
+    return ClassificationResult(action=Action.ROOT_ONLY, root=root, ssl=ssl)
 
 
 def test_generate_report_writes_file_with_expected_content(tmp_path):
@@ -50,7 +50,7 @@ def test_generate_report_distinguishes_neither_auto_skip_from_operator_skip(tmp_
     # when nobody passed that flag).
     root = CategoryVerdict(confidence=0.0, detected=False, evidence=[])
     ssl = CategoryVerdict(confidence=0.0, detected=False, evidence=[])
-    classification = ClassificationResult(action=Action.NEITHER, root=root, ssl=ssl, threshold=0.7)
+    classification = ClassificationResult(action=Action.NEITHER, root=root, ssl=ssl)
 
     report_path = generate_report(
         run_id="run2",

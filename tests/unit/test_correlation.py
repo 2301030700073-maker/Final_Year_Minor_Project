@@ -16,7 +16,7 @@ def _classification(root_detected: bool, ssl_detected: bool) -> ClassificationRe
         action = Action.SSL_ONLY
     else:
         action = Action.NEITHER
-    return ClassificationResult(action=action, root=root, ssl=ssl, threshold=0.7)
+    return ClassificationResult(action=action, root=root, ssl=ssl)
 
 
 def test_correlate_matches_when_prediction_confirmed():

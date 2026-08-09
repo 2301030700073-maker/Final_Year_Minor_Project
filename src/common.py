@@ -57,7 +57,6 @@ class ClassificationResult:
     action: Action
     root: CategoryVerdict
     ssl: CategoryVerdict
-    threshold: float = 0.7
     root_threshold: float = 0.7
     ssl_threshold: float = 0.7
     # RESID-4C: carried through from StaticEvidence so the report can show how

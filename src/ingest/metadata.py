@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import re
 import shutil
@@ -122,11 +123,13 @@ def run_apksigner_verify(apk_path: Path) -> str:
     return _run_tool("apksigner", ApksignerError, ["verify", "--verbose", "--print-certs", str(apk_path)])
 
 
+@functools.lru_cache(maxsize=1)
 def tool_versions() -> dict[str, str]:
     """Capture the exact toolchain that produced a run (NEW-B) - a real
     reproducibility gap for the deterministic core. Each tool is probed
     independently and degrades to "unknown" (never raises), so a missing
-    optional tool cannot fail ingest."""
+    optional tool cannot fail ingest. Cached (NEW-F): versions don't change
+    mid-process, so this runs once instead of spawning 4 probes per ingest."""
     versions: dict[str, str] = {}
     for name, flag in (
         # aapt2 takes a subcommand ("aapt2 version"), unlike the other three
@@ -168,7 +171,10 @@ def parse_aapt2_output(raw: str) -> PackageMetadata:
     target_sdk_match = re.search(r"targetSdkVersion:'([^']*)'", raw)
     target_sdk = target_sdk_match.group(1) if target_sdk_match else None
 
-    permissions = re.findall(r"uses-permission: name='([^']*)'", raw)
+    # NEW-E: also capture the -sdk-<n> / -sdk-lite variants aapt2 emits for
+    # permissions declared via <uses-permission-sdk-23> etc.; the plain form
+    # alone silently dropped those from the inventory.
+    permissions = re.findall(r"uses-permission(?:-sdk-\d+|-sdk-lite)?: name='([^']*)'", raw)
 
     return PackageMetadata(
         package_name=package_name,
@@ -244,6 +250,16 @@ def ingest(apk_path: Path) -> StageResult:
 
         return StageResult(
             stage="ingest", status="success", evidence=evidence,
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
+    except ToolError as exc:
+        # NEW-G: keep the named error type at the boundary (Aapt2Error /
+        # ApksignerError), not just its str() - the StageResult.error field is
+        # a string, but prefixing the type preserves the tool + timeout-vs-exit
+        # distinction that NEW-D added instead of flattening it away.
+        return StageResult(
+            stage="ingest", status="failed", evidence=evidence,
+            error=f"{type(exc).__name__}: {exc}",
             duration_ms=int((time.monotonic() - start) * 1000),
         )
     except Exception as exc:

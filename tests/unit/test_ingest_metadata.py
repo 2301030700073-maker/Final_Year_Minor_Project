@@ -14,6 +14,7 @@ import hashlib
 import pytest
 
 from ingest.metadata import (
+    Aapt2Error,
     _assert_zip_magic,
     compute_hashes,
     file_size,
@@ -172,3 +173,45 @@ def test_tool_versions_reports_all_known_tools():
     versions = tool_versions()
     assert {"aapt2", "apksigner", "jadx", "apktool"}.issubset(versions.keys())
     assert all(isinstance(v, str) and v for v in versions.values())
+
+
+def test_tool_versions_is_cached():
+    # NEW-F: versions don't change mid-process; lru_cache must return the same
+    # object so the 4 subprocess probes run once, not once per ingest.
+    assert tool_versions() is tool_versions()
+
+
+def test_parse_aapt2_output_captures_sdk_variant_permissions():
+    # NEW-E: aapt2 emits uses-permission-sdk-<n> lines for permissions gated
+    # behind <uses-permission-sdk-23> etc.; the plain-form regex alone dropped
+    # them from the inventory.
+    raw = (
+        "uses-permission: name='android.permission.INTERNET'\n"
+        "uses-permission-sdk-23: name='android.permission.FOREGROUND_SERVICE'\n"
+        "uses-permission-sdk-lite: name='android.permission.NFC'\n"
+    )
+    metadata = parse_aapt2_output(raw)
+    assert metadata.permissions == [
+        "android.permission.INTERNET",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.NFC",
+    ]
+
+
+def test_ingest_preserves_tool_error_type_at_boundary(tmp_path, monkeypatch):
+    # NEW-G: a named Aapt2Error raised inside a tool call must surface its type
+    # at the ingest boundary (error prefixed with 'Aapt2Error:'), not be
+    # flattened to a bare str - so the timeout-vs-exit distinction survives.
+    sample = tmp_path / "sample.apk"
+    sample.write_bytes(b"PK\x03\x04valid zip header + body")
+
+    def _boom(*args, **kwargs):
+        raise Aapt2Error("aapt2 exited 1: resource table not found")
+
+    monkeypatch.setattr("ingest.metadata.run_aapt2_dump", _boom)
+
+    result = ingest(sample)
+
+    assert result.status == "failed"
+    assert result.error.startswith("Aapt2Error: ")
+    assert "exited 1" in result.error

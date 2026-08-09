@@ -226,6 +226,7 @@ Bucket edges always include the real decision threshold explicitly - the one bou
 {% if report.ssl_verification_not_implemented -%}
 - No `success_checks/*.py` module implements SSL bypass verification yet (all three hardcode `ssl_bypassed=None` unconditionally) - an empty/zero SSL Tier 1 result above means "not built yet," not "0% success rate."
 {% endif -%}
+- Tier-2 "complete" is exit-code-derived (jadx and apktool both exit 0). A decompile that exits 0 on a truncated or heavily-obfuscated corpus is therefore counted as complete for Tier-2 even when it produced few files - the report's low-corpus caveat (RESID-4C) is not mirrored as a separate Tier-2 exclusion. This is a deliberate conservative-simple choice to avoid over-excluding real observations, not an oversight; a low-corpus-but-exit-0 run inflates n slightly rather than being silently dropped.
 - "Zero false positives" is not a claim this system makes (ADR-0006) - these numbers are measured, improving, and only as reliable as the sample size shown above.
 """)
 

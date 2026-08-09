@@ -160,6 +160,12 @@ def compute_calibration_report(
             gt_value = getattr(gt_entry, category) if gt_entry else None
 
             if run.decompile_completeness != "complete" and not detected:
+                # W1 (documented, not gated): "complete" is exit-code-derived
+                # (jadx and apktool both exit 0), so a decompile that exits 0 on a
+                # truncated corpus is treated as complete for Tier-2. This is not
+                # separately gated on corpus size - RunRow carries no jadx_file_count
+                # and there is no arbitrary low-corpus threshold to over-exclude on;
+                # the report's RESID-4C low-corpus warning is not mirrored here.
                 # G3: exclude only the NEGATIVE direction from Tier 2 and the
                 # curve - a detected=False from an incomplete decompile isn't
                 # proof of absence (the signature may live in the un-decompiled

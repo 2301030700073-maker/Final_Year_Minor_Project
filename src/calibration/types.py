@@ -33,6 +33,10 @@ class RunRow:
     # direction of these runs; a detected=True partial run is a real positive
     # found in the partial corpus and stays counted (G3). Tier 1
     # (self-consistency) doesn't have this problem and always counts them.
+    # "complete" is exit-code-derived (jadx + apktool exit 0); it is not
+    # separately gated on corpus size, so a low-corpus-but-exit-0 decompile is
+    # treated as complete for Tier-2 (documented in the calibration report's
+    # Notes, W1) - deliberately not gated to avoid over-excluding real runs.
     decompile_completeness: str  # "complete" | "partial" | "unknown"
 
 

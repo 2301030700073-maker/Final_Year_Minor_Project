@@ -35,6 +35,7 @@ class SignerInfo:
     v1_verified: bool
     v2_verified: bool
     v3_verified: bool
+    v4_verified: bool
     certificate_dn: str | None
     certificate_sha256: str | None
 
@@ -118,11 +119,12 @@ def parse_signer_info(raw: str) -> SignerInfo:
     v1 = _verified("v1 scheme (JAR signing)")
     v2 = _verified("v2 scheme (APK Signature Scheme v2)")
     v3 = _verified("v3 scheme (APK Signature Scheme v3)")
+    v4 = _verified("v4 scheme (APK Signature Scheme v4)")
 
-    # NOTE: first-signer only. apksigner --print-certs may list multiple signers;
-    # re.search captures only signer #1's DN/digest. Acceptable for the current
-    # signing-anomaly signal (report shows the signing scheme + primary cert), but
-    # multi-signer APKs are under-documented here.
+    # NOTE: first-signer only (LIM-3). apksigner --print-certs may list multiple
+    # signers; re.search captures only signer #1's DN/digest. Acceptable for the
+    # current signing-anomaly signal (report shows the signing scheme + primary
+    # cert), but multi-signer (key-rotation) APKs are truncated to signer #1.
     dn_match = re.search(r"certificate DN:\s*(.+)", raw)
     sha256_match = re.search(r"certificate SHA-256 digest:\s*([0-9a-fA-F:]+)", raw)
 
@@ -130,6 +132,7 @@ def parse_signer_info(raw: str) -> SignerInfo:
         v1_verified=v1,
         v2_verified=v2,
         v3_verified=v3,
+        v4_verified=v4,
         certificate_dn=dn_match.group(1).strip() if dn_match else None,
         certificate_sha256=sha256_match.group(1).strip() if sha256_match else None,
     )
@@ -137,6 +140,7 @@ def parse_signer_info(raw: str) -> SignerInfo:
 
 def ingest(apk_path: Path) -> StageResult:
     start = time.monotonic()
+    evidence: dict = {}
     try:
         apk_path = Path(apk_path)
         if not apk_path.is_file():
@@ -146,32 +150,30 @@ def ingest(apk_path: Path) -> StageResult:
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
-        hashes = compute_hashes(apk_path)
-        size = file_size(apk_path)
+        # Accumulate evidence as it's computed (LIM-1), so a failure partway
+        # through still yields a real hash for the audit log (ADR-0005) instead
+        # of throwing away the hashes/size on a later aapt2/apksigner failure.
+        evidence["hashes"] = compute_hashes(apk_path).__dict__
+        evidence["size_bytes"] = file_size(apk_path)
         package_metadata = parse_aapt2_output(run_aapt2_dump(apk_path))
+        evidence["package"] = package_metadata.__dict__
         # The downstream dynamic stage hands package_name to frida_runner.attach() ->
         # device.spawn([None]); a None here would only surface as a confusing runtime
         # error there, not at the cause. Fail loudly at ingest instead (NFR-1).
         if package_metadata.package_name is None:
             return StageResult(
-                stage="ingest", status="failed", evidence={},
+                stage="ingest", status="failed", evidence=evidence,
                 error="could not extract package name from aapt2 badging",
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
-        signer_info = parse_signer_info(run_apksigner_verify(apk_path))
+        evidence["signer"] = parse_signer_info(run_apksigner_verify(apk_path)).__dict__
 
-        evidence = {
-            "hashes": hashes.__dict__,
-            "size_bytes": size,
-            "package": package_metadata.__dict__,
-            "signer": signer_info.__dict__,
-        }
         return StageResult(
             stage="ingest", status="success", evidence=evidence,
             duration_ms=int((time.monotonic() - start) * 1000),
         )
     except Exception as exc:
         return StageResult(
-            stage="ingest", status="failed", evidence={}, error=str(exc),
+            stage="ingest", status="failed", evidence=evidence, error=str(exc),
             duration_ms=int((time.monotonic() - start) * 1000),
         )

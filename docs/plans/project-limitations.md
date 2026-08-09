@@ -47,17 +47,23 @@ A single-researcher, deterministic analysis tool that, given an APK: ingests it,
 | 4 (SQLite, calibration, report) | ✅ core done | root Tier 2 = 1.00; **SSL Tier 1 = 1.00 (1/1) this session**; SSL Tier 2 still N/A (no fully-decompiling ssl:true target) |
 | **5-7 (AI layer)** | ❌ **NOT BUILT** | No AI/RAG/hypothesis-gen/bypass-synthesis. Deferred per ADR-0003 — nothing exists yet, by design. |
 
-## 6. Code / tooling gaps (open, from `phase-1-4-review.md` G1-G22)
+## 6. Code / tooling gaps (from `phase-1-4-review.md` G1-G22)
 
-- `config/settings.yaml` is **dead config** (G1) — threshold/paths hardcoded.
-- **No subprocess timeouts** on aapt2/apksigner/jadx/apktool (G2, G9) — a stalling tool hangs the run.
-- v4 signing not parsed (G4); `ingest` discards partial evidence on failure (G3).
-- `.smali`/`.so` not scanned (G6, G7); `load_signatures` crashes unhandled (G8).
-- **Audit log not tamper-evident** (no hash-chaining/fsync) (G15) — append-only by convention only.
-- `run.sh` has hardcoded personal paths (G21); no CI (G22); CLI orchestrator largely untested (G20).
+**Resolved** (see git history for the closing commits):
+- **Subprocess timeouts** (G2, G9) — aapt2/apksigner (30s), jadx (600s), apktool (300s) now time out and fail loudly instead of hanging silently.
+- **Ingest discards partial evidence on failure** (G3) — `ingest` accumulates hashes/size/package into the failed `StageResult`, so a failed ingest still yields a real hash for the audit log (ADR-0005).
+- **v4 signing not parsed** (G4) — `SignerInfo` now carries `v4_verified`.
+- **`load_signatures` crashes unhandled** (G8) — signature loading is wrapped so a malformed YAML fails as a loud `StageResult` and halts.
+- **`config/settings.yaml` dead config** (G1) — per-category root/ssl thresholds are now loaded from it; the path/model-routing keys remain unused.
+- **Audit log not tamper-evident** (G15) — records are hash-chained and fsynced, with a `verify-audit-log` command; `outputs/` is gitignored.
+
+**Still open:**
+- `.smali`/`.so` not scanned (G6, G7); matching is single-line/case-sensitive.
+- CLI orchestrator largely untested (G20); `run.sh` has hardcoded personal paths (G21); no CI (G22).
 - Ground-truth registry diverged / partial-decompile controls excluded (G17, G18).
+- Multi-signer (key-rotation) APKs report only signer #1's certificate (LIM-3).
 
-These are known, documented, and open — **not** hidden. Fixing them is legitimate future work within the deterministic core.
+These are known and documented — **not** hidden. Fixing them is legitimate future work within the deterministic core.
 
 ## 7. What I will strictly follow going forward
 

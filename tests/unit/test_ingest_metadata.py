@@ -57,6 +57,7 @@ def test_parse_signer_info_extracts_scheme_verification_and_cert():
     assert signer.v1_verified is True
     assert signer.v2_verified is False
     assert signer.v3_verified is False
+    assert signer.v4_verified is False  # sample carries no v4 line (LIM-2)
     assert signer.certificate_dn == "CN=Android Debug, O=Android, C=US"
     assert signer.certificate_sha256 == "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"
 

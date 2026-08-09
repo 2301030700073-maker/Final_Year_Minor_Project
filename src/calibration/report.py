@@ -117,7 +117,7 @@ def compute_calibration_report(
     generated_at: str,
     ground_truth_commit: str,
     analysis_code_commit: str = "unknown",
-    threshold: float | dict[Category, float] = 0.7,
+    threshold: float | dict[Category, float] = DEFAULT_THRESHOLD,
     bucket_edges: list[float] | None = None,
 ) -> CalibrationReport:
     # G2: the decision engine tunes root and ssl independently (4-3), so each

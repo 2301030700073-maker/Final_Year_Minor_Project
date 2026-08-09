@@ -1,5 +1,6 @@
 from calibration.report import CategoryTier1Report, CategoryTier2Report, RateWithCount, compute_calibration_report
 from calibration.types import GroundTruthEntry, RunRow
+from static.decision_engine import DEFAULT_THRESHOLD
 
 
 def _run(apk_hash, run_id, action, root_confidence, root_detected, root_bypassed,
@@ -188,6 +189,23 @@ def test_calibration_curve_supports_per_category_thresholds():
     assert 0.75 in _edges("root")
     assert 0.85 in _edges("ssl")
     assert 0.75 not in _edges("ssl")  # each category carries only its own boundary
+
+
+def test_calibration_curve_uses_engine_default_when_threshold_omitted():
+    # The no-arg library path must track the engine's DEFAULT_THRESHOLD, not a
+    # magic literal - otherwise a caller who omits threshold silently diverges
+    # from the live decision engine the moment that default changes. The edge is
+    # asserted against the symbol, not a hardcoded 0.7, so the test stays valid
+    # if the engine default ever changes.
+    runs = [_run("uc1_hash", "r1", "ROOT_ONLY", 0.80, True, True)]
+    ground_truth = {"uc1_hash": GroundTruthEntry("uc1_hash", root=True, ssl=False, source="manual review")}
+
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )  # no threshold arg -> must use the engine default
+
+    edges = {b.range_low for b in report.calibration_curve["root"]} | {report.calibration_curve["root"][-1].range_high}
+    assert DEFAULT_THRESHOLD in edges
 
 
 def test_calibration_curve_empty_bucket_reports_no_data_not_zero_percent():

@@ -64,6 +64,51 @@ def test_hung_frida_attach_fails_loudly_under_deadline(monkeypatch):
     assert "hard timeout" in result.error
 
 
+def test_ui_action_loop_runs_target_actions_in_order(monkeypatch):
+    # RESID-6A: the UI-action loop must run the target's actions in order and
+    # must not disturb the Action parameter (previously the loop variable
+    # shadowed it). Pins AndroGoat's exact navigation sequence end-to-end with
+    # all device interaction mocked so it runs anywhere.
+    class _FakeDevice:
+        def spawn(self, pkg):
+            return 1234
+
+        def resume(self, pid):
+            return None
+
+    ui_calls = []
+
+    monkeypatch.setattr(
+        "dynamic.frida_runner.attach",
+        lambda serial, pkg: (_FakeDevice(), object(), 1234),
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner.load_script",
+        lambda session, name, on_message=None: None,
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner._run_ui_action",
+        lambda serial, action: ui_calls.append(action),
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner._wait_for_checkpoint",
+        lambda messages, seconds: None,
+    )
+
+    result = frida_runner.run_dynamic_stage(
+        "emulator-5554", "owasp.sat.agoat", Action.SSL_ONLY, target="AndroGoat",
+    )
+
+    assert result.status == "success"
+    # AndroGoat's exact navigation sequence, in order: reach TrafficActivity,
+    # let it draw, then tap the CERTIFICATE PINNING button.
+    assert ui_calls == [
+        ("am_start", "owasp.sat.agoat/.TrafficActivity"),
+        ("sleep", 2.0),
+        ("tap", 720, 1251),
+    ]
+
+
 def test_wait_for_checkpoint_returns_early_on_hook_signal(monkeypatch):
     # RESID-6D: as soon as a bypass script signals its hooks are in (a send
     # payload carrying a 'hook' key), the settle wait returns - no blind sleep.

@@ -4,6 +4,7 @@ import pytest
 
 from audit.attestation import (
     record_authorization,
+    record_ingest_failure,
     record_run_completion,
     validate_justification,
     verify_audit_log,
@@ -229,3 +230,52 @@ def test_audit_log_rotates_past_size_cap(tmp_path, monkeypatch):
     lines = log_path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1  # fresh file holds only run-2
     assert json.loads(lines[0])["run_id"] == "run-2"
+
+
+def test_verify_audit_log_checks_rotated_archives(tmp_path, monkeypatch):
+    # RESID-2C: rotation resets the chain and was previously invisible to
+    # verify_audit_log - a tampered archive went undetected. Verify must now
+    # scan archive siblings too and flag tampering in them.
+    import audit.attestation as att
+    monkeypatch.setattr(att, "MAX_LOG_BYTES", 1)
+
+    log_path = tmp_path / "audit_log.jsonl"
+    record_authorization(log_path, "OWN_APP", "hash1", "op", "commit1", run_id="run-1")
+    record_authorization(log_path, "OWN_APP", "hash2", "op", "commit1", run_id="run-2")
+
+    archive = next(p for p in tmp_path.iterdir() if p.name.startswith("audit_log.jsonl."))
+    # Tamper the archive (edit a field without recomputing its chain hash).
+    lines = archive.read_text(encoding="utf-8").splitlines()
+    edited = json.loads(lines[0])
+    edited["operator"] = "forged"
+    archive.write_text(json.dumps(edited, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = verify_audit_log(log_path)
+    assert result["archives_checked"] == 1
+    assert result["valid"] is False
+    assert any("record_hash mismatch" in e for e in result["errors"])
+
+
+def test_record_ingest_failure_does_not_crash_on_corrupt_log(tmp_path):
+    # RESID-2D: on a corrupt log the ingest-failure path must not raise a raw
+    # traceback (unlike authorization/completion, it previously had no guard).
+    log_path = tmp_path / "audit_log.jsonl"
+    log_path.write_text("not valid json\n", encoding="utf-8")
+
+    ok = record_ingest_failure(log_path, "hash1", "OWN_APP", "op", "commit1", "boom")
+
+    assert ok is False
+    assert log_path.read_text(encoding="utf-8").splitlines() == ["not valid json"]
+
+
+def test_validate_justification_strips_whitespace_consistently():
+    # RESID-2E: whitespace is handled uniformly - surrounding spaces on exact
+    # justifications validate just like the bare value (previously only the
+    # AUTHORIZED_ENGAGEMENT branch stripped).
+    assert validate_justification("  OWN_APP  ") is True
+    assert validate_justification(" OWN_APP") is True
+    assert validate_justification("OWN_APP ") is True
+    assert validate_justification("  CTF ") is True
+    assert validate_justification("AUTHORIZED_ENGAGEMENT: eng-123") is True
+    assert validate_justification("  AUTHORIZED_ENGAGEMENT:  ") is False  # blank id
+    assert validate_justification("   ") is False

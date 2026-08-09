@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,10 @@ AUTHORIZED_ENGAGEMENT_PREFIX = "AUTHORIZED_ENGAGEMENT:"
 
 
 def validate_justification(justification: str) -> bool:
+    # RESID-2E: strip once up front so whitespace is handled consistently for
+    # both the exact-match and the AUTHORIZED_ENGAGEMENT:<id> branches (" OWN_APP"
+    # now validates like "OWN_APP", instead of only the suffix branch stripping).
+    justification = justification.strip()
     if justification in EXACT_JUSTIFICATIONS:
         return True
     if justification.startswith(AUTHORIZED_ENGAGEMENT_PREFIX):
@@ -38,7 +43,7 @@ def validate_justification(justification: str) -> bool:
         # validated against an engagement registry - that is a documented
         # scope decision, not a bug, because there is no registry to validate
         # against in this single-operator tool. We only reject an empty id.
-        return len(justification.strip()) > len(AUTHORIZED_ENGAGEMENT_PREFIX)
+        return len(justification) > len(AUTHORIZED_ENGAGEMENT_PREFIX)
     return False
 
 
@@ -226,7 +231,7 @@ def record_ingest_failure(
     git_commit: str,
     error: str,
     tool_version: str = "0.1.0",
-) -> None:
+) -> bool:
     """Append an audit line for an ingest that failed before an authorization
     record could be written. ADR-0005 demands *every* analysis attempt be
     traceable; cli.py runs ingest before record_authorization so the log can
@@ -234,6 +239,10 @@ def record_ingest_failure(
     This keeps the attempt on record (with the hash if it was computed) so a
     failed run isn't invisible. Not gated on justification validity - logging
     a failed attempt is the whole point, and we still record who tried.
+
+    Returns True if the record was appended, False if a corrupt log made it
+    impossible (RESID-2D) - so this crash-path never raises a raw traceback
+    the way the other two record functions already avoid.
     """
     record = {
         "event": "ingest_failed",
@@ -245,7 +254,12 @@ def record_ingest_failure(
         "git_commit": git_commit,
         "error": error,
     }
-    _append_audit_record(audit_log_path, record)
+    try:
+        _append_audit_record(audit_log_path, record)
+    except ValueError:
+        # RESID-2D: a corrupt log must not crash the ingest-failure path.
+        return False
+    return True
 
 
 def verify_audit_log(audit_log_path: Path) -> dict:
@@ -254,6 +268,11 @@ def verify_audit_log(audit_log_path: Path) -> dict:
     written before hashing existed are counted as `legacy` (unchainable) and
     don't fail the check on their own.
 
+    Scans the current log AND every rotated archive sibling (RESID-2C), because
+    rotation resets the chain - a tampered archive would otherwise be invisible.
+    Authorizations are tracked across files so a completion in a later file can
+    still pair with an authorization from an earlier archive.
+
     Beyond the hash chain it also performs a semantic pairing check (RESID-2A):
     each run_completed event must have a prior run_authorized event carrying the
     same run_id. An *orphan completion* (result on record with no authorization)
@@ -261,66 +280,79 @@ def verify_audit_log(audit_log_path: Path) -> dict:
     completion* is informational (normal for a crashed or deliberately-halted
     run) and reported separately without failing."""
     path = Path(audit_log_path)
+    # RESID-2C: rotated archives are named <name>.<YYYYMMDDTHHMMSSZ> (RESID-2B).
+    archive_re = re.compile(re.escape(path.name) + r"\.\d{8}T\d{6}Z$")
+    files = [path] + sorted(
+        p for p in path.parent.iterdir() if archive_re.match(p.name) and p.is_file()
+    )
     if not path.is_file():
         return {
             "valid": True, "total": 0, "chained": 0, "legacy": 0,
-            "orphan_completions": [], "uncompleted_runs": [], "errors": [],
+            "archives_checked": 0, "orphan_completions": [], "uncompleted_runs": [],
+            "errors": [],
         }
 
     errors: list[str] = []
     total = chained = legacy = 0
-    prev_hash: str | None = None
+    archives_checked = 0
     authorized_run_ids: set[str] = set()
     completed_run_ids: set[str] = set()
     orphan_order: list[str] = []
 
-    with open(path, encoding="utf-8") as f:
-        for lineno, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            total += 1
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError as exc:
-                errors.append(f"line {lineno}: invalid JSON: {exc}")
-                continue
-            record_hash = rec.get("record_hash")
-            prev = rec.get("prev_hash")
-            # Legacy = written before hashing existed (no record_hash key at
-            # all). The first hashed record legitimately has prev_hash=None -
-            # that's the chain anchor, not a legacy record - so it still gets
-            # its record_hash verified.
-            if "record_hash" not in rec or "prev_hash" not in rec:
-                legacy += 1
-                continue
-            chained += 1
-            if hashlib.sha256(_canonical(rec).encode()).hexdigest() != record_hash:
-                errors.append(f"line {lineno}: record_hash mismatch (record edited)")
-            if prev != prev_hash:
-                errors.append(f"line {lineno}: prev_hash breaks the chain (record inserted/deleted)")
-            prev_hash = record_hash
+    for file in files:
+        if file != path:
+            archives_checked += 1
+        prev_hash: str | None = None
+        with open(file, encoding="utf-8") as f:
+            for lineno, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                total += 1
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    errors.append(f"{file.name} line {lineno}: invalid JSON: {exc}")
+                    continue
+                record_hash = rec.get("record_hash")
+                prev = rec.get("prev_hash")
+                # Legacy = written before hashing existed (no record_hash key at
+                # all). The first hashed record legitimately has prev_hash=None -
+                # that's the chain anchor, not a legacy record - so it still gets
+                # its record_hash verified.
+                if "record_hash" not in rec or "prev_hash" not in rec:
+                    legacy += 1
+                    continue
+                chained += 1
+                if hashlib.sha256(_canonical(rec).encode()).hexdigest() != record_hash:
+                    errors.append(f"{file.name} line {lineno}: record_hash mismatch (record edited)")
+                if prev != prev_hash:
+                    errors.append(f"{file.name} line {lineno}: prev_hash breaks the chain (record inserted/deleted)")
+                prev_hash = record_hash
 
-            # Semantic pairing (RESID-2A) - only for hashed, current-schema
-            # records that carry a run_id.
-            event = rec.get("event")
-            run_id = rec.get("run_id")
-            if event == "run_authorized" and run_id:
-                authorized_run_ids.add(run_id)
-            elif event == "run_completed":
-                if run_id:
-                    if run_id in authorized_run_ids:
-                        completed_run_ids.add(run_id)
-                    else:
-                        errors.append(
-                            f"line {lineno}: run_completed for run_id '{run_id}' has no prior "
-                            "authorization (orphan completion)"
-                        )
-                        orphan_order.append(run_id)
+                # Semantic pairing (RESID-2A) - only for hashed, current-schema
+                # records that carry a run_id. Authorizations accumulate across
+                # files so a completion in a later file pairs with an earlier
+                # archive's authorization (RESID-2C).
+                event = rec.get("event")
+                run_id = rec.get("run_id")
+                if event == "run_authorized" and run_id:
+                    authorized_run_ids.add(run_id)
+                elif event == "run_completed":
+                    if run_id:
+                        if run_id in authorized_run_ids:
+                            completed_run_ids.add(run_id)
+                        else:
+                            errors.append(
+                                f"{file.name} line {lineno}: run_completed for run_id '{run_id}' "
+                                "has no prior authorization (orphan completion)"
+                            )
+                            orphan_order.append(run_id)
 
     uncompleted = sorted(authorized_run_ids - completed_run_ids)
     return {
         "valid": not errors, "total": total, "chained": chained, "legacy": legacy,
+        "archives_checked": archives_checked,
         "orphan_completions": orphan_order,
         "uncompleted_runs": uncompleted,
         "errors": errors,

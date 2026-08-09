@@ -359,6 +359,7 @@ def run(
         stage_results=stage_results,
         output_dir=REPORTS_ROOT,
         manifest=manifest_info if manifest_stage.status == "success" else None,
+        git_commit=git_commit,
     )
     save_run(ANALYSIS_ROOT, apk_hash, run_id, {
         "classification": classification,

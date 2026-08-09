@@ -283,3 +283,27 @@ def test_generate_report_renders_inconclusive_bypass_as_not_a_failure(tmp_path):
     content = report_path.read_text(encoding="utf-8")
     assert "inconclusive (see evidence below)" in content
     assert "- Root bypassed: None" not in content
+
+
+def test_generate_report_renders_git_commit(tmp_path):
+    # RESID-7A: the report must show which version of the analysis code
+    # produced it (reproducibility intent, ADR-0007) - like the toolchain
+    # line, not just the audit log. Renders the commit when provided and
+    # degrades to "unknown" when not (backward-compat with existing callers).
+    metadata = {"hashes": {"sha256": "jkl345"}, "package": {"package_name": "test.app"}}
+    report_path = generate_report(
+        run_id="run10", apk_hash="jkl345", timestamp="2026-08-09T12:00:00",
+        metadata=metadata, classification=_classification(), verification=None,
+        correlation=None, stage_results=[], output_dir=tmp_path,
+        git_commit="a1fcaf6b10209e1660155bb6f215eb3493eb52a2",
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "**Analysis code:** a1fcaf6b10209e1660155bb6f215eb3493eb52a2" in content
+
+    report_path = generate_report(
+        run_id="run10", apk_hash="jkl345", timestamp="2026-08-09T12:00:00",
+        metadata=metadata, classification=_classification(), verification=None,
+        correlation=None, stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "**Analysis code:** unknown" in content

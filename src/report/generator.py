@@ -17,6 +17,7 @@ TEMPLATE = Template("""\
 
 **Run ID:** {{ run_id }}
 **Generated:** {{ timestamp }}
+**Analysis code:** {{ git_commit or "unknown" }}
 **Package:** {{ metadata.package.package_name or "unknown" }}
 **APK SHA-256:** {{ metadata.hashes.sha256 }}
 **Version:** {{ metadata.package.version_name }} (code {{ metadata.package.version_code }})
@@ -120,6 +121,7 @@ def generate_report(
     output_dir: Path,
     dynamic_skip_reason: str | None = None,
     manifest: ManifestInfo | None = None,
+    git_commit: str | None = None,
 ) -> Path:
     output_dir = Path(output_dir) / apk_hash
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -128,6 +130,7 @@ def generate_report(
     content = TEMPLATE.render(
         run_id=run_id,
         timestamp=timestamp,
+        git_commit=git_commit,
         metadata=_as_attrdict(metadata),
         classification=classification,
         verification=verification,

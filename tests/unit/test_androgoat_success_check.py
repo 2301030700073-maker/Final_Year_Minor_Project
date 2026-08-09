@@ -45,6 +45,19 @@ def test_empty_logs_are_inconclusive_not_failure():
     assert "hooks_not_confirmed" in result.evidence_lines
 
 
+def test_cross_line_hook_and_marker_does_not_false_positive():
+    # RESID-6G: the hook name and the 'bypassed' flag must be on the SAME
+    # line. A "not present" message carries the hook name but no flag; a
+    # stray 'bypassed' token on a different line must not pair with it.
+    frida_log = _frida_log(
+        {"type": "send", "payload": {"hook": "OkHttp CertificatePinner.check", "present": False}},
+        {"type": "send", "payload": {"unrelated": "stray bypassed token"}},
+    )
+    result = check.check(logcat_output="", frida_log=frida_log)
+    assert result.ssl_bypassed is None
+    assert "hooks_not_confirmed" in result.evidence_lines
+
+
 def test_response_log_alone_is_inconclusive():
     # A "Response" logcat line without the hook firing is bonus only - it must
     # not confirm on its own.

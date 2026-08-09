@@ -29,9 +29,10 @@ class RunRow:
     ssl_bypassed: bool | None
     # Phase 4 partial-decompile tolerance (static/decompile.py) - a
     # detected=False from a "partial" or "unknown" decompile isn't proof of
-    # absence, so Tier 2 (ground-truth comparison) must exclude these runs
-    # entirely; Tier 1 (self-consistency) doesn't have this problem and
-    # still counts them.
+    # absence, so Tier 2 (ground-truth comparison) must exclude the NEGATIVE
+    # direction of these runs; a detected=True partial run is a real positive
+    # found in the partial corpus and stays counted (G3). Tier 1
+    # (self-consistency) doesn't have this problem and always counts them.
     decompile_completeness: str  # "complete" | "partial" | "unknown"
 
 

@@ -116,10 +116,19 @@ def compute_calibration_report(
     generated_at: str,
     ground_truth_commit: str,
     analysis_code_commit: str = "unknown",
-    threshold: float = 0.7,
+    threshold: float | dict[Category, float] = 0.7,
     bucket_edges: list[float] | None = None,
 ) -> CalibrationReport:
-    edges = sorted(set(bucket_edges or DEFAULT_BUCKET_EDGES) | {threshold})
+    # G2: the decision engine tunes root and ssl independently (4-3), so each
+    # category's calibration curve must mark its OWN decision boundary as an
+    # explicit bucket edge. Accepts either a single shared threshold
+    # (backward-compatible) or a per-category dict; a dict with a missing
+    # category falls back to the engine default 0.7.
+    base_edges = sorted(set(bucket_edges or DEFAULT_BUCKET_EDGES))
+    if isinstance(threshold, dict):
+        thresholds: dict[Category, float] = {c: float(threshold.get(c, 0.7)) for c in CATEGORIES}
+    else:
+        thresholds = {c: float(threshold) for c in CATEGORIES}
 
     tier1: dict[Category, CategoryTier1Report] = {}
     tier2: dict[Category, CategoryTier2Report] = {}
@@ -133,6 +142,7 @@ def compute_calibration_report(
         tier2_counts = {outcome: 0 for outcome in Tier2Outcome}
         no_gt_count = 0
         partial_count = 0
+        edges = sorted(set(base_edges) | {thresholds[category]})
         bucket_hits: list[list[bool]] = [[] for _ in range(len(edges) - 1)]  # per-bucket list of ground_truth booleans
 
         for run in runs:
@@ -145,13 +155,18 @@ def compute_calibration_report(
             gt_entry = ground_truth.get(run.apk_hash)
             gt_value = getattr(gt_entry, category) if gt_entry else None
 
-            if run.decompile_completeness != "complete":
-                # A detected=False from an incomplete decompile isn't proof
-                # of absence - exclude entirely from Tier 2 and the curve,
-                # regardless of what the registry says. Tier 1 above is
-                # unaffected (already counted).
-                if gt_value is not None:
-                    partial_count += 1
+            if run.decompile_completeness != "complete" and not detected:
+                # G3: exclude only the NEGATIVE direction from Tier 2 and the
+                # curve - a detected=False from an incomplete decompile isn't
+                # proof of absence (the signature may live in the un-decompiled
+                # portion). A detected=True partial run is a real positive found
+                # in the partial corpus and stays counted; dropping it too would
+                # deflate measured precision/recall. Tier 1 above is unaffected.
+                # G1: count every run excluded here in partial_count regardless
+                # of whether it also has a ground-truth entry, so the two
+                # "Excluded from Tier 2" lines sum to every excluded run instead
+                # of a partial-and-GT-less run silently dropping from both.
+                partial_count += 1
                 continue
 
             tier2_counts[classify_tier2(detected, gt_value)] += 1

@@ -89,7 +89,11 @@ def test_end_to_end_against_real_current_numbers():
     assert report.tier1["ssl"].confirmation_rate.rate is None
 
 
-def test_partial_decompile_run_excluded_from_tier2_but_counted_in_tier1():
+def test_partial_decompile_run_with_positive_detection_stays_in_tier2():
+    # G3: a detected=True partial run is a real positive found in the partial
+    # corpus - excluding it too would deflate precision/recall. Only the
+    # negative direction (detected=False, where an incomplete decompile isn't
+    # proof of absence) is dropped from Tier 2.
     runs = [
         _run("propertyguru_hash", "r1", "ROOT_ONLY", 0.80, True, True, decompile_completeness="partial"),
     ]
@@ -99,15 +103,45 @@ def test_partial_decompile_run_excluded_from_tier2_but_counted_in_tier1():
         runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
     )
 
-    # A detected=False from an incomplete decompile isn't proof of absence -
-    # but here detected=True and bypassed=True regardless, so Tier 1 still
-    # counts the genuine dynamic confirmation.
     assert report.tier1["root"].confirmed == 1
-    # Tier 2 excludes it entirely despite having a ground-truth entry -
-    # the run's own decompile was incomplete, so its detected verdict can't
-    # be trusted as a clean data point either way.
+    assert report.tier2["root"].true_positive == 1  # partial positive counts as a real TP
+    assert report.tier2["root"].n == 1
+    assert report.excluded_partial_decompile["root"] == 0
+
+
+def test_partial_decompile_run_with_negative_detection_excluded_from_tier2():
+    # G3: a detected=False partial run is ambiguous (the corpus was incomplete,
+    # so absence isn't proof) and is dropped from Tier 2.
+    runs = [
+        _run("propertyguru_hash", "r1", "NEITHER", 0.20, False, None, decompile_completeness="partial"),
+    ]
+    ground_truth = {"propertyguru_hash": GroundTruthEntry("propertyguru_hash", root=False, ssl=None, source="manual review")}
+
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+
     assert report.tier2["root"].n == 0
     assert report.excluded_partial_decompile["root"] == 1
+
+
+def test_partial_no_ground_truth_run_counted_in_partial_tally():
+    # G1: a partial-decompile run with no ground-truth entry used to drop from
+    # BOTH exclusion tallies - the partial branch only incremented when a
+    # gt_value existed, and the no_gt branch was skipped by the continue. So the
+    # report undercounted excluded runs. It's now counted in partial_count, its
+    # primary exclusion reason.
+    runs = [
+        _run("unknown_app", "r1", "NEITHER", 0.20, False, None, decompile_completeness="partial"),
+    ]
+
+    report = compute_calibration_report(
+        runs, ground_truth={}, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+
+    assert report.tier2["root"].n == 0
+    assert report.excluded_partial_decompile["root"] == 1
+    assert report.excluded_no_ground_truth["root"] == 0  # not double-counted
 
 
 def test_no_ground_truth_entry_excluded_from_tier2_counted_separately():
@@ -132,6 +166,28 @@ def test_calibration_curve_buckets_include_the_threshold_as_an_explicit_edge():
 
     edges = sorted({b.range_low for b in report.calibration_curve["root"]} | {report.calibration_curve["root"][-1].range_high})
     assert 0.7 in edges
+
+
+def test_calibration_curve_supports_per_category_thresholds():
+    # G2: the decision engine tunes root and ssl independently (4-3), so each
+    # category's curve must mark its OWN decision boundary. A dict threshold
+    # yields a distinct explicit edge per category; the values chosen (0.75 /
+    # 0.85) are not in DEFAULT_BUCKET_EDGES, so their presence proves the
+    # per-category threshold, not a default edge.
+    runs = [_run("uc1_hash", "r1", "ROOT_ONLY", 0.80, True, True)]
+    ground_truth = {"uc1_hash": GroundTruthEntry("uc1_hash", root=True, ssl=False, source="manual review")}
+
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+        threshold={"root": 0.75, "ssl": 0.85},
+    )
+
+    def _edges(cat):
+        return sorted({b.range_low for b in report.calibration_curve[cat]} | {report.calibration_curve[cat][-1].range_high})
+
+    assert 0.75 in _edges("root")
+    assert 0.85 in _edges("ssl")
+    assert 0.75 not in _edges("ssl")  # each category carries only its own boundary
 
 
 def test_calibration_curve_empty_bucket_reports_no_data_not_zero_percent():

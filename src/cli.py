@@ -202,6 +202,58 @@ def _halt(stage_results: list[StageResult]) -> None:
     raise typer.Exit(code=1)
 
 
+def _finalize_run(
+    report_kwargs: dict,
+    analysis_root: Path,
+    apk_hash: str,
+    run_id: str,
+    save_payload: dict,
+    completion_kwargs: dict,
+) -> Path:
+    """Write the report, persist the run to SQLite, and record the audit
+    completion, surfacing any failure loudly (H1/H2). Returns the final report
+    path.
+
+    H1: the completion StageResult used to be discarded - a failed completion
+    (e.g. a corrupt audit log) was silent and the CLI printed unqualified green
+    success. It is now captured, appended to the report's stage_results (and the
+    report regenerated so the Stage Results table shows it); a failed completion
+    prints the error and exits non-zero instead of claiming success.
+
+    H2: a save_run DB failure must not silently drop the audit completion or the
+    report path - completion is still recorded (the audit log is the
+    traceability loop's source of truth, LIM-A), the report path is surfaced,
+    and the command exits non-zero rather than leaving an inconsistent state.
+    """
+    report_path = generate_report(**report_kwargs)
+
+    save_error: str | None = None
+    try:
+        save_run(analysis_root, apk_hash, run_id, save_payload)
+    except Exception as exc:
+        save_error = str(exc)
+
+    completion_stage = record_run_completion(**completion_kwargs)
+    report_kwargs["stage_results"].append(completion_stage)
+    report_path = generate_report(**report_kwargs)
+
+    if completion_stage.status == "failed":
+        console.print(f"[red]Audit completion failed: {completion_stage.error}[/red]")
+        if save_error is not None:
+            console.print(f"[red]Run save failed: {save_error}[/red]")
+        raise typer.Exit(code=1)
+
+    if save_error is not None:
+        console.print(
+            f"[yellow]Report written and run audited, but the run was not saved to the DB: {save_error}[/yellow]"
+        )
+        console.print(f"\n[bold green]Report: {report_path}[/bold green]")
+        raise typer.Exit(code=1)
+
+    console.print(f"\n[bold green]Report: {report_path}[/bold green]")
+    return report_path
+
+
 @app.command("run")
 def run(
     apk: Path = typer.Option(..., "--apk", exists=True, help="Path to the APK to analyze"),
@@ -358,8 +410,11 @@ def run(
     # run doesn't misleadingly look like someone chose to skip verification.
     dynamic_skip_reason = dynamic_stage.evidence.get("reason", "skipped") if dynamic_stage.status == "skipped" else None
 
-    # --- report ---
-    report_path = generate_report(
+    # --- terminal persistence: report + SQLite save + audit completion ---
+    # Extracted into _finalize_run so the H1/H2 failure handling is unit-testable
+    # (a failed audit completion must not be silent; a DB save failure must still
+    # record the completion and surface the report path).
+    report_kwargs = dict(
         run_id=run_id,
         apk_hash=apk_hash,
         timestamp=datetime.now(timezone.utc).isoformat(),
@@ -373,36 +428,34 @@ def run(
         manifest=manifest_info if manifest_stage.status == "success" else None,
         git_commit=git_commit,
     )
-    save_run(ANALYSIS_ROOT, apk_hash, run_id, {
-        "classification": classification,
-        "verification": verification,
-        "correlation": correlation_result,
-        "stage_results": stage_results,
-        "git_commit": git_commit,
-        "target": target,
-    })
-
-    # --- audit: run-outcome record (LIM-A) ---
-    # Close the traceability loop start->end: ADR-0005's "every attempt
-    # traceable" is incomplete if the log records who authorized the run but
-    # never whether it completed or what it found. Record the decision action,
-    # per-stage statuses, and the dynamic-verification result before reporting.
-    record_run_completion(
-        audit_log_path=AUDIT_LOG_PATH,
-        run_id=run_id,
+    report_path = _finalize_run(
+        report_kwargs=report_kwargs,
+        analysis_root=ANALYSIS_ROOT,
         apk_hash=apk_hash,
-        justification=justification,
-        operator=operator,
-        git_commit=git_commit,
-        action=classification.action.value,
-        stage_statuses={s.stage: s.status for s in stage_results},
-        verification=(
-            f"root_bypassed={verification.root_bypassed}, ssl_bypassed={verification.ssl_bypassed}"
-            if verification else "not run"
+        run_id=run_id,
+        save_payload={
+            "classification": classification,
+            "verification": verification,
+            "correlation": correlation_result,
+            "stage_results": stage_results,
+            "git_commit": git_commit,
+            "target": target,
+        },
+        completion_kwargs=dict(
+            audit_log_path=AUDIT_LOG_PATH,
+            run_id=run_id,
+            apk_hash=apk_hash,
+            justification=justification,
+            operator=operator,
+            git_commit=git_commit,
+            action=classification.action.value,
+            stage_statuses={s.stage: s.status for s in stage_results},
+            verification=(
+                f"root_bypassed={verification.root_bypassed}, ssl_bypassed={verification.ssl_bypassed}"
+                if verification else "not run"
+            ),
         ),
     )
-
-    console.print(f"\n[bold green]Report: {report_path}[/bold green]")
 
 
 @app.command("calibration-report")

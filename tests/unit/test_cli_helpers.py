@@ -3,9 +3,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import typer
 
 from cli import _apply_manifest_ssl_signal, _git_commit_hash, _git_last_commit_touching, _load_thresholds, _wrap_stage
-from common import StaticEvidence
+from common import StageResult, StaticEvidence
 from static.manifest import ManifestInfo
 
 
@@ -205,3 +206,83 @@ def test_git_commit_hash_handles_git_failure(monkeypatch):
     monkeypatch.setattr("cli.subprocess.run", fake_run)
 
     assert _git_commit_hash() == "unknown"
+
+
+class _FakeConsole:
+    """Minimal stand-in for Rich's console so _finalize_run's prints are no-ops."""
+
+    def print(self, *args, **kwargs):
+        pass
+
+
+def _finalize_kwargs():
+    return {
+        "report_kwargs": {"stage_results": [], "output_dir": Path("/tmp")},
+        "analysis_root": Path("/tmp"),
+        "apk_hash": "hash",
+        "run_id": "r1",
+        "save_payload": {},
+        "completion_kwargs": {},
+    }
+
+
+def test_finalize_run_failed_completion_is_not_silent(monkeypatch):
+    # H1: a failed audit-completion write (e.g. a corrupt log) was previously
+    # silent - the StageResult was discarded and the CLI printed unqualified
+    # green success. It must now be surfaced in the report's stage_results and
+    # exit non-zero instead of claiming success.
+    import cli
+    failed = StageResult(stage="audit", status="failed", evidence={}, error="audit log corrupt", duration_ms=0)
+    monkeypatch.setattr("cli.generate_report", lambda **kw: Path("report.md"))
+    monkeypatch.setattr("cli.save_run", lambda *a, **kw: None)
+    monkeypatch.setattr("cli.record_run_completion", lambda **kw: failed)
+    monkeypatch.setattr("cli.console", _FakeConsole())
+
+    kwargs = _finalize_kwargs()
+    with pytest.raises(typer.Exit) as excinfo:
+        cli._finalize_run(**kwargs)
+
+    assert excinfo.value.exit_code == 1
+    assert len(kwargs["report_kwargs"]["stage_results"]) == 1  # completion stage surfaced
+    assert kwargs["report_kwargs"]["stage_results"][0].status == "failed"
+
+
+def test_finalize_run_save_failure_still_records_completion_and_surfaces_report(monkeypatch):
+    # H2: a save_run DB failure must not silently drop the audit completion or
+    # the report path - the audit log is the traceability loop's source of truth
+    # (LIM-A), so completion is still recorded, the report is still generated,
+    # and the command exits non-zero rather than leaving an inconsistent state.
+    import cli
+    ok = StageResult(stage="audit", status="success", evidence={}, duration_ms=0)
+    recorded = {}
+
+    def _record(**kw):
+        recorded["called"] = True
+        return ok
+
+    monkeypatch.setattr("cli.generate_report", lambda **kw: Path("report.md"))
+
+    def _boom(*a, **kw):
+        raise RuntimeError("db full")
+
+    monkeypatch.setattr("cli.save_run", _boom)
+    monkeypatch.setattr("cli.record_run_completion", _record)
+    monkeypatch.setattr("cli.console", _FakeConsole())
+
+    with pytest.raises(typer.Exit) as excinfo:
+        cli._finalize_run(**_finalize_kwargs())
+
+    assert excinfo.value.exit_code == 1
+    assert recorded.get("called") is True  # audit completion still recorded despite the DB failure
+
+
+def test_finalize_run_success_returns_report_path(monkeypatch):
+    import cli
+    ok = StageResult(stage="audit", status="success", evidence={}, duration_ms=0)
+    monkeypatch.setattr("cli.generate_report", lambda **kw: Path("report.md"))
+    monkeypatch.setattr("cli.save_run", lambda *a, **kw: None)
+    monkeypatch.setattr("cli.record_run_completion", lambda **kw: ok)
+    monkeypatch.setattr("cli.console", _FakeConsole())
+
+    result = cli._finalize_run(**_finalize_kwargs())
+    assert result == Path("report.md")

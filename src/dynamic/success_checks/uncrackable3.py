@@ -133,7 +133,9 @@ class UnCrackable3SuccessCheck:
         elif hooks_confirmed_fired and not block_match:
             root_bypassed = True
         else:
-            root_bypassed = False
+            # RESID-6F: not confirmed is inconclusive (None), not a definitive
+            # failure (False) - see uncrackable1.py for the rationale.
+            root_bypassed = None
             missing = sorted(set(ROOT_CHECK_HOOK_IDS) - fired_hooks)
             evidence_lines["hooks_not_confirmed"] = (
                 f"hook firing not confirmed for: {missing} - cannot confirm the bypass took effect"

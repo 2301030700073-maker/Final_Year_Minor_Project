@@ -17,7 +17,7 @@ ALL_ROOT_HOOKS_FIRED = _frida_log(
 )
 
 
-def test_secret_revealed_alone_without_hook_evidence_is_not_bypassed():
+def test_secret_revealed_alone_without_hook_evidence_is_inconclusive():
     # Secret text is bonus evidence, never sufficient on its own - it requires
     # a human to type the decrypted secret and click verify, which no
     # automated run does.
@@ -25,26 +25,26 @@ def test_secret_revealed_alone_without_hook_evidence_is_not_bypassed():
         logcat_output="I/System.out: Success! This is the secret string.",
         frida_log="",
     )
-    assert result.root_bypassed is False
+    assert result.root_bypassed is None
     assert "secret_revealed" in result.evidence_lines
     assert "hooks_not_confirmed" in result.evidence_lines
 
 
-def test_block_signal_present_with_no_hook_evidence_is_not_bypassed():
+def test_block_signal_present_with_no_hook_evidence_is_inconclusive():
     result = check.check(
         logcat_output="WindowManager: WIN DEATH: Window{a2fdae2 u0 Root detected!}",
         frida_log="",
     )
-    assert result.root_bypassed is False
+    assert result.root_bypassed is None
     assert "block_signal_still_present" in result.evidence_lines
 
 
-def test_no_hook_confirmation_means_not_bypassed_even_without_block_signal():
+def test_no_hook_confirmation_means_inconclusive_even_without_block_signal():
     # This is the case that was wrong before: absence of a block signal
     # alone used to be treated as sufficient. It isn't - that signal proved
     # racy in real runs (see module docstring).
     result = check.check(logcat_output="unrelated log line", frida_log="")
-    assert result.root_bypassed is False
+    assert result.root_bypassed is None
     assert result.evidence_lines  # never silently empty on a real verdict
     assert "hooks_not_confirmed" in result.evidence_lines
 
@@ -58,24 +58,24 @@ def test_hooks_confirmed_fired_and_no_block_signal_is_bypassed():
     assert "hook_fired_c.c" in result.evidence_lines
 
 
-def test_hooks_installed_but_never_fired_is_not_confirmed_bypassed():
+def test_hooks_installed_but_never_fired_is_inconclusive():
     # "all three hooked" alone (setup succeeded) without any forced_result
     # message (the app never actually called the methods) isn't sufficient -
     # it fires before the app necessarily runs anything.
     frida_log = _frida_log({"type": "send", "payload": {"hook": "sg.vantagepoint.a.c", "status": "all three hooked"}})
     result = check.check(logcat_output="unrelated log line", frida_log=frida_log)
-    assert result.root_bypassed is False
+    assert result.root_bypassed is None
     assert "hooks_not_confirmed" in result.evidence_lines
 
 
-def test_partial_hook_firing_is_not_confirmed_bypassed():
+def test_partial_hook_firing_is_inconclusive():
     # Only 2 of 3 root-check hooks fired - not sufficient.
     frida_log = _frida_log(
         {"type": "send", "payload": {"hook": "c.a", "forced_result": False}},
         {"type": "send", "payload": {"hook": "c.b", "forced_result": False}},
     )
     result = check.check(logcat_output="unrelated log line", frida_log=frida_log)
-    assert result.root_bypassed is False
+    assert result.root_bypassed is None
     assert "hooks_not_confirmed" in result.evidence_lines
 
 

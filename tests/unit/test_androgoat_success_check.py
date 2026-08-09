@@ -26,7 +26,7 @@ def test_pin_hook_fired_confirms_ssl_bypass():
     assert "hook_fired_certificate_pinner_check" in result.evidence_lines
 
 
-def test_pin_hook_not_fired_means_not_confirmed():
+def test_pin_hook_not_fired_is_inconclusive():
     # Loaded-but-never-called hooks send no runtime message - a bare setup is
     # not confirmation.
     result = check.check(
@@ -35,23 +35,23 @@ def test_pin_hook_not_fired_means_not_confirmed():
             {"type": "send", "payload": {"hook": "TrustManagerImpl.verifyChain", "present": False}},
         ),
     )
-    assert result.ssl_bypassed is False
+    assert result.ssl_bypassed is None
     assert "hooks_not_confirmed" in result.evidence_lines
 
 
-def test_empty_logs_never_confirm():
+def test_empty_logs_are_inconclusive_not_failure():
     result = check.check(logcat_output="", frida_log="")
-    assert result.ssl_bypassed is False
+    assert result.ssl_bypassed is None
     assert "hooks_not_confirmed" in result.evidence_lines
 
 
-def test_response_log_is_bonus_evidence_not_required():
+def test_response_log_alone_is_inconclusive():
     # A "Response" logcat line without the hook firing is bonus only - it must
     # not confirm on its own.
     result = check.check(
         logcat_output="V/Response: <html>owasp.org response</html>",
         frida_log="",
     )
-    assert result.ssl_bypassed is False
+    assert result.ssl_bypassed is None
     assert "response_received" in result.evidence_lines
     assert "hooks_not_confirmed" in result.evidence_lines

@@ -62,8 +62,8 @@ TEMPLATE = Template("""\
 {% endfor %}
 ## Dynamic Verification
 
-- Root bypassed: {{ verification.root_bypassed if verification else "not run (" ~ (dynamic_skip_reason or "reason unknown") ~ ")" }}
-- SSL bypassed: {{ verification.ssl_bypassed if verification else "not run (" ~ (dynamic_skip_reason or "reason unknown") ~ ")" }}
+- Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}not run ({{ dynamic_skip_reason or "reason unknown" }}){% endif %}
+- SSL bypassed: {% if verification %}{% if verification.ssl_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.ssl_bypassed }}{% endif %}{% else %}not run ({{ dynamic_skip_reason or "reason unknown" }}){% endif %}
 {% if verification -%}
 {% for key, value in verification.evidence_lines.items() -%}
 - {{ key }}: `{{ value }}`

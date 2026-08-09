@@ -253,3 +253,33 @@ def test_generate_report_flags_missing_nsc_file(tmp_path):
     content = report_path.read_text(encoding="utf-8")
     assert "MISSING" in content
     assert "@xml/network_security_config" in content
+
+
+def test_generate_report_renders_inconclusive_bypass_as_not_a_failure(tmp_path):
+    # RESID-6F: a None bypass (hooks couldn't confirm) must render as
+    # "inconclusive", not a bare Python "None" and not "False" - the report
+    # must keep the honest three-way distinction (confirmed / failed /
+    # inconclusive), never collapse inconclusive into a definitive failure.
+    from common import VerificationResult
+
+    report_path = generate_report(
+        run_id="run9", apk_hash="ghi012", timestamp="2026-08-09T12:00:00",
+        metadata={"hashes": {"sha256": "ghi012"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+    # exercise both the inconclusive and the not-run renderings
+    report_path = generate_report(
+        run_id="run9", apk_hash="ghi012", timestamp="2026-08-09T12:00:00",
+        metadata={"hashes": {"sha256": "ghi012"}, "package": {"package_name": "test.app"}},
+        classification=_classification(),
+        verification=VerificationResult(
+            root_bypassed=None, ssl_bypassed=None,
+            evidence_lines={"hooks_not_confirmed": "cannot confirm the bypass took effect"},
+        ),
+        correlation=None, stage_results=[], output_dir=tmp_path,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "inconclusive (see evidence below)" in content
+    assert "- Root bypassed: None" not in content

@@ -32,11 +32,24 @@ HOOK_FIRED_MARKER = "bypassed"
 RESPONSE_LOG_TAG = "V/Response"
 
 
+def _pin_hook_fired(frida_log: str) -> bool:
+    """Line-coherent pin-hook check (RESID-6G). The whole-log AND it replaces -
+    `SSL_PIN_HOOK in log and HOOK_FIRED_MARKER in log` - could pair a "not
+    present" line's hook name with a stray `bypassed` on a *different* line and
+    false-positive ssl_bypassed. Requiring both on the same line matches the
+    line-coherent `_fired_hook_ids` design of the root checkers: a hook name and
+    its runtime flag must come from the same message."""
+    for line in frida_log.splitlines():
+        if SSL_PIN_HOOK in line and HOOK_FIRED_MARKER in line:
+            return True
+    return False
+
+
 class AndroGoatSuccessCheck:
     def check(self, logcat_output: str, frida_log: str) -> VerificationResult:
         combined = f"{logcat_output}\n{frida_log}"
 
-        pin_hook_fired = SSL_PIN_HOOK in frida_log and HOOK_FIRED_MARKER in frida_log
+        pin_hook_fired = _pin_hook_fired(frida_log)
         response_received = RESPONSE_LOG_TAG in combined
 
         evidence_lines: dict[str, str] = {}
@@ -57,6 +70,10 @@ class AndroGoatSuccessCheck:
 
         return VerificationResult(
             root_bypassed=None,  # root not attempted for an SSL-only run
-            ssl_bypassed=bool(pin_hook_fired),
+            # RESID-6F: not confirmed is None (inconclusive), not False (a
+            # definitive failure) - the pin hook not firing means "could not
+            # verify", which must not be blended with a confirmed failure in
+            # correlation.
+            ssl_bypassed=True if pin_hook_fired else None,
             evidence_lines=evidence_lines,
         )

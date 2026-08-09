@@ -17,28 +17,28 @@ ALL_ROOT_HOOKS_FIRED = _frida_log(
 )
 
 
-def test_secret_revealed_alone_without_hook_evidence_is_not_bypassed():
+def test_secret_revealed_alone_without_hook_evidence_is_inconclusive():
     result = check.check(
         logcat_output="I/System.out: Success! This is the correct secret.",
         frida_log="",
     )
-    assert result.root_bypassed is False
+    assert result.root_bypassed is None
     assert "secret_revealed" in result.evidence_lines
     assert "hooks_not_confirmed" in result.evidence_lines
 
 
-def test_block_signal_present_with_no_hook_evidence_is_not_bypassed():
+def test_block_signal_present_with_no_hook_evidence_is_inconclusive():
     result = check.check(
         logcat_output="WindowManager: WIN DEATH: Window{a2fdae2 u0 Root detected!}",
         frida_log="",
     )
-    assert result.root_bypassed is False
+    assert result.root_bypassed is None
     assert "block_signal_still_present" in result.evidence_lines
 
 
-def test_no_hook_confirmation_means_not_bypassed_even_without_block_signal():
+def test_no_hook_confirmation_means_inconclusive_even_without_block_signal():
     result = check.check(logcat_output="unrelated log line", frida_log="")
-    assert result.root_bypassed is False
+    assert result.root_bypassed is None
     assert result.evidence_lines  # never silently empty on a real verdict
     assert "hooks_not_confirmed" in result.evidence_lines
 
@@ -52,23 +52,23 @@ def test_hooks_confirmed_fired_and_no_block_signal_is_bypassed():
     assert "hook_fired_sg.vantagepoint.a.b.c" in result.evidence_lines
 
 
-def test_hooks_installed_but_never_fired_is_not_confirmed_bypassed():
+def test_hooks_installed_but_never_fired_is_inconclusive():
     # "all three hooked" alone (setup succeeded) without any forced_result
     # message (the app never actually called the methods) isn't sufficient.
     frida_log = _frida_log({"type": "send", "payload": {"hook": "sg.vantagepoint.a.b", "status": "all three hooked"}})
     result = check.check(logcat_output="unrelated log line", frida_log=frida_log)
-    assert result.root_bypassed is False
+    assert result.root_bypassed is None
     assert "hooks_not_confirmed" in result.evidence_lines
 
 
-def test_partial_hook_firing_is_not_confirmed_bypassed():
+def test_partial_hook_firing_is_inconclusive():
     # Only 2 of 3 root-check hooks fired - not sufficient.
     frida_log = _frida_log(
         {"type": "send", "payload": {"hook": "sg.vantagepoint.a.b.a", "forced_result": False}},
         {"type": "send", "payload": {"hook": "sg.vantagepoint.a.b.b", "forced_result": False}},
     )
     result = check.check(logcat_output="unrelated log line", frida_log=frida_log)
-    assert result.root_bypassed is False
+    assert result.root_bypassed is None
     assert "hooks_not_confirmed" in result.evidence_lines
 
 
@@ -97,7 +97,7 @@ def test_debugger_detected_block_signal_is_recognized_explicitly():
     assert "Debugger detected" in result.evidence_lines["block_signal_still_present"]
 
 
-def test_anti_debug_poll_hook_firing_alone_does_not_flip_verdict_to_bypassed():
+def test_anti_debug_poll_hook_firing_alone_is_inconclusive_not_a_failure():
     # The Debug.isDebuggerConnected() hook is a defensive precaution, not
     # root-detection evidence - it must never substitute for the three real
     # root-check hooks in the verdict.
@@ -105,7 +105,7 @@ def test_anti_debug_poll_hook_firing_alone_does_not_flip_verdict_to_bypassed():
         {"type": "send", "payload": {"hook": "android.os.Debug.isDebuggerConnected", "forced_result": False}},
     )
     result = check.check(logcat_output="unrelated log line", frida_log=frida_log)
-    assert result.root_bypassed is False
+    assert result.root_bypassed is None
     assert "hooks_not_confirmed" in result.evidence_lines
     assert "anti_debug_poll_neutralized" in result.evidence_lines
 

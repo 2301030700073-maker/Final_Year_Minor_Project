@@ -32,8 +32,12 @@ TEMPLATE = Template("""\
 **Toolchain:** {% for tool, ver in metadata.tool_versions.items() %}{{ tool }}={{ ver }}{% if not loop.last %}, {% endif %}{% endfor %}
 {% endif %}
 {% if manifest -%}
+{% if manifest.application_present -%}
 **Debuggable:** {{ "yes" if manifest.debuggable else "no" }}
-**Network security config:** {{ manifest.network_security_config or "none" }}
+**Network security config:** {{ manifest.network_security_config or "none" }}{% if manifest.nsc_file_present is false %} (**MISSING** - declared `{{ manifest.network_security_config }}` was not found in the decoded resources){% endif %}
+{% else -%}
+**Manifest has no &lt;application&gt; element** - debuggable and network-security-config below are defaults, not reads (RESID-5A/5D).
+{% endif %}
 {% endif %}
 
 ## Classification

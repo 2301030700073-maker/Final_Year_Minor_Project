@@ -211,3 +211,45 @@ def test_generate_report_complete_decompile_shows_no_caution_badge(tmp_path):
     content = report_path.read_text(encoding="utf-8")
     assert "CAUTION" not in content
     assert "completed successfully (42 source files)" in content
+
+
+def test_generate_report_labels_defaults_when_manifest_lacks_application(tmp_path):
+    # RESID-5A/5D: for a manifest with no <application> element, debuggable/NSC
+    # are defaults, not reads - the report must say so instead of rendering
+    # "Debuggable: no" as if it were a read.
+    from static.manifest import ManifestInfo
+
+    report_path = generate_report(
+        run_id="run7", apk_hash="def456", timestamp="2026-08-09T12:00:00",
+        metadata={"hashes": {"sha256": "def456"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+        manifest=ManifestInfo(debuggable=False, network_security_config=None, application_present=False),
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "no &lt;application&gt; element" in content
+    assert "defaults, not reads" in content
+
+
+def test_generate_report_flags_missing_nsc_file(tmp_path):
+    # RESID-5C: a declared NSC whose referenced file is absent from the decoded
+    # resources must be flagged, not silently presented as a scanned config.
+    from static.manifest import ManifestInfo
+
+    report_path = generate_report(
+        run_id="run8", apk_hash="abc789", timestamp="2026-08-09T12:00:00",
+        metadata={"hashes": {"sha256": "abc789"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+        manifest=ManifestInfo(
+            debuggable=False,
+            network_security_config="@xml/network_security_config",
+            application_present=True,
+            nsc_file_present=False,
+        ),
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "MISSING" in content
+    assert "@xml/network_security_config" in content

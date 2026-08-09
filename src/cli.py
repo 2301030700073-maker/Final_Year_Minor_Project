@@ -290,7 +290,9 @@ def run(
     if scan_stage.status == "failed":
         _halt(stage_results)
 
-    manifest_stage, manifest_info = _wrap_stage("manifest_parse", parse_manifest, manifest_path)
+    # RESID-5C: pass the apktool output root so parse_manifest can resolve the
+    # declared NSC reference against res/xml/ and say whether the file exists.
+    manifest_stage, manifest_info = _wrap_stage("manifest_parse", parse_manifest, manifest_path, apktool_output)
     stage_results.append(manifest_stage)
     _print_stage(manifest_stage)
     # 5-1: a successful manifest parse now feeds the SSL evidence (NSC presence)

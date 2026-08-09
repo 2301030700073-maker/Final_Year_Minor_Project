@@ -56,6 +56,71 @@ def test_parse_manifest_flags_missing_application_element(tmp_path):
     assert info.network_security_config is None
 
 
+def test_parse_manifest_accepts_noncanonical_true_boolean(tmp_path):
+    # RESID-5B: True/TRUE and "1" are legal non-canonical boolean encodings in
+    # Android XML but a strict == "true" read them as False - a debuggable app
+    # silently reported as not debuggable.
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="x.y.z">\n'
+        '    <application android:debuggable="TRUE"/>\n'
+        '</manifest>\n'
+    )
+
+    info = parse_manifest(manifest_path)
+
+    assert info.debuggable is True
+
+
+def test_parse_manifest_accepts_one_boolean(tmp_path):
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="x.y.z">\n'
+        '    <application android:debuggable="1"/>\n'
+        '</manifest>\n'
+    )
+
+    assert parse_manifest(manifest_path).debuggable is True
+
+
+def test_parse_manifest_resolves_nsc_file_presence(tmp_path):
+    # RESID-5C: with a resource_root, the @xml/<name> reference is resolved to
+    # res/xml/<name>.xml so the report can say whether it exists.
+    resource_root = tmp_path / "apktool"
+    (resource_root / "res" / "xml").mkdir(parents=True)
+    (resource_root / "res" / "xml" / "network_security_config.xml").write_text(
+        "<network-security-config/>"
+    )
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(MANIFEST_WITH_NSC)
+
+    info = parse_manifest(manifest_path, resource_root)
+
+    assert info.nsc_file_present is True
+
+
+def test_parse_manifest_flags_missing_nsc_file(tmp_path):
+    # RESID-5C: declared but absent - the report must not present a pinning
+    # config as scanned when the referenced file doesn't exist in the output.
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(MANIFEST_WITH_NSC)
+
+    info = parse_manifest(manifest_path, tmp_path)  # no res/xml/... under tmp_path
+
+    assert info.nsc_file_present is False
+
+
+def test_parse_manifest_nsc_presence_is_none_without_resource_root(tmp_path):
+    # No resource root to resolve against - nothing to assert, stays None (the
+    # pre-existing parse path is unchanged for unit tests that only pass a path).
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(MANIFEST_WITH_NSC)
+
+    assert parse_manifest(manifest_path).nsc_file_present is None
+
+
 def test_parse_manifest_rejects_wrong_root_tag(tmp_path):
     # 5-4: a non-manifest XML used to silently yield defaults - fail loudly.
     manifest_path = tmp_path / "AndroidManifest.xml"

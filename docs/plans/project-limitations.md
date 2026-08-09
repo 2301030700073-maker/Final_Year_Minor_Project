@@ -53,6 +53,11 @@ A single-researcher, deterministic analysis tool that, given an APK: ingests it,
 - **Subprocess timeouts** (G2, G9) — aapt2/apksigner (30s), jadx (600s), apktool (300s) now time out and fail loudly instead of hanging silently.
 - **Ingest discards partial evidence on failure** (G3) — `ingest` accumulates hashes/size/package into the failed `StageResult`, so a failed ingest still yields a real hash for the audit log (ADR-0005).
 - **v4 signing not parsed** (G4) — `SignerInfo` now carries `v4_verified`.
+- **Multi-signer truncation** (LIM-3) — all signers are parsed; the report lists the count and every cert, not just signer #1's.
+- **`sdkVersion` regex ambiguity** — anchored to the line start so it can't misread a `targetSdkVersion` value as `min_sdk` on reordered output.
+- **Toolchain versions not captured** (reproducibility) — aapt2/apksigner/jadx/apktool versions are recorded in ingest evidence and the report header.
+- **Non-APK accepted** — a fast `PK\x03\x04` zip-magic check rejects non-APKs before hashing or any tool run.
+- **Uncontextualized tool failure** — named `Aapt2Error`/`ApksignerError` distinguish a timeout from a nonzero exit.
 - **`load_signatures` crashes unhandled** (G8) — signature loading is wrapped so a malformed YAML fails as a loud `StageResult` and halts.
 - **`config/settings.yaml` dead config** (G1) — per-category root/ssl thresholds are now loaded from it; the path/model-routing keys remain unused.
 - **Audit log not tamper-evident** (G15) — records are hash-chained and fsynced, with a `verify-audit-log` command; `outputs/` is gitignored.
@@ -61,7 +66,6 @@ A single-researcher, deterministic analysis tool that, given an APK: ingests it,
 - `.smali`/`.so` not scanned (G6, G7); matching is single-line/case-sensitive.
 - CLI orchestrator largely untested (G20); `run.sh` has hardcoded personal paths (G21); no CI (G22).
 - Ground-truth registry diverged / partial-decompile controls excluded (G17, G18).
-- Multi-signer (key-rotation) APKs report only signer #1's certificate (LIM-3).
 
 These are known and documented — **not** hidden. Fixing them is legitimate future work within the deterministic core.
 

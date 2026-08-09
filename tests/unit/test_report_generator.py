@@ -144,6 +144,56 @@ def test_generate_report_surfaces_manifest_fields(tmp_path):
     assert "@xml/network_security_config" in content
 
 
+def test_generate_report_lists_all_signers_and_toolchain(tmp_path):
+    # LIM-3 + NEW-B: multiple signers must all be surfaced, and the toolchain
+    # versions recorded at ingest must appear in the header.
+    metadata = {
+        "hashes": {"sha256": "multisig"},
+        "package": {"package_name": "test.app"},
+        "signer": {
+            "v1_verified": True, "v2_verified": True, "v3_verified": False, "v4_verified": False,
+            "certificate_dn": "CN=App", "certificate_sha256": "aa:bb",
+            "signer_count": 2,
+            "signers": [
+                {"dn": "CN=App", "sha256": "aa:bb"},
+                {"dn": "CN=Rotation Key", "sha256": "cc:dd"},
+            ],
+        },
+        "tool_versions": {"aapt2": "2.0.1", "apksigner": "33.0.1", "jadx": "1.5.0", "apktool": "2.9.3"},
+    }
+
+    report_path = generate_report(
+        run_id="multisig", apk_hash="multisig", timestamp="2026-08-09T12:00:00",
+        metadata=metadata, classification=_classification(), verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "2 total" in content
+    assert "CN=Rotation Key" in content
+    assert "cc:dd" in content
+    assert "aapt2=2.0.1" in content
+    assert "apktool=2.9.3" in content
+
+
+def test_generate_report_single_signer_omits_multi_block(tmp_path):
+    # A single signer must not render the "All signers" block.
+    metadata = {
+        "hashes": {"sha256": "single"},
+        "package": {"package_name": "test.app"},
+        "signer": {"v1_verified": True, "v2_verified": True, "v3_verified": False, "v4_verified": False,
+                   "certificate_sha256": "aa", "signer_count": 1, "signers": [{"dn": "CN=App", "sha256": "aa"}]},
+    }
+    report_path = generate_report(
+        run_id="single", apk_hash="single", timestamp="2026-08-09T12:00:00",
+        metadata=metadata, classification=_classification(), verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "All signers" not in content
+    assert "cert SHA-256: aa" in content
+
+
 def test_generate_report_complete_decompile_shows_no_caution_badge(tmp_path):
     stage_results = [StageResult(
         stage="decompile", status="success",

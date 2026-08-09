@@ -155,6 +155,36 @@ def test_git_commit_hash_dirty_tree_is_flagged(monkeypatch):
     assert _git_commit_hash() == "abc123 (dirty working tree)"
 
 
+def test_calibration_report_command_wires_tuned_thresholds(monkeypatch):
+    # G2-residual: the calibration-report command must pass the same tuned
+    # root/ssl thresholds the live decision engine uses (from settings.yaml via
+    # _load_thresholds), not silently default both to 0.7 - otherwise a tuning
+    # in config is honored at run time but the report's decision boundary stays
+    # stale, defeating the 4-3 independence the per-category threshold exists to
+    # represent. A tuned threshold must surface as an explicit bucket edge.
+    import cli
+    captured: dict = {}
+    real_ccr = cli.compute_calibration_report
+
+    def _spy(*args, **kwargs):
+        captured["threshold"] = kwargs.get("threshold")
+        captured["report"] = real_ccr(*args, **kwargs)
+        return captured["report"]
+
+    monkeypatch.setattr("cli.compute_calibration_report", _spy)
+    monkeypatch.setattr("cli.load_runs_for_calibration", lambda _root: [])
+    monkeypatch.setattr("cli.load_ground_truth", lambda _gt: {})
+    monkeypatch.setattr("cli._load_thresholds", lambda: (0.6, 0.8))
+    monkeypatch.setattr("cli.generate_calibration_report", lambda _report, _root: Path("calib.md"))
+
+    cli.calibration_report(ground_truth=Path("unused.yaml"))
+
+    assert captured["threshold"] == {"root": 0.6, "ssl": 0.8}
+    root_edges = {b.range_low for b in captured["report"].calibration_curve["root"]} \
+        | {captured["report"].calibration_curve["root"][-1].range_high}
+    assert 0.6 in root_edges  # the tuned root threshold is a real bucket edge
+
+
 def test_git_commit_hash_does_not_flag_git_diff_error_as_dirty(monkeypatch):
     # F2: `!= 0` conflated a `git diff HEAD --quiet` error (rc=128) with a
     # genuinely dirty tree (rc=1). Only rc=1 means differences exist; an errored

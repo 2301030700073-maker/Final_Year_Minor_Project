@@ -418,11 +418,16 @@ def calibration_report(
     --apk/--justification, unlike `run`."""
     runs = load_runs_for_calibration(ANALYSIS_ROOT)
     gt_entries = load_ground_truth(ground_truth)
+    # G2-residual: honor the same tuned root/ssl thresholds the live decision
+    # engine uses (_load_thresholds, 4-3) so the report's decision boundary
+    # matches reality instead of silently defaulting to 0.7 for both categories.
+    root_threshold, ssl_threshold = _load_thresholds()
     report = compute_calibration_report(
         runs, gt_entries,
         generated_at=datetime.now(timezone.utc).isoformat(),
         ground_truth_commit=_git_last_commit_touching(ground_truth),
         analysis_code_commit=_git_commit_hash(),
+        threshold={"root": root_threshold, "ssl": ssl_threshold},
     )
 
     def _fmt(rate: float | None) -> str:

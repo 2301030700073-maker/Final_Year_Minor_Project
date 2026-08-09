@@ -237,6 +237,7 @@ def run(
         apk_hash=apk_hash,
         operator=operator,
         git_commit=git_commit,
+        run_id=run_id,
     )
     stage_results.append(audit_result)
     _print_stage(audit_result)

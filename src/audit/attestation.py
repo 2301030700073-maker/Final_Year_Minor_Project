@@ -85,11 +85,34 @@ def _last_record_hash(audit_log_path: Path) -> str | None:
         return None
 
 
+# RESID-2B: rotate the log before it grows past this many bytes, so an
+# unbounded JSONL append can't consume disk indefinitely. Rotation archives the
+# current file (chain resets at the archive boundary - documented, and each
+# archive verifies independently) and starts a fresh, empty log.
+MAX_LOG_BYTES = 5 * 1024 * 1024
+
+
+def _maybe_rotate(audit_log_path: Path) -> None:
+    """Rename the log to a timestamped archive once it exceeds MAX_LOG_BYTES,
+    so appends continue in a fresh file. Resets the tail-hash cache so the new
+    file starts a clean chain."""
+    try:
+        if audit_log_path.stat().st_size >= MAX_LOG_BYTES:
+            archive = audit_log_path.with_name(
+                f"{audit_log_path.name}.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+            )
+            os.replace(audit_log_path, archive)
+            _last_hash_by_path.pop(str(audit_log_path), None)
+    except FileNotFoundError:
+        pass  # first record: nothing to rotate
+
+
 def _append_audit_record(audit_log_path: Path, record: dict) -> None:
     """Append one hash-chained record with an fsync (A4: flush() alone only
     reaches the OS page cache; a crash right after would silently drop it)."""
     audit_log_path = Path(audit_log_path)
     audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+    _maybe_rotate(audit_log_path)
     record["prev_hash"] = _last_record_hash(audit_log_path)
     record["record_hash"] = hashlib.sha256(_canonical(record).encode()).hexdigest()
     with open(audit_log_path, "a", encoding="utf-8") as f:
@@ -107,6 +130,7 @@ def record_authorization(
     operator: str,
     git_commit: str,
     tool_version: str = "0.1.0",
+    run_id: str | None = None,
 ) -> StageResult:
     start = time.monotonic()
     if not validate_justification(justification):
@@ -120,6 +144,7 @@ def record_authorization(
         )
 
     record = {
+        "event": "run_authorized",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "apk_hash": apk_hash,
         "justification": justification,
@@ -127,6 +152,11 @@ def record_authorization(
         "tool_version": tool_version,
         "git_commit": git_commit,
     }
+    if run_id is not None:
+        # RESID-2A: carry the run id so verify_audit_log can pair each
+        # completion back to its authorization (semantic check on top of the
+        # hash chain). Omitted when callers don't track a run id.
+        record["run_id"] = run_id
     try:
         _append_audit_record(audit_log_path, record)
     except ValueError as exc:
@@ -222,14 +252,27 @@ def verify_audit_log(audit_log_path: Path) -> dict:
     """Re-derive the hash chain and report integrity. Returns a dict and never
     raises on corrupt content - it collects every error it finds. Records
     written before hashing existed are counted as `legacy` (unchainable) and
-    don't fail the check on their own."""
+    don't fail the check on their own.
+
+    Beyond the hash chain it also performs a semantic pairing check (RESID-2A):
+    each run_completed event must have a prior run_authorized event carrying the
+    same run_id. An *orphan completion* (result on record with no authorization)
+    is an integrity break and fails the check; an *authorization without
+    completion* is informational (normal for a crashed or deliberately-halted
+    run) and reported separately without failing."""
     path = Path(audit_log_path)
     if not path.is_file():
-        return {"valid": True, "total": 0, "chained": 0, "legacy": 0, "errors": []}
+        return {
+            "valid": True, "total": 0, "chained": 0, "legacy": 0,
+            "orphan_completions": [], "uncompleted_runs": [], "errors": [],
+        }
 
     errors: list[str] = []
     total = chained = legacy = 0
     prev_hash: str | None = None
+    authorized_run_ids: set[str] = set()
+    completed_run_ids: set[str] = set()
+    orphan_order: list[str] = []
 
     with open(path, encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
@@ -258,4 +301,27 @@ def verify_audit_log(audit_log_path: Path) -> dict:
                 errors.append(f"line {lineno}: prev_hash breaks the chain (record inserted/deleted)")
             prev_hash = record_hash
 
-    return {"valid": not errors, "total": total, "chained": chained, "legacy": legacy, "errors": errors}
+            # Semantic pairing (RESID-2A) - only for hashed, current-schema
+            # records that carry a run_id.
+            event = rec.get("event")
+            run_id = rec.get("run_id")
+            if event == "run_authorized" and run_id:
+                authorized_run_ids.add(run_id)
+            elif event == "run_completed":
+                if run_id:
+                    if run_id in authorized_run_ids:
+                        completed_run_ids.add(run_id)
+                    else:
+                        errors.append(
+                            f"line {lineno}: run_completed for run_id '{run_id}' has no prior "
+                            "authorization (orphan completion)"
+                        )
+                        orphan_order.append(run_id)
+
+    uncompleted = sorted(authorized_run_ids - completed_run_ids)
+    return {
+        "valid": not errors, "total": total, "chained": chained, "legacy": legacy,
+        "orphan_completions": orphan_order,
+        "uncompleted_runs": uncompleted,
+        "errors": errors,
+    }

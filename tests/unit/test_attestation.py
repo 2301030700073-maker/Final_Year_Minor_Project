@@ -102,7 +102,9 @@ def test_record_run_completion_appends_chained_outcome_record(tmp_path):
     # alone left the trail silent on whether the analysis completed or what
     # it found. Verify it lands, carries the result, and stays hash-chained.
     log_path = tmp_path / "audit_log.jsonl"
-    record_authorization(log_path, "OWN_APP", "hash1", "op", "commit1")
+    # Real paired run: the authorization carries the same run_id the completion
+    # will, so the semantic pairing check (RESID-2A) sees a legitimate run.
+    record_authorization(log_path, "OWN_APP", "hash1", "op", "commit1", run_id="run-abc")
 
     result = record_run_completion(
         audit_log_path=log_path,
@@ -135,6 +137,37 @@ def test_authorized_engagement_requires_non_blank_id(tmp_path):
     assert validate_justification("AUTHORIZED_ENGAGEMENT:eng-123") is True
 
 
+def test_append_chains_oo1_no_whole_file_rescan(tmp_path, monkeypatch):
+    # LIM-B: each append must chain in O(1), not re-read the whole file to
+    # find the tail hash (that would be O(n²) across a run). Warm the cache,
+    # then instrument open() to count accesses to the audit file during the
+    # next append: a cached tail hash means exactly one open (the append-mode
+    # write), whereas a rescan would add a second read-mode open.
+    log_path = tmp_path / "audit_log.jsonl"
+    for i in range(10):
+        record_authorization(log_path, "OWN_APP", f"hash{i}", "op", "commit1")
+    # Warm the per-path cache so the next append reads it instead of the file.
+    from audit.attestation import _last_record_hash
+    _last_record_hash(log_path)
+
+    opens = {"count": 0}
+    real_open = open
+
+    def counting_open(*args, **kwargs):
+        if str(args[0]) == str(log_path):
+            opens["count"] += 1
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", counting_open)
+    record_authorization(log_path, "OWN_APP", "hash-last", "op", "commit1")
+    # One open for the append write; no extra read to rescan the tail.
+    assert opens["count"] <= 1
+
+    verified = verify_audit_log(log_path)
+    assert verified["valid"] is True
+    assert verified["chained"] == 11  # 10 auth + 1 appended, all chained
+
+
 def test_corrupt_tail_line_fails_append_loudly(tmp_path):
     # LIM-D: a malformed trailing line must not silently reset the hash chain
     # (which would hide tampering) - record_authorization must surface it as a
@@ -149,3 +182,50 @@ def test_corrupt_tail_line_fails_append_loudly(tmp_path):
     # Nothing appended - the bad tail was not papered over.
     lines = log_path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
+
+
+def test_verify_audit_log_flags_orphan_completion(tmp_path):
+    # RESID-2A: a run_completed with no prior run_authorized is an integrity
+    # break the hash chain alone can't see (a result recorded without the
+    # authorization gate) - it must fail verification.
+    log_path = tmp_path / "audit_log.jsonl"
+    record_run_completion(
+        audit_log_path=log_path,
+        run_id="ghost", apk_hash="hash1",
+        justification="OWN_APP", operator="op", git_commit="commit1",
+        action="ROOT_ONLY", stage_statuses={}, verification="not run",
+    )
+
+    result = verify_audit_log(log_path)
+    assert result["valid"] is False
+    assert result["orphan_completions"] == ["ghost"]
+    assert any("orphan completion" in e for e in result["errors"])
+
+
+def test_verify_audit_log_reports_uncompleted_runs_informational(tmp_path):
+    # RESID-2A: an authorization with no completion is normal for a crashed or
+    # halted run - reported but must NOT fail verification.
+    log_path = tmp_path / "audit_log.jsonl"
+    record_authorization(log_path, "OWN_APP", "hash1", "op", "commit1", run_id="run-halted")
+
+    result = verify_audit_log(log_path)
+    assert result["valid"] is True
+    assert result["uncompleted_runs"] == ["run-halted"]
+    assert result["orphan_completions"] == []
+
+
+def test_audit_log_rotates_past_size_cap(tmp_path, monkeypatch):
+    # RESID-2B: once the log exceeds the cap, the next append must archive the
+    # current file and start fresh instead of appending without bound.
+    import audit.attestation as att
+    monkeypatch.setattr(att, "MAX_LOG_BYTES", 1)  # any existing file triggers rotation
+
+    log_path = tmp_path / "audit_log.jsonl"
+    record_authorization(log_path, "OWN_APP", "hash1", "op", "commit1", run_id="run-1")
+    record_authorization(log_path, "OWN_APP", "hash2", "op", "commit1", run_id="run-2")
+
+    archives = [p for p in tmp_path.iterdir() if p.name.startswith("audit_log.jsonl.")]
+    assert len(archives) == 1  # run-1's record was rotated out
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1  # fresh file holds only run-2
+    assert json.loads(lines[0])["run_id"] == "run-2"

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from calibration.outcomes import Tier1Outcome, Tier2Outcome, classify_tier1, classify_tier2
 from calibration.types import Category, GroundTruthEntry, RunRow
+from static.decision_engine import DEFAULT_THRESHOLD
 
 CATEGORIES: tuple[Category, ...] = ("root", "ssl")
 DEFAULT_BUCKET_EDGES = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
@@ -126,7 +127,10 @@ def compute_calibration_report(
     # category falls back to the engine default 0.7.
     base_edges = sorted(set(bucket_edges or DEFAULT_BUCKET_EDGES))
     if isinstance(threshold, dict):
-        thresholds: dict[Category, float] = {c: float(threshold.get(c, 0.7)) for c in CATEGORIES}
+        # Single source of truth for the default: import DEFAULT_THRESHOLD from
+        # the decision engine rather than a literal, so a missing dict key can't
+        # silently drift from the engine's actual default.
+        thresholds: dict[Category, float] = {c: float(threshold.get(c, DEFAULT_THRESHOLD)) for c in CATEGORIES}
     else:
         thresholds = {c: float(threshold) for c in CATEGORIES}
 

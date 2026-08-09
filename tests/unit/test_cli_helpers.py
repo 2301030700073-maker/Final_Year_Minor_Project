@@ -216,12 +216,16 @@ class _FakeConsole:
 
 
 def _finalize_kwargs():
+    # Mirrors the real caller: report_kwargs and save_payload reference the SAME
+    # stage_results list object, which is exactly the object-identity coupling H3
+    # depends on (an append through one must be visible to the other).
+    stage_results = []
     return {
-        "report_kwargs": {"stage_results": [], "output_dir": Path("/tmp")},
+        "report_kwargs": {"stage_results": stage_results, "output_dir": Path("/tmp")},
         "analysis_root": Path("/tmp"),
         "apk_hash": "hash",
         "run_id": "r1",
-        "save_payload": {},
+        "save_payload": {"stage_results": stage_results},
         "completion_kwargs": {},
     }
 
@@ -286,3 +290,25 @@ def test_finalize_run_success_returns_report_path(monkeypatch):
 
     result = cli._finalize_run(**_finalize_kwargs())
     assert result == Path("report.md")
+
+
+def test_finalize_run_save_run_persists_the_completion_stage(monkeypatch):
+    # H3: the completion stage must be appended to stage_results BEFORE save_run
+    # snapshots it, so the persisted DB record and the report table agree. If
+    # save_run ran first, it would store the list without the audit-completion
+    # stage while the regenerated report showed it - a report-vs-DB mismatch.
+    import cli
+    ok = StageResult(stage="audit", status="success", evidence={}, duration_ms=0)
+    captured: dict = {}
+
+    def _save(analysis_root, apk_hash, run_id, save_payload):
+        captured["stage_results"] = save_payload["stage_results"]
+
+    monkeypatch.setattr("cli.generate_report", lambda **kw: Path("report.md"))
+    monkeypatch.setattr("cli.save_run", _save)
+    monkeypatch.setattr("cli.record_run_completion", lambda **kw: ok)
+    monkeypatch.setattr("cli.console", _FakeConsole())
+
+    cli._finalize_run(**_finalize_kwargs())
+
+    assert "audit" in [s.stage for s in captured["stage_results"]]

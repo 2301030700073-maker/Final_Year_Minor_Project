@@ -227,15 +227,20 @@ def _finalize_run(
     """
     report_path = generate_report(**report_kwargs)
 
+    # H3: append the completion stage to stage_results BEFORE save_run. report_kwargs
+    # and save_payload reference the SAME list, so save_run snapshots it at call
+    # time - if it ran first it would persist the list without the completion
+    # stage while the regenerated report showed it, a report-vs-DB inconsistency.
+    completion_stage = record_run_completion(**completion_kwargs)
+    report_kwargs["stage_results"].append(completion_stage)
+
     save_error: str | None = None
     try:
         save_run(analysis_root, apk_hash, run_id, save_payload)
     except Exception as exc:
         save_error = str(exc)
 
-    completion_stage = record_run_completion(**completion_kwargs)
-    report_kwargs["stage_results"].append(completion_stage)
-    report_path = generate_report(**report_kwargs)
+    report_path = generate_report(**report_kwargs)  # regenerate with the completion stage
 
     if completion_stage.status == "failed":
         console.print(f"[red]Audit completion failed: {completion_stage.error}[/red]")

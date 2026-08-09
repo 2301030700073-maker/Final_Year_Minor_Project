@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cli import _apply_manifest_ssl_signal, _git_last_commit_touching, _load_thresholds, _wrap_stage
+from cli import _apply_manifest_ssl_signal, _git_commit_hash, _git_last_commit_touching, _load_thresholds, _wrap_stage
 from common import StaticEvidence
 from static.manifest import ManifestInfo
 
@@ -130,3 +130,34 @@ def test_wrap_stage_failure_captures_error_and_returns_none():
     assert stage_result.status == "failed"
     assert "something broke" in stage_result.error
     assert raw is None
+
+
+def test_git_commit_hash_clean_tree_returns_bare_hash(monkeypatch):
+    def fake_run(cmd, capture_output, text=None, check=None):
+        if cmd == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="abc123\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")  # diff: clean
+    monkeypatch.setattr("cli.subprocess.run", fake_run)
+
+    assert _git_commit_hash() == "abc123"
+
+
+def test_git_commit_hash_dirty_tree_is_flagged(monkeypatch):
+    # RESID-7B: uncommitted edits to the code that ran must be flagged, not
+    # silently presented as the committed revision - a report stamped "abc123"
+    # would be a false statement about which code produced it.
+    def fake_run(cmd, capture_output, text=None, check=None):
+        if cmd == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="abc123\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")  # diff: dirty
+    monkeypatch.setattr("cli.subprocess.run", fake_run)
+
+    assert _git_commit_hash() == "abc123 (dirty working tree)"
+
+
+def test_git_commit_hash_handles_git_failure(monkeypatch):
+    def fake_run(cmd, capture_output, text=None, check=None):
+        raise FileNotFoundError("git not found")
+    monkeypatch.setattr("cli.subprocess.run", fake_run)
+
+    assert _git_commit_hash() == "unknown"

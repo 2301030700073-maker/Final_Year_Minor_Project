@@ -69,9 +69,21 @@ SUCCESS_CHECKS = {
 
 
 def _git_commit_hash() -> str:
+    """The analysis code's commit, made dirty-aware (RESID-7B). Stamping bare
+    HEAD was a false precision: a report could print a commit even when the
+    working tree carried uncommitted edits to the exact code that ran - a false
+    statement about which code produced the report (principle 3). Flags it the
+    same way _git_last_commit_touching does, so every provenance stamp (report,
+    audit log, saved run) honestly says uncommitted changes were present.
+    `git diff HEAD --quiet` covers staged and unstaged edits to tracked files
+    while ignoring untracked artifacts (outputs/, bundles) that always exist."""
     try:
         result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True)
-        return result.stdout.strip()
+        commit = result.stdout.strip()
+        if not commit:
+            return "unknown"
+        dirty = subprocess.run(["git", "diff", "HEAD", "--quiet"], capture_output=True).returncode != 0
+        return f"{commit} (dirty working tree)" if dirty else commit
     except Exception:
         return "unknown"
 

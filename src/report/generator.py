@@ -22,7 +22,11 @@ TEMPLATE = Template("""\
 **APK SHA-256:** {{ metadata.hashes.sha256 }}
 **Version:** {{ metadata.package.version_name }} (code {{ metadata.package.version_code }})
 **SDK:** min={{ metadata.package.min_sdk }}, target={{ metadata.package.target_sdk }}
+{% if metadata.signer -%}
 **Signing:** v1={{ "yes" if metadata.signer.v1_verified else "no" }}, v2={{ "yes" if metadata.signer.v2_verified else "no" }}, v3={{ "yes" if metadata.signer.v3_verified else "no" }}, v4={{ "yes" if metadata.signer.v4_verified else "no" }}; cert SHA-256: {{ metadata.signer.certificate_sha256 or "unknown" }}
+{% else -%}
+**Signing:** unknown (no signing information extracted)
+{% endif %}
 {% if metadata.signer and metadata.signer.signer_count is not none and metadata.signer.signer_count > 1 -%}
 **All signers ({{ metadata.signer.signer_count }} total):**
 {% for s in metadata.signer.signers -%}
@@ -176,6 +180,7 @@ CALIBRATION_TEMPLATE = Template("""\
 # Calibration Report
 
 **Generated:** {{ report.generated_at }}
+**Analysis code:** {{ report.analysis_code_commit or "unknown" }}
 **Ground-truth registry commit:** {{ report.ground_truth_commit }}
 
 {% if report.skeleton_warning -%}

@@ -82,6 +82,7 @@ class CalibrationCurveBucket:
 class CalibrationReport:
     generated_at: str
     ground_truth_commit: str
+    analysis_code_commit: str
     tier1: dict[Category, CategoryTier1Report]
     tier2: dict[Category, CategoryTier2Report]
     calibration_curve: dict[Category, list[CalibrationCurveBucket]]
@@ -114,6 +115,7 @@ def compute_calibration_report(
     ground_truth: dict[str, GroundTruthEntry],
     generated_at: str,
     ground_truth_commit: str,
+    analysis_code_commit: str = "unknown",
     threshold: float = 0.7,
     bucket_edges: list[float] | None = None,
 ) -> CalibrationReport:
@@ -191,6 +193,7 @@ def compute_calibration_report(
     return CalibrationReport(
         generated_at=generated_at,
         ground_truth_commit=ground_truth_commit,
+        analysis_code_commit=analysis_code_commit,
         tier1=tier1,
         tier2=tier2,
         calibration_curve=curve,

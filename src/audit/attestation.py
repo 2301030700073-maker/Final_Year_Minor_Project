@@ -92,24 +92,32 @@ def _last_record_hash(audit_log_path: Path) -> str | None:
 
 # RESID-2B: rotate the log before it grows past this many bytes, so an
 # unbounded JSONL append can't consume disk indefinitely. Rotation archives the
-# current file (chain resets at the archive boundary - documented, and each
-# archive verifies independently) and starts a fresh, empty log.
+# current file and starts a fresh, empty log; the fresh file's first record is
+# anchored to the archived file's last record_hash (cross-file chaining) so the
+# chain runs continuously across files and a deleted archive stays detectable.
 MAX_LOG_BYTES = 5 * 1024 * 1024
 
 
-def _maybe_rotate(audit_log_path: Path) -> None:
+def _maybe_rotate(audit_log_path: Path) -> str | None:
     """Rename the log to a timestamped archive once it exceeds MAX_LOG_BYTES,
-    so appends continue in a fresh file. Resets the tail-hash cache so the new
-    file starts a clean chain."""
+    so appends continue in a fresh file. Resets the tail-hash cache for the
+    current path. Returns the archived file's last record_hash (captured before
+    the cache reset) so the new file's first record can anchor onto it - without
+    that anchor, deleting an archive would be invisible to verify_audit_log,
+    which would just see a fresh chain start instead of a missing file. Returns
+    None when nothing rotated (no archive, no anchor)."""
     try:
         if audit_log_path.stat().st_size >= MAX_LOG_BYTES:
             archive = audit_log_path.with_name(
                 f"{audit_log_path.name}.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
             )
+            tail_hash = _last_record_hash(audit_log_path)  # capture BEFORE the pop below
             os.replace(audit_log_path, archive)
             _last_hash_by_path.pop(str(audit_log_path), None)
+            return tail_hash
     except FileNotFoundError:
         pass  # first record: nothing to rotate
+    return None
 
 
 def _append_audit_record(audit_log_path: Path, record: dict) -> None:
@@ -117,8 +125,11 @@ def _append_audit_record(audit_log_path: Path, record: dict) -> None:
     reaches the OS page cache; a crash right after would silently drop it)."""
     audit_log_path = Path(audit_log_path)
     audit_log_path.parent.mkdir(parents=True, exist_ok=True)
-    _maybe_rotate(audit_log_path)
-    record["prev_hash"] = _last_record_hash(audit_log_path)
+    anchor = _maybe_rotate(audit_log_path)
+    # A rotation returns the archived file's tail hash: the new file's first
+    # record chains onto it, so the chain is continuous across the boundary.
+    # Otherwise (no rotation) chain onto the current file's own tail as before.
+    record["prev_hash"] = anchor if anchor is not None else _last_record_hash(audit_log_path)
     record["record_hash"] = hashlib.sha256(_canonical(record).encode()).hexdigest()
     with open(audit_log_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, sort_keys=True) + "\n")
@@ -268,8 +279,10 @@ def verify_audit_log(audit_log_path: Path) -> dict:
     written before hashing existed are counted as `legacy` (unchainable) and
     don't fail the check on their own.
 
-    Scans the current log AND every rotated archive sibling (RESID-2C), because
-    rotation resets the chain - a tampered archive would otherwise be invisible.
+    Scans the current log AND every rotated archive sibling (RESID-2C) oldest to
+    newest, carrying prev_hash across the boundary - the fresh file's first record
+    anchors to the most-recent archive's tail hash (cross-file chaining), so both
+    a tampered archive and a *deleted* archive break the chain and are flagged.
     Authorizations are tracked across files so a completion in a later file can
     still pair with an authorization from an earlier archive.
 
@@ -282,9 +295,14 @@ def verify_audit_log(audit_log_path: Path) -> dict:
     path = Path(audit_log_path)
     # RESID-2C: rotated archives are named <name>.<YYYYMMDDTHHMMSSZ> (RESID-2B).
     archive_re = re.compile(re.escape(path.name) + r"\.\d{8}T\d{6}Z$")
-    files = [path] + sorted(
+    # Cross-file chaining (F4): iterate archives oldest->newest, then the current
+    # file, carrying prev_hash across the boundary. The current file's first
+    # record anchors to the most-recent archive's tail hash, so a deleted
+    # archive breaks the chain of the surviving files rather than being silently
+    # absent from the scan.
+    files = sorted(
         p for p in path.parent.iterdir() if archive_re.match(p.name) and p.is_file()
-    )
+    ) + [path]
     if not path.is_file():
         return {
             "valid": True, "total": 0, "chained": 0, "legacy": 0,
@@ -299,10 +317,14 @@ def verify_audit_log(audit_log_path: Path) -> dict:
     completed_run_ids: set[str] = set()
     orphan_order: list[str] = []
 
+    # prev_hash is declared ONCE and carried across every file (oldest archive
+    # through current), so the chain is verified continuously rather than reset
+    # per file - a missing archive now shows up as a prev_hash break in the next
+    # file's first record.
+    prev_hash: str | None = None
     for file in files:
         if file != path:
             archives_checked += 1
-        prev_hash: str | None = None
         with open(file, encoding="utf-8") as f:
             for lineno, line in enumerate(f, 1):
                 line = line.strip()

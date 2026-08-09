@@ -155,6 +155,20 @@ def test_git_commit_hash_dirty_tree_is_flagged(monkeypatch):
     assert _git_commit_hash() == "abc123 (dirty working tree)"
 
 
+def test_git_commit_hash_does_not_flag_git_diff_error_as_dirty(monkeypatch):
+    # F2: `!= 0` conflated a `git diff HEAD --quiet` error (rc=128) with a
+    # genuinely dirty tree (rc=1). Only rc=1 means differences exist; an errored
+    # diff must not be reported as "dirty working tree" - that would be a false
+    # statement about which code produced the report.
+    def fake_run(cmd, capture_output, text=None, check=None):
+        if cmd == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="abc123\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="fatal: bad revision")
+    monkeypatch.setattr("cli.subprocess.run", fake_run)
+
+    assert _git_commit_hash() == "abc123"
+
+
 def test_git_commit_hash_handles_git_failure(monkeypatch):
     def fake_run(cmd, capture_output, text=None, check=None):
         raise FileNotFoundError("git not found")

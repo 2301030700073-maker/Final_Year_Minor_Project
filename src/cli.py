@@ -82,7 +82,7 @@ def _git_commit_hash() -> str:
         commit = result.stdout.strip()
         if not commit:
             return "unknown"
-        dirty = subprocess.run(["git", "diff", "HEAD", "--quiet"], capture_output=True).returncode != 0
+        dirty = subprocess.run(["git", "diff", "HEAD", "--quiet"], capture_output=True).returncode == 1
         return f"{commit} (dirty working tree)" if dirty else commit
     except Exception:
         return "unknown"
@@ -104,7 +104,7 @@ def _git_last_commit_touching(path: Path) -> str:
             return "unknown (no commit history for this file)"
         dirty = subprocess.run(
             ["git", "diff", "--quiet", "--", str(path)], capture_output=True,
-        ).returncode != 0
+        ).returncode == 1
         return f"{commit} (uncommitted changes present)" if dirty else commit
     except Exception:
         return "unknown"
@@ -422,6 +422,7 @@ def calibration_report(
         runs, gt_entries,
         generated_at=datetime.now(timezone.utc).isoformat(),
         ground_truth_commit=_git_last_commit_touching(ground_truth),
+        analysis_code_commit=_git_commit_hash(),
     )
 
     def _fmt(rate: float | None) -> str:

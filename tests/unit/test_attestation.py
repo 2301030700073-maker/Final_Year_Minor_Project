@@ -256,6 +256,29 @@ def test_verify_audit_log_checks_rotated_archives(tmp_path, monkeypatch):
     assert any("record_hash mismatch" in e for e in result["errors"])
 
 
+def test_verify_audit_log_flags_deleted_archive_via_chain_break(tmp_path, monkeypatch):
+    # Cross-file chaining: the fresh file's first record is anchored to the
+    # archived file's last record_hash. Deleting an archive after rotation was
+    # previously invisible - verify iterated [current] + archives, each verifying
+    # independently, so a removed archive was simply not scanned. Now the current
+    # file's first record's prev_hash points at the missing archive's tail hash,
+    # which no longer matches any processed file - the deletion breaks the chain.
+    import audit.attestation as att
+    monkeypatch.setattr(att, "MAX_LOG_BYTES", 1)
+
+    log_path = tmp_path / "audit_log.jsonl"
+    record_authorization(log_path, "OWN_APP", "hash1", "op", "commit1", run_id="run-1")
+    record_authorization(log_path, "OWN_APP", "hash2", "op", "commit1", run_id="run-2")
+
+    archive = next(p for p in tmp_path.iterdir() if p.name.startswith("audit_log.jsonl."))
+    archive.unlink()  # deletion after rotation
+
+    result = verify_audit_log(log_path)
+    assert result["archives_checked"] == 0
+    assert result["valid"] is False
+    assert any("prev_hash breaks the chain" in e for e in result["errors"])
+
+
 def test_record_ingest_failure_does_not_crash_on_corrupt_log(tmp_path):
     # RESID-2D: on a corrupt log the ingest-failure path must not raise a raw
     # traceback (unlike authorization/completion, it previously had no guard).

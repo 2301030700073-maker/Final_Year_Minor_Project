@@ -246,8 +246,8 @@ Bucket edges always include the real decision threshold explicitly - the one bou
 {% endfor %}
 ## Notes
 
-{% if report.ssl_verification_not_implemented -%}
-- No `success_checks/*.py` module implements SSL bypass verification yet (all three hardcode `ssl_bypassed=None` unconditionally) - an empty/zero SSL Tier 1 result above means "not built yet," not "0% success rate."
+{% if report.ssl_verification_partial -%}
+- SSL bypass verification is PARTIAL: only `success_checks/androgoat.py` implements it (okhttp `CertificatePinner.check` hook -> `ssl_bypassed=True` on fire); the three UnCrackable checks hardcode `ssl_bypassed=None`. A thin/zero SSL Tier 1 count for those targets means "not verified," not "0% success rate."
 {% endif -%}
 - Tier-2 "complete" is exit-code-derived (jadx and apktool both exit 0). A decompile that exits 0 on a truncated or heavily-obfuscated corpus is therefore counted as complete for Tier-2 even when it produced few files - the report's low-corpus caveat (RESID-4C) is not mirrored as a separate Tier-2 exclusion. This is a deliberate conservative-simple choice to avoid over-excluding real observations, not an oversight; a low-corpus-but-exit-0 run inflates n slightly rather than being silently dropped.
 - Per-surface coverage (ADR-0008, F2/G-A): a category's NEITHER is excluded from Tier 2 when any of its governing surfaces (root->{java,native}, ssl->{java,native,manifest}) is partial/unscannable. A run with no coverage map (recorded before per-surface coverage existed) scanned only Java, so all other governing surfaces are unscannable and its negative is not certified as a confident TN - it is excluded from Tier 2 like any under-covered negative (types.py:46-48). This is deliberately stricter than the pre-ADR-0008 Java-only gate: a NEITHER from a surface that was never scanned must not read as a verified negative.

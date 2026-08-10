@@ -103,14 +103,16 @@ class CalibrationReport:
     calibration_curve: dict[Category, list[CalibrationCurveBucket]]
     excluded_no_ground_truth: dict[Category, int] = field(default_factory=dict)
     excluded_partial_decompile: dict[Category, int] = field(default_factory=dict)
-    # Manually maintained, not derived from run data - whether any
+    # Manually maintained, not derived from run data - whether every
     # success_checks/*.py module implements real SSL bypass verification is
     # a fact about the current codebase, not something a run's data can
-    # tell you (all three currently hardcode ssl_bypassed=None). Flip to
-    # False once a real SSL success-check exists; nothing here would ever
-    # do that automatically, so this must be updated by hand and reviewed
-    # if it ever silently goes stale.
-    ssl_verification_not_implemented: bool = True
+    # tell you. Coverage is PARTIAL: AndroGoat (success_checks/androgoat.py)
+    # implements real verification (ssl_bypassed=True on a fired
+    # CertificatePinner.check hook), while the three UnCrackable checks
+    # hardcode ssl_bypassed=None. Flip to False only once ALL modules do;
+    # nothing here would ever do that automatically, so this must be updated
+    # by hand and reviewed if it ever silently goes stale.
+    ssl_verification_partial: bool = True
     skeleton_warning: str = ""
 
 

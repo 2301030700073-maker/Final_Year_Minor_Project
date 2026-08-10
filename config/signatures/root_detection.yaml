@@ -120,6 +120,24 @@
 # corpus (none is available on the reference device); ADR-0006 governs - the
 # calibration loop must re-measure precision/recall when a Magisk-rooted
 # target is added, and only then does this expansion earn empirical trust.
+#
+# Over-trust warning (the honest reading of these signatures): the engine is
+# additive-only - confidence can only rise when a signature matches. It can
+# never express "clean BUT hardened." A 2026 banking app relying solely on
+# Play Integrity attestation (the dominant hardening path) statically scans
+# clean at 0.0 confidence, yet is precisely the app where absence of a root
+# signature means the least. A clean static result on such a target is NOT
+# evidence of absence of root; treat it as "no known indicator found," not
+# "confirmed clean." Consistent with ADR-0008 - a negative must never over-
+# trust a surface it could not actually scan.
+#
+# Label semantics (what ROOT_ONLY means): a match means "the app references a
+# root artifact in a way consistent with root DETECTION." Root-file-manager /
+# module-enumeration apps (MT Manager, MiXplorer root mode, "installed Magisk
+# modules" listers) hardcode these same paths to enumerate state, not to
+# detect root, and would be mislabeled ROOT_ONLY. No such app is in the
+# validated corpus (which is exactly why zero-FP held); if one is ever added,
+# a fixture must accompany it so the label semantics stay honest.
 
 - id: magisk_su_binary_paths
   category: root
@@ -144,8 +162,9 @@
   weight: 0.3
   pattern_type: string_literal
   patterns:
+    # /data/adb/ksud is a strict substring of /data/adb/ksu (matching already
+    # covers it), so it would add zero distinct matches - dropped as redundant.
     - "/data/adb/ksu"
-    - "/data/adb/ksud"
   evidence_type: bytecode_string
 
 - id: zygisk_artifact_paths
@@ -153,8 +172,9 @@
   weight: 0.3
   pattern_type: string_literal
   patterns:
+    # /data/adb/modules/zygisk_ (the per-module prefix) is subsumed by the
+    # directory literal above it - dropped as redundant.
     - "/data/adb/modules/zygisk"
-    - "/data/adb/modules/zygisk_"
     - "/data/adb/magisk/zygisk"
   evidence_type: bytecode_string
 

@@ -74,7 +74,7 @@ Windows' ADB server and a Windows-managed emulator's `frida-server` are both onl
 - id: root_su_binary_check
   category: root
   weight: 0.3
-  pattern_type: string_literal   # string_literal | api_call | class_reference | regex
+  pattern_type: string_literal   # string_literal | class_reference | regex (native adds export_symbol | embedded_string)
   patterns:
     - "/system/bin/su"
     - "/system/xbin/su"
@@ -97,8 +97,9 @@ Each matched signature contributes its `weight` to a running confidence score pe
 def classify(static_evidence: StaticEvidence) -> ClassificationResult:
     """Deterministic weighted-signature scoring.
     Returns per-category confidence + the full evidence list behind it.
-    Threshold (default 0.7) is read from config/settings.yaml, not hardcoded,
-    since it needs empirical tuning in Phase 4 against real calibration data.
+    The default (DEFAULT_THRESHOLD = 0.7) lives in decision_engine.py, not
+    settings.yaml - callers may override per call. settings.yaml may carry a
+    copy for CLI wiring, but the engine symbol is the source of truth (G8).
     """
 ```
 
@@ -109,16 +110,43 @@ def classify(static_evidence: StaticEvidence) -> ClassificationResult:
 These extend the deterministic core; all remain signature/rule work under ADR-0001. Native matches and behavioral indicators are additional *evidence sources*, not a separate decision tier — they feed the same weighted-confidence model.
 
 ### Expanded static core
-- **Obfuscation indicator** — a per-run `obfuscation_level ∈ clear | light | heavy` derived deterministically (e.g. identifier entropy, presence of `-obfuscate` markers, string-encryption patterns). Reported, not used to silence findings.
+- **Obfuscation indicator** — a per-run `obfuscation_level ∈ clear | light | heavy`, derived by one concrete deterministic rule (G7): ratio of single-char class identifiers among decompiled classes — `> 0.40` → `heavy`, `> 0.10` → `light`, else `clear` (the single-char ratio is a stable, cheap proxy for minified/obfuscated names; the thresholds are empirical starting points to be tuned in calibration, not asserted). Reported, not used to silence findings.
 - **Behavioral indicators** — string-decryptor stubs, reflection-based string building, crypto primitive usage; each is a matchable signature pattern contributing evidence, so a technique that only appears *behaviorally* (not as a plain literal) is still surfaced with a citation.
 - **Manifest / resource analysis** — beyond the existing `network_security_config` read: stored-cert presence, `DevicePolicyManager` usage, and the networkSecurityConfig element itself, matched against the signature set. Every read carries its own coverage state.
-- **No silent parse swallows** — every unparseable manifest/resource element surfaces as a `parse_failure` with a byte offset rather than being skipped; a partial parse never presents as a complete scan (ties into the coverage contract below).
+- **No silent parse swallows** — every unparseable manifest/resource element surfaces as a `parse_failure` rather than being skipped; a partial parse never presents as a complete scan (G9). Because the current parser is `xml.etree.ElementTree` (`static/manifest.py`), which exposes no element byte offsets and hard-fails the whole document on malformed XML, `parse_failure` is specified as a **coverage-state driver**, not a byte-offset promise: a manifest that fails to parse (or whose resources partially fail) drives its surface to `partial`/`unscannable` in the coverage contract, which is what actually prevents a confident negative. An optional position-aware upgrade (e.g. `lxml` `sourceline`) may add byte offsets later; it is not a precondition for the guarantee that nothing is silently skipped.
 
 ### Native `.so` analysis (`static/native.py`)
-Parses `.so` export symbols and embedded strings from each native library in the APK, matched by hand-authored native signature rules in `config/signatures/`. Matches record the same `{signature_id, file, line_or_offset, matched_text}` evidence shape and contribute weight to the same per-category confidence — so native root-detection or SSL-pinning logic is scored identically to Java-side logic, and the decision engine and report are unchanged in shape (FR-2.x, ADR-0001).
+Parses `.so` export symbols and embedded strings from each native library in the APK, matched by hand-authored native signature rules in `config/signatures/native_detection.yaml`. Matches record the same `{signature_id, file, line_or_offset, matched_text}` evidence shape and contribute weight to the same per-category confidence — so native root-detection or SSL-pinning logic is scored identically to Java-side logic, and the decision engine and report are unchanged in shape (FR-2.x, ADR-0001).
+
+**G3 — native matcher and schema are defined, and the Java matcher is not silently reused.** `static/signatures.py` walks only `SCANNED_SUFFIXES = (".java", ".xml")` and matches *text lines* via `_line_matches` — it cannot parse binary `.so` exports/strings. So `native.py` implements its own binary matcher rather than calling the Java matcher, but emits the *same* `Evidence` shape so the decision engine and report treat native and Java matches identically. Native YAML schema (additive to the existing schema in `config/signatures/`, with `pattern_type` narrowed to native-only types so a rule can't load a Java-only type against a binary target):
+```yaml
+- id: native_jni_root_check
+  category: root
+  weight: 0.5
+  pattern_type: export_symbol   # export_symbol | embedded_string (native-only; Java-only types rejected here)
+  patterns:
+    - "check_root"
+  evidence_type: native_symbol
+```
+**G3b — `api_call` is NOT a valid pattern type.** `VALID_PATTERN_TYPES = {"string_literal", "class_reference", "regex"}` (`signatures.py`); the previous `# string_literal | api_call | class_reference | regex` comment in this doc's YAML example advertised a type that does not exist and never did. That comment is corrected below. `_line_matches` raises `ValueError` only for a type that passes load — and since `api_call` is rejected at *load* by `_validate_signature_entry`, a rule author choosing it fails loudly before scan, never mid-scan (no silent detection weakening). The native schema above keeps the same load-time rejection discipline: an unknown `pattern_type` in a native rule is a loud load error, not a silent no-op.
+
+**G6 — ABI handling.** An APK typically ships multiple ABIs (`lib/armeabi-v7a`, `arm64-v8a`, `x86_64`, …). `native.py` enumerates all `lib/<abi>/` directories present and records per-ABI coverage. The scan covers *all* ABIs present in the APK (archive enumeration, not the runtime device's ABI) so a device-only scan can't silently under-cover; each ABI is an entry in the coverage contract (G1). A signature present only in one ABI is still a real finding for that ABI, recorded with the ABI in its `file` path.
+
+**G10 — stripped-vs-unstripped `.so`.** A stripped native library has a much smaller export/string surface than its unstripped original; its reduced surface must map to `partial` in the coverage contract, never `fully_analyzed`. `native.py` detects strip state (e.g. absent `.symtab`/symbol-table heuristics) and reports it; the coverage contract uses it to bound how confident a native NEITHER may be.
 
 ### Coverage / measurement layer (`static/coverage.py`)
-A per-surface contract `fully_analyzed | partial | unscannable` for each analysis surface (Java decompile, native `.so`, manifest/resources). Persisted per run and surfaced in both the per-run report and the calibration report's Notes — the explicit *bound* of every scan, so a `partial`/`unscannable` surface reads as a lower bound, never a silent confident negative (extends ADR-0006's measured-not-asserted discipline). The dynamic bypass synthesizer and AI learner (roadmap groups 12-20) are intentionally **not** spec'd here — deferred to their own low-level designs immediately before they start (ADR-0003), with the synthesizer's execution behind the sandbox + human-review gate (ADR-0004) and the AI learner's promotion gated on an empirical baseline diff (ADR-0008).
+A per-surface contract `fully_analyzed | partial | unscannable` for each analysis surface (Java decompile, native `.so`, manifest/resources). The explicit *bound* of every scan, so a `partial`/`unscannable` surface reads as a lower bound, never a silent confident negative (extends ADR-0006's measured-not-asserted discipline).
+
+**G1 — end-to-end carrier (coverage is not free-floating).** Coverage is a real, persisted signal with a defined path to every consumer:
+- **Storage:** a JSON `coverage` column on `RunRecord` (`src/storage/db.py`), serialized as `{surface: "fully_analyzed"|"partial"|"unscannable"}`.
+- **Calibration:** a matching `coverage` field on `RunRow` (`src/calibration/types.py`), populated by the same `storage/results.py` adapter that already builds `decompile_completeness`.
+- **Report:** a coverage block in both the per-run report and the calibration report's Notes — not hardcoded template text; rendered from the persisted field.
+- **Synthesizer interface:** the deferred dynamic synthesizer (group C, items 12-17) reads this per-surface coverage as its *input contract*: it only attempts bypass on surfaces marked `fully_analyzed`, and treats a `partial`/`unscannable` surface as an explicit "no attempt + no confident negative" state. That interface is named here precisely so group C depends on an already-emitted signal.
+
+**G2 — `partial` disambiguation (two meanings, one rule).** Per-surface coverage *coexists* with the existing `decompile_completeness ∈ complete|partial|unknown` (`RunRecord.decompile_completeness`), which stays the single driver of the existing Tier-2 exclusion (`src/calibration/report.py`, `generator.py`). The combination rule: the Java surface's coverage is *derived from* `decompile_completeness` (`complete→fully_analyzed`, `partial→partial`, `unknown→unscannable`), so the two never disagree for the Java surface. A `partial` Java surface + `unscannable` native surface is simply two per-surface states, each with its own bound; the report's Limitations section reads both. `decompile_completeness` is *not* removed or migrated — it remains the backward-compatible signal calibration already keys on; coverage is additive.
+
+### Dynamic bypass synthesizer + AI learner (deferred — not spec'd here)
+The dynamic bypass synthesizer (group C, items 12-17) and AI baseline + learner (group D, items 18-20) are intentionally **not** spec'd in this doc — deferred to their own low-level designs immediately before each starts (ADR-0003), with the synthesizer's execution behind the sandbox + human-review gate (ADR-0004) and the AI learner's promotion gated on an empirical baseline diff (ADR-0008, G4: bypass-convergence for bypass, precision/recall for detection). This section is reserved as their seam; coverage (G1 above) is their emitted input.
 
 ## Dynamic success-check convention
 

@@ -57,3 +57,26 @@ def test_correlate_neither_predicted_nor_confirmed_is_a_match():
     result = correlate(classification, verification)
 
     assert result.matches is True
+
+
+def test_correlate_inconclusive_dynamic_verdict_is_not_a_match():
+    # M5: a predicted-positive whose dynamic bypass ran but was inconclusive
+    # (bypassed=None, RESID-6F) is NOT agreement - matches=True would fabricate
+    # a static/dynamic confirmation the evidence never showed.
+    classification = _classification(root_detected=True, ssl_detected=False)
+    verification = VerificationResult(root_bypassed=None, ssl_bypassed=None, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert result.matches is False
+    assert any("inconclusive" in m for m in result.mismatches)
+
+
+def test_correlate_inconclusive_ssl_verdict_is_not_a_match():
+    classification = _classification(root_detected=False, ssl_detected=True)
+    verification = VerificationResult(root_bypassed=None, ssl_bypassed=None, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert result.matches is False
+    assert any("SSL-pinning" in m and "inconclusive" in m for m in result.mismatches)

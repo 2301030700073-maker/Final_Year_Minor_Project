@@ -24,11 +24,12 @@ def _category_is_confident_negative(run: RunRow, category: str) -> bool:
     """F2/G-A: a NEITHER is a confident negative only when every governing
     surface (root->{java,native}, ssl->{java,native,manifest}) is fully_analyzed.
     A run with NO coverage map (pre-coverage, or native.py not yet emitting
-    states) is treated as confident - the legacy Java-only decompile gate above
-    already handles partial-decompile exclusion, so this is a strict no-op until
-    coverage exists (F2's documented byte-identical guarantee)."""
+    states) scanned only Java - every other surface is effectively unscannable -
+    so it cannot certify native/manifest clean. Its negative is NOT confident
+    and is excluded from Tier 2 (types.py:46-48 documents this conservative
+    default; returning True here would over-certify absence, ADR-0006/0008)."""
     if not run.coverage:
-        return True  # no coverage -> legacy decompile gate is the only exclusion
+        return False  # no coverage -> surfaces unscannable -> not a confident negative
     return category_is_confident_negative(category, run.coverage)
 
 CATEGORIES: tuple[Category, ...] = ("root", "ssl")
@@ -198,10 +199,10 @@ def compute_calibration_report(
             # its governing surfaces (root->{java,native}, ssl->{java,native,
             # manifest}) is partial/unscannable - so a root check hiding in a
             # stripped .so excludes the root negative even when Java is complete.
-            # Runs with no coverage field (pre-coverage, or native.py not yet
-            # emitting states) default to all surfaces unscannable via coverage.py,
-            # which keeps Tier-2 behavior byte-identical to the legacy Java-only
-            # gate (F2's documented no-op) while being correct once coverage exists.
+            # A run with no coverage field (pre-coverage, or native.py not yet
+            # emitting states) scanned only Java, so all other governing surfaces
+            # are unscannable and its negative is NOT confident (types.py:46-48) -
+            # excluded here exactly like a partial-decompile negative (H1).
             if not detected and not _category_is_confident_negative(run, category):
                 # An under-covered negative is not proof of absence - excluded from
                 # Tier 2 and the curve exactly like a partial-decompile negative.

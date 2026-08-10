@@ -29,6 +29,7 @@ from rich.table import Table
 from audit.attestation import (
     record_authorization,
     record_ingest_failure,
+    validate_justification,
     record_run_completion,
     verify_audit_log,
 )
@@ -331,6 +332,20 @@ def run(
     git_commit = _git_commit_hash()
     operator = _operator_identity()
 
+    # --- auth gate (M3): validate the justification BEFORE any real analysis ---
+    # record_authorization below also validates, but it runs after ingest (so it
+    # can carry the computed hash) - leaving that as the only gate would tool-
+    # analyze the target (aapt2 badging + apksigner verify) and persist metadata
+    # before an invalid justification halted the run. Fail the cheap pure check
+    # up front so no unauthorized target is ever analyzed (FR-8.2/ADR-0005).
+    if not validate_justification(justification):
+        console.print(
+            f"[bold red]Invalid --justification '{justification}' - aborting before "
+            "any analysis. Use one of OWN_APP, CTF, ACADEMIC_TRAINING_TARGET, or "
+            "AUTHORIZED_ENGAGEMENT:<id>.[/bold red]"
+        )
+        raise typer.Exit(code=1)
+
     # --- ingest (identification, not gated behind auth - see module docstring) ---
     ingest_result = ingest(apk)
     stage_results.append(ingest_result)
@@ -340,7 +355,7 @@ def run(
         # traceable. record_authorization runs after ingest (so it can carry the
         # real hash), so a failed ingest would otherwise leave zero audit trail -
         # write a dedicated ingest_failed event with the hash if it was computed.
-        record_ingest_failure(
+        logged = record_ingest_failure(
             audit_log_path=AUDIT_LOG_PATH,
             apk_hash=(ingest_result.evidence.get("hashes") or {}).get("sha256"),
             justification=justification,
@@ -348,6 +363,15 @@ def run(
             git_commit=git_commit,
             error=ingest_result.error or "ingest failed",
         )
+        # L7: a corrupt log that also drops the ingest_failed event is a double
+        # failure - the attempt becomes invisible. The False return was silently
+        # discarded; surface it loudly instead.
+        if not logged:
+            console.print(
+                "[bold red]WARNING: could not append the ingest_failed event - the "
+                "audit log appears corrupt, so this failed attempt may be "
+                "untraceable.[/bold red]"
+            )
         _halt(stage_results)
 
     apk_hash = ingest_result.evidence["hashes"]["sha256"]

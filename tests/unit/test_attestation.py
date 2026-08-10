@@ -302,3 +302,42 @@ def test_validate_justification_strips_whitespace_consistently():
     assert validate_justification("AUTHORIZED_ENGAGEMENT: eng-123") is True
     assert validate_justification("  AUTHORIZED_ENGAGEMENT:  ") is False  # blank id
     assert validate_justification("   ") is False
+
+
+def test_verify_audit_log_does_not_treat_record_hash_without_prev_as_legacy(tmp_path):
+    # M2: a record that HAS record_hash but is missing prev_hash is NOT legacy.
+    # It must be chain-verified - the missing key breaks the chain (unless it's
+    # the anchor) - so deleting hash keys can't escape every check.
+    log_path = tmp_path / "audit_log.jsonl"
+    record_authorization(log_path, "OWN_APP", "hash1", "op", "c1")
+    record_authorization(log_path, "CTF", "hash2", "op", "c2")
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    second = json.loads(lines[1])
+    second.pop("prev_hash", None)
+    log_path.write_text(lines[0] + "\n" + json.dumps(second, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = verify_audit_log(log_path)
+    assert result["legacy"] == 0            # has record_hash => not legacy
+    assert result["chained"] == 2
+    assert result["valid"] is False         # chain break surfaced, not silently skipped
+    assert any("prev_hash breaks the chain" in e for e in result["errors"])
+
+
+def test_verify_audit_log_flags_missing_current_when_archives_present(tmp_path, monkeypatch):
+    # L6: deleting the current log (tail truncation) while archives survive must
+    # NOT short-circuit to valid=True and skip the archives - the truncation is
+    # surfaced as an integrity error and the surviving archive is still checked.
+    import audit.attestation as att
+    monkeypatch.setattr(att, "MAX_LOG_BYTES", 1)
+
+    log_path = tmp_path / "audit_log.jsonl"
+    record_authorization(log_path, "OWN_APP", "hash1", "op", "commit1", run_id="run-1")
+    record_authorization(log_path, "OWN_APP", "hash2", "op", "commit1", run_id="run-2")
+    archive = next(p for p in tmp_path.iterdir() if p.name.startswith("audit_log.jsonl."))
+    log_path.unlink()  # current file gone, archive survives
+
+    result = verify_audit_log(log_path)
+    assert result["archives_checked"] == 1   # archive still scanned
+    assert result["total"] >= 1              # the surviving archive's records were read
+    assert result["valid"] is False
+    assert any("current audit log missing" in e for e in result["errors"])

@@ -300,17 +300,26 @@ def verify_audit_log(audit_log_path: Path) -> dict:
     # record anchors to the most-recent archive's tail hash, so a deleted
     # archive breaks the chain of the surviving files rather than being silently
     # absent from the scan.
-    files = sorted(
+    archives = sorted(
         p for p in path.parent.iterdir() if archive_re.match(p.name) and p.is_file()
-    ) + [path]
-    if not path.is_file():
+    )
+    if not path.is_file() and not archives:
         return {
             "valid": True, "total": 0, "chained": 0, "legacy": 0,
             "archives_checked": 0, "orphan_completions": [], "uncompleted_runs": [],
             "errors": [],
         }
+    # L6: a missing current log with archives present is a truncated tail, not a
+    # clean log - the newest end of the chain is gone. Verify the archives that
+    # survive and surface the truncation as an integrity error, instead of
+    # short-circuiting to valid=True and skipping the archives entirely.
+    if not path.is_file():
+        errors = [f"current audit log missing but {len(archives)} archive(s) present - tail may be truncated"]
+        files = archives
+    else:
+        errors = []
+        files = archives + [path]
 
-    errors: list[str] = []
     total = chained = legacy = 0
     archives_checked = 0
     authorized_run_ids: set[str] = set()
@@ -339,10 +348,14 @@ def verify_audit_log(audit_log_path: Path) -> dict:
                 record_hash = rec.get("record_hash")
                 prev = rec.get("prev_hash")
                 # Legacy = written before hashing existed (no record_hash key at
-                # all). The first hashed record legitimately has prev_hash=None -
-                # that's the chain anchor, not a legacy record - so it still gets
-                # its record_hash verified.
-                if "record_hash" not in rec or "prev_hash" not in rec:
+                # all), and only that is unverifiable - we can't recompute a hash
+                # that was never stored. A record that HAS record_hash but lacks
+                # prev_hash is NOT legacy: it must still get its record_hash
+                # verified, and the missing prev_hash breaks the chain (prev !=
+                # prev_hash) unless it is the chain anchor. Treating any missing
+                # key as legacy would let a tampered record escape every check
+                # (M2) - deleting the hash keys is itself the tamper signal.
+                if "record_hash" not in rec:
                     legacy += 1
                     continue
                 chained += 1

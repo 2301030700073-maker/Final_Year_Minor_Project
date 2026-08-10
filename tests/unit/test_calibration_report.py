@@ -5,13 +5,16 @@ from static.decision_engine import DEFAULT_THRESHOLD
 
 def _run(apk_hash, run_id, action, root_confidence, root_detected, root_bypassed,
          ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
-         decompile_completeness="complete"):
+         decompile_completeness="complete", coverage=None):
     return RunRow(
         apk_hash=apk_hash, run_id=run_id, action=action,
         root_confidence=root_confidence, root_detected=root_detected, root_bypassed=root_bypassed,
         ssl_confidence=ssl_confidence, ssl_detected=ssl_detected, ssl_bypassed=ssl_bypassed,
-        decompile_completeness=decompile_completeness,
+        decompile_completeness=decompile_completeness, coverage=coverage,
     )
+
+
+FULLY_ANALYZED = {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed"}
 
 
 def test_rate_with_count_reports_none_not_zero_on_empty_denominator():
@@ -49,10 +52,13 @@ def test_end_to_end_against_real_current_numbers():
     20260729T163412Z, 20260730T025301Z, 20260730T042612Z). Locks in the
     exact numbers a real calibration-report run should produce today."""
     runs = [
-        _run("uc1_hash", "r1", "ROOT_ONLY", 0.80, True, True),
-        _run("uc2_hash", "r2", "ROOT_ONLY", 0.80, True, True),
-        _run("uc3_hash", "r3", "ROOT_ONLY", 0.80, True, True),
-        _run("contacts_hash", "r4", "NEITHER", 0.00, False, None),
+        _run("uc1_hash", "r1", "ROOT_ONLY", 0.80, True, True, coverage=FULLY_ANALYZED),
+        _run("uc2_hash", "r2", "ROOT_ONLY", 0.80, True, True, coverage=FULLY_ANALYZED),
+        _run("uc3_hash", "r3", "ROOT_ONLY", 0.80, True, True, coverage=FULLY_ANALYZED),
+        # Contacts is genuinely fully-analyzed (stock app, all surfaces clean), so
+        # its NEITHER is a confident TN - with full coverage, not the pre-coverage
+        # default that H1 now excludes.
+        _run("contacts_hash", "r4", "NEITHER", 0.00, False, None, coverage=FULLY_ANALYZED),
     ]
     ground_truth = {
         "uc1_hash": GroundTruthEntry("uc1_hash", root=True, ssl=False, source="manual review"),
@@ -230,3 +236,38 @@ def test_skeleton_warning_present_below_sample_floor():
     )
 
     assert report.skeleton_warning  # non-empty - n is nowhere near statistically robust yet
+
+
+def test_pre_coverage_negative_excluded_from_tier2():
+    # H1: a complete-decompile NEITHER with coverage=None (pre-coverage run that
+    # only scanned Java) must NOT certify as a confident TN - native/manifest
+    # were never scanned. Its negative is excluded from Tier 2 (types.py:46-48),
+    # not counted as a verified true negative.
+    runs = [
+        _run("old_hash", "r1", "NEITHER", 0.00, False, None, decompile_completeness="complete", coverage=None),
+    ]
+    ground_truth = {"old_hash": GroundTruthEntry("old_hash", root=False, ssl=False, source="manual review")}
+
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+
+    assert report.tier2["root"].n == 0              # excluded, not a TN
+    assert report.tier2["root"].true_negative == 0  # no fabricated confident negative
+    assert report.excluded_partial_decompile["root"] == 1  # excluded like an under-covered negative
+
+
+def test_pre_coverage_negative_but_full_coverage_counts_tn():
+    # Contrast: the SAME NEITHER with full per-surface coverage IS a confident
+    # TN - coverage is what earns the negative a place in Tier 2, not its absence.
+    runs = [
+        _run("new_hash", "r1", "NEITHER", 0.00, False, None, decompile_completeness="complete", coverage=FULLY_ANALYZED),
+    ]
+    ground_truth = {"new_hash": GroundTruthEntry("new_hash", root=False, ssl=False, source="manual review")}
+
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+
+    assert report.tier2["root"].true_negative == 1
+    assert report.tier2["root"].n == 1

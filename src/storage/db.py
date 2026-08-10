@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, create_engine
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 DB_FILENAME = "results.db"
@@ -111,4 +111,24 @@ def get_engine(analysis_root: Path):
     db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{db_path}")
     Base.metadata.create_all(engine)  # idempotent - only creates missing tables
+    _migrate_schema(engine)  # ...but create_all never adds columns to existing tables
     return engine
+
+
+def _migrate_schema(engine) -> None:
+    """Bring an on-disk DB created by an older model into sync with the current
+    one. `create_all` only creates *missing tables* - it never ALTERs an existing
+    table, so a column the model gained since the DB was first written is absent
+    and every save fails (live-caught: `runs.coverage` added by ADR-0008). This is
+    idempotent: we read the real columns via the inspector and ALTER ADD COLUMN
+    only those the model declares but the table lacks. No-op on a fresh DB.
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        table = RunRecord.__tablename__
+        existing = {c["name"] for c in insp.get_columns(table)}
+        for col in RunRecord.__table__.columns:
+            if col.name in existing:
+                continue
+            col_type = col.type.compile(engine.dialect)
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col.name} {col_type}"))

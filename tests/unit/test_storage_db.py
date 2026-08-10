@@ -41,3 +41,47 @@ def test_run_record_apk_sha256_is_a_plain_indexed_column_not_a_hard_fk_constrain
 
     with Session(get_engine(tmp_path)) as session:
         assert session.get(RunRecord, "run1") is not None
+
+
+def test_get_engine_migrates_column_added_since_db_was_created(tmp_path):
+    # Live-caught (ADR-0008): a real on-disk DB created Jul 29 predates the
+    # `runs.coverage` column the model gained. create_all() only creates *missing
+    # tables*, never ALTERs an existing one - so without a migration every run on
+    # a pre-existing DB silently failed to save and calibration lost precision/
+    # recall data. Build an old-schema runs table, then confirm get_engine adds
+    # the column and a save with coverage persists.
+    import sqlite3
+
+    db_path = tmp_path / DB_FILENAME
+    conn = sqlite3.connect(db_path)
+    # Old schema: exactly the runs columns present before `coverage` (and before
+    # any later additions) - no coverage column.
+    conn.execute(
+        "CREATE TABLE runs ("
+        "  run_id VARCHAR PRIMARY KEY,"
+        "  apk_sha256 VARCHAR,"
+        "  timestamp VARCHAR,"
+        "  classification_json JSON NOT NULL,"
+        "  stage_results_json JSON NOT NULL"
+        ")"
+    )
+    conn.execute("CREATE TABLE apks (sha256 VARCHAR PRIMARY KEY, first_ingested_at VARCHAR, raw_metadata JSON NOT NULL)")
+    conn.commit()
+    conn.close()
+
+    engine = get_engine(tmp_path)
+    cols = {c["name"] for c in inspect(engine).get_columns("runs")}
+    assert "coverage" in cols  # migration added the missing column
+
+    with Session(engine) as session:
+        session.add(RunRecord(
+            run_id="run_migrated", apk_sha256="abc", timestamp="2026-01-01T00:00:00",
+            coverage={"java": "partial", "native": "unscannable", "manifest": "fully_analyzed"},
+            classification_json={}, stage_results_json=[],
+        ))
+        session.commit()
+
+    with Session(engine) as session:
+        row = session.get(RunRecord, "run_migrated")
+        assert row is not None
+        assert row.coverage == {"java": "partial", "native": "unscannable", "manifest": "fully_analyzed"}

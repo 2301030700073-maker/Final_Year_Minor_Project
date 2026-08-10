@@ -19,10 +19,17 @@
   weight: 0.4
   pattern_type: embedded_string
   patterns:
+    # NOTE - bare substrings deliberately NOT used here. Empirically, a benign
+    # BoringSSL libssl.so has 65 embedded strings containing "su"
+    # (EVP_PKEY_decapsulate, SSL_*_subjects_to_stack, ...) - a bare "su" or
+    # "magisk" pattern false-positives on any stock native lib and would
+    # inflate root confidence on a clean app. Only full, structurally-unlikely
+    # paths are matched, so a native hit requires the .so to genuinely embed a
+    # root-manager path.
     - "/system/bin/su"
     - "/system/xbin/su"
-    - "magisk"
-    - "su"
+    - "/data/adb/magisk"
+    - "/data/adb/ksu"
 
 - id: native_ssl_pinning_verify
   category: ssl

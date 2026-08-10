@@ -22,6 +22,14 @@ class Evidence:
     file: str
     line_or_offset: int | str
     matched_text: str
+    # principle 2 / ADR-0001: every finding carries its verification tier.
+    # All evidence this engine produces is deterministic_matched by
+    # construction - it comes from signature matching, never from an AI/LLM
+    # hypothesis. Dynamic confirmation lives on VerificationResult, not on
+    # Evidence; nothing here may ever be labeled dynamically_confirmed (that
+    # tier belongs to the dynamic stage's own output). AI-hypothesized tiers
+    # are Phase 5+ and will add to this field's values, not new fields.
+    verification_state: str = "deterministic_matched"
 
 
 @dataclass

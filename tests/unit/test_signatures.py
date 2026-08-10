@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from static.signatures import load_signatures, scan
+from static.signatures import _line_matches, load_signatures, scan
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -527,3 +527,57 @@ def test_root_runtime_exec_su_regex_is_linear():
     re.search(pat, hostile)
     elapsed = time.monotonic() - start
     assert elapsed < 1.0, f"root_runtime_exec_su backtracks catastrophically: {elapsed:.2f}s"
+
+
+def test_root_runtime_exec_su_matches_every_real_corpus_form():
+    # An adversarial audit claimed the ReDoS-linearized exec-su regex silently
+    # regressed to a false negative and proposed exec\(\s*"[^"]*su as the fix.
+    # Both are wrong, and locked here: the CURRENT pattern matches every real
+    # decompiled form (the command-slot and all three array-slot forms below),
+    # while the proposed replacement drops the array forms (leading token is
+    # 'new', not a quote). This pins the real coverage so a future
+    # "improvement" that regresses it fails loudly instead of silently
+    # weakening native-app root detection.
+    sigs = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    sig = next(s for s in sigs if s.id == "root_runtime_exec_su")
+    real_forms = [
+        'Runtime.getRuntime().exec("su"',
+        'Runtime.getRuntime().exec("su -c id"',
+        'Runtime.getRuntime().exec(new String[]{"su", "ls /data/data/"}',
+        'Runtime.getRuntime().exec(new String[]{"/system/bin/which", "su"}',
+        'Runtime.getRuntime().exec(new String[]{"which", "su"}',
+    ]
+    for form in real_forms:
+        assert _line_matches(form, sig) is not None, f"current pattern missed real form: {form}"
+
+
+def test_scan_counts_decode_dropped_files_as_unreadable(tmp_path):
+    # errors="ignore" was a second silent partial-read path: a file with
+    # malformed bytes was read with the bad bytes stripped while still counted
+    # as fully scanned. scan() now reads strict and counts a file that cannot
+    # fully decode as unreadable, the same as an OSError - so a NEITHER built
+    # over stripped files is flagged, not certified clean.
+    good = tmp_path / "Good.java"
+    good.write_text("public class Good {}\n")
+    malformed = tmp_path / "Malformed.java"
+    malformed.write_bytes(b"public class Bad { \xff\xfe }\n")  # 0xFF is invalid UTF-8
+
+    sig = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    evidence = scan(tmp_path, sig)
+
+    assert evidence.scanned_file_count == 2            # both files walked
+    assert evidence.unreadable_file_count == 1         # Malformed.java surfaced, not stripped
+
+
+def test_scan_evidence_carries_deterministic_verification_state(tmp_path):
+    # principle 2 / ADR-0001: every finding carries its verification tier. All
+    # evidence from this deterministic engine is deterministic_matched by
+    # construction - it must be stamped on the row, never left untyped, so a
+    # report/consumer cannot blend it with an AI-hypothesized finding.
+    (tmp_path / "Root.java").write_text('Runtime.getRuntime().exec("su -c id")\n')
+    sigs = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    evidence = scan(tmp_path, sigs)
+
+    assert evidence.root_evidence
+    for e in evidence.root_evidence:
+        assert e.verification_state == "deterministic_matched"

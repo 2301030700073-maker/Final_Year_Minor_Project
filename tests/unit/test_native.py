@@ -88,6 +88,28 @@ def test_match_native_embedded_string_finds_evidence():
     assert len(result.root_evidence) == 1
 
 
+def test_native_su_binary_embedded_does_not_fp_on_benign_bare_su():
+    # Empirically, a benign BoringSSL libssl.so has ~65 embedded strings
+    # containing "su" (EVP_PKEY_decapsulate, SSL_*_subjects_to_stack, ...). A
+    # bare "su"/"magisk" embedded_string pattern would false-positive on any
+    # stock native lib. The shipped signature must not carry such a bare
+    # pattern, and a lib whose only "su" strings are benign identifiers gets
+    # zero root confidence from it.
+    repo = Path(__file__).resolve().parents[2]
+    raw = load_native_signatures(repo / "config/signatures/native_detection.yaml")
+    sig = next(s for s in raw if s.id == "native_su_binary_embedded")
+    assert all(p not in ("su", "magisk") for p in sig.patterns)
+    assert "/system/bin/su" in sig.patterns
+
+    benign = NativeLibrary(
+        abi="arm64-v8a", name="libssl.so",
+        strings=["EVP_PKEY_decapsulate", "SSL_add_dir_cert_subjects_to_stack", "hello"],
+    )
+    result = match_native([benign], [sig])
+    assert result.root_confidence == 0.0
+    assert result.root_evidence == []
+
+
 def test_match_native_no_match_zero_confidence():
     lib = NativeLibrary(abi="arm64-v8a", name="libclean.so", exports=["JNI_OnLoad"], strings=["hello"])
     sig = NativeSignature(id="native_jni_root_check", category="root", weight=0.5,

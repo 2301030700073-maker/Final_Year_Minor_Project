@@ -70,6 +70,18 @@
     # (verified 0.0001s on the same hostile input, 0.002s worst-case no-su).
     # A per-line budget in scan() (signatures.py) backs this up so no future
     # regex can re-hang it silently.
+    #
+    # Corpus coverage (verified 2026-08 against the real decompiled targets):
+    # every real Runtime.exec-su form matches - exec("su"), and the three
+    # exec(new String[]{...}) array forms ({"su", ...}, {"/system/bin/which",
+    # "su"}, {"which", "su"}). None of these place a ')' before the su token,
+    # so the single [^)]* reaches it linearly. A hypothetical exec(getUser(),
+    # "su") with a nested method-call argument would NOT match - but that form
+    # is absent from the corpus and cannot be caught by any single linear
+    # regex (balanced-paren matching is non-regular); the command-slot and
+    # array-slot forms above are the real detection surface. Do NOT "improve"
+    # this to exec\(\s*"[^"]*su: it drops the new String[] forms (the leading
+    # token is 'new', not a quote) and would be a regression, not a fix.
     - 'Runtime\.getRuntime\(\)\.exec\([^)]*su'
   evidence_type: bytecode_string
 

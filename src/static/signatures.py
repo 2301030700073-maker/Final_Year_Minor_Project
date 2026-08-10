@@ -144,8 +144,14 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
     evidence_counts: dict[str, int] = defaultdict(int)
     for file_path, root in files:
         try:
-            lines = file_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-        except OSError:
+            # errors="strict" (the default): errors="ignore" would read a file
+            # with malformed bytes by silently stripping them, while the file
+            # still counted as fully scanned - a second silent partial-read
+            # path alongside the OSError case. A file that cannot fully decode
+            # is genuinely degraded, so count it unreadable the same way, and
+            # let a NEITHER built over it be flagged rather than read as clean.
+            lines = file_path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
             # RESID-4G: an unreadable file (e.g. chmod-000, a corrupt entry) was
             # silently dropped while scanned_file_count still counted it as
             # scanned - a NEITHER from a half-read corpus was presented as a full

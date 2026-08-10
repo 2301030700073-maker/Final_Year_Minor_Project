@@ -5,6 +5,8 @@ parsers and matcher against fixture text, which is what the toolchain runs feed.
 
 from pathlib import Path
 
+import subprocess
+
 import pytest
 
 from common import Evidence
@@ -130,3 +132,61 @@ def test_load_native_signatures_accepts_valid():
     sigs = load_native_signatures(Path("config/signatures/native_detection.yaml"))
     assert sigs
     assert all(s.pattern_type in ("export_symbol", "embedded_string") for s in sigs)
+
+
+def test_compute_degradation_unscannable_tool_failure_is_unscannable():
+    # H1/H4: a lib a tool failed on is unscannable, NOT 'stripped' (partial) -
+    # misreading it as stripped would let a confident negative slip through.
+    lib = NativeLibrary(abi="arm64-v8a", name="lib.so", unscannable=True, scan_error="readelf exited 1")
+    assert compute_degradation([lib])["arm64-v8a"] == "unscannable"
+    assert lib.scan_error
+
+
+def test_analyze_so_returns_unscannable_on_tool_failure(tmp_path, monkeypatch):
+    # H4: analyze_so must turn a tool non-zero exit into an unscannable lib with
+    # a loud error - never a silent empty parse that reads as 'stripped'.
+    so = tmp_path / "lib.so"
+    so.write_bytes(b"\x7fELF")
+
+    from static import native as native_mod
+
+    def fake_which(name):
+        return f"/usr/bin/{name}"
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=60)
+
+    monkeypatch.setattr(native_mod, "_require_tool", fake_which)
+    monkeypatch.setattr(native_mod.subprocess, "run", fake_run)
+
+    lib = native_mod.analyze_so(so)
+
+    assert lib.unscannable is True
+    assert lib.scan_error is not None
+
+
+def test_analyze_so_marks_unscannable_on_nonzero_returncode(tmp_path, monkeypatch):
+    # H4: a non-zero return code (corrupt .so) must not silently parse as empty
+    # stdout -> 'stripped'. It becomes unscannable with the return code surfaced.
+    so = tmp_path / "lib.so"
+    so.write_bytes(b"\x7fELF not really a shared object")
+
+    from static import native as native_mod
+
+    def fake_which(name):
+        return f"/usr/bin/{name}"
+
+    class FakeProc:
+        returncode = 1
+        stdout = ""
+
+    def fake_run(cmd, **kwargs):
+        return FakeProc()
+
+    monkeypatch.setattr(native_mod, "_require_tool", fake_which)
+    monkeypatch.setattr(native_mod.subprocess, "run", fake_run)
+
+    lib = native_mod.analyze_so(so)
+
+    assert lib.unscannable is True
+    assert "readelf exited 1" in lib.scan_error

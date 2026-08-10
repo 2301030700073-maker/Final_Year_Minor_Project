@@ -34,3 +34,31 @@ def test_detect_obfuscation_level_walks_files(tmp_path):
     for name in ("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "MainActivity"):
         (tmp_path / f"{name}.java").write_text(f"public class {name} {{}}\n")
     assert detect_obfuscation_level(list(tmp_path.glob("*.java"))) == "heavy"
+
+
+def test_heavy_when_many_two_char_names():
+    # H6: real R8 uses two-char names (aa, ab) - single-char-only missed these,
+    # so the heavy guard never fired on the population it targets.
+    names = ["aa", "ab", "ac", "ad", "ae", "af", "ag", "ah", "ai", "aj", "MainActivity"]
+    assert obfuscation_from_names(names) == "heavy"
+
+
+def test_heavy_when_many_dollar_inner_names():
+    # H6: R8 inner classes are `a$a` (three chars, contains `$`) - these were
+    # invisible to a length-only single-char count.
+    names = ["a$a", "a$b", "a$c", "a$d", "a$e", "a$f", "a$g", "a$h", "a$i", "a$j", "MainActivity"]
+    assert obfuscation_from_names(names) == "heavy"
+
+
+def test_class_simple_names_allows_dollar_identifiers(tmp_path):
+    # H6: isidentifier() rejects the `$` in `a$b`; class-name extraction must
+    # still capture R8 flattened inner classes so they feed the ratio.
+    (tmp_path / "a.java").write_text("public class a$a {}\n")
+    (tmp_path / "b.java").write_text("public class b {}\n")
+    (tmp_path / "MainActivity.java").write_text("public class MainActivity {}\n")
+
+    names = []
+    from static.obfuscation import _class_simple_names
+    names = _class_simple_names(list(tmp_path.glob("*.java")))
+
+    assert "a$a" in names

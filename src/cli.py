@@ -130,10 +130,17 @@ def _run_native_scan(apk_path, analysis_root, apk_hash):
     so_files = extract_native_libs(apk_path, native_dir)
     if not so_files:
         return NativeScanResult(libraries=[], abi_coverage={})
-    libraries = [analyze_so(so) for so in so_files]
+    libraries = []
+    errors: list[str] = []
+    for so in so_files:
+        lib = analyze_so(so)
+        libraries.append(lib)
+        if lib.scan_error:
+            errors.append(lib.scan_error)
     signatures = load_native_signatures(Path("config/signatures/native_detection.yaml"))
     result = match_native(libraries, signatures)
     result.abi_coverage = compute_degradation(libraries)
+    result.errors = errors
     return result
 
 
@@ -449,7 +456,12 @@ def run(
             if native_evidence is not None else {}
         ),
         manifest_parsed=manifest_stage.status == "success",
-        resources_complete=manifest_stage.status == "success",
+        # H3: resources_complete comes from the real read (a declared NSC that's
+        # missing/unparseable degrades the manifest surface to partial), not a
+        # tautology of manifest_parsed - which could never fire the partial branch.
+        resources_complete=(
+            manifest_info.resources_complete if manifest_stage.status == "success" else False
+        ),
     )
 
     # --- decision engine (per-category thresholds, 4-3) ---

@@ -49,18 +49,23 @@ def _class_simple_names(java_files: list[Path]) -> list[str]:
                 after = stripped[idx + len(kw):].strip()
                 name = after.split(" ")[0].split("{")[0].split("<")[0]
                 name = name.strip()
-                if name and name.isidentifier():
+                # R8 emits `a$b` inner-class names; isidentifier() rejects the
+                # `$`, so allow alnum plus `_` and `$` (H6).
+                if name and all(c.isalnum() or c in ("_", "$") for c in name):
                     names.append(name)
                 break
     return names
 
 
-def _single_char_ratio(names: list[str]) -> float:
-    """Fraction of names that are a single character (the minifier signature)."""
+def _minified_name_ratio(names: list[str]) -> float:
+    """Fraction of names that look minified - one or two characters (`a`, `b`,
+    `aa`, `ab`) or containing `$` (R8 inner classes `a$a`). Single-char-only
+    missed real R8, which uses two-char and `$` names, so the heavy guard never
+    fired on the population it targets (H6)."""
     if not names:
         return 0.0
-    single = sum(1 for n in names if len(n) == 1)
-    return single / len(names)
+    minified = sum(1 for n in names if len(n) <= 2 or "$" in n)
+    return minified / len(names)
 
 
 def detect_obfuscation_level(java_files: list[Path]) -> ObfuscationLevel:
@@ -68,7 +73,7 @@ def detect_obfuscation_level(java_files: list[Path]) -> ObfuscationLevel:
     observe; the coverage contract separately marks a low-corpus Java surface
     partial via decompile_completeness, so this can't over-claim absence)."""
     names = _class_simple_names(java_files)
-    ratio = _single_char_ratio(names)
+    ratio = _minified_name_ratio(names)
     if ratio > HEAVY_RATIO:
         return "heavy"
     if ratio > LIGHT_RATIO:
@@ -80,7 +85,7 @@ def obfuscation_from_names(names: list[str]) -> ObfuscationLevel:
     """Fixture-testable entry point - pass class simple names directly instead
     of walking files. Used by unit tests and by callers that already hold the
     name list."""
-    ratio = _single_char_ratio(names)
+    ratio = _minified_name_ratio(names)
     if ratio > HEAVY_RATIO:
         return "heavy"
     if ratio > LIGHT_RATIO:

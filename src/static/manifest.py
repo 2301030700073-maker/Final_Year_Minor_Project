@@ -28,6 +28,11 @@ class ManifestInfo:
     # certain pinning/bypass behavior, not proof of it).
     stored_certs: int = 0
     device_admin: bool = False
+    # G9/H2: whether every resource the manifest references resolved cleanly. A
+    # declared-but-missing or unparseable networkSecurityConfig makes this False,
+    # driving the manifest surface to `partial` so it can't certify a confident
+    # SSL negative. True when nothing is referenced (or it all resolved).
+    resources_complete: bool = True
 
 
 def _resolve_nsc_file(network_security_config: str | None, resource_root: Path | None) -> bool | None:
@@ -83,7 +88,15 @@ def parse_manifest(manifest_path: Path, resource_root: Path | None = None) -> Ma
     # so it is a real read of the config file, not a placeholder field. Both are
     # deterministic and fixture-testable.
     device_admin = _has_device_admin(root)
-    stored_certs = _count_stored_certs(_resolve_nsc_path(network_security_config, resource_root))
+    # H2/H3: a missing or unparseable NSC must degrade coverage, never silently
+    # read as stored_certs=0 with a fully_analyzed surface. resources_complete is
+    # computed first; stored_certs is only read when the file is known-good, so
+    # _count_stored_certs cannot hit the swallowed-ParseError path.
+    resources_complete = _resources_complete(network_security_config, resource_root)
+    stored_certs = (
+        _count_stored_certs(_resolve_nsc_path(network_security_config, resource_root))
+        if resources_complete else 0
+    )
 
     return ManifestInfo(
         debuggable=debuggable,
@@ -91,20 +104,42 @@ def parse_manifest(manifest_path: Path, resource_root: Path | None = None) -> Ma
         nsc_file_present=_resolve_nsc_file(network_security_config, resource_root),
         stored_certs=stored_certs,
         device_admin=device_admin,
+        resources_complete=resources_complete,
     )
+
+
+def _resources_complete(network_security_config: str | None, resource_root: Path | None) -> bool:
+    """G9/H2: True when every referenced resource resolved cleanly. A declared
+    @xml/ networkSecurityConfig that is missing, or present-but-unparseable,
+    is a partial resource resolution - the manifest surface must degrade to
+    `partial`, not certify a confident SSL negative. True when nothing is
+    referenced or nothing could be resolved against."""
+    if network_security_config is None or resource_root is None:
+        return True
+    if not network_security_config.startswith("@xml/"):
+        return True
+    name = network_security_config[len("@xml/"):]
+    p = resource_root / "res" / "xml" / f"{name}.xml"
+    if not p.exists():
+        return False
+    try:
+        ET.parse(p)
+    except ET.ParseError:
+        return False
+    return True
 
 
 def _count_stored_certs(nsc_path: Path | None) -> int:
     """Count stored-certificate trust anchors declared in the networkSecurityConfig
     XML (`<trust-anchors><certificates src="system|user|@raw/..."/></trust-anchors>`).
     0 when no NSC file, or none declared. These weaken SSL pinning, so their
-    presence is an SSL evidence contributor."""
+    presence is an SSL evidence contributor.
+    H2: a malformed NSC is NOT swallowed here - it propagates as ET.ParseError.
+    The caller gates this on `_resources_complete` (which flags the surface
+    partial), so this function is only called on a file already known to parse."""
     if nsc_path is None:
         return 0
-    try:
-        tree = ET.parse(nsc_path)
-    except ET.ParseError:
-        return 0  # parse_failure is driven to the coverage contract elsewhere (G9)
+    tree = ET.parse(nsc_path)
     count = 0
     for certs in tree.getroot().iter("certificates"):
         src = certs.get(f"{ANDROID_NS}src")

@@ -188,3 +188,56 @@ def test_parse_manifest_no_device_admin_by_default(tmp_path):
     manifest_path.write_text(MANIFEST_MINIMAL)
 
     assert parse_manifest(manifest_path).device_admin is False
+
+
+def test_parse_manifest_resources_incomplete_when_nsc_missing(tmp_path):
+    # H2: a declared-but-missing NSC must degrade resources_complete to False,
+    # so the manifest surface goes partial and can't certify a confident SSL
+    # negative - not silently read as a clean fully_analyzed scan.
+    resource_root = tmp_path / "apktool"
+    (resource_root / "res" / "xml").mkdir(parents=True)
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(MANIFEST_WITH_NSC)  # references @xml/network_security_config
+
+    info = parse_manifest(manifest_path, resource_root)
+
+    assert info.resources_complete is False
+    assert info.stored_certs == 0
+
+
+def test_parse_manifest_resources_incomplete_when_nsc_malformed(tmp_path):
+    # H2: a present-but-unparseable NSC also degrades coverage; the malformed
+    # config is never swallowed into stored_certs=0 with a clean surface.
+    resource_root = tmp_path / "apktool"
+    (resource_root / "res" / "xml").mkdir(parents=True)
+    (resource_root / "res" / "xml" / "network_security_config.xml").write_text(
+        '<network-security-config><trust-anchors><!-- truncated'  # not well-formed
+    )
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(MANIFEST_WITH_NSC)
+
+    info = parse_manifest(manifest_path, resource_root)
+
+    assert info.resources_complete is False
+    assert info.stored_certs == 0
+
+
+def test_parse_manifest_resources_complete_when_nsc_resolves(tmp_path):
+    # H3 counterpart: a present + well-formed NSC is a complete resource read.
+    resource_root = tmp_path / "apktool"
+    (resource_root / "res" / "xml").mkdir(parents=True)
+    (resource_root / "res" / "xml" / "network_security_config.xml").write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<network-security-config xmlns:android="http://schemas.android.com/apk/res/android">\n'
+        '    <trust-anchors>\n'
+        '        <certificates android:src="system"/>\n'
+        '    </trust-anchors>\n'
+        '</network-security-config>\n'
+    )
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(MANIFEST_WITH_NSC)
+
+    info = parse_manifest(manifest_path, resource_root)
+
+    assert info.resources_complete is True
+    assert info.stored_certs == 1

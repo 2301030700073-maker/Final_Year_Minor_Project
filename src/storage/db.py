@@ -90,6 +90,13 @@ class RunRecord(Base):
     jadx_file_count: Mapped[int | None] = mapped_column(Integer)
     jadx_exit_code: Mapped[int | None] = mapped_column(Integer)
 
+    # ADR-0008 item 10 (G1): per-surface coverage map {surface: fully_analyzed|
+    # partial|unscannable} for java/native/manifest, persisted per run so the
+    # report and calibration both read the same bound instead of each deriving
+    # its own. JSON - no calibration query needs to filter on it, it is a
+    # per-run bound to report/exclude against.
+    coverage: Mapped[dict | None] = mapped_column(JSON)
+
     git_commit: Mapped[str | None] = mapped_column(String)
     target: Mapped[str | None] = mapped_column(String)
 

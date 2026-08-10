@@ -16,7 +16,20 @@ from dataclasses import dataclass, field
 
 from calibration.outcomes import Tier1Outcome, Tier2Outcome, classify_tier1, classify_tier2
 from calibration.types import Category, GroundTruthEntry, RunRow
+from static.coverage import category_is_confident_negative
 from static.decision_engine import DEFAULT_THRESHOLD
+
+
+def _category_is_confident_negative(run: RunRow, category: str) -> bool:
+    """F2/G-A: a NEITHER is a confident negative only when every governing
+    surface (root->{java,native}, ssl->{java,native,manifest}) is fully_analyzed.
+    A run with NO coverage map (pre-coverage, or native.py not yet emitting
+    states) is treated as confident - the legacy Java-only decompile gate above
+    already handles partial-decompile exclusion, so this is a strict no-op until
+    coverage exists (F2's documented byte-identical guarantee)."""
+    if not run.coverage:
+        return True  # no coverage -> legacy decompile gate is the only exclusion
+    return category_is_confident_negative(category, run.coverage)
 
 CATEGORIES: tuple[Category, ...] = ("root", "ssl")
 DEFAULT_BUCKET_EDGES = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
@@ -176,6 +189,22 @@ def compute_calibration_report(
                 # of whether it also has a ground-truth entry, so the two
                 # "Excluded from Tier 2" lines sum to every excluded run instead
                 # of a partial-and-GT-less run silently dropping from both.
+                partial_count += 1
+                continue
+
+            # ADR-0008 (F2/G-A): the legacy decompile_completeness gate above is
+            # the Java-only exclusion. Per-surface coverage (when present) gates
+            # EVERY governing surface: a category's NEITHER is excluded if any of
+            # its governing surfaces (root->{java,native}, ssl->{java,native,
+            # manifest}) is partial/unscannable - so a root check hiding in a
+            # stripped .so excludes the root negative even when Java is complete.
+            # Runs with no coverage field (pre-coverage, or native.py not yet
+            # emitting states) default to all surfaces unscannable via coverage.py,
+            # which keeps Tier-2 behavior byte-identical to the legacy Java-only
+            # gate (F2's documented no-op) while being correct once coverage exists.
+            if not detected and not _category_is_confident_negative(run, category):
+                # An under-covered negative is not proof of absence - excluded from
+                # Tier 2 and the curve exactly like a partial-decompile negative.
                 partial_count += 1
                 continue
 

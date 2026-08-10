@@ -45,9 +45,18 @@ from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
 from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
 from ingest.metadata import ingest
 from report.generator import generate_calibration_report, generate_report
+from static.coverage import per_surface_coverage
 from static.decision_engine import DEFAULT_THRESHOLD, classify
 from static.decompile import decompile
 from static.manifest import ManifestInfo, parse_manifest
+from static.native import (
+    analyze_so,
+    compute_degradation,
+    extract_native_libs,
+    load_native_signatures,
+    match_native,
+)
+from static.obfuscation import detect_obfuscation_level
 from static.signatures import load_signatures, scan
 from storage.results import load_runs_for_calibration, save_metadata, save_run
 
@@ -108,6 +117,35 @@ def _git_last_commit_touching(path: Path) -> str:
         return f"{commit} (uncommitted changes present)" if dirty else commit
     except Exception:
         return "unknown"
+
+
+def _run_native_scan(apk_path, analysis_root, apk_hash):
+    """Extract lib/<abi>/*.so, analyze each with readelf/nm/strings, match native
+    signatures, and return a NativeScanResult (including per-ABI coverage).
+    Returns None when the APK has no native libs (a legitimate 'nothing to scan',
+    which the coverage contract records as native=unscannable, not a failure)."""
+    from static.native import NativeScanResult
+
+    native_dir = Path(analysis_root) / apk_hash / "native"
+    so_files = extract_native_libs(apk_path, native_dir)
+    if not so_files:
+        return NativeScanResult(libraries=[], abi_coverage={})
+    libraries = [analyze_so(so) for so in so_files]
+    signatures = load_native_signatures(Path("config/signatures/native_detection.yaml"))
+    result = match_native(libraries, signatures)
+    result.abi_coverage = compute_degradation(libraries)
+    return result
+
+
+def _merge_native_evidence(static_evidence, native_evidence) -> None:
+    """Native evidence feeds the same confidence model as Java (ADR-0001): merge
+    native root/ssl confidence + evidence into StaticEvidence so classify() and
+    the report treat both identically. Confidence is capped at 1.0 per category,
+    same as the Java matcher's cap."""
+    static_evidence.root_confidence = min(1.0, static_evidence.root_confidence + native_evidence.root_confidence)
+    static_evidence.ssl_confidence = min(1.0, static_evidence.ssl_confidence + native_evidence.ssl_confidence)
+    static_evidence.root_evidence.extend(native_evidence.root_evidence)
+    static_evidence.ssl_evidence.extend(native_evidence.ssl_evidence)
 
 
 def _apply_manifest_ssl_signal(static_evidence, manifest_info) -> None:
@@ -372,6 +410,48 @@ def run(
     if manifest_stage.status == "success":
         _apply_manifest_ssl_signal(static_evidence, manifest_info)
 
+    # --- native .so analysis (ADR-0008 items 4-6) ---
+    # Deterministic, additive: native evidence feeds the same confidence model as
+    # Java (it is merged into static_evidence below before classify), and it
+    # emits per-ABI degradation for the coverage contract (G10/G-B/G6). Fails
+    # loudly if the native toolchain (readelf/nm/strings/unzip) is missing - it
+    # never silently no-ops (principle 3).
+    native_evidence = None
+    native_stage, native_evidence = _wrap_stage("native_scan", _run_native_scan, apk, ANALYSIS_ROOT, apk_hash)
+    stage_results.append(native_stage)
+    _print_stage(native_stage)
+    if native_stage.status == "failed":
+        _halt(stage_results)
+    if native_evidence is not None:
+        _merge_native_evidence(static_evidence, native_evidence)
+
+    # --- obfuscation level (ADR-0008 item 2) + coverage (items 9-11) ---
+    # Pure deterministic signals. obfuscation_level drives the Java surface's
+    # coverage (heavy -> partial, N1/G-C); native degradation + manifest parse
+    # drive native/manifest coverage. The per-surface map is persisted per run
+    # and feeds the report + calibration exclusion (G1/F2/G-A).
+    obfuscation_stage, obfuscation_level = _wrap_stage(
+        "obfuscation", detect_obfuscation_level, list((Path(jadx_output)).rglob("*.java"))
+    )
+    stage_results.append(obfuscation_stage)
+    _print_stage(obfuscation_stage)
+    if obfuscation_stage.status == "failed":
+        _halt(stage_results)
+
+    coverage_map = per_surface_coverage(
+        decompile_completeness=(
+            decompile_result.evidence.get("decompile_completeness", "unknown")
+            if decompile_result.status == "success" else "unknown"
+        ),
+        obfuscation_level=obfuscation_level,
+        abi_coverage=(
+            native_evidence.abi_coverage
+            if native_evidence is not None else {}
+        ),
+        manifest_parsed=manifest_stage.status == "success",
+        resources_complete=manifest_stage.status == "success",
+    )
+
     # --- decision engine (per-category thresholds, 4-3) ---
     root_threshold, ssl_threshold = _load_thresholds()
     classify_stage, classification = _wrap_stage(
@@ -432,6 +512,8 @@ def run(
         output_dir=REPORTS_ROOT,
         manifest=manifest_info if manifest_stage.status == "success" else None,
         git_commit=git_commit,
+        coverage=coverage_map,
+        obfuscation_level=obfuscation_level,
     )
     report_path = _finalize_run(
         report_kwargs=report_kwargs,
@@ -445,6 +527,7 @@ def run(
             "stage_results": stage_results,
             "git_commit": git_commit,
             "target": target,
+            "coverage": coverage_map,
         },
         completion_kwargs=dict(
             audit_log_path=AUDIT_LOG_PATH,

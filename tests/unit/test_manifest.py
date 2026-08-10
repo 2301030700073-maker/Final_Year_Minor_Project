@@ -128,3 +128,63 @@ def test_parse_manifest_rejects_wrong_root_tag(tmp_path):
 
     with pytest.raises(ValueError, match="manifest"):
         parse_manifest(manifest_path)
+
+
+def test_parse_manifest_counts_stored_certs_from_nsc_file(tmp_path):
+    # ADR-0008 item 7: stored-certificate trust anchors live in the
+    # networkSecurityConfig XML, not the manifest - parse the resolved NSC file.
+    resource_root = tmp_path / "apktool"
+    (resource_root / "res" / "xml").mkdir(parents=True)
+    (resource_root / "res" / "xml" / "network_security_config.xml").write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<network-security-config xmlns:android="http://schemas.android.com/apk/res/android">\n'
+        '    <trust-anchors>\n'
+        '        <certificates android:src="system"/>\n'
+        '        <certificates android:src="user"/>\n'
+        '    </trust-anchors>\n'
+        '</network-security-config>\n'
+    )
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(MANIFEST_WITH_NSC)
+
+    info = parse_manifest(manifest_path, resource_root)
+
+    assert info.stored_certs == 2
+
+
+def test_parse_manifest_zero_stored_certs_when_no_nsc(tmp_path):
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(MANIFEST_MINIMAL)
+
+    info = parse_manifest(manifest_path)
+
+    assert info.stored_certs == 0
+
+
+def test_parse_manifest_detects_device_admin(tmp_path):
+    # A <receiver> declaring BIND_DEVICE_ADMIN => device_admin True.
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="x.y.z">\n'
+        '    <application>\n'
+        '        <receiver android:name=".AdminReceiver"\n'
+        '            android:permission="android.permission.BIND_DEVICE_ADMIN">\n'
+        '            <intent-filter>\n'
+        '                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/>\n'
+        '            </intent-filter>\n'
+        '        </receiver>\n'
+        '    </application>\n'
+        '</manifest>\n'
+    )
+
+    info = parse_manifest(manifest_path)
+
+    assert info.device_admin is True
+
+
+def test_parse_manifest_no_device_admin_by_default(tmp_path):
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(MANIFEST_MINIMAL)
+
+    assert parse_manifest(manifest_path).device_admin is False

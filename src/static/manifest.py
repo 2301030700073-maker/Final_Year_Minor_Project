@@ -20,6 +20,14 @@ class ManifestInfo:
     # the decoded resources (resource_root/res/xml/<name>.xml). None when no NSC
     # is declared or no resource_root was provided to resolve against.
     nsc_file_present: bool | None = None
+    # ADR-0008 (roadmap item 7): deeper manifest indicators. stored_certs is the
+    # count of <trust-anchors>/stored-certificate references; device_admin true
+    # when a DevicePolicyManager receiver is declared (a device-admin app can
+    # install/update certificates at the system level). Each is an evidence
+    # contributor when present, but never asserted (they are preconditions for
+    # certain pinning/bypass behavior, not proof of it).
+    stored_certs: int = 0
+    device_admin: bool = False
 
 
 def _resolve_nsc_file(network_security_config: str | None, resource_root: Path | None) -> bool | None:
@@ -33,6 +41,19 @@ def _resolve_nsc_file(network_security_config: str | None, resource_root: Path |
         return None
     name = network_security_config[len("@xml/"):]
     return (resource_root / "res" / "xml" / f"{name}.xml").exists()
+
+
+def _resolve_nsc_path(network_security_config: str | None, resource_root: Path | None) -> Path | None:
+    """The decoded path to the referenced NSC XML (or None if not resolvable) -
+    used to read trust-anchors from the config file itself, which is where
+    stored-certificate trust anchors actually live (not in the manifest)."""
+    if network_security_config is None or resource_root is None:
+        return None
+    if not network_security_config.startswith("@xml/"):
+        return None
+    name = network_security_config[len("@xml/"):]
+    p = resource_root / "res" / "xml" / f"{name}.xml"
+    return p if p.exists() else None
 
 
 def parse_manifest(manifest_path: Path, resource_root: Path | None = None) -> ManifestInfo:
@@ -56,8 +77,50 @@ def parse_manifest(manifest_path: Path, resource_root: Path | None = None) -> Ma
     debuggable = debuggable_attr is not None and debuggable_attr.strip().lower() in ("true", "1")
     network_security_config = application.get(f"{ANDROID_NS}networkSecurityConfig")
 
+    # ADR-0008 item 7: deeper manifest indicators. device_admin is read from the
+    # manifest's own <receiver> declarations; stored_certs comes from the
+    # resolved networkSecurityConfig XML (where trust-anchors actually live),
+    # so it is a real read of the config file, not a placeholder field. Both are
+    # deterministic and fixture-testable.
+    device_admin = _has_device_admin(root)
+    stored_certs = _count_stored_certs(_resolve_nsc_path(network_security_config, resource_root))
+
     return ManifestInfo(
         debuggable=debuggable,
         network_security_config=network_security_config,
         nsc_file_present=_resolve_nsc_file(network_security_config, resource_root),
+        stored_certs=stored_certs,
+        device_admin=device_admin,
     )
+
+
+def _count_stored_certs(nsc_path: Path | None) -> int:
+    """Count stored-certificate trust anchors declared in the networkSecurityConfig
+    XML (`<trust-anchors><certificates src="system|user|@raw/..."/></trust-anchors>`).
+    0 when no NSC file, or none declared. These weaken SSL pinning, so their
+    presence is an SSL evidence contributor."""
+    if nsc_path is None:
+        return 0
+    try:
+        tree = ET.parse(nsc_path)
+    except ET.ParseError:
+        return 0  # parse_failure is driven to the coverage contract elsewhere (G9)
+    count = 0
+    for certs in tree.getroot().iter("certificates"):
+        src = certs.get(f"{ANDROID_NS}src")
+        if src and (src == "system" or src == "user" or src.startswith("@raw/")):
+            count += 1
+    return count
+
+
+def _has_device_admin(root: ET.Element) -> bool:
+    """True when a <receiver> declares the BIND_DEVICE_ADMIN permission - the
+    signature of a device-admin app that can install/update system certificates.
+    The permission is the receiver's `android:permission` attribute (a device-admin
+    receiver uses that attribute, plus the DEVICE_ADMIN_ENABLED intent-filter)."""
+    for receiver in root.iter("receiver"):
+        if receiver.find("intent-filter") is None:
+            continue
+        if receiver.get(f"{ANDROID_NS}permission") == "android.permission.BIND_DEVICE_ADMIN":
+            return True
+    return False

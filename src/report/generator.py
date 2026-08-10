@@ -65,6 +65,25 @@ TEMPLATE = Template("""\
 {% for e in classification.ssl.evidence -%}
 - `{{ e.signature_id }}` at {{ e.file }}:{{ e.line_or_offset }} - `{{ e.matched_text }}`
 {% endfor %}
+## Scan Coverage (ADR-0008)
+
+Per-surface bound of this scan - a `partial`/`unscannable` surface is a lower bound, never a confident negative. {% if obfuscation_level -%}Obfuscation: **{{ obfuscation_level }}**{% endif %}
+
+{% if coverage -%}
+| Surface | Coverage |
+|---|---|
+{% for surface, state in coverage.items() -%}
+| {{ surface }} | {{ state }} |
+{% endfor %}
+{% if "native" in coverage and coverage["native"] == "unscannable" -%}
+> **Native:** unscannable means the APK had no scannable `.so` (or none at all) - a native NEITHER is not proof a native root/SSL check is absent.
+{% endif %}
+{% if obfuscation_level == "heavy" -%}
+> **Heavy obfuscation:** the Java surface is `partial` even on a complete decompile - encrypted/unreachable strings mean a clean Java NEITHER is not proof of absence (N1/G-C).
+{% endif %}
+{% else -%}
+Not recorded for this run.
+{% endif %}
 ## Dynamic Verification
 
 - Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}not run ({{ dynamic_skip_reason or "reason unknown" }}){% endif %}
@@ -126,6 +145,8 @@ def generate_report(
     dynamic_skip_reason: str | None = None,
     manifest: ManifestInfo | None = None,
     git_commit: str | None = None,
+    coverage: dict | None = None,
+    obfuscation_level: str | None = None,
 ) -> Path:
     output_dir = Path(output_dir) / apk_hash
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -144,6 +165,8 @@ def generate_report(
         root_attribution=_root_attribution(metadata, classification),
         **_decompile_summary(stage_results),
         manifest=manifest,
+        coverage=coverage,
+        obfuscation_level=obfuscation_level,
     )
     report_path.write_text(content, encoding="utf-8")
     return report_path
@@ -227,6 +250,7 @@ Bucket edges always include the real decision threshold explicitly - the one bou
 - No `success_checks/*.py` module implements SSL bypass verification yet (all three hardcode `ssl_bypassed=None` unconditionally) - an empty/zero SSL Tier 1 result above means "not built yet," not "0% success rate."
 {% endif -%}
 - Tier-2 "complete" is exit-code-derived (jadx and apktool both exit 0). A decompile that exits 0 on a truncated or heavily-obfuscated corpus is therefore counted as complete for Tier-2 even when it produced few files - the report's low-corpus caveat (RESID-4C) is not mirrored as a separate Tier-2 exclusion. This is a deliberate conservative-simple choice to avoid over-excluding real observations, not an oversight; a low-corpus-but-exit-0 run inflates n slightly rather than being silently dropped.
+- Per-surface coverage (ADR-0008, F2/G-A): a category's NEITHER is excluded from Tier 2 when any of its governing surfaces (root->{java,native}, ssl->{java,native,manifest}) is partial/unscannable. Runs recorded before per-surface coverage existed are excluded only by the Java decompile gate above, so pre-coverage Tier-2 behavior is unchanged - this becomes stricter (and more honest) as native coverage is actually emitted.
 - "Zero false positives" is not a claim this system makes (ADR-0006) - these numbers are measured, improving, and only as reliable as the sample size shown above.
 """)
 

@@ -1,0 +1,42 @@
+# Native signature rules (ADR-0008, roadmap item 5). Matched against each .so's
+# dynamic export symbols and embedded strings by src/static/native.py.
+# pattern_type: export_symbol (matches symbol names, incl. Java_* JNI exports)
+#               | embedded_string (matches strings extracted from the .so)
+# A rule that only matches at the bytecode/string layer has no native analogue -
+# keep this file to techniques that actually show up in native exports/strings.
+
+- id: native_jni_root_check
+  category: root
+  weight: 0.5
+  pattern_type: export_symbol
+  patterns:
+    - "Java_com_example_check_root"
+    - "checkRoot"
+    - "isRooted"
+
+- id: native_su_binary_embedded
+  category: root
+  weight: 0.4
+  pattern_type: embedded_string
+  patterns:
+    - "/system/bin/su"
+    - "/system/xbin/su"
+    - "magisk"
+    - "su"
+
+- id: native_ssl_pinning_verify
+  category: ssl
+  weight: 0.5
+  pattern_type: export_symbol
+  patterns:
+    - "Java_com_example_verify_cert"
+    - "verify_certificate"
+    - "checkCertificatePinning"
+
+- id: native_pinning_embedded
+  category: ssl
+  weight: 0.3
+  pattern_type: embedded_string
+  patterns:
+    - "certificate pinning"
+    - "CertificatePinner"

@@ -38,6 +38,15 @@ class RunRow:
     # treated as complete for Tier-2 (documented in the calibration report's
     # Notes, W1) - deliberately not gated to avoid over-excluding real runs.
     decompile_completeness: str  # "complete" | "partial" | "unknown"
+    # ADR-0008 (G1/G-A/F2): per-surface coverage map {surface: fully_analyzed|
+    # partial|unscannable} for java/native/manifest, persisted per run. A
+    # category's NEITHER is a confident negative only when EVERY governing
+    # surface is fully_analyzed (root->{java,native}, ssl->{java,native,
+    # manifest}); a partial/unscannable governing surface excludes it from Tier 2
+    # (report.py). Empty/None (pre-coverage runs) => all surfaces unscannable,
+    # so pre-coverage negatives are not certified as confident TNs - documented
+    # conservative default, not a silent upgrade.
+    coverage: dict | None = None
 
 
 @dataclass(frozen=True)

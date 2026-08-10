@@ -113,6 +113,10 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
             decompile_completeness=decompile_evidence.get("decompile_completeness", "unknown"),
             jadx_file_count=decompile_evidence.get("jadx_file_count"),
             jadx_exit_code=decompile_evidence.get("jadx_exit_code"),
+            # ADR-0008 (G1): persist the per-surface coverage map from the run
+            # payload (coverage.py's per_surface_coverage), so report and
+            # calibration read the same bound. None when the run carried none.
+            coverage=run_data.get("coverage"),
             git_commit=run_data.get("git_commit"),
             target=run_data.get("target"),
             classification_json=classification,
@@ -143,6 +147,7 @@ def load_runs_for_calibration(analysis_root: Path) -> list[RunRow]:
                 ssl_detected=r.ssl_detected,
                 ssl_bypassed=r.ssl_bypassed,
                 decompile_completeness=r.decompile_completeness,
+                coverage=r.coverage,
             )
             for r in records
         ]

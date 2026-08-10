@@ -57,14 +57,25 @@ def _class_simple_names(java_files: list[Path]) -> list[str]:
     return names
 
 
+def _is_minified_name(n: str) -> bool:
+    """A name reads as minified when it is one/two chars (`a`, `b`, `aa`, `ab`),
+    OR it is an R8-flattened inner class whose *outer* segment is itself short
+    (`a$a`). A bare `$` is NOT enough: `Cache$urls$1` is the normal inner/
+    anonymous-class marker in a clear app and would mislabel it as minified (C1)."""
+    if len(n) <= 2:
+        return True
+    outer = n.split("$", 1)[0]
+    return len(outer) <= 2
+
+
 def _minified_name_ratio(names: list[str]) -> float:
-    """Fraction of names that look minified - one or two characters (`a`, `b`,
-    `aa`, `ab`) or containing `$` (R8 inner classes `a$a`). Single-char-only
-    missed real R8, which uses two-char and `$` names, so the heavy guard never
-    fired on the population it targets (H6)."""
+    """Fraction of names that look minified (see _is_minified_name). Single-char-
+    only missed real R8, which uses two-char and `$` names, so the heavy guard
+    never fired on the population it targets (H6); requiring the outer segment to
+    also be short keeps clear apps' inner classes from being counted (C1)."""
     if not names:
         return 0.0
-    minified = sum(1 for n in names if len(n) <= 2 or "$" in n)
+    minified = sum(1 for n in names if _is_minified_name(n))
     return minified / len(names)
 
 

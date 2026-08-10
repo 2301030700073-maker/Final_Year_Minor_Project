@@ -62,3 +62,22 @@ def test_class_simple_names_allows_dollar_identifiers(tmp_path):
     names = _class_simple_names(list(tmp_path.glob("*.java")))
 
     assert "a$a" in names
+
+
+def test_inner_class_name_with_long_outer_not_minified():
+    # C1: `Cache$urls$1` is a normal inner/anonymous-class marker in a clear app,
+    # NOT R8 minification - a bare `$` must not be counted. Only a short outer
+    # segment (true R8 `a$a`) is a minification signal.
+    names = ["Cache$urls$1", "Cache", "MainActivity", "HttpClient", "Foo", "Bar",
+             "Baz", "Qux", "Quux", "Corge", "Grault", "Garply"]
+    assert obfuscation_from_names(names) == "clear"
+
+
+def test_inner_class_with_short_outer_is_minified():
+    # True R8 flattened inner: outer `a` (short) + `$` => counted as minified,
+    # raising the ratio (2/12 = 0.166 => light) where a bare-$ rule would also
+    # count it - the contrast with the long-outer test shows the outer check
+    # distinguishes them.
+    names = ["a$a", "a$b", "MainActivity", "HttpClient", "Foo", "Bar",
+             "Baz", "Qux", "Quux", "Corge", "Grault", "Garply"]
+    assert obfuscation_from_names(names) == "light"

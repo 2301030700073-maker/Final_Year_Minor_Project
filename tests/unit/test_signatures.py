@@ -32,6 +32,23 @@ def test_load_signatures_reads_real_root_detection_yaml():
     assert all(0 < s.weight <= 1.0 for s in signatures)
 
 
+def test_root_corpus_includes_magisk_kernelsu_zygisk_era_signatures():
+    # Phase 4 web-grounded expansion: the seven original signatures describe
+    # the 2015 SuperSU root model. A 2026 root-detection engine must also probe
+    # Magisk (systemless), KernelSU, and Zygisk artifacts. Pin the new IDs so
+    # the corpus can't silently regress to pre-Magisk coverage.
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    ids = {s.id for s in signatures}
+    assert "magisk_su_binary_paths" in ids
+    assert "magisk_selinux_context" in ids
+    assert "kernelsu_binary_paths" in ids
+    assert "zygisk_artifact_paths" in ids
+    assert "magisk_denylist_artifacts" in ids
+    # The dominant 2026 manager must sit alongside the SuperSU-era managers.
+    su_apps = next(s for s in signatures if s.id == "su_management_apps")
+    assert "com.topjohnwu.magisk" in su_apps.patterns
+
+
 def test_load_signatures_reads_real_ssl_pinning_yaml():
     signatures = load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")
     ids = {s.id for s in signatures}

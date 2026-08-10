@@ -77,6 +77,11 @@
   patterns:
     - "com.noshufou.android.su"
     - "eu.chainfire.supersu"
+    # Magisk - the dominant 2026 manager (added Phase 4). Its package name can
+    # be randomized by the user, so absence of this literal is NOT evidence of
+    # no Magisk; presence is a genuine root-management signal. Same weight as
+    # the SuperSU-era managers it joins.
+    - "com.topjohnwu.magisk"
   evidence_type: bytecode_string
 
 - id: root_su_via_path_env_check
@@ -99,4 +104,65 @@
     - "/system/etc/.has_su_daemon"
     - "/system/etc/.installed_su_daemon"
     - "/dev/com.koushikdutta.superuser.daemon/"
+  evidence_type: bytecode_string
+
+# --- Magisk / KernelSU / Zygisk era (Phase 4, web-grounded 2026) ---
+#
+# The seven signatures above describe the 2015 SuperSU root model. Modern
+# Android (2026) is dominated by Magisk (systemless), KernelSU, and APatch.
+# Each signature below targets a real 2026 detection technique, web-verified.
+# Per-signature FP analysis follows each entry (the same discipline
+# okhttp_certificate_pinner documents): bare "/data/adb" or "magisk" fragments
+# are deliberately NOT used - those strings appear in benign telemetry and
+# library code - only full, structurally-unlikely paths and SELinux contexts
+# are matched, so a false positive requires the app to genuinely probe for a
+# systemless-root artifact. These are NOT yet validated against a Magisk
+# corpus (none is available on the reference device); ADR-0006 governs - the
+# calibration loop must re-measure precision/recall when a Magisk-rooted
+# target is added, and only then does this expansion earn empirical trust.
+
+- id: magisk_su_binary_paths
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "/data/adb/magisk/magisk"
+    - "/data/adb/magisk/su"
+    - "/data/adb/magisk/busybox"
+  evidence_type: bytecode_string
+
+- id: magisk_selinux_context
+  category: root
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "u:r:magisk:s0"
+  evidence_type: bytecode_string
+
+- id: kernelsu_binary_paths
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "/data/adb/ksu"
+    - "/data/adb/ksud"
+  evidence_type: bytecode_string
+
+- id: zygisk_artifact_paths
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "/data/adb/modules/zygisk"
+    - "/data/adb/modules/zygisk_"
+    - "/data/adb/magisk/zygisk"
+  evidence_type: bytecode_string
+
+- id: magisk_denylist_artifacts
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "/data/adb/denylist"
+    - "/data/adb/magisk/denylist.db"
   evidence_type: bytecode_string

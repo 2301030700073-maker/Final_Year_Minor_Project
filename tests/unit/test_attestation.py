@@ -341,3 +341,23 @@ def test_verify_audit_log_flags_missing_current_when_archives_present(tmp_path, 
     assert result["total"] >= 1              # the surviving archive's records were read
     assert result["valid"] is False
     assert any("current audit log missing" in e for e in result["errors"])
+
+
+def test_verify_audit_log_flags_record_hash_less_record_after_hashed(tmp_path):
+    # M2-hardening: legacy (record_hash-less) records can only form the PREFIX.
+    # A hashed-record-less record AFTER hashed records is provably a tamper (the
+    # code always writes record_hash now) - it must be flagged, not silently
+    # re-admitted into the legacy pool.
+    log_path = tmp_path / "audit_log.jsonl"
+    record_authorization(log_path, "OWN_APP", "hash1", "op", "c1")
+    # Append a forged record with BOTH hash keys stripped, after a hashed record.
+    forged = {"event": "run_authorized", "timestamp": "2026-01-01T00:00:00Z",
+              "apk_hash": "hash2", "justification": "CTF", "operator": "op",
+              "tool_version": "0.1.0", "git_commit": "c2", "run_id": "run-forged"}
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(forged) + "\n")
+
+    result = verify_audit_log(log_path)
+    assert result["legacy"] == 0             # not silently counted as legacy
+    assert result["valid"] is False
+    assert any("without record_hash after hashed records" in e for e in result["errors"])

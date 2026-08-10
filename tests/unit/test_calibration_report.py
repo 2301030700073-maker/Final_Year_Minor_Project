@@ -55,9 +55,12 @@ def test_end_to_end_against_real_current_numbers():
         _run("uc1_hash", "r1", "ROOT_ONLY", 0.80, True, True, coverage=FULLY_ANALYZED),
         _run("uc2_hash", "r2", "ROOT_ONLY", 0.80, True, True, coverage=FULLY_ANALYZED),
         _run("uc3_hash", "r3", "ROOT_ONLY", 0.80, True, True, coverage=FULLY_ANALYZED),
-        # Contacts is genuinely fully-analyzed (stock app, all surfaces clean), so
-        # its NEITHER is a confident TN - with full coverage, not the pre-coverage
-        # default that H1 now excludes.
+        # Contacts is a *fixture* fully-analyzed run (all surfaces clean), so its
+        # NEITHER is a confident TN. This locks in the calibration MATH given the
+        # fixture input, not a claim about contacts' real per-surface coverage - a
+        # real no-native-lib app would be native=unscannable and its negatives
+        # excluded (F3). FULLY_ANALYZED is the fixture choice that makes the
+        # expected TN counts deterministic here.
         _run("contacts_hash", "r4", "NEITHER", 0.00, False, None, coverage=FULLY_ANALYZED),
     ]
     ground_truth = {

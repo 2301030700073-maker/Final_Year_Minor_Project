@@ -14,11 +14,12 @@ def correlate(classification: ClassificationResult, verification: VerificationRe
             "static analysis predicted root-detection present, but the dynamic bypass did not confirm it"
         )
     if root_predicted and verification.root_bypassed is None:
-        # M5: a ran-but-inconclusive dynamic verdict (RESID-6F) is not agreement -
-        # matches=True would fabricate a static/dynamic confirmation the evidence
-        # never showed. It reads as unverified, so it is surfaced as a mismatch.
+        # M5: a missing dynamic verdict (not attempted, or ran-but-inconclusive
+        # per RESID-6F) is not agreement - matches=True would fabricate a
+        # static/dynamic confirmation the evidence never showed. It reads as
+        # unverified, so it is surfaced as a mismatch.
         mismatches.append(
-            "static analysis predicted root-detection present, but dynamic verification was inconclusive (no bypass confirmation)"
+            "static analysis predicted root-detection present, but dynamic verification did not confirm a bypass (not attempted or inconclusive)"
         )
     if not root_predicted and verification.root_bypassed:
         mismatches.append(
@@ -32,7 +33,7 @@ def correlate(classification: ClassificationResult, verification: VerificationRe
         )
     if ssl_predicted and verification.ssl_bypassed is None:
         mismatches.append(
-            "static analysis predicted SSL-pinning present, but dynamic verification was inconclusive (no bypass confirmation)"
+            "static analysis predicted SSL-pinning present, but dynamic verification did not confirm a bypass (not attempted or inconclusive)"
         )
     if not ssl_predicted and verification.ssl_bypassed:
         mismatches.append(

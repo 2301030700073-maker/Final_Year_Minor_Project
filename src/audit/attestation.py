@@ -331,6 +331,12 @@ def verify_audit_log(audit_log_path: Path) -> dict:
     # per file - a missing archive now shows up as a prev_hash break in the next
     # file's first record.
     prev_hash: str | None = None
+    # M2-hardening: legacy (record_hash-less) records can only legitimately form
+    # the PREFIX of the log - they were written before hashing existed. Once any
+    # hashed record appears, a later record without record_hash is provably a
+    # tamper (the code always writes record_hash now), so flag it rather than
+    # silently letting it re-enter the legacy pool.
+    seen_hashed = False
     for file in files:
         if file != path:
             archives_checked += 1
@@ -356,8 +362,18 @@ def verify_audit_log(audit_log_path: Path) -> dict:
                 # key as legacy would let a tampered record escape every check
                 # (M2) - deleting the hash keys is itself the tamper signal.
                 if "record_hash" not in rec:
-                    legacy += 1
+                    if seen_hashed:
+                        # M2-hardening: hashed records already exist in the log,
+                        # so a hashed-record-less record after them is a tamper
+                        # (the code always writes record_hash), not legacy.
+                        errors.append(
+                            f"{file.name} line {lineno}: record without record_hash after "
+                            "hashed records - tamper"
+                        )
+                    else:
+                        legacy += 1
                     continue
+                seen_hashed = True
                 chained += 1
                 if hashlib.sha256(_canonical(rec).encode()).hexdigest() != record_hash:
                     errors.append(f"{file.name} line {lineno}: record_hash mismatch (record edited)")

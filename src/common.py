@@ -36,6 +36,11 @@ class StaticEvidence:
     # discount a degenerate negative instead of certifying absence from a tiny
     # corpus.
     scanned_file_count: int = 0
+    # How many candidate files scan() could NOT read (OSError). counted
+    # separately from scanned_file_count so a scan that skipped files is not
+    # presented as a full scan - an unreadable corpus is a degradation, and a
+    # NEITHER built over it must not read as a confident negative.
+    unreadable_file_count: int = 0
 
 
 class Action(str, Enum):
@@ -62,6 +67,9 @@ class ClassificationResult:
     # RESID-4C: carried through from StaticEvidence so the report can show how
     # many files a verdict was based on (see scan()).
     scanned_file_count: int = 0
+    # RESID-4G: candidate files that could not be read (OSError), carried so
+    # the report can flag a verdict built over a degraded corpus.
+    unreadable_file_count: int = 0
 
 
 @dataclass

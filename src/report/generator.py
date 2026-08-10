@@ -48,7 +48,7 @@ TEMPLATE = Template("""\
 ## Classification
 
 **Decision:** {{ classification.action.value }} (root threshold {{ classification.root_threshold }}, ssl threshold {{ classification.ssl_threshold }}){% if decompile_completeness == "partial" %} - **CAUTION: based on a PARTIAL decompile ({{ jadx_file_count }} files, jadx exit {{ jadx_exit_code }}) - see Limitations**{% endif %}
-**Files scanned:** {{ classification.scanned_file_count }} (RESID-4C: a low count means this verdict is based on a small corpus - a NEITHER is not proof of absence)
+**Files scanned:** {{ classification.scanned_file_count }} (RESID-4C: a low count means this verdict is based on a small corpus - a NEITHER is not proof of absence){% if classification.unreadable_file_count %}{{ " " }}**CAUTION: {{ classification.unreadable_file_count }} candidate file(s) could not be read (OSError) - treat any NEITHER/Inconclusive verdict as degraded, not a full-scan clean.**{% endif %}
 
 ### Root-detection
 - Confidence: {{ "%.2f"|format(classification.root.confidence) }} -> {{ "DETECTED" if classification.root.detected else "Inconclusive" }}
@@ -230,7 +230,9 @@ Built from the *static* detected verdict against `config/ground_truth.yaml` - ne
 {% endfor %}
 Excluded from Tier 2 (no ground-truth entry for that APK): root={{ report.excluded_no_ground_truth.root }}, ssl={{ report.excluded_no_ground_truth.ssl }}
 Excluded from Tier 2 (partial/unknown decompile - a negative isn't proof of absence): root={{ report.excluded_partial_decompile.root }}, ssl={{ report.excluded_partial_decompile.ssl }}
-
+{% for category, t2 in report.tier2.items() %}{% if t2.true_negative == 0 %}
+- **{{ category }} has TN=0: the 1.00 precision/recall is a tautology, not a measurement.** Every ground-truthed {{ category }} case is a positive, so the FP/FN direction has never been tested - a false positive would be structurally invisible here. The 1.00 holds only because no negative control (e.g. a stock app) is included in this category's Tier-2 corpus. Do not read it as validated precision until a true negative is added and the loop re-measured (ADR-0006).
+{% endif %}{% endfor %}
 ## Confidence-Calibration Curve
 
 Bucket edges always include the real decision threshold explicitly - the one boundary that matters for future threshold re-scoring.

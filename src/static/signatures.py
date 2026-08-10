@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,17 @@ VALID_PATTERN_TYPES = {"string_literal", "class_reference", "regex"}
 # the rest add bulk without signal. Confidence is unaffected: it is added once
 # per matched signature, not per match (see the matched_signatures set).
 MAX_EVIDENCE_PER_SIGNATURE = 50
+
+# Per-line regex budget (ReDoS defense, NFR-1 fail-loud). Python's re cannot
+# be interrupted mid-backtracking, so the real cure is keeping every signature
+# regex linear (anchored/possessive, no unanchored .*). This budget is the
+# backstop for any future signature that regresses: if matching a single line
+# against the corpus takes longer than this, the signature is catastrophically
+# backtracking and scan() raises loudly instead of hanging silently (the exact
+# NFR-1/principle-3 violation ReDoS exploits). A legitimate source line never
+# approaches this even across 12+ regex signatures; a hostile line that does
+# means a bug in a hand-authored rule, and the pipeline should halt, not burn.
+LINE_MATCH_BUDGET_SECONDS = 1.0
 
 
 @dataclass
@@ -134,10 +146,29 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
         try:
             lines = file_path.read_text(encoding="utf-8", errors="ignore").splitlines()
         except OSError:
+            # RESID-4G: an unreadable file (e.g. chmod-000, a corrupt entry) was
+            # silently dropped while scanned_file_count still counted it as
+            # scanned - a NEITHER from a half-read corpus was presented as a full
+            # scan. Count it separately so reporting/coverage can treat the scan
+            # as degraded (partial), not silently certifying absence.
+            evidence.unreadable_file_count += 1
             continue
         for line_number, line in enumerate(lines, start=1):
+            line_start = time.monotonic()
             for signature in signatures:
                 matched_text = _line_matches(line, signature)
+                # ReDoS backstop (NFR-1 fail-loud): check the budget after every
+                # signature attempt on the line (matched or not - a catastrophic
+                # regex can return None after burning the time). A single slow
+                # line means a hand-authored rule is backtracking quadratically,
+                # so scan() raises loudly instead of hanging the whole pipeline.
+                if time.monotonic() - line_start > LINE_MATCH_BUDGET_SECONDS:
+                    raise TimeoutError(
+                        f"static scan: matching line {line_number} of "
+                        f"{file_path.name} took > {LINE_MATCH_BUDGET_SECONDS:.1f}s - "
+                        f"signature '{signature.id}' is catastrophically backtracking "
+                        f"(ReDoS). The regex must be linearized; see signatures.py."
+                    )
                 if matched_text is None:
                     continue
                 matched_signatures.add(signature.id)

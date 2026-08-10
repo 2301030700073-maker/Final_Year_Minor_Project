@@ -452,3 +452,78 @@ def test_scan_still_matches_genuine_custom_trustmanager_implementation(tmp_path)
 
     matched_ids = {e.signature_id for e in evidence.ssl_evidence}
     assert "custom_trustmanager_checkservertrusted" in matched_ids
+
+
+def test_scan_counts_unreadable_files_separately(tmp_path, monkeypatch):
+    # RESID-4G: an unreadable candidate was silently dropped while
+    # scanned_file_count still counted it as scanned - a NEITHER from a
+    # half-read corpus looked like a full scan. It must be counted separately
+    # so coverage/reporting can treat the scan as degraded, not certified-clean.
+    # chmod(0) is NOT used to trigger the OSError: the test runner runs as root
+    # (WSL), where chmod-000 still allows reading, so the file would be read
+    # fine and the guard never fire. Instead monkeypatch Path.read_text to raise
+    # OSError for exactly the blocked file - deterministic regardless of uid.
+    good = tmp_path / "Good.java"
+    good.write_text("public class Good {}\n")
+    blocked = tmp_path / "Blocked.java"
+    blocked.write_text("public class Blocked {}\n")
+
+    from pathlib import Path
+
+    real_read_text = Path.read_text
+
+    def flaky_read_text(self, *args, **kwargs):
+        if self.name == "Blocked.java":
+            raise OSError("simulated unreadable file")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", flaky_read_text)
+
+    sig = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    evidence = scan(tmp_path, sig)
+
+    assert evidence.scanned_file_count == 2           # both files walked
+    assert evidence.unreadable_file_count == 1        # Blocked.java surfaced, not hidden
+
+
+def test_scan_raises_loudly_on_regex_backtracking_budget(tmp_path, monkeypatch):
+    # ReDoS backstop (NFR-1 fail-loud): a catastrophically-backtracking regex
+    # must halt the scan with a loud TimeoutError, not hang it silently. We
+    # force the budget to ~0 so a merely-slow (not even adversarial) line trips
+    # it - proving the guard fires, independent of regex linearity.
+    import static.signatures as sig_mod
+    monkeypatch.setattr(sig_mod, "LINE_MATCH_BUDGET_SECONDS", 0.0)
+    (tmp_path / "Main.java").write_text("public class Main { void m() {} }\n")
+
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        "- id: slow\n"
+        "  category: root\n"
+        "  weight: 0.5\n"
+        "  pattern_type: regex\n"
+        "  patterns:\n"
+        "    - '.*'\n"
+        "  evidence_type: bytecode_string\n",
+        encoding="utf-8",
+    )
+    sigs = load_signatures(bad)
+
+    with pytest.raises(TimeoutError, match="catastrophically backtracking"):
+        scan(tmp_path, sigs)
+
+
+def test_root_runtime_exec_su_regex_is_linear():
+    # ReDoS regression: the former 'Runtime\.getRuntime\(\)\.exec\(.*su.*\)'
+    # backtracked quadratically on a long line of su tokens with no closing
+    # paren (verified 10-47s). The linearized form must not hang. Directly
+    # matches the corpus regex against a hostile input and bounds the time.
+    import re
+    import time
+    sigs = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    pat = next(s.patterns[0] for s in sigs if s.id == "root_runtime_exec_su")
+
+    hostile = "Runtime.getRuntime().exec(" + "su " * 120000 + "x" * 200
+    start = time.monotonic()
+    re.search(pat, hostile)
+    elapsed = time.monotonic() - start
+    assert elapsed < 1.0, f"root_runtime_exec_su backtracks catastrophically: {elapsed:.2f}s"

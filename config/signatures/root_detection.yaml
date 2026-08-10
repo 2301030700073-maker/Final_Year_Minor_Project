@@ -59,7 +59,18 @@
   weight: 0.3
   pattern_type: regex
   patterns:
-    - 'Runtime\.getRuntime\(\)\.exec\(.*su.*\)'
+    # Linearized against catastrophic backtracking (ReDoS). The former
+    # '.*su.*' had two unanchored .* - on a long line of repeated su tokens
+    # with no closing paren, the regex backtracks quadratically (verified:
+    # 10-47s on a hostile 1MB line, a silent hang). The trailing '\)' was the
+    # remaining hazard (matching a paren that may not exist re-scans the whole
+    # remainder per candidate), so it is dropped: '[^)]*' naturally stops at
+    # the first ')' and so still guarantees 'su' appears inside exec()'s own
+    # argument list, while a single [^)]* + literal 'su' is a linear scan
+    # (verified 0.0001s on the same hostile input, 0.002s worst-case no-su).
+    # A per-line budget in scan() (signatures.py) backs this up so no future
+    # regex can re-hang it silently.
+    - 'Runtime\.getRuntime\(\)\.exec\([^)]*su'
   evidence_type: bytecode_string
 
 - id: rootbeer_framework

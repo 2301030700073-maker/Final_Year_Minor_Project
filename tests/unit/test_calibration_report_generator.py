@@ -44,3 +44,29 @@ def test_generate_calibration_report_omits_ssl_note_once_all_modules_verify():
     content = CALIBRATION_TEMPLATE.render(report=report)
 
     assert "SSL bypass verification is PARTIAL" not in content
+
+
+def test_generate_calibration_report_flags_vacuous_1p00_when_tn_is_zero(tmp_path):
+    # RESID (finding 4): a Tier-2 with TN=0 reports 1.00 precision/recall as a
+    # tautology, not a measurement - every ground-truthed case is a positive, so
+    # the FP/FN direction was never tested. The report must say so loudly
+    # instead of letting a structurally-unearned 1.00 read as validated.
+    runs = [
+        RunRow(
+            apk_hash="uc1_hash", run_id="r1", action="ROOT_ONLY",
+            root_confidence=0.80, root_detected=True, root_bypassed=True,
+            ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+            decompile_completeness="complete",
+        ),
+    ]
+    ground_truth = {"uc1_hash": GroundTruthEntry("uc1_hash", root=True, ssl=False, source="manual review")}
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+    assert report.tier2["root"].true_negative == 0  # the tautology precondition
+
+    from report.generator import CALIBRATION_TEMPLATE
+    content = CALIBRATION_TEMPLATE.render(report=report)
+
+    assert "has TN=0: the 1.00 precision/recall is a tautology, not a measurement" in content
+    assert "Every ground-truthed root case is a positive" in content

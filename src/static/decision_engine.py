@@ -42,4 +42,5 @@ def classify(
         action=action, root=root, ssl=ssl,
         root_threshold=root_threshold, ssl_threshold=ssl_threshold,
         scanned_file_count=static_evidence.scanned_file_count,
+        unreadable_file_count=static_evidence.unreadable_file_count,
     )

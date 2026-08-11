@@ -71,3 +71,22 @@ def test_confidence_capped_at_one():
     result = classify(evidence)
     assert result.root.confidence == 1.0
     assert result.action == Action.BOTH
+
+
+def test_classify_refuses_to_blend_non_deterministic_evidence():
+    # principle 2 / ADR-0001: verification_state is the consumer of the
+    # evidence tier. A non-deterministic tier (AI-hypothesized) reaching the
+    # static classification path would be blended into a deterministic
+    # confidence score - exactly what principle 2 forbids. classify() must
+    # fail loudly rather than blend.
+    import pytest as _pytest
+    from common import Evidence as _Evidence
+
+    bad = _Evidence(
+        signature_id="ai_hypothesis_root",
+        file="A.java", line_or_offset=1, matched_text="root",
+        verification_state="ai_hypothesized_unverified",
+    )
+    evidence = StaticEvidence(root_confidence=0.9, root_evidence=[bad])
+    with _pytest.raises(ValueError, match="may only aggregate deterministic_matched"):
+        classify(evidence)

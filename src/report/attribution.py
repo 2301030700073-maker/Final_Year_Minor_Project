@@ -51,6 +51,17 @@ KNOWN_VENDOR_PREFIXES = (
     "org.acra",           # ACRA crash reporter
     "io.flutter",         # Flutter engine/plugins
     "com.flutter",        # Flutter plugins
+    # Network / SSL-pinning SDKs (added 2026-08). okhttp3 is the dominant
+    # Android HTTP client whose CertificatePinner performs most real SSL
+    # pinning - an SSL match under okhttp3/okhttp4 (or Square's other libs) is
+    # bundled-SDK pinning, not the app's own logic, and without these prefixes
+    # it was being mislabeled app-owned at machine confidence. React Native's
+    # network/blob libs likewise. All are always-bundled third-party libraries.
+    "okhttp3",            # OkHttp top-level package
+    "com.squareup",       # Square ecosystem: okhttp3/4, retrofit, moshi
+    "com.reactnativecommunity",  # React Native community modules (incl. blobutil)
+    "com.RNFetchBlob",    # ReactNativeBlobUtil (legacy package)
+    "com.ReactNativeBlobUtil",   # ReactNativeBlobUtil
 )
 
 
@@ -99,16 +110,21 @@ def attribute_root_evidence(app_package: str, evidence: list) -> dict | None:
     Returns None when there's no root evidence (nothing to attribute). The
     result is a plain dict the report template can branch on:
       app_package, app_owned, third_party, vendors, all_third_party, mixed.
-    `evidence` items only need a `.file` attribute. A match is third-party only
-    if its namespace is a recognized vendor; everything else counts as the
-    app's own code."""
+    `evidence` items only need a `.file` (or `["file"]` - dict, as asdict
+    produces for a stored classification_json). A match is third-party only if
+    its namespace is a recognized vendor; everything else counts as the app's
+    own code."""
     if not evidence:
         return None
     app_owned = 0
     third_party = 0
     vendors: set[str] = set()
     for e in evidence:
-        file = getattr(e, "file", None) or getattr(e, "file_path", None)
+        file = (
+            e.get("file") or e.get("file_path")
+            if isinstance(e, dict)
+            else getattr(e, "file", None) or getattr(e, "file_path", None)
+        )
         ns = derive_namespace(file)
         if is_known_third_party(ns):
             third_party += 1

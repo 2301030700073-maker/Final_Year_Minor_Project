@@ -511,6 +511,15 @@ def run(
     classification.root_attribution = attribute_root_evidence(
         package_name, classification.root.evidence
     )
+    # SSL attribution is the same attribution question: most real SSL pinning
+    # is okhttp3's CertificatePinner inside a bundled SDK, so an SSL verdict
+    # built entirely from bundled network libraries (okhttp3/com.squareup/RN)
+    # is not the app's own pinning logic. The vendor taxonomy is shared with
+    # root - attribute_root_evidence is generic over evidence (its is_known_
+    # third_party logic does not need app_package). Same machine caveat.
+    classification.ssl_attribution = attribute_root_evidence(
+        package_name, classification.ssl.evidence
+    )
 
     # --- dynamic analysis ---
     verification: Optional[VerificationResult] = None
@@ -653,6 +662,56 @@ def calibration_report(
 
     output_path = generate_calibration_report(report, CALIBRATION_REPORTS_ROOT)
     console.print(f"\n[bold green]Calibration report: {output_path}[/bold green]")
+
+
+@app.command("re-attribute")
+def re_attribute_cmd():
+    """Backfill machine-readable root/ssl attribution into stored runs that
+    predate the attribution feature. The feature is forward-only (it protects
+    new runs); this brings existing classification_json blobs up to date so an
+    automated consumer no longer reads a bundled-SDK-only ROOT_ONLY/SSL_ONLY as
+    the app's own anti-tampering. Non-destructive: it only attaches caveats
+    (root_attribution/ssl_attribution) - it never rewrites the verdict,
+    confidence, or evidence. Idempotent: re-running only fills rows still
+    missing attribution."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from storage.db import ApkRecord, RunRecord, get_engine
+
+    with Session(get_engine(ANALYSIS_ROOT)) as session:
+        rows = session.execute(
+            select(RunRecord, ApkRecord.package_name)
+            .outerjoin(ApkRecord, RunRecord.apk_sha256 == ApkRecord.sha256)
+        ).all()
+        updated = 0
+        third_party_only = 0
+        for run, package_name in rows:
+            cj = dict(run.classification_json or {})
+            root = cj.get("root") or {}
+            ssl = cj.get("ssl") or {}
+            root_ev = root.get("evidence") or []
+            ssl_ev = ssl.get("evidence") or []
+            pkg = package_name or ""
+            root_attr = attribute_root_evidence(pkg, root_ev)
+            ssl_attr = attribute_root_evidence(pkg, ssl_ev)
+            changed = False
+            if root_attr is not None and cj.get("root_attribution") is None:
+                cj["root_attribution"] = root_attr
+                changed = True
+            if ssl_attr is not None and cj.get("ssl_attribution") is None:
+                cj["ssl_attribution"] = ssl_attr
+                changed = True
+            if changed:
+                run.classification_json = cj
+                updated += 1
+                if (root_attr or {}).get("all_third_party") or (ssl_attr or {}).get("all_third_party"):
+                    third_party_only += 1
+        session.commit()
+    console.print(
+        f"[bold green]re-attributed {updated} stored run(s); "
+        f"{third_party_only} now carry an all-third-party caveat[/bold green]"
+    )
 
 
 @app.command("verify-audit-log")

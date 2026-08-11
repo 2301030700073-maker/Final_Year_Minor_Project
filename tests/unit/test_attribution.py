@@ -82,3 +82,22 @@ def test_attribute_mixed_app_and_third_party():
 
 def test_attribute_no_evidence_returns_none():
     assert attribution.attribute_root_evidence(PG, []) is None
+
+
+def test_attribute_handles_dict_evidence_and_okhttp_as_third_party():
+    # Two properties the re-attribute backfill relies on: (1) evidence given as
+    # plain dicts (asdict shape of a stored classification_json) is tolerated,
+    # not just dataclass Evidence; (2) okhttp3 - the dominant SSL-pinning SDK -
+    # is recognized as third-party, so a bundled OkHttp CertificatePinner match
+    # is not mislabeled the app's own code.
+    evidence = [
+        {"signature_id": "ssl_okhttp_certificate_pinner", "file": "sources/okhttp3/internal/tls/CertificateChainCleaner.java", "line_or_offset": 1, "matched_text": "CertificatePinner"},
+        {"signature_id": "root_su_binary_paths", "file": "sources/sg/vantagepoint/a/c.java", "line_or_offset": 1, "matched_text": "/system/bin/su"},
+    ]
+    result = attribution.attribute_root_evidence("com.example.app", evidence)
+    assert result["third_party"] == 1          # okhttp3 counted third-party
+    assert result["app_owned"] == 1            # sg.vantagepoint counted app-owned
+    # vendor_namespace collapses to the top two segments -> "okhttp3.internal"
+    assert result["vendors"] == ["okhttp3.internal"]
+    assert result["all_third_party"] is False
+    assert result["mixed"] is True

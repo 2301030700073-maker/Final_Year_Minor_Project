@@ -65,6 +65,11 @@ TEMPLATE = Template("""\
 {% for e in classification.ssl.evidence -%}
 - `{{ e.signature_id }}` at {{ e.file }}:{{ e.line_or_offset }} - `{{ e.matched_text }}`
 {% endfor %}
+{% if ssl_attribution and ssl_attribution.all_third_party -%}
+> **Attribution:** all {{ ssl_attribution.third_party }} SSL-pinning matches are in bundled third-party libraries ({{ ssl_attribution.vendors | join(', ') }}), none in the app's own package (`{{ ssl_attribution.app_package }}`) - consistent with bundled SDK pinning (e.g. OkHttp's CertificatePinner), not the app's own certificate-pinning logic.
+{% elif ssl_attribution and ssl_attribution.mixed -%}
+> **Attribution:** SSL-pinning matches split across the app's own package ({{ ssl_attribution.app_owned }}) and bundled third-party libraries ({{ ssl_attribution.third_party }}: {{ ssl_attribution.vendors | join(', ') }}).
+{% endif %}
 ## Scan Coverage (ADR-0008)
 
 Per-surface bound of this scan - a `partial`/`unscannable` surface is a lower bound, never a confident negative. {% if obfuscation_level -%}Obfuscation: **{{ obfuscation_level }}**{% endif %}
@@ -163,6 +168,7 @@ def generate_report(
         correlation=correlation,
         stage_results=stage_results,
         root_attribution=_root_attribution(metadata, classification),
+        ssl_attribution=_ssl_attribution(metadata, classification),
         **_decompile_summary(stage_results),
         manifest=manifest,
         coverage=coverage,
@@ -185,6 +191,16 @@ def _root_attribution(metadata: dict, classification: ClassificationResult) -> d
         return classification.root_attribution
     package_name = (metadata.get("package") or {}).get("package_name", "")
     return attribution_module.attribute_root_evidence(package_name, classification.root.evidence)
+
+
+def _ssl_attribution(metadata: dict, classification: ClassificationResult) -> dict | None:
+    """Attribution for SSL-pinning evidence - same question as root (most real
+    pinning is OkHttp's CertificatePinner inside a bundled SDK). Prefers the
+    attached machine field; falls back for direct generate_report() callers."""
+    if classification.ssl_attribution is not None:
+        return classification.ssl_attribution
+    package_name = (metadata.get("package") or {}).get("package_name", "")
+    return attribution_module.attribute_root_evidence(package_name, classification.ssl.evidence)
 
 
 def _decompile_summary(stage_results: list[StageResult]) -> dict:

@@ -120,6 +120,18 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
             git_commit=run_data.get("git_commit"),
             target=run_data.get("target"),
             package_name=run_data.get("package_name"),
+            # Item 1: surface the bundled-SDK qualifier on the denormalized row
+            # so calibration/consumers see it without parsing classification_json.
+            root_all_third_party=(
+                classification.get("root_attribution") or {}
+            ).get("all_third_party"),
+            ssl_all_third_party=(
+                classification.get("ssl_attribution") or {}
+            ).get("all_third_party"),
+            # Item 3: persist the manifest read + obfuscation level so report
+            # regeneration stays faithful (None on runs that predate this).
+            manifest_json=run_data.get("manifest"),
+            obfuscation_level=run_data.get("obfuscation_level"),
             classification_json=classification,
             verification_json=verification,
             correlation_json=correlation,
@@ -147,6 +159,8 @@ def load_runs_for_calibration(analysis_root: Path) -> list[RunRow]:
                 ssl_confidence=r.ssl_confidence,
                 ssl_detected=r.ssl_detected,
                 ssl_bypassed=r.ssl_bypassed,
+                root_all_third_party=bool(r.root_all_third_party),
+                ssl_all_third_party=bool(r.ssl_all_third_party),
                 decompile_completeness=r.decompile_completeness,
                 coverage=r.coverage,
             )

@@ -105,6 +105,19 @@ class RunRecord(Base):
     # as 'uncrackable1'); package_name is derived from the APK manifest and is
     # the reliable key for consumers. (F1)
     package_name: Mapped[str | None] = mapped_column(String, index=True)
+    # Item 1 (F3): per-category machine-visible qualifier - True when a DETECTED
+    # verdict's governing evidence is entirely recognized bundled-SDK code, so a
+    # consumer/calibration reading the denormalized columns doesn't mistake it
+    # for the app's own implementation. Populated from root_attribution/ssl_attribution
+    # at save and backfilled by re-attribute. Detection stays real (the code is
+    # present); this flags that it is not the app's own logic.
+    root_all_third_party: Mapped[bool | None] = mapped_column(Boolean, index=True)
+    ssl_all_third_party: Mapped[bool | None] = mapped_column(Boolean, index=True)
+    # Item 3: persist the manifest read and obfuscation level so re-attribute's
+    # report regeneration is faithful (Debuggable/NSC lines, R8 caveat) instead
+    # of dropping them. None on runs that predate persistence (unrecoverable).
+    manifest_json: Mapped[dict | None] = mapped_column(JSON)
+    obfuscation_level: Mapped[str | None] = mapped_column(String)
 
     classification_json: Mapped[dict] = mapped_column(JSON)
     verification_json: Mapped[dict | None] = mapped_column(JSON)  # None if dynamic stage skipped
@@ -138,3 +151,11 @@ def _migrate_schema(engine) -> None:
                 continue
             col_type = col.type.compile(engine.dialect)
             conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col.name} {col_type}"))
+        # ALTER ADD COLUMN above never creates the indexes a fresh create_all
+        # would (e.g. ix_runs_package_name); a migrated DB would silently miss
+        # them. Create any index the model declares that isn't already present.
+        index_names = {row[1] for row in conn.exec_driver_sql(f"PRAGMA index_list({table})")}
+        for ix in RunRecord.__table__.indexes:
+            if ix.name not in index_names:
+                cols = ", ".join(c.name for c in ix.columns)
+                conn.execute(text(f"CREATE INDEX {ix.name} ON {table} ({cols})"))

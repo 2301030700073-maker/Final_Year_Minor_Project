@@ -36,6 +36,8 @@ from audit.attestation import (
 from calibration.ground_truth import DEFAULT_PATH as DEFAULT_GROUND_TRUTH_PATH
 from calibration.ground_truth import load_ground_truth
 from calibration.report import compute_calibration_report
+from dataclasses import asdict
+
 from common import (
     Action,
     CategoryVerdict,
@@ -593,6 +595,8 @@ def run(
             "target": target,
             "package_name": package_name,
             "coverage": coverage_map,
+            "obfuscation_level": obfuscation_level,
+            "manifest": asdict(manifest_info) if manifest_info else None,
         },
         completion_kwargs=dict(
             audit_log_path=AUDIT_LOG_PATH,
@@ -704,6 +708,7 @@ def re_attribute_cmd(
         updated = 0
         third_party_only = 0
         regenerated = 0
+        errors: list[str] = []
         for run, apk in rows:
             cj = dict(run.classification_json or {})
             root = cj.get("root") or {}
@@ -726,6 +731,14 @@ def re_attribute_cmd(
             if run.package_name != pkg:
                 run.package_name = pkg
                 changed = True
+            # Item 1: denormalized bundled-SDK qualifiers, so calibration and
+            # the column view carry the caveat alongside the DETECTED verdict.
+            if run.root_all_third_party != bool((root_attr or {}).get("all_third_party")):
+                run.root_all_third_party = bool((root_attr or {}).get("all_third_party"))
+                changed = True
+            if run.ssl_all_third_party != bool((ssl_attr or {}).get("all_third_party")):
+                run.ssl_all_third_party = bool((ssl_attr or {}).get("all_third_party"))
+                changed = True
             if changed:
                 run.classification_json = cj
                 updated += 1
@@ -733,38 +746,49 @@ def re_attribute_cmd(
                     third_party_only += 1
                 # F2: a changed attribution leaves the persisted .md stale (it
                 # was rendered pre-attribution and still reads as app-implemented).
-                # Regenerate it from the stored JSON so DB and report agree.
-                report_path = _regenerate_report(run, apk)
-                if report_path is not None:
+                # Regenerate it from the stored JSON so DB and report agree. A
+                # per-row failure is surfaced loudly (item 2) and never aborts
+                # the backfill or rolls back attribution already applied.
+                try:
+                    _regenerate_report(run, apk)
                     regenerated += 1
+                except Exception as exc:  # NFR-1: fail loudly, never silently
+                    errors.append(f"{run.run_id}: report regeneration failed: {exc}")
         session.commit()
     console.print(
         f"[bold green]re-attributed {updated} stored run(s); "
         f"{third_party_only} now carry an all-third-party caveat; "
         f"regenerated {regenerated} report(s)[/bold green]"
     )
+    if errors:
+        for err in errors:
+            console.print(f"[bold red]{err}[/bold red]")
+        console.print(
+            f"[bold red]{len(errors)} report(s) could not be regenerated - "
+            f"their DB attribution was still applied.[/bold red]"
+        )
 
 
-def _regenerate_report(run: RunRecord, apk) -> Path | None:
+def _regenerate_report(run: RunRecord, apk) -> None:
     """Re-render a stored run's .md from its persisted JSON, so a classification
     backfill (re-attribute) is reflected on disk, not just in the DB. The header
     metadata comes from the stored APK record's raw ingest metadata (the exact
-    original payload), so the regenerated report is faithful - only the
-    attribution caveat differs from the pre-attribution original."""
-    try:
-        cls = _classification_from_json(run.classification_json or {})
-    except Exception:
-        # A malformed/legacy blob must not abort the whole backfill - skip the
-        # report for this row and leave the DB attribution already applied.
-        return None
+    original payload) plus the persisted manifest/obfuscation level (item 3), so
+    the regenerated report is faithful. Raises on malformed stored data - the
+    caller records the error loudly rather than swallowing it (NFR-1)."""
+    cls = _classification_from_json(run.classification_json or {})
     metadata = (apk.raw_metadata if apk else None) or {
         "package": {"package_name": run.package_name or ""},
         "hashes": {"sha256": run.apk_sha256},
     }
-    return generate_report(
+    timestamp = f"{run.timestamp} (report regenerated from stored data)"
+    if run.obfuscation_level:
+        metadata.setdefault("package", {})
+        metadata["package"]["obfuscation_level"] = run.obfuscation_level
+    generate_report(
         run_id=run.run_id,
         apk_hash=run.apk_sha256,
-        timestamp=run.timestamp,
+        timestamp=timestamp,
         metadata=metadata,
         classification=cls,
         verification=_verification_from_json(run.verification_json),
@@ -772,8 +796,10 @@ def _regenerate_report(run: RunRecord, apk) -> Path | None:
         stage_results=[_stage_from_json(s) for s in (run.stage_results_json or [])],
         output_dir=REPORTS_ROOT,
         dynamic_skip_reason=run.dynamic_skip_reason,
+        manifest=_manifest_from_json(run.manifest_json),
         git_commit=run.git_commit,
         coverage=run.coverage,
+        obfuscation_level=run.obfuscation_level,
     )
 
 
@@ -833,6 +859,23 @@ def _stage_from_json(s: dict) -> StageResult:
         evidence=s.get("evidence"),
         error=s.get("error"),
         duration_ms=s.get("duration_ms"),
+    )
+
+
+def _manifest_from_json(m) -> ManifestInfo | None:
+    """Rebuild a ManifestInfo from the persisted manifest_json (item 3), so a
+    regenerated report keeps its Debuggable/network-security-config section
+    instead of dropping it. None on runs that predate manifest persistence."""
+    if not m:
+        return None
+    return ManifestInfo(
+        debuggable=bool(m.get("debuggable")),
+        network_security_config=m.get("network_security_config"),
+        application_present=bool(m.get("application_present", True)),
+        nsc_file_present=m.get("nsc_file_present"),
+        stored_certs=int(m.get("stored_certs") or 0),
+        device_admin=bool(m.get("device_admin")),
+        resources_complete=bool(m.get("resources_complete", True)),
     )
 
 

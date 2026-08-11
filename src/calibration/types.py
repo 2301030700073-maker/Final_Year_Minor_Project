@@ -47,6 +47,12 @@ class RunRow:
     # so pre-coverage negatives are not certified as confident TNs - documented
     # conservative default, not a silent upgrade.
     coverage: dict | None = None
+    # Item 1 (F3): True when a DETECTED verdict is carried entirely by bundled
+    # third-party code (none in the app's own package). The detection is real
+    # (the code is present) but it is not evidence the app itself implements the
+    # technique; carried here so calibration/consumers can see the qualifier.
+    root_all_third_party: bool = False
+    ssl_all_third_party: bool = False
 
 
 @dataclass(frozen=True)

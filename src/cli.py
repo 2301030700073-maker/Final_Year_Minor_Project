@@ -734,10 +734,19 @@ def re_attribute_cmd(
                 attribute_root_evidence(pkg, ssl_ev), bool(ssl.get("detected"))
             )
             changed = False
-            if root_attr is not None and (force or cj.get("root_attribution") is None):
+            # Compare-and-write, not "is None". Gating the JSON write on
+            # `is None` left a latent drift: a stale row whose classification_json
+            # already carried all_third_party=True (pre-fix) would never be
+            # corrected without --force, because the guard was permanently False,
+            # while the column gate below corrects unconditionally - so column
+            # flipped to False but JSON stayed True and never self-healed. Writing
+            # only when the freshly-gated value differs fixes that drift AND stays
+            # idempotent for already-correct rows (attribute_root_evidence is
+            # deterministic, so an up-to-date value compares equal and is skipped).
+            if root_attr is not None and (force or cj.get("root_attribution") != root_attr):
                 cj["root_attribution"] = root_attr
                 changed = True
-            if ssl_attr is not None and (force or cj.get("ssl_attribution") is None):
+            if ssl_attr is not None and (force or cj.get("ssl_attribution") != ssl_attr):
                 cj["ssl_attribution"] = ssl_attr
                 changed = True
             # F1: run rows now denormalize the authoritative package identity

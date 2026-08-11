@@ -5,12 +5,14 @@ from static.decision_engine import DEFAULT_THRESHOLD
 
 def _run(apk_hash, run_id, action, root_confidence, root_detected, root_bypassed,
          ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
-         decompile_completeness="complete", coverage=None):
+         decompile_completeness="complete", coverage=None,
+         root_all_third_party=False, ssl_all_third_party=False):
     return RunRow(
         apk_hash=apk_hash, run_id=run_id, action=action,
         root_confidence=root_confidence, root_detected=root_detected, root_bypassed=root_bypassed,
         ssl_confidence=ssl_confidence, ssl_detected=ssl_detected, ssl_bypassed=ssl_bypassed,
         decompile_completeness=decompile_completeness, coverage=coverage,
+        root_all_third_party=root_all_third_party, ssl_all_third_party=ssl_all_third_party,
     )
 
 
@@ -97,6 +99,32 @@ def test_end_to_end_against_real_current_numbers():
     assert report.tier1["root"].confirmation_rate.rate == 1.0
     assert report.tier1["ssl"].not_applicable == 4
     assert report.tier1["ssl"].confirmation_rate.rate is None
+
+
+def test_bundled_sdk_qualifier_is_consumer_visible_not_a_detection_downgrade():
+    """Locks the ADR-0010 decision: a DETECTED verdict whose governing evidence
+    is entirely bundled third-party code is STILL a real detection and is still
+    counted as a Tier-2 true positive when ground truth is positive. The
+    pinning/root-check code is present in the shipped binary and affects the
+    app, so downgrading it to not-TP would undercount real detections. The
+    all_third_party flag is a consumer-visible qualifier, not a requalifier -
+    it must never change a Tier-2 outcome."""
+    runs = [
+        # Bundled-SDK-only root detection (e.g. PropertyGuru: Sentry/Expo/Firebase).
+        _run("pg_hash", "r1", "ROOT_ONLY", 0.90, True, None,
+             root_all_third_party=True, coverage=FULLY_ANALYZED),
+    ]
+    ground_truth = {
+        "pg_hash": GroundTruthEntry("pg_hash", root=True, ssl=False, source="manual review"),
+    }
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-08-11T00:00:00", ground_truth_commit="abc123",
+    )
+    # The qualifier is carried but does not requalify: still a true positive.
+    assert report.tier2["root"].true_positive == 1
+    assert report.tier2["root"].false_negative == 0
+    assert report.tier2["root"].precision.rate == 1.0
+    assert runs[0].root_all_third_party is True  # qualifier survives to the row
 
 
 def test_partial_decompile_run_with_positive_detection_stays_in_tier2():

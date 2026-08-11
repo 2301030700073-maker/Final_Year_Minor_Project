@@ -107,10 +107,12 @@ class RunRecord(Base):
     package_name: Mapped[str | None] = mapped_column(String, index=True)
     # Item 1 (F3): per-category machine-visible qualifier - True when a DETECTED
     # verdict's governing evidence is entirely recognized bundled-SDK code, so a
-    # consumer/calibration reading the denormalized columns doesn't mistake it
-    # for the app's own implementation. Populated from root_attribution/ssl_attribution
-    # at save and backfilled by re-attribute. Detection stays real (the code is
-    # present); this flags that it is not the app's own logic.
+    # consumer reading the denormalized columns doesn't mistake it for the app's
+    # own implementation. Populated from root_attribution/ssl_attribution at save
+    # and backfilled by re-attribute. This is a CONSUMER-VISIBLE annotation only
+    # (ADR-0010): the detection is real (the code is present in the shipped
+    # binary and affects the app) and Tier-2 classification is deliberately
+    # unchanged - the flag never requalifies a detection.
     root_all_third_party: Mapped[bool | None] = mapped_column(Boolean, index=True)
     ssl_all_third_party: Mapped[bool | None] = mapped_column(Boolean, index=True)
     # Item 3: persist the manifest read and obfuscation level so re-attribute's

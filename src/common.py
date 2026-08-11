@@ -87,8 +87,8 @@ class ClassificationResult:
     # the machine output and the report agree. all_third_party=True means every
     # root match is in a recognized bundled SDK - NOT the app's own logic.
     # None when there is no root evidence or attribution was not computed.
-    # ssl_attribution stays None for now: it needs its own vendor taxonomy,
-    # which is not yet established (see report/attribution.py).
+    # Both share the same vendor taxonomy (report/attribution.py) - SSL was
+    # wired when okhttp3/com.squareup/the React Native network SDKs were added.
     root_attribution: dict | None = None
     ssl_attribution: dict | None = None
 

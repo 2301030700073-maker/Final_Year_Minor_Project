@@ -709,6 +709,10 @@ def re_attribute_cmd(
         third_party_only = 0
         regenerated = 0
         errors: list[str] = []
+        # Item 2: the report is rendered by the CURRENT code, so the Analysis-code
+        # line must name the rendering commit, not the original run's (which an
+        # ancestor that predates the attribution caveat). Compute once, not per row.
+        rendering_commit = _git_commit_hash()
         for run, apk in rows:
             cj = dict(run.classification_json or {})
             root = cj.get("root") or {}
@@ -750,7 +754,7 @@ def re_attribute_cmd(
                 # per-row failure is surfaced loudly (item 2) and never aborts
                 # the backfill or rolls back attribution already applied.
                 try:
-                    _regenerate_report(run, apk)
+                    _regenerate_report(run, apk, rendering_commit)
                     regenerated += 1
                 except Exception as exc:  # NFR-1: fail loudly, never silently
                     errors.append(f"{run.run_id}: report regeneration failed: {exc}")
@@ -769,13 +773,16 @@ def re_attribute_cmd(
         )
 
 
-def _regenerate_report(run: RunRecord, apk) -> None:
+def _regenerate_report(run: RunRecord, apk, rendering_commit: str) -> None:
     """Re-render a stored run's .md from its persisted JSON, so a classification
     backfill (re-attribute) is reflected on disk, not just in the DB. The header
     metadata comes from the stored APK record's raw ingest metadata (the exact
     original payload) plus the persisted manifest/obfuscation level (item 3), so
-    the regenerated report is faithful. Raises on malformed stored data - the
-    caller records the error loudly rather than swallowing it (NFR-1)."""
+    the regenerated report is faithful. `rendering_commit` is the CURRENT code's
+    commit (the report was rendered by it), so the Analysis-code line isn't
+    misattributed to the original run's pre-feature commit (item 2). Raises on
+    malformed stored data - the caller records the error loudly rather than
+    swallowing it (NFR-1)."""
     cls = _classification_from_json(run.classification_json or {})
     metadata = (apk.raw_metadata if apk else None) or {
         "package": {"package_name": run.package_name or ""},
@@ -797,7 +804,7 @@ def _regenerate_report(run: RunRecord, apk) -> None:
         output_dir=REPORTS_ROOT,
         dynamic_skip_reason=run.dynamic_skip_reason,
         manifest=_manifest_from_json(run.manifest_json),
-        git_commit=run.git_commit,
+        git_commit=rendering_commit,
         coverage=run.coverage,
         obfuscation_level=run.obfuscation_level,
     )

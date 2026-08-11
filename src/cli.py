@@ -36,7 +36,15 @@ from audit.attestation import (
 from calibration.ground_truth import DEFAULT_PATH as DEFAULT_GROUND_TRUTH_PATH
 from calibration.ground_truth import load_ground_truth
 from calibration.report import compute_calibration_report
-from common import Action, Evidence, StageResult, VerificationResult
+from common import (
+    Action,
+    CategoryVerdict,
+    ClassificationResult,
+    CorrelationResult,
+    Evidence,
+    StageResult,
+    VerificationResult,
+)
 from dynamic import correlation as correlation_module
 from dynamic import device
 from dynamic import frida_runner
@@ -583,6 +591,7 @@ def run(
             "stage_results": stage_results,
             "git_commit": git_commit,
             "target": target,
+            "package_name": package_name,
             "coverage": coverage_map,
         },
         completion_kwargs=dict(
@@ -689,18 +698,19 @@ def re_attribute_cmd(
 
     with Session(get_engine(ANALYSIS_ROOT)) as session:
         rows = session.execute(
-            select(RunRecord, ApkRecord.package_name)
+            select(RunRecord, ApkRecord)
             .outerjoin(ApkRecord, RunRecord.apk_sha256 == ApkRecord.sha256)
         ).all()
         updated = 0
         third_party_only = 0
-        for run, package_name in rows:
+        regenerated = 0
+        for run, apk in rows:
             cj = dict(run.classification_json or {})
             root = cj.get("root") or {}
             ssl = cj.get("ssl") or {}
             root_ev = root.get("evidence") or []
             ssl_ev = ssl.get("evidence") or []
-            pkg = package_name or ""
+            pkg = (apk.package_name if apk else None) or ""
             root_attr = attribute_root_evidence(pkg, root_ev)
             ssl_attr = attribute_root_evidence(pkg, ssl_ev)
             changed = False
@@ -710,15 +720,119 @@ def re_attribute_cmd(
             if ssl_attr is not None and (force or cj.get("ssl_attribution") is None):
                 cj["ssl_attribution"] = ssl_attr
                 changed = True
+            # F1: run rows now denormalize the authoritative package identity
+            # (derived from the APK manifest) so a consumer keying on the run
+            # doesn't rely on the operator-supplied `target` label.
+            if run.package_name != pkg:
+                run.package_name = pkg
+                changed = True
             if changed:
                 run.classification_json = cj
                 updated += 1
                 if (root_attr or {}).get("all_third_party") or (ssl_attr or {}).get("all_third_party"):
                     third_party_only += 1
+                # F2: a changed attribution leaves the persisted .md stale (it
+                # was rendered pre-attribution and still reads as app-implemented).
+                # Regenerate it from the stored JSON so DB and report agree.
+                report_path = _regenerate_report(run, apk)
+                if report_path is not None:
+                    regenerated += 1
         session.commit()
     console.print(
         f"[bold green]re-attributed {updated} stored run(s); "
-        f"{third_party_only} now carry an all-third-party caveat[/bold green]"
+        f"{third_party_only} now carry an all-third-party caveat; "
+        f"regenerated {regenerated} report(s)[/bold green]"
+    )
+
+
+def _regenerate_report(run: RunRecord, apk) -> Path | None:
+    """Re-render a stored run's .md from its persisted JSON, so a classification
+    backfill (re-attribute) is reflected on disk, not just in the DB. The header
+    metadata comes from the stored APK record's raw ingest metadata (the exact
+    original payload), so the regenerated report is faithful - only the
+    attribution caveat differs from the pre-attribution original."""
+    try:
+        cls = _classification_from_json(run.classification_json or {})
+    except Exception:
+        # A malformed/legacy blob must not abort the whole backfill - skip the
+        # report for this row and leave the DB attribution already applied.
+        return None
+    metadata = (apk.raw_metadata if apk else None) or {
+        "package": {"package_name": run.package_name or ""},
+        "hashes": {"sha256": run.apk_sha256},
+    }
+    return generate_report(
+        run_id=run.run_id,
+        apk_hash=run.apk_sha256,
+        timestamp=run.timestamp,
+        metadata=metadata,
+        classification=cls,
+        verification=_verification_from_json(run.verification_json),
+        correlation=_correlation_from_json(run.correlation_json),
+        stage_results=[_stage_from_json(s) for s in (run.stage_results_json or [])],
+        output_dir=REPORTS_ROOT,
+        dynamic_skip_reason=run.dynamic_skip_reason,
+        git_commit=run.git_commit,
+        coverage=run.coverage,
+    )
+
+
+def _classification_from_json(cj: dict) -> ClassificationResult:
+    def _ev(d: dict) -> Evidence:
+        return Evidence(
+            signature_id=d["signature_id"],
+            file=d["file"],
+            line_or_offset=d["line_or_offset"],
+            matched_text=d["matched_text"],
+            verification_state=d.get("verification_state", "deterministic_matched"),
+        )
+
+    def _cat(d: dict) -> CategoryVerdict:
+        return CategoryVerdict(
+            confidence=d["confidence"],
+            detected=d["detected"],
+            evidence=[_ev(e) for e in d.get("evidence", [])],
+        )
+
+    return ClassificationResult(
+        action=Action(cj["action"]),
+        root=_cat(cj["root"]),
+        ssl=_cat(cj["ssl"]),
+        root_threshold=cj.get("root_threshold", 0.7),
+        ssl_threshold=cj.get("ssl_threshold", 0.7),
+        scanned_file_count=cj.get("scanned_file_count", 0),
+        unreadable_file_count=cj.get("unreadable_file_count", 0),
+        root_attribution=cj.get("root_attribution"),
+        ssl_attribution=cj.get("ssl_attribution"),
+    )
+
+
+def _verification_from_json(v) -> VerificationResult | None:
+    if not v:
+        return None
+    return VerificationResult(
+        root_bypassed=v.get("root_bypassed"),
+        ssl_bypassed=v.get("ssl_bypassed"),
+        evidence_lines=v.get("evidence_lines") or {},
+    )
+
+
+def _correlation_from_json(c) -> CorrelationResult | None:
+    if not c:
+        return None
+    return CorrelationResult(
+        matches=c.get("matches"),
+        mismatches=c.get("mismatches") or [],
+    )
+
+
+def _stage_from_json(s: dict) -> StageResult:
+    return StageResult(
+        stage=s.get("stage"),
+        status=s.get("status"),
+        evidence=s.get("evidence"),
+        error=s.get("error"),
+        duration_ms=s.get("duration_ms"),
     )
 
 

@@ -99,6 +99,12 @@ class RunRecord(Base):
 
     git_commit: Mapped[str | None] = mapped_column(String)
     target: Mapped[str | None] = mapped_column(String)
+    # Authoritative app identity, denormalized from apks.package_name so a run
+    # row carries it without the join. `target` above is an operator-supplied
+    # *label* (which past runs set inconsistently - e.g. PropertyGuru recorded
+    # as 'uncrackable1'); package_name is derived from the APK manifest and is
+    # the reliable key for consumers. (F1)
+    package_name: Mapped[str | None] = mapped_column(String, index=True)
 
     classification_json: Mapped[dict] = mapped_column(JSON)
     verification_json: Mapped[dict | None] = mapped_column(JSON)  # None if dynamic stage skipped

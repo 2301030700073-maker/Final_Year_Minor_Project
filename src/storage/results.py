@@ -119,6 +119,7 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
             coverage=run_data.get("coverage"),
             git_commit=run_data.get("git_commit"),
             target=run_data.get("target"),
+            package_name=run_data.get("package_name"),
             classification_json=classification,
             verification_json=verification,
             correlation_json=correlation,

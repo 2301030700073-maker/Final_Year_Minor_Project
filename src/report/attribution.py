@@ -16,6 +16,16 @@ UnCrackable, whose root-detection code lives under `sg.vantagepoint` while its
 manifest package is `owasp.mstg.uncrackable1` (package != source namespace is
 common); those matches must not be called third-party.
 
+Consequence of that conservatism, stated plainly (F4): under an R8-obfuscated
+corpus the namespaces are opaque (e.g. `X/*`, `e3/*`), so they are never
+recognized as vendors and default to `app_owned`. That is correct in the
+conservative direction (we never *assert* an SDK we can't identify) but it means
+an obfuscated bundled SDK can be presented as the app's own code. This
+under-attribution is unfalsifiable for obfuscated corpora by design; it is the
+price of never asserting a false third-party. Do not "solve" it by treating
+opaque namespaces as third-party - that inverts the error and asserts SDKs we
+cannot verify.
+
 Pure path/string logic - no AI, no inference beyond the file paths and the
 vendor allowlist. Deterministic and unit-testable anywhere.
 """

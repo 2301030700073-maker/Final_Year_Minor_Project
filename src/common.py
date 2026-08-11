@@ -78,6 +78,19 @@ class ClassificationResult:
     # RESID-4G: candidate files that could not be read (OSError), carried so
     # the report can flag a verdict built over a degraded corpus.
     unreadable_file_count: int = 0
+    # Machine-readable ownership caveat. Attribution used to reach only the
+    # human Markdown report (and root-only), so an automated consumer of the
+    # stored classification_json read a bundled-SDK-only ROOT_ONLY as the
+    # app's own anti-tampering. The pipeline attaches the attribution dict
+    # here (report/attribution.attribute_root_evidence) after classify(); it
+    # persists to classification_json via asdict and the report reads it, so
+    # the machine output and the report agree. all_third_party=True means every
+    # root match is in a recognized bundled SDK - NOT the app's own logic.
+    # None when there is no root evidence or attribution was not computed.
+    # ssl_attribution stays None for now: it needs its own vendor taxonomy,
+    # which is not yet established (see report/attribution.py).
+    root_attribution: dict | None = None
+    ssl_attribution: dict | None = None
 
 
 @dataclass

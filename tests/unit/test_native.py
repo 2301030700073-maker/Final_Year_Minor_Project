@@ -88,28 +88,28 @@ def test_match_native_embedded_string_finds_evidence():
     assert len(result.root_evidence) == 1
 
 
-def test_native_su_binary_embedded_exact_membership_not_substring():
-    # CORRECTION of a prior wrong test/claim: an earlier change asserted bare
-    # "su"/"magisk" embedded patterns false-positive on any stock lib (citing
-    # "su"-containing strings like EVP_PKEY_decapsulate in libssl.so). That was
-    # wrong - native matching is EXACT list membership (pattern not in
-    # this_corpus), not substring. This locks the corrected semantics: a lib
-    # whose only "su" strings are benign substrings gets ZERO confidence (no
-    # FP), while a lib embedding the exact literal "su" DOES match (the real,
-    # weak signal the wrong "FP fix" had dropped). The shipped signature must
-    # carry the bare literals again.
+def test_native_su_binary_embedded_exact_membership_and_reachability():
+    # Two guarantees on native_su_binary_embedded, both verified against the
+    # real corpus:
+    #  1. Exact list membership, not substring: a lib whose only "su" strings
+    #     are benign substrings (EVP_PKEY_decapsulate, SSL_*_subjects_to_stack)
+    #     gets ZERO confidence - bare "su" never FP-matches those.
+    #  2. Reachability: analyze_so runs `strings` with default flags (min
+    #     printable length 4), so a 2-char exact "su" can never be extracted
+    #     from a real .so - keeping a bare "su" pattern would be dead weight.
+    #     The signature must NOT carry "su"; it carries "magisk" (7 chars,
+    #     reachable, a real systemless-root indicator) and the full paths.
     repo = Path(__file__).resolve().parents[2]
     sig = next(
         s for s in load_native_signatures(repo / "config/signatures/native_detection.yaml")
         if s.id == "native_su_binary_embedded"
     )
-    # full paths are the genuine strengthening; bare literals are restored.
     assert "/system/bin/su" in sig.patterns
     assert "/data/adb/magisk" in sig.patterns
-    assert "su" in sig.patterns
+    assert "su" not in sig.patterns          # unreachable via strings min-len 4
     assert "magisk" in sig.patterns
 
-    # benign lib: only SUBSTRING "su" appearances -> exact membership => no match.
+    # exact membership: benign substring-only lib -> no match.
     benign = NativeLibrary(
         abi="arm64-v8a", name="libssl.so",
         strings=["EVP_PKEY_decapsulate", "SSL_add_dir_cert_subjects_to_stack", "hello"],
@@ -118,8 +118,8 @@ def test_native_su_binary_embedded_exact_membership_not_substring():
     assert result.root_confidence == 0.0
     assert result.root_evidence == []
 
-    # real weak signal: a lib embedding the exact literal "su" -> matches.
-    rooting = NativeLibrary(abi="arm64-v8a", name="librt.so", strings=["su", "geteuid"])
+    # reachable real signal: a lib embedding the exact "magisk" literal -> matches.
+    rooting = NativeLibrary(abi="arm64-v8a", name="librt.so", strings=["magisk", "geteuid"])
     result = match_native([rooting], [sig])
     assert result.root_confidence == 0.4
     assert len(result.root_evidence) == 1

@@ -176,7 +176,13 @@ def _root_attribution(metadata: dict, classification: ClassificationResult) -> d
     """Classify root-detection evidence as app-owned vs bundled third-party, so
     the report can say plainly when a DETECTED root verdict is entirely from
     bundled SDKs (real PropertyGuru case) rather than the app's own logic.
-    Returns None when there's no root evidence to attribute."""
+    Returns None when there's no root evidence to attribute. Prefers the
+    attribution the pipeline already attached to the classification object (so
+    the report and the persisted classification_json agree - single source of
+    truth); falls back to computing for direct generate_report() callers that
+    did not attach it."""
+    if classification.root_attribution is not None:
+        return classification.root_attribution
     package_name = (metadata.get("package") or {}).get("package_name", "")
     return attribution_module.attribute_root_evidence(package_name, classification.root.evidence)
 

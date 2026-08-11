@@ -19,23 +19,21 @@
   weight: 0.4
   pattern_type: embedded_string
   patterns:
-    # CORRECTION (2026-08): an earlier commit claimed a bare "su"/"magisk"
-    # embedded_string pattern false-positives on any stock lib, citing 65
-    # "su"-containing strings in a benign libssl.so (EVP_PKEY_decapsulate,
-    # SSL_*_subjects_to_stack, ...). That claim was WRONG: native matching is
-    # exact list membership (pattern not in this_corpus), not substring - so a
-    # bare "su" only fires on a string exactly equal to "su" and never touches
-    # "EVP_PKEY_decapsulate". The "FP fix" was premised on a false substring
-    # model and silently dropped a weak-but-real exact signal (a lib embedding
-    # the literal "su", e.g. in an access("su") probe). Both bare literals are
-    # restored below. The genuine strengthening from that commit - the modern
-    # systemless-root full paths, exact-match and structurally unlikely - is
-    # kept. See tests/unit/test_native.py for the exact-membership guarantee.
+    # Extraction bound (verified 2026-08 against the real corpus): analyze_so
+    # invokes the `strings` tool with default flags (min printable length 4) -
+    # see native.py analyze_so. A real libssl.so yields min-length 4 and zero
+    # exact "su" strings. So a bare "su" pattern is UNREACHABLE: the strings
+    # layer filters every 2-char string out before matching ever runs. It is
+    # not kept (dead weight). "magisk" (7 chars) IS reachable and a real
+    # systemless-root indicator; it is kept. Matching remains exact list
+    # membership (pattern not in this_corpus) - not substring - so only full
+    # path literals and "magisk" fire, never a substring of a benign symbol.
+    # See tests/unit/test_native.py for the exact-membership + reachability
+    # guarantees.
     - "/system/bin/su"
     - "/system/xbin/su"
     - "/data/adb/magisk"
     - "/data/adb/ksu"
-    - "su"
     - "magisk"
 
 - id: native_ssl_pinning_verify

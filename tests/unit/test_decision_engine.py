@@ -73,6 +73,31 @@ def test_confidence_capped_at_one():
     assert result.action == Action.BOTH
 
 
+def test_classification_carries_machine_readable_attribution():
+    # The gap an audit found: attribution reached only the human Markdown
+    # report, so an automated consumer of classification_json read a bundled-
+    # SDK-only ROOT_ONLY as the app's own anti-tampering. The attribution dict
+    # now lives on ClassificationResult and serializes via asdict (the path
+    # save_run uses) - the machine output carries the ownership caveat too.
+    from dataclasses import asdict
+
+    evidence = StaticEvidence(root_confidence=0.9)
+    result = classify(evidence)
+    assert result.root_attribution is None          # no evidence -> no attribution
+    assert result.ssl_attribution is None
+
+    # once the pipeline attaches it, asdict (machine output) carries it.
+    result.root_attribution = {
+        "app_package": "com.example.app",
+        "app_owned": 0, "third_party": 3,
+        "vendors": ["io.sentry", "com.google"],
+        "all_third_party": True, "mixed": False,
+    }
+    d = asdict(result)
+    assert d["root_attribution"]["all_third_party"] is True
+    assert d["root_attribution"]["vendors"] == ["io.sentry", "com.google"]
+
+
 def test_classify_refuses_to_blend_non_deterministic_evidence():
     # principle 2 / ADR-0001: verification_state is the consumer of the
     # evidence tier. A non-deterministic tier (AI-hypothesized) reaching the

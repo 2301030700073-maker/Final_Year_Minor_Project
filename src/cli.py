@@ -45,6 +45,7 @@ from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
 from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
 from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
 from ingest.metadata import ingest
+from report.attribution import attribute_root_evidence
 from report.generator import generate_calibration_report, generate_report
 from static.coverage import per_surface_coverage
 from static.decision_engine import DEFAULT_THRESHOLD, classify
@@ -500,6 +501,17 @@ def run(
 
     console.print(f"[bold]Decision: {classification.action.value}[/bold]")
 
+    # --- machine-readable ownership caveat (report-only attribution was the gap) ---
+    # Attach the root attribution to the classification object itself so it
+    # persists to classification_json (save_run asdicts the ClassificationResult)
+    # and the report reads it - an automated consumer of a bundled-SDK-only
+    # ROOT_ONLY is told it is NOT the app's own logic, instead of being left to
+    # read a benign app as root-positive with no third-party indicator.
+    package_name = ingest_result.evidence["package"]["package_name"]
+    classification.root_attribution = attribute_root_evidence(
+        package_name, classification.root.evidence
+    )
+
     # --- dynamic analysis ---
     verification: Optional[VerificationResult] = None
     correlation_result = None
@@ -509,7 +521,6 @@ def run(
         _print_stage(dynamic_stage)
     else:
         serial = device.discover_device(device_serial)
-        package_name = ingest_result.evidence["package"]["package_name"]
         device.install_apk(serial, apk)
         dynamic_stage = frida_runner.run_dynamic_stage(serial, package_name, classification.action, target=target)
         stage_results.append(dynamic_stage)

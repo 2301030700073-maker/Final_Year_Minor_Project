@@ -55,7 +55,7 @@ from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
 from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
 from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
 from ingest.metadata import ingest
-from report.attribution import attribute_root_evidence
+from report.attribution import attribute_root_evidence, gate_all_third_party
 from report.generator import generate_calibration_report, generate_report
 from static.coverage import per_surface_coverage
 from static.decision_engine import DEFAULT_THRESHOLD, classify
@@ -518,17 +518,24 @@ def run(
     # ROOT_ONLY is told it is NOT the app's own logic, instead of being left to
     # read a benign app as root-positive with no third-party indicator.
     package_name = ingest_result.evidence["package"]["package_name"]
-    classification.root_attribution = attribute_root_evidence(
-        package_name, classification.root.evidence
+    # Gated on detected (gate_all_third_party): the all_third_party qualifier
+    # annotates a DETECTED verdict only (ADR-0010). A non-detected run must not
+    # carry it in classification_json/report - the denormalized column was gated
+    # but the JSON and report surfaces were not, so all three must agree here.
+    classification.root_attribution = gate_all_third_party(
+        attribute_root_evidence(package_name, classification.root.evidence),
+        classification.root.detected,
     )
     # SSL attribution is the same attribution question: most real SSL pinning
     # is okhttp3's CertificatePinner inside a bundled SDK, so an SSL verdict
     # built entirely from bundled network libraries (okhttp3/com.squareup/RN)
     # is not the app's own pinning logic. The vendor taxonomy is shared with
     # root - attribute_root_evidence is generic over evidence (its is_known_
-    # third_party logic does not need app_package). Same machine caveat.
-    classification.ssl_attribution = attribute_root_evidence(
-        package_name, classification.ssl.evidence
+    # third_party logic does not need app_package). Same machine caveat, same
+    # detected gate.
+    classification.ssl_attribution = gate_all_third_party(
+        attribute_root_evidence(package_name, classification.ssl.evidence),
+        classification.ssl.detected,
     )
 
     # --- dynamic analysis ---
@@ -720,8 +727,12 @@ def re_attribute_cmd(
             root_ev = root.get("evidence") or []
             ssl_ev = ssl.get("evidence") or []
             pkg = (apk.package_name if apk else None) or ""
-            root_attr = attribute_root_evidence(pkg, root_ev)
-            ssl_attr = attribute_root_evidence(pkg, ssl_ev)
+            root_attr = gate_all_third_party(
+                attribute_root_evidence(pkg, root_ev), bool(root.get("detected"))
+            )
+            ssl_attr = gate_all_third_party(
+                attribute_root_evidence(pkg, ssl_ev), bool(ssl.get("detected"))
+            )
             changed = False
             if root_attr is not None and (force or cj.get("root_attribution") is None):
                 cj["root_attribution"] = root_attr

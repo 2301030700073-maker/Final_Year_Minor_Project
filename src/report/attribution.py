@@ -127,6 +127,18 @@ def is_known_third_party(ns: str | None) -> bool:
     return any(ns == p or ns.startswith(p + ".") for p in KNOWN_VENDOR_PREFIXES)
 
 
+def gate_all_third_party(attr: dict | None, detected: bool) -> dict | None:
+    """Null the all_third_party qualifier when the category is not detected
+    (ADR-0010): the flag annotates a DETECTED verdict, and a non-detected run
+    must never carry it or a consumer would infer a detection that doesn't
+    exist. The evidence counts (app_owned/third_party/vendors) are kept - they
+    describe the evidence and are still true - only the all_third_party flag is
+    gated. Returns the (possibly modified) dict unchanged when None."""
+    if not attr:
+        return attr
+    return {**attr, "all_third_party": bool(attr.get("all_third_party")) and bool(detected)}
+
+
 def attribute_root_evidence(app_package: str, evidence: list) -> dict | None:
     """Classify root-detection evidence as app-owned vs bundled third-party.
     Returns None when there's no root evidence (nothing to attribute). The

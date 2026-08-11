@@ -55,6 +55,21 @@ def test_known_third_party_vendors():
     assert attribution.is_known_third_party("com.datadoghq") is False
 
 
+def test_gate_all_third_party_nulls_flag_when_not_detected():
+    # ADR-0010: the qualifier annotates a DETECTED verdict only. A non-detected
+    # category must not carry all_third_party=True (in JSON or report), or a
+    # consumer infers a detection that doesn't exist. Counts are kept.
+    attr = {"app_owned": 0, "third_party": 3, "all_third_party": True, "vendors": ["okhttp3"]}
+    gated = attribution.gate_all_third_party(attr, detected=False)
+    assert gated["all_third_party"] is False
+    assert gated["third_party"] == 3  # evidence counts survive
+    assert gated["vendors"] == ["okhttp3"]
+    # detected=True leaves it intact
+    assert attribution.gate_all_third_party(attr, detected=True)["all_third_party"] is True
+    # None passthrough
+    assert attribution.gate_all_third_party(None, True) is None
+
+
 def test_attribute_all_third_party_flags_it():
     # The real PropertyGuru case: every match is a recognized SDK.
     evidence = [

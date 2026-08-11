@@ -51,21 +51,21 @@ TEMPLATE = Template("""\
 **Files scanned:** {{ classification.scanned_file_count }} (RESID-4C: a low count means this verdict is based on a small corpus - a NEITHER is not proof of absence){% if classification.unreadable_file_count %}{{ " " }}**CAUTION: {{ classification.unreadable_file_count }} candidate file(s) could not be read (OSError) - treat any NEITHER/Inconclusive verdict as degraded, not a full-scan clean.**{% endif %}
 
 ### Root-detection
-- Confidence: {{ "%.2f"|format(classification.root.confidence) }} -> {{ "DETECTED" if classification.root.detected else "Inconclusive" }}{% if root_attribution and root_attribution.all_third_party %} (**bundled SDK only** - none of these root-detection matches are in the app's own package){% endif %}
+- Confidence: {{ "%.2f"|format(classification.root.confidence) }} -> {{ "DETECTED" if classification.root.detected else "Inconclusive" }}{% if root_attribution and root_attribution.all_third_party and classification.root.detected %} (**bundled SDK only** - none of these root-detection matches are in the app's own package){% endif %}
 {% for e in classification.root.evidence -%}
 - `{{ e.signature_id }}` at {{ e.file }}:{{ e.line_or_offset }} - `{{ e.matched_text }}`
 {% endfor %}
-{% if root_attribution and root_attribution.all_third_party -%}
+{% if root_attribution and root_attribution.all_third_party and classification.root.detected -%}
 > **Attribution:** all {{ root_attribution.third_party }} root-detection matches are in bundled third-party libraries ({{ root_attribution.vendors | join(', ') }}), none in the app's own package (`{{ root_attribution.app_package }}`) - consistent with SDK telemetry/fraud-detection root-checks, not necessarily the app's own anti-tampering logic.
 {% elif root_attribution and root_attribution.mixed -%}
 > **Attribution:** root-detection matches split across the app's own package ({{ root_attribution.app_owned }}) and bundled third-party libraries ({{ root_attribution.third_party }}: {{ root_attribution.vendors | join(', ') }}).
 {% endif %}
 ### SSL-pinning
-- Confidence: {{ "%.2f"|format(classification.ssl.confidence) }} -> {{ "DETECTED" if classification.ssl.detected else "Inconclusive" }}{% if ssl_attribution and ssl_attribution.all_third_party %} (**bundled SDK only** - none of these SSL-pinning matches are in the app's own package){% endif %}
+- Confidence: {{ "%.2f"|format(classification.ssl.confidence) }} -> {{ "DETECTED" if classification.ssl.detected else "Inconclusive" }}{% if ssl_attribution and ssl_attribution.all_third_party and classification.ssl.detected %} (**bundled SDK only** - none of these SSL-pinning matches are in the app's own package){% endif %}
 {% for e in classification.ssl.evidence -%}
 - `{{ e.signature_id }}` at {{ e.file }}:{{ e.line_or_offset }} - `{{ e.matched_text }}`
 {% endfor %}
-{% if ssl_attribution and ssl_attribution.all_third_party -%}
+{% if ssl_attribution and ssl_attribution.all_third_party and classification.ssl.detected -%}
 > **Attribution:** all {{ ssl_attribution.third_party }} SSL-pinning matches are in bundled third-party libraries ({{ ssl_attribution.vendors | join(', ') }}), none in the app's own package (`{{ ssl_attribution.app_package }}`) - consistent with bundled SDK pinning (e.g. OkHttp's CertificatePinner), not the app's own certificate-pinning logic.
 {% elif ssl_attribution and ssl_attribution.mixed -%}
 > **Attribution:** SSL-pinning matches split across the app's own package ({{ ssl_attribution.app_owned }}) and bundled third-party libraries ({{ ssl_attribution.third_party }}: {{ ssl_attribution.vendors | join(', ') }}).

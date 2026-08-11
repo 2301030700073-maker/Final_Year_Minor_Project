@@ -22,9 +22,6 @@ vendor allowlist. Deterministic and unit-testable anywhere.
 
 import re
 
-# A java package segment is a lowercase-initial identifier; a class/resource
-# filename (uppercase initial, or containing a '.') terminates the namespace.
-_JAVA_SEG = re.compile(r"[a-z][a-zA-Z0-9_]*$")
 # Non-source roots in a decompiled tree that are never package namespaces.
 _NON_NS_PREFIXES = ("sources/", "resources/")
 
@@ -47,10 +44,18 @@ KNOWN_VENDOR_PREFIXES = (
     "com.adjust",         # Adjust
     "com.mixpanel",       # Mixpanel
     "com.amplitude",      # Amplitude
-    "com.datadoghq",      # Datadog
+    "com.datadog",        # Datadog (decompiled ns is com.datadog.android/.core;
+                          # the com.datadoghq Maven group never appears in code)
     "org.acra",           # ACRA crash reporter
     "io.flutter",         # Flutter engine/plugins
     "com.flutter",        # Flutter plugins
+    # Mobile APM / crash SDKs that ship their own root-detection checks. Without
+    # these, a root match under an APM namespace was mislabeled the app's own
+    # anti-tampering at machine confidence even though it is bundled SDK code.
+    "com.newrelic",       # New Relic Android agent
+    "com.appdynamics",    # AppDynamics
+    "com.crittercism",    # Crittercism (AppDynamics)
+    "androidx.work",      # AndroidX WorkManager (RootedDevice check)
     # Network / SSL-pinning SDKs (added 2026-08). okhttp3 is the dominant
     # Android HTTP client whose CertificatePinner performs most real SSL
     # pinning - an SSL match under okhttp3/okhttp4 (or Square's other libs) is
@@ -74,6 +79,13 @@ def derive_namespace(file: str) -> str | None:
       -> 'sg.vantagepoint.a'
     Returns None when no package-like namespace can be derived (a path that
     isn't under a source root, or a bare filename).
+
+    A segment is a class/resource *file* iff it contains a '.' (the extension);
+    a dotless segment is a package directory. Package directories may legally
+    contain uppercase letters - e.g. com.ReactNativeBlobUtil - so the old
+    lowercase-initial guard was wrong: it truncated that namespace to "com" and
+    made the com.ReactNativeBlobUtil vendor prefix unmatchable. Only the
+    extension marks a file.
     """
     if not file:
         return None
@@ -83,7 +95,7 @@ def derive_namespace(file: str) -> str | None:
             break
     segments: list[str] = []
     for seg in file.split("/"):
-        if not seg or "." in seg or not _JAVA_SEG.match(seg):
+        if not seg or "." in seg:
             break
         segments.append(seg)
     return ".".join(segments) if segments else None

@@ -28,6 +28,16 @@ def test_derive_namespace_none_for_bare_filename():
     assert attribution.derive_namespace("") is None
 
 
+def test_derive_namespace_keeps_uppercase_package_segment():
+    # ReactNativeBlobUtil is a real package with an uppercase segment. The old
+    # lowercase-initial guard truncated this to "com", so the com.ReactNativeBlobUtil
+    # vendor prefix could never match and its evidence counted as app-owned. Only
+    # the extension (the '.java') marks a class file; dotless segments are packages.
+    ns = attribution.derive_namespace("sources/com/ReactNativeBlobUtil/BlobUtil.java")
+    assert ns == "com.ReactNativeBlobUtil"
+    assert attribution.is_known_third_party(ns) is True
+
+
 def test_known_third_party_vendors():
     assert attribution.is_known_third_party("io.sentry.android.core") is True
     assert attribution.is_known_third_party("com.google.android.gms.ads") is True
@@ -36,6 +46,13 @@ def test_known_third_party_vendors():
     # UnCrackable's own root code - MUST NOT be called third-party even though
     # its namespace differs from its manifest package (owasp.mstg.uncrackable1).
     assert attribution.is_known_third_party("sg.vantagepoint.a") is False
+    # APM/root-checking SDKs are recognized as third-party.
+    assert attribution.is_known_third_party("com.datadog.android") is True
+    assert attribution.is_known_third_party("com.newrelic.agent.android") is True
+    assert attribution.is_known_third_party("com.appdynamics.android") is True
+    assert attribution.is_known_third_party("androidx.work") is True
+    # The dead com.datadoghq Maven group is gone - it never appears in code.
+    assert attribution.is_known_third_party("com.datadoghq") is False
 
 
 def test_attribute_all_third_party_flags_it():

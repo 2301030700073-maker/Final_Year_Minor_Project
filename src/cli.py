@@ -665,15 +665,23 @@ def calibration_report(
 
 
 @app.command("re-attribute")
-def re_attribute_cmd():
+def re_attribute_cmd(
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Recompute attribution for every stored run, including rows that "
+        "already carry it (default re-runs only fill rows still missing it).",
+    ),
+):
     """Backfill machine-readable root/ssl attribution into stored runs that
     predate the attribution feature. The feature is forward-only (it protects
     new runs); this brings existing classification_json blobs up to date so an
     automated consumer no longer reads a bundled-SDK-only ROOT_ONLY/SSL_ONLY as
     the app's own anti-tampering. Non-destructive: it only attaches caveats
     (root_attribution/ssl_attribution) - it never rewrites the verdict,
-    confidence, or evidence. Idempotent: re-running only fills rows still
-    missing attribution."""
+    confidence, or evidence. By default it fills only rows still missing
+    attribution (idempotent); --force recomputes even already-attributed rows
+    so a taxonomy/namespace fix can correct stale caveats on disk."""
     from sqlalchemy import select
     from sqlalchemy.orm import Session
 
@@ -696,10 +704,10 @@ def re_attribute_cmd():
             root_attr = attribute_root_evidence(pkg, root_ev)
             ssl_attr = attribute_root_evidence(pkg, ssl_ev)
             changed = False
-            if root_attr is not None and cj.get("root_attribution") is None:
+            if root_attr is not None and (force or cj.get("root_attribution") is None):
                 cj["root_attribution"] = root_attr
                 changed = True
-            if ssl_attr is not None and cj.get("ssl_attribution") is None:
+            if ssl_attr is not None and (force or cj.get("ssl_attribution") is None):
                 cj["ssl_attribution"] = ssl_attr
                 changed = True
             if changed:

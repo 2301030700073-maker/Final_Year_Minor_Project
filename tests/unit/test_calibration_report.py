@@ -126,6 +126,24 @@ def test_bundled_sdk_qualifier_is_consumer_visible_not_a_detection_downgrade():
     assert report.tier2["root"].precision.rate == 1.0
     assert runs[0].root_all_third_party is True  # qualifier survives to the row
 
+    # The GT-false half of the ADR-0010 decision: a bundled-SDK-only detection
+    # against an app-owned FALSE ground truth is a real FP. The qualifier does
+    # not suppress it (and must not - that would hide a genuine measurement,
+    # ADR-0006). This is the price of binary-inclusive detection when GT is
+    # authored app-owned; it is reported, not masked.
+    runs_false = [
+        _run("pg_false_hash", "r2", "ROOT_ONLY", 0.90, True, None,
+             root_all_third_party=True, coverage=FULLY_ANALYZED),
+    ]
+    gt_false = {
+        "pg_false_hash": GroundTruthEntry("pg_false_hash", root=False, ssl=False, source="manual review"),
+    }
+    report_false = compute_calibration_report(
+        runs_false, gt_false, generated_at="2026-08-11T00:00:00", ground_truth_commit="abc123",
+    )
+    assert report_false.tier2["root"].false_positive == 1
+    assert report_false.tier2["root"].true_positive == 0
+
 
 def test_partial_decompile_run_with_positive_detection_stays_in_tier2():
     # G3: a detected=True partial run is a real positive found in the partial

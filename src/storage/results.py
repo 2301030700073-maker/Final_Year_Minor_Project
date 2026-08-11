@@ -122,12 +122,17 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
             package_name=run_data.get("package_name"),
             # Item 1: surface the bundled-SDK qualifier on the denormalized row
             # so calibration/consumers see it without parsing classification_json.
+            # Gated on detected: the qualifier only meaningfully annotates a
+            # DETECTED verdict (ADR-0010) - a non-detected category must never
+            # carry it, or a consumer would infer a detection that doesn't exist.
             root_all_third_party=(
-                classification.get("root_attribution") or {}
-            ).get("all_third_party"),
+                (classification.get("root_attribution") or {}).get("all_third_party")
+                if root.get("detected") else False
+            ),
             ssl_all_third_party=(
-                classification.get("ssl_attribution") or {}
-            ).get("all_third_party"),
+                (classification.get("ssl_attribution") or {}).get("all_third_party")
+                if ssl.get("detected") else False
+            ),
             # Item 3: persist the manifest read + obfuscation level so report
             # regeneration stays faithful (None on runs that predate this).
             manifest_json=run_data.get("manifest"),

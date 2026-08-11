@@ -737,16 +737,21 @@ def re_attribute_cmd(
                 changed = True
             # Item 1: denormalized bundled-SDK qualifiers, so calibration and
             # the column view carry the caveat alongside the DETECTED verdict.
-            if run.root_all_third_party != bool((root_attr or {}).get("all_third_party")):
-                run.root_all_third_party = bool((root_attr or {}).get("all_third_party"))
+            # Gated on detected: the qualifier only annotates a DETECTED category
+            # (ADR-0010); a non-detected one must not carry it. 8 runs were
+            # misflagged because this ignored the threshold - fixed here.
+            root_third = bool((root_attr or {}).get("all_third_party")) if root.get("detected") else False
+            ssl_third = bool((ssl_attr or {}).get("all_third_party")) if ssl.get("detected") else False
+            if run.root_all_third_party != root_third:
+                run.root_all_third_party = root_third
                 changed = True
-            if run.ssl_all_third_party != bool((ssl_attr or {}).get("all_third_party")):
-                run.ssl_all_third_party = bool((ssl_attr or {}).get("all_third_party"))
+            if run.ssl_all_third_party != ssl_third:
+                run.ssl_all_third_party = ssl_third
                 changed = True
             if changed:
                 run.classification_json = cj
                 updated += 1
-                if (root_attr or {}).get("all_third_party") or (ssl_attr or {}).get("all_third_party"):
+                if root_third or ssl_third:
                     third_party_only += 1
                 # F2: a changed attribution leaves the persisted .md stale (it
                 # was rendered pre-attribution and still reads as app-implemented).

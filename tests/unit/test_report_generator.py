@@ -11,6 +11,42 @@ def _classification():
     return ClassificationResult(action=Action.ROOT_ONLY, root=root, ssl=ssl)
 
 
+def test_generate_report_renders_below_threshold_as_inconclusive_retaining_evidence(tmp_path):
+    # FR-3.2: a below-threshold verdict (detected=False) must render explicitly
+    # as Inconclusive - never be silently dropped - and must retain its full
+    # evidence trail in the report. This locks the renderer's else-branch, which
+    # the dynamic success-check tests only cover indirectly.
+    root = CategoryVerdict(
+        confidence=0.4, detected=False,  # below the 0.7 default threshold
+        evidence=[Evidence(signature_id="root_su_binary_paths", file="Main.java", line_or_offset=42, matched_text="/system/bin/su")],
+    )
+    ssl = CategoryVerdict(confidence=0.1, detected=False, evidence=[])
+    classification = ClassificationResult(action=Action.NEITHER, root=root, ssl=ssl)
+
+    report_path = generate_report(
+        run_id="below-threshold",
+        apk_hash="abc123",
+        timestamp="2026-08-11T12:00:00",
+        metadata={"hashes": {"sha256": "abc123"}, "package": {"package_name": "com.example.app"}},
+        classification=classification,
+        verification=None,
+        dynamic_skip_reason="--skip-dynamic passed",
+        correlation=None,
+        stage_results=[],
+        output_dir=tmp_path,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    # The below-threshold root verdict is rendered Inconclusive, not DETECTED.
+    assert "Inconclusive" in content
+    assert "0.40 -> Inconclusive" in content
+    assert "DETECTED" not in content
+    # ...and its evidence is retained, not dropped (FR-3.2: no silent loss).
+    assert "root_su_binary_paths" in content
+    assert "Main.java:42" in content
+    assert "/system/bin/su" in content
+
+
 def test_generate_report_writes_file_with_expected_content(tmp_path):
     metadata = {
         "hashes": {"sha256": "abc123"},

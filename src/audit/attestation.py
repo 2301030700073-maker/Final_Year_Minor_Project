@@ -242,7 +242,7 @@ def record_ingest_failure(
     git_commit: str,
     error: str,
     tool_version: str = "0.1.0",
-) -> bool:
+) -> StageResult:
     """Append an audit line for an ingest that failed before an authorization
     record could be written. ADR-0005 demands *every* analysis attempt be
     traceable; cli.py runs ingest before record_authorization so the log can
@@ -251,10 +251,12 @@ def record_ingest_failure(
     failed run isn't invisible. Not gated on justification validity - logging
     a failed attempt is the whole point, and we still record who tried.
 
-    Returns True if the record was appended, False if a corrupt log made it
-    impossible (RESID-2D) - so this crash-path never raises a raw traceback
-    the way the other two record functions already avoid.
+    Returns a StageResult like every other record_* function (FR-8
+    consistency): success when the record was appended, failed when a corrupt
+    log made it impossible (RESID-2D) - the crash-path still never raises a raw
+    traceback, it just reports failure loudly instead of a bare False.
     """
+    start = time.monotonic()
     record = {
         "event": "ingest_failed",
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -267,10 +269,17 @@ def record_ingest_failure(
     }
     try:
         _append_audit_record(audit_log_path, record)
-    except ValueError:
-        # RESID-2D: a corrupt log must not crash the ingest-failure path.
-        return False
-    return True
+    except ValueError as exc:
+        # RESID-2D: a corrupt log must not crash the ingest-failure path; report
+        # it as a failed StageResult instead.
+        return StageResult(
+            stage="audit", status="failed", evidence={}, error=str(exc),
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
+    return StageResult(
+        stage="audit", status="success", evidence=record,
+        duration_ms=int((time.monotonic() - start) * 1000),
+    )
 
 
 def record_classification(
@@ -392,11 +401,11 @@ def verify_audit_log(audit_log_path: Path) -> dict:
     still pair with an authorization from an earlier archive.
 
     Beyond the hash chain it also performs a semantic pairing check (RESID-2A):
-    each run_completed event must have a prior run_authorized event carrying the
-    same run_id. An *orphan completion* (result on record with no authorization)
-    is an integrity break and fails the check; an *authorization without
-    completion* is informational (normal for a crashed or deliberately-halted
-    run) and reported separately without failing."""
+    each run_completed and classification event must have a prior run_authorized
+    event carrying the same run_id. An *orphan record* (a result on record with
+    no authorization) is an integrity break and fails the check; an *authorization
+    without completion* is informational (normal for a crashed or
+    deliberately-halted run) and reported separately without failing."""
     path = Path(audit_log_path)
     # RESID-2C: rotated archives are named <name>.<YYYYMMDDTHHMMSSZ> (RESID-2B).
     archive_re = re.compile(re.escape(path.name) + r"\.\d{8}T\d{6}Z$")
@@ -494,14 +503,21 @@ def verify_audit_log(audit_log_path: Path) -> dict:
                 run_id = rec.get("run_id")
                 if event == "run_authorized" and run_id:
                     authorized_run_ids.add(run_id)
-                elif event == "run_completed":
+                elif event in ("run_completed", "classification"):
+                    # C: classification carries the run's deterministic verdict
+                    # (FR-3.3) and is also a result on record - so like a
+                    # run_completed, it must have a prior run_authorized for the
+                    # same run_id. In the real flow it always follows its
+                    # authorization, so a classification flagged here is a tamper
+                    # signal (an inserted/edited record), not a live false positive.
                     if run_id:
-                        if run_id in authorized_run_ids:
+                        if event == "run_completed":
                             completed_run_ids.add(run_id)
-                        else:
+                        if run_id not in authorized_run_ids:
+                            suffix = "completion" if event == "run_completed" else "record"
                             errors.append(
-                                f"{file.name} line {lineno}: run_completed for run_id '{run_id}' "
-                                "has no prior authorization (orphan completion)"
+                                f"{file.name} line {lineno}: {event} for run_id '{run_id}' "
+                                f"has no prior authorization (orphan {suffix})"
                             )
                             orphan_order.append(run_id)
 

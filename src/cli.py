@@ -391,9 +391,9 @@ def run(
             error=ingest_result.error or "ingest failed",
         )
         # L7: a corrupt log that also drops the ingest_failed event is a double
-        # failure - the attempt becomes invisible. The False return was silently
-        # discarded; surface it loudly instead.
-        if not logged:
+        # failure - the attempt becomes invisible. Surface a failed status
+        # loudly instead of swallowing it.
+        if logged.status == "failed":
             console.print(
                 "[bold red]WARNING: could not append the ingest_failed event - the "
                 "audit log appears corrupt, so this failed attempt may be "

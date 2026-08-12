@@ -282,12 +282,15 @@ def test_verify_audit_log_flags_deleted_archive_via_chain_break(tmp_path, monkey
 def test_record_ingest_failure_does_not_crash_on_corrupt_log(tmp_path):
     # RESID-2D: on a corrupt log the ingest-failure path must not raise a raw
     # traceback (unlike authorization/completion, it previously had no guard).
+    # FR-8 consistency: it now returns a failed StageResult like every other
+    # record_* function, not a bare False.
     log_path = tmp_path / "audit_log.jsonl"
     log_path.write_text("not valid json\n", encoding="utf-8")
 
-    ok = record_ingest_failure(log_path, "hash1", "OWN_APP", "op", "commit1", "boom")
+    result = record_ingest_failure(log_path, "hash1", "OWN_APP", "op", "commit1", "boom")
 
-    assert ok is False
+    assert result.status == "failed"
+    assert "corrupt" in result.error.lower()
     assert log_path.read_text(encoding="utf-8").splitlines() == ["not valid json"]
 
 

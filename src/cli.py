@@ -28,6 +28,7 @@ from rich.table import Table
 
 from audit.attestation import (
     record_authorization,
+    record_classification,
     record_ingest_failure,
     validate_justification,
     record_run_completion,
@@ -547,6 +548,30 @@ def run(
         attribute_root_evidence(package_name, classification.ssl.evidence),
         classification.ssl.detected,
     )
+
+    # FR-3.3: log the classification + full evidence trail BEFORE any dynamic
+    # stage begins. The verdict is otherwise only serialized in _finalize_run,
+    # which runs after dynamic - so a frida-spawn crash or a mid-run _halt would
+    # lose the deterministic decision. Flushing it to the immutable, hash-chained
+    # audit log here (the same partial-evidence-preservation the project applies
+    # to ingest, LIM-1/ADR-0005) guarantees the decision survives a downstream
+    # crash. Fails loudly (NFR-1) if the flush can't be written.
+    classification_audit = asdict(classification)
+    classification_audit["action"] = classification.action.value
+    classification_flush = record_classification(
+        audit_log_path=AUDIT_LOG_PATH,
+        run_id=run_id,
+        apk_hash=apk_hash,
+        justification=justification,
+        operator=operator,
+        git_commit=git_commit,
+        action=classification.action.value,
+        classification=classification_audit,
+    )
+    stage_results.append(classification_flush)
+    _print_stage(classification_flush)
+    if classification_flush.status == "failed":
+        _halt(stage_results)
 
     # --- dynamic analysis ---
     verification: Optional[VerificationResult] = None

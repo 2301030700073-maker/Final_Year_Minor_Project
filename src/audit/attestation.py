@@ -273,6 +273,52 @@ def record_ingest_failure(
     return True
 
 
+def record_classification(
+    audit_log_path: Path,
+    run_id: str,
+    apk_hash: str,
+    justification: str,
+    operator: str,
+    git_commit: str,
+    action: str,
+    classification: dict,
+    tool_version: str = "0.1.0",
+) -> StageResult:
+    """Append the deterministic classification verdict + full evidence trail to
+    the audit log BEFORE any dynamic stage runs (FR-3.3). The decision is only
+    serialized to the DB/report in _finalize_run, which runs AFTER dynamic; if
+    the frida spawn crashes or _halt() fires mid-run, the verdict and its
+    evidence would be lost. Flushing it here (append-only, hash-chained, fsynced)
+    guarantees the deterministic decision survives a downstream crash - the same
+    partial-evidence-preservation the project already applies to ingest
+    (LIM-1/ADR-0005). Fails loudly (StageResult, not a traceback) when a corrupt
+    log blocks the write."""
+    start = time.monotonic()
+    record = {
+        "event": "classification",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "run_id": run_id,
+        "apk_hash": apk_hash,
+        "justification": justification,
+        "operator": operator,
+        "tool_version": tool_version,
+        "git_commit": git_commit,
+        "action": action,
+        "classification": classification,
+    }
+    try:
+        _append_audit_record(audit_log_path, record)
+    except ValueError as exc:
+        return StageResult(
+            stage="audit", status="failed", evidence={}, error=str(exc),
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
+    return StageResult(
+        stage="audit", status="success", evidence=record,
+        duration_ms=int((time.monotonic() - start) * 1000),
+    )
+
+
 def verify_audit_log(audit_log_path: Path) -> dict:
     """Re-derive the hash chain and report integrity. Returns a dict and never
     raises on corrupt content - it collects every error it finds. Records

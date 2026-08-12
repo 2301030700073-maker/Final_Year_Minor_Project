@@ -198,6 +198,31 @@ def test_parse_aapt2_output_captures_sdk_variant_permissions():
     ]
 
 
+def test_ingest_uses_precomputed_hashes_without_recomputing(tmp_path, monkeypatch):
+    """cli.py hashes once to resolve the FR-1.3 reuse record and passes it in;
+    ingest must use it and must NOT stream the file a second time. If ingest
+    called compute_hashes despite being given precomputed_hashes, the
+    monkeypatch raises loudly."""
+    sample = tmp_path / "sample.apk"
+    sample.write_bytes(b"PK\x03\x04precomputed hash path")
+    monkeypatch.setattr(
+        "ingest.metadata.run_aapt2_dump",
+        lambda *a, **k: "package: name='owasp.mstg.uncrackable1'\n",
+    )
+    monkeypatch.setattr("ingest.metadata.run_apksigner_verify", lambda *a, **k: "Verifies\n")
+    pre = compute_hashes(sample)
+
+    def _forbid_recompute(*args, **kwargs):
+        raise AssertionError("ingest must not re-stream the file when precomputed hashes are given")
+
+    monkeypatch.setattr("ingest.metadata.compute_hashes", _forbid_recompute)
+
+    result = ingest(sample, precomputed_hashes=pre)
+
+    assert result.status == "success"
+    assert result.evidence["hashes"]["sha256"] == pre.sha256
+
+
 def test_ingest_reuses_existing_record_and_skips_tools(tmp_path, monkeypatch):
     """FR-1.3: passing reuse_metadata for a matching sha256 must reference the
     existing record (reuse its package/signer/tool_versions) and must NOT

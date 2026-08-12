@@ -363,8 +363,12 @@ def run(
     # the record; ingest() then reuses its aapt2/apksigner metadata and skips the
     # toolchain spawns instead of re-running them on every run. On a hash mismatch
     # (file changed) ingest falls through to a full tool-backed re-ingest.
-    existing = existing_metadata(ANALYSIS_ROOT, compute_hashes(apk).sha256)
-    ingest_result = ingest(apk, reuse_metadata=existing)
+    # Hash once, use twice: resolve the FR-1.3 reuse record by the hash, then
+    # pass the precomputed HashSet into ingest so the file isn't streamed a
+    # second time for its evidence (a full SHA-256/SHA-1/MD5 read per run).
+    prehashed = compute_hashes(apk)
+    existing = existing_metadata(ANALYSIS_ROOT, prehashed.sha256)
+    ingest_result = ingest(apk, reuse_metadata=existing, precomputed_hashes=prehashed)
     stage_results.append(ingest_result)
     _print_stage(ingest_result)
     if ingest_result.status == "failed":

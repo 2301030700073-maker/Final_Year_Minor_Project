@@ -218,7 +218,11 @@ def parse_signer_info(raw: str) -> SignerInfo:
     )
 
 
-def ingest(apk_path: Path, reuse_metadata: dict | None = None) -> StageResult:
+def ingest(
+    apk_path: Path,
+    reuse_metadata: dict | None = None,
+    precomputed_hashes: HashSet | None = None,
+) -> StageResult:
     start = time.monotonic()
     evidence: dict = {}
     try:
@@ -236,7 +240,12 @@ def ingest(apk_path: Path, reuse_metadata: dict | None = None) -> StageResult:
         # Accumulate evidence as it's computed (LIM-1), so a failure partway
         # through still yields a real hash for the audit log (ADR-0005) instead
         # of throwing away the hashes/size on a later aapt2/apksigner failure.
-        evidence["hashes"] = compute_hashes(apk_path).__dict__
+        # cli.py hashes the file once up front to resolve the FR-1.3 reuse record
+        # and passes the HashSet in, so we don't stream the file a second time on
+        # every run (a full SHA-256/SHA-1/MD5 read). Falls back to hashing here
+        # when ingest is called standalone (tests, other callers).
+        hashes = precomputed_hashes or compute_hashes(apk_path)
+        evidence["hashes"] = hashes.__dict__
         evidence["size_bytes"] = file_size(apk_path)
         # FR-1.3: a re-run against an already-ingested APK references the existing
         # record instead of re-running the Android toolchain. The caller resolves

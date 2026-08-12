@@ -68,7 +68,7 @@ def test_parse_signer_info_extracts_scheme_verification_and_cert():
     assert signer.v1_verified is True
     assert signer.v2_verified is False
     assert signer.v3_verified is False
-    assert signer.v4_verified is False  # sample carries no v4 line (LIM-2)
+    assert signer.v4_verified is None  # no v4 line - scheme not exercised, not failed (Finding G)
     assert signer.certificate_dn == "CN=Android Debug, O=Android, C=US"
     assert signer.certificate_sha256 == "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"
 
@@ -84,9 +84,10 @@ def test_ingest_preserves_partial_evidence_on_failure(tmp_path, monkeypatch):
     so the audit record (cli.py record_ingest_failure) has a real hash (ADR-0005).
     Monkeypatches only the tool call to raise - no fabricated evidence."""
     sample = tmp_path / "sample.apk"
-    # Must start with a real zip magic header: NEW-C's fail-fast check runs
-    # before hashing, so a non-APK fixture would never reach the aapt2 call.
-    sample.write_bytes(b"PK\x03\x04partial evidence retained on aapt2 failure")
+    # Must be a real COMPLETE zip: NEW-C's fail-fast check runs before hashing
+    # and now also verifies zip completeness (Finding F), so a truncated fixture
+    # would be rejected before ever reaching the aapt2 call under test.
+    sample.write_bytes(_valid_apk_bytes())
 
     def _boom(*args, **kwargs):
         raise RuntimeError("aapt2 exploded after hashing")
@@ -154,6 +155,20 @@ def test_parse_aapt2_output_min_sdk_not_confused_by_target():
     assert metadata.target_sdk == "23"
 
 
+def _valid_apk_bytes() -> bytes:
+    """A real, complete zip - needed wherever a fixture must pass the ingest
+    fail-fast check, which now verifies zip completeness (Finding F), not just
+    the PK magic. A truncated byte-string would be rejected before reaching
+    whatever code under test."""
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("classes.dex", b"x")
+    return buf.getvalue()
+
+
 def test_assert_zip_magic_rejects_non_apk(tmp_path):
     bad = tmp_path / "not.apk"
     bad.write_bytes(b"MZ\x90\x00\x03\x00")  # PE header, not a zip
@@ -161,10 +176,21 @@ def test_assert_zip_magic_rejects_non_apk(tmp_path):
         _assert_zip_magic(bad)
 
 
-def test_assert_zip_magic_accepts_zip(tmp_path):
+def test_assert_zip_magic_accepts_complete_zip(tmp_path):
     good = tmp_path / "ok.apk"
-    good.write_bytes(b"PK\x03\x04" + b"rest of archive")
+    good.write_bytes(_valid_apk_bytes())
     _assert_zip_magic(good)  # must not raise
+
+
+def test_assert_zip_magic_rejects_truncated_zip(tmp_path):
+    # Finding F: a file with the PK\x03\x04 start magic but a cut-off tail
+    # (no End-Of-Central-Directory record) must be rejected at ingest - the old
+    # 4-byte magic check accepted it, leaving a truncated APK to fail confusingly
+    # deep inside apksigner (which reads the signature block + EOCD at the end).
+    bad = tmp_path / "truncated.apk"
+    bad.write_bytes(b"PK\x03\x04" + b"some truncated archive content")
+    with pytest.raises(ValueError, match="complete"):
+        _assert_zip_magic(bad)
 
 
 def test_tool_versions_reports_all_known_tools():
@@ -204,7 +230,7 @@ def test_ingest_uses_precomputed_hashes_without_recomputing(tmp_path, monkeypatc
     called compute_hashes despite being given precomputed_hashes, the
     monkeypatch raises loudly."""
     sample = tmp_path / "sample.apk"
-    sample.write_bytes(b"PK\x03\x04precomputed hash path")
+    sample.write_bytes(_valid_apk_bytes())
     monkeypatch.setattr(
         "ingest.metadata.run_aapt2_dump",
         lambda *a, **k: "package: name='owasp.mstg.uncrackable1'\n",
@@ -229,7 +255,7 @@ def test_ingest_reuses_existing_record_and_skips_tools(tmp_path, monkeypatch):
     re-spawn aapt2/apksigner - the expensive part of a re-ingest. If either tool
     were called, the monkeypatch raises loudly."""
     sample = tmp_path / "sample.apk"
-    sample.write_bytes(b"PK\x03\x04fr13 reuse path")
+    sample.write_bytes(_valid_apk_bytes())
 
     def _must_not_call(*args, **kwargs):
         raise AssertionError("aapt2/apksigner must not run when reusing an existing record")
@@ -259,7 +285,7 @@ def test_ingest_reingests_when_reused_file_hash_mismatches(tmp_path, monkeypatch
     """FR-1.3: a changed file (hash mismatch vs the stored record) must NOT
     reuse stale metadata - it falls through to a full tool-backed re-ingest."""
     sample = tmp_path / "sample.apk"
-    sample.write_bytes(b"PK\x03\x04different file, must re-ingest")
+    sample.write_bytes(_valid_apk_bytes())
 
     monkeypatch.setattr(
         "ingest.metadata.run_aapt2_dump",
@@ -299,7 +325,7 @@ def test_ingest_preserves_tool_error_type_at_boundary(tmp_path, monkeypatch):
     # at the ingest boundary (error prefixed with 'Aapt2Error:'), not be
     # flattened to a bare str - so the timeout-vs-exit distinction survives.
     sample = tmp_path / "sample.apk"
-    sample.write_bytes(b"PK\x03\x04valid zip header + body")
+    sample.write_bytes(_valid_apk_bytes())
 
     def _boom(*args, **kwargs):
         raise Aapt2Error("aapt2 exited 1: resource table not found")

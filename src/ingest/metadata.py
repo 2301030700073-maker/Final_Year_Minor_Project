@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import time
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -54,10 +55,10 @@ class SignerCert:
 
 @dataclass
 class SignerInfo:
-    v1_verified: bool
-    v2_verified: bool
-    v3_verified: bool
-    v4_verified: bool
+    v1_verified: bool | None
+    v2_verified: bool | None
+    v3_verified: bool | None
+    v4_verified: bool | None
     certificate_dn: str | None
     certificate_sha256: str | None
     signer_count: int
@@ -91,12 +92,26 @@ def _require_tool(name: str) -> str:
 def _assert_zip_magic(apk_path: Path) -> None:
     """Fail fast before hashing/tool runs (NEW-C): a real APK is a zip and
     begins with the PK\x03\x04 local-file-header magic. Anything else burns
-    time hashing only to fail confusingly inside aapt2 later."""
+    time hashing only to fail confusingly inside aapt2 later.
+
+    Finding F: the start magic alone accepts a TRUNCATED zip - a file that
+    opens with PK\x03\x04 but whose tail (where the APK Signature Block and the
+    End-Of-Central-Directory record live) is cut off. apksigner reads that tail,
+    so a truncated APK only fails deep inside apksigner, after aapt2 has already
+    run and hashes/size are computed - late, confusing, and wasteful. Verify the
+    zip is complete/openable up front (zipfile.is_zipfile checks for the EOCD
+    record) so a corrupt/truncated APK is rejected at ingest, before any tool
+    runs."""
     with open(apk_path, "rb") as f:
         magic = f.read(4)
     if magic != b"PK\x03\x04":
         raise ValueError(
             f"not a valid APK/zip - missing PK\\x03\\x04 magic header (got {magic!r}): {apk_path}"
+        )
+    if not zipfile.is_zipfile(apk_path):
+        raise ValueError(
+            f"not a complete/valid APK/zip - start magic present but no End-Of-"
+            f"Central-Directory record (truncated or corrupt): {apk_path}"
         )
 
 
@@ -191,9 +206,18 @@ def parse_aapt2_output(raw: str) -> PackageMetadata:
 
 
 def parse_signer_info(raw: str) -> SignerInfo:
-    def _verified(scheme_label: str) -> bool:
+    def _verified(scheme_label: str) -> bool | None:
+        # Finding G: an ABSENT scheme line must not read as False. apksigner only
+        # prints "Verified using <scheme>:" for schemes the APK is signed with -
+        # a v1-only APK carries no v2/v3/v4 line at all. Returning False for an
+        # absent line conflated "this scheme was checked and FAILED" with "this
+        # scheme was never exercised", a false negative in the signer metadata.
+        # None = scheme not present/not exercised; True/False = present and
+        # verified/failed. (The DB signer_v* columns are already bool|None.)
         match = re.search(rf"Verified using {re.escape(scheme_label)}.*?:\s*(true|false)", raw)
-        return bool(match and match.group(1) == "true")
+        if match is None:
+            return None
+        return match.group(1) == "true"
 
     v1 = _verified("v1 scheme (JAR signing)")
     v2 = _verified("v2 scheme (APK Signature Scheme v2)")

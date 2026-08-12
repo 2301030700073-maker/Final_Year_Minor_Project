@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, create_engine, inspect, text
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 DB_FILENAME = "results.db"
@@ -131,7 +131,21 @@ class RunRecord(Base):
 def get_engine(analysis_root: Path):
     db_path = Path(analysis_root) / DB_FILENAME
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    # NFR-1: runs.apk_sha256 -> apks.sha256 is declared but SQLite enforces
+    # foreign keys only when PRAGMA foreign_keys=ON runs on each connection (it
+    # is OFF by default). Without this, a save_run whose apks row is missing
+    # silently writes an orphan instead of erroring. Enable it per-connection so
+    # the declared referential integrity is actually enforced.
     engine = create_engine(f"sqlite:///{db_path}")
+
+    @event.listens_for(engine, "connect")
+    def _enforce_foreign_keys(dbapi_connection, connection_record):
+        # Runs on every new pooled connection - FK enforcement is per-connection,
+        # not per-database.
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     Base.metadata.create_all(engine)  # idempotent - only creates missing tables
     _migrate_schema(engine)  # ...but create_all never adds columns to existing tables
     return engine

@@ -30,6 +30,10 @@ def test_save_run_serializes_dataclasses_and_enums(tmp_path):
     verdict = CategoryVerdict(confidence=0.9, detected=True, evidence=[])
     classification = ClassificationResult(action=Action.ROOT_ONLY, root=verdict, ssl=verdict)
 
+    # FK enforcement (PRAGMA foreign_keys=ON) is on, so the parent apks row must
+    # exist before the run is written - the real flow always save_metadata before
+    # save_run (cli.py), so the test models that invariant.
+    save_metadata(tmp_path, "abc123", {"package": {"package_name": "test.app"}})
     path = save_run(tmp_path, "abc123", "run1", {"classification": classification, "stage_results": []})
 
     assert path.name == "results.db"
@@ -48,6 +52,7 @@ def test_save_run_promotes_calibration_fields_to_indexed_columns(tmp_path):
         root_threshold=0.8, ssl_threshold=0.85,
     )
 
+    save_metadata(tmp_path, "abc123", {"package": {"package_name": "test.app"}})
     save_run(tmp_path, "abc123", "run1", {"classification": classification, "stage_results": []})
 
     with Session(get_engine(tmp_path)) as session:
@@ -73,6 +78,7 @@ def test_save_run_records_decompile_completeness_from_stage_results(tmp_path):
         evidence={"decompile_completeness": "partial", "jadx_file_count": 1563, "jadx_exit_code": 1},
     )]
 
+    save_metadata(tmp_path, "propertyguru", {"package": {"package_name": "com.propertyguru"}})
     save_run(tmp_path, "propertyguru", "run2", {"classification": classification, "stage_results": stage_results})
 
     with Session(get_engine(tmp_path)) as session:
@@ -86,6 +92,7 @@ def test_save_run_flags_anomaly_from_verification_evidence_lines(tmp_path):
     classification = ClassificationResult(action=Action.ROOT_ONLY, root=verdict, ssl=verdict)
     verification = {"root_bypassed": False, "ssl_bypassed": None, "evidence_lines": {"anomaly": "contradiction"}}
 
+    save_metadata(tmp_path, "abc123", {"package": {"package_name": "test.app"}})
     save_run(tmp_path, "abc123", "run3", {
         "classification": classification, "verification": verification, "stage_results": [],
     })
@@ -93,3 +100,17 @@ def test_save_run_flags_anomaly_from_verification_evidence_lines(tmp_path):
     with Session(get_engine(tmp_path)) as session:
         record = session.get(RunRecord, "run3")
         assert record.anomaly_flagged is True
+
+
+def test_save_run_orphan_without_apks_row_fails_loudly(tmp_path):
+    # FR-7/NFR-1 (Finding B): runs.apk_sha256 -> apks.sha256 was declared but
+    # unenforced - SQLite has PRAGMA foreign_keys=OFF by default, so a run
+    # written without its apks row was persisted silently as an orphan. With
+    # enforcement on, save_run must fail loudly (IntegrityError) instead.
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+    verdict = CategoryVerdict(confidence=0.8, detected=True, evidence=[])
+    classification = ClassificationResult(action=Action.ROOT_ONLY, root=verdict, ssl=verdict)
+
+    with pytest.raises(IntegrityError):
+        save_run(tmp_path, "no-such-apk", "orphan", {"classification": classification, "stage_results": []})

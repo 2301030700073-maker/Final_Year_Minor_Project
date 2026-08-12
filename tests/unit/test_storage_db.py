@@ -26,21 +26,25 @@ def test_get_engine_is_idempotent_on_existing_tables(tmp_path):
         assert session.get(ApkRecord, "abc") is not None
 
 
-def test_run_record_apk_sha256_is_a_plain_indexed_column_not_a_hard_fk_constraint(tmp_path):
-    # SQLite doesn't enforce FK constraints by default (no PRAGMA foreign_keys=ON
-    # here) - a run row can be saved even if its apk hasn't been separately
-    # ingested yet, which matters since cli.py's real pipeline order calls
-    # save_metadata before save_run but nothing enforces that ordering at the
-    # DB layer itself.
+def test_run_record_apk_sha256_fk_is_enforced_not_just_declared(tmp_path):
+    # This previously asserted the DB layer was deliberately permissive (a run
+    # could be saved without its apk row, relying on cli.py's save_metadata-
+    # before-save_run ordering). The runs.apk_sha256 -> apks.sha256 ForeignKey
+    # was declared but unenforced - the schema claimed referential integrity it
+    # didn't provide. NFR-1 ("fail loudly, never silently") prefers an orphan to
+    # be refused at the DB layer. get_engine now runs PRAGMA foreign_keys=ON per
+    # connection, so an insert with a missing parent must raise IntegrityError
+    # instead of being silently written.
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+
     with Session(get_engine(tmp_path)) as session:
         session.add(RunRecord(
             run_id="run1", apk_sha256="never_ingested", timestamp="2026-01-01T00:00:00",
             classification_json={}, stage_results_json=[],
         ))
-        session.commit()
-
-    with Session(get_engine(tmp_path)) as session:
-        assert session.get(RunRecord, "run1") is not None
+        with pytest.raises(IntegrityError):
+            session.commit()
 
 
 def test_get_engine_migrates_column_added_since_db_was_created(tmp_path):

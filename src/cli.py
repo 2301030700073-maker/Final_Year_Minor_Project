@@ -341,7 +341,11 @@ def run(
     ),
 ):
     stage_results: list[StageResult] = []
-    run_id = uuid.uuid4().hex[:8]
+    # Full 128-bit uuid, not a [:8] truncation: RunRecord.run_id is the PK and
+    # save_run upserts via session.merge, so a 32-bit collision would silently
+    # overwrite a prior run's record instead of erroring - unacceptable in a
+    # dual-use tool that values audit integrity (FR-7.1/ADR-0005).
+    run_id = uuid.uuid4().hex
     git_commit = _git_commit_hash()
     operator = _operator_identity()
 

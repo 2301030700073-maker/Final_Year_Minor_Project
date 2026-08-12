@@ -43,7 +43,10 @@ def test_save_run_serializes_dataclasses_and_enums(tmp_path):
 
 def test_save_run_promotes_calibration_fields_to_indexed_columns(tmp_path):
     verdict = CategoryVerdict(confidence=0.9, detected=True, evidence=[])
-    classification = ClassificationResult(action=Action.ROOT_ONLY, root=verdict, ssl=verdict)
+    classification = ClassificationResult(
+        action=Action.ROOT_ONLY, root=verdict, ssl=verdict,
+        root_threshold=0.8, ssl_threshold=0.85,
+    )
 
     save_run(tmp_path, "abc123", "run1", {"classification": classification, "stage_results": []})
 
@@ -54,6 +57,11 @@ def test_save_run_promotes_calibration_fields_to_indexed_columns(tmp_path):
         assert record.decompile_completeness == "unknown"  # no decompile stage in this fixture
         assert record.root_bypassed is None  # no verification supplied - dynamic stage never ran
         assert record.verification_json is None  # stays a real NULL, not an empty dict
+        # Both decision thresholds promoted to columns so a calibration query
+        # doesn't need to parse classification_json (parity: root used to be the
+        # only one promoted, SSL was JSON-only).
+        assert record.threshold == 0.8  # root decision threshold
+        assert record.ssl_threshold == 0.85
 
 
 def test_save_run_records_decompile_completeness_from_stage_results(tmp_path):

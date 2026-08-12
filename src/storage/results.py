@@ -114,6 +114,10 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
             # ssl_threshold and only ever carried root). The DB column keeps
             # persisting the root decision threshold to preserve its meaning.
             threshold=classification.get("root_threshold"),
+            # SSL threshold promoted alongside root so a calibration query can
+            # filter/aggregate by the threshold that governed each run without
+            # parsing classification_json - parity with the root column.
+            ssl_threshold=classification.get("ssl_threshold"),
             root_confidence=root.get("confidence"),
             root_detected=root.get("detected"),
             ssl_confidence=ssl.get("confidence"),

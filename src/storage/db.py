@@ -70,7 +70,8 @@ class RunRecord(Base):
     timestamp: Mapped[str] = mapped_column(String, index=True)
 
     action: Mapped[str | None] = mapped_column(String, index=True)  # ROOT_ONLY/SSL_ONLY/BOTH/NEITHER
-    threshold: Mapped[float | None] = mapped_column(Float)
+    threshold: Mapped[float | None] = mapped_column(Float)  # root decision threshold
+    ssl_threshold: Mapped[float | None] = mapped_column(Float)
     root_confidence: Mapped[float | None] = mapped_column(Float, index=True)
     root_detected: Mapped[bool | None] = mapped_column(Boolean, index=True)
     ssl_confidence: Mapped[float | None] = mapped_column(Float, index=True)

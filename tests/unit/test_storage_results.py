@@ -114,3 +114,16 @@ def test_save_run_orphan_without_apks_row_fails_loudly(tmp_path):
 
     with pytest.raises(IntegrityError):
         save_run(tmp_path, "no-such-apk", "orphan", {"classification": classification, "stage_results": []})
+
+
+def test_save_metadata_reingest_refuses_to_drop_existing_fields(tmp_path):
+    # NFR-1 (Finding C): save_metadata blind-overwrote every field on re-ingest,
+    # so a less-complete future ingest (toolchain drift / partial signer
+    # failure) would silently set previously-good values to None. It now refuses
+    # to clobber a recorded value with None - loud ValueError, not silent loss.
+    # (Upserts to new non-None values still apply - see
+    # test_save_metadata_upserts_rather_than_duplicating.)
+    import pytest
+    save_metadata(tmp_path, "abc123", {"hashes": {"sha256": "abc123"}, "signer": {"certificate_sha256": "aa:bb"}})
+    with pytest.raises(ValueError, match="certificate_sha256"):
+        save_metadata(tmp_path, "abc123", {"hashes": {"sha256": "abc123"}, "signer": {}})

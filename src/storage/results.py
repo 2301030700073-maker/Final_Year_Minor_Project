@@ -49,18 +49,37 @@ def save_metadata(analysis_root: Path, apk_hash: str, metadata: dict) -> Path:
         if record is None:
             record = ApkRecord(sha256=apk_hash, first_ingested_at=datetime.now(timezone.utc).isoformat())
             session.add(record)
-        record.sha1 = hashes.get("sha1")
-        record.md5 = hashes.get("md5")
-        record.size_bytes = metadata.get("size_bytes")
-        record.package_name = package.get("package_name")
-        record.version_name = package.get("version_name")
-        record.version_code = package.get("version_code")
-        record.min_sdk = package.get("min_sdk")
-        record.target_sdk = package.get("target_sdk")
-        record.signer_v1_verified = signer.get("v1_verified")
-        record.signer_v2_verified = signer.get("v2_verified")
-        record.signer_v3_verified = signer.get("v3_verified")
-        record.certificate_sha256 = signer.get("certificate_sha256")
+        fields = {
+            "sha1": hashes.get("sha1"),
+            "md5": hashes.get("md5"),
+            "size_bytes": metadata.get("size_bytes"),
+            "package_name": package.get("package_name"),
+            "version_name": package.get("version_name"),
+            "version_code": package.get("version_code"),
+            "min_sdk": package.get("min_sdk"),
+            "target_sdk": package.get("target_sdk"),
+            "signer_v1_verified": signer.get("v1_verified"),
+            "signer_v2_verified": signer.get("v2_verified"),
+            "signer_v3_verified": signer.get("v3_verified"),
+            "certificate_sha256": signer.get("certificate_sha256"),
+        }
+        # NFR-1 (Finding C): on re-ingest of the same sha256, refuse to silently
+        # clobber a field the prior record already carried with None. The APK is
+        # keyed by its hash - identity is immutable - so a re-ingest that drops a
+        # previously-good value (toolchain drift, a signer-verify step partially
+        # failing) is a regression, not a legitimate update. Upserts to a new
+        # non-None value still apply (test_save_metadata_upserts); only loss to
+        # None is refused, loudly.
+        for field, new_value in fields.items():
+            old_value = getattr(record, field)
+            if old_value is not None and new_value is None:
+                raise ValueError(
+                    f"re-ingest of APK '{apk_hash}' would drop previously-recorded "
+                    f"'{field}' (was {old_value!r}, new ingest omits it) - refusing "
+                    "to silently lose existing evidence; investigate the ingest "
+                    "before retrying"
+                )
+            setattr(record, field, new_value)
         record.raw_metadata = metadata
         session.commit()
 

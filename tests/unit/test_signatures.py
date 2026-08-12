@@ -49,6 +49,31 @@ def test_root_corpus_includes_magisk_kernelsu_zygisk_era_signatures():
     assert "com.topjohnwu.magisk" in su_apps.patterns
 
 
+def test_scan_records_capped_signature_match_count(tmp_path):
+    # RESID-4F observability: when a signature matches > MAX_EVIDENCE_PER_SIGNATURE
+    # (50) times, scan() must retain the 50-row cap BUT also record the true total
+    # in evidence.capped_counts, so the report can state "matched 300x, showing
+    # first 50" instead of silently implying 50 is the whole match set.
+    sigfile = tmp_path / "sig.yaml"
+    sigfile.write_text(
+        "---\n"
+        "- id: root_su_binary_paths\n"
+        "  category: root\n"
+        "  weight: 0.5\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['/system/bin/su']\n"
+        "  evidence_type: bytecode_string\n"
+    )
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "Main.java").write_text("\n".join("/system/bin/su" for _ in range(60)) + "\n")
+
+    evidence = scan(src, load_signatures(sigfile))
+
+    assert len(evidence.root_evidence) == 50  # cap retained
+    assert evidence.capped_counts == {"root_su_binary_paths": 60}  # true total recorded
+
+
 def test_load_signatures_reads_real_ssl_pinning_yaml():
     signatures = load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")
     ids = {s.id for s in signatures}

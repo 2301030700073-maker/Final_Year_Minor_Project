@@ -70,6 +70,9 @@ TEMPLATE = Template("""\
 {% elif ssl_attribution and ssl_attribution.mixed -%}
 > **Attribution:** SSL-pinning matches split across the app's own package ({{ ssl_attribution.app_owned }}) and bundled third-party libraries ({{ ssl_attribution.third_party }}: {{ ssl_attribution.vendors | join(', ') }}).
 {% endif %}
+{% if classification.evidence_capped_counts -%}
+> **Evidence truncated (RESID-4F cap):** {{ classification.evidence_capped_counts|length }} signature(s) matched more than the 50-row-per-signature display cap - the evidence rows above show the first 50 for each:{% for sig_id, total in classification.evidence_capped_counts.items() %} `{{ sig_id }}` matched {{ total }}x{% if not loop.last %},{% endif %}{% endfor %}.
+{% endif %}
 ## Scan Coverage (ADR-0008)
 
 Per-surface bound of this scan - a `partial`/`unscannable` surface is a lower bound, never a confident negative. {% if obfuscation_level -%}Obfuscation: **{{ obfuscation_level }}**{% endif %}

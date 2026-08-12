@@ -49,6 +49,15 @@ class StaticEvidence:
     # presented as a full scan - an unreadable corpus is a degradation, and a
     # NEITHER built over it must not read as a confident negative.
     unreadable_file_count: int = 0
+    # RESID-4F observability: total matches per signature that exceeded the
+    # 50-row-per-signature display cap, keyed by signature_id -> total matches.
+    # The cap keeps the report readable (thousands of near-identical rows add
+    # no signal), but dropping the surplus silently would hide how many matches
+    # a signature actually produced - this makes the truncation honest so the
+    # report can say "matched 300x, showing first 50" instead of implying 50 is
+    # the whole story. Detection/confidence are unaffected (weight is added once
+    # per matched signature regardless, via matched_signatures).
+    capped_counts: dict[str, int] = field(default_factory=dict)
 
 
 class Action(str, Enum):
@@ -91,6 +100,11 @@ class ClassificationResult:
     # wired when okhttp3/com.squareup/the React Native network SDKs were added.
     root_attribution: dict | None = None
     ssl_attribution: dict | None = None
+    # RESID-4F observability: carried from StaticEvidence so the report can
+    # state which signatures hit the per-signature evidence cap and how many
+    # matches were truncated (see StaticEvidence.capped_counts). Empty when no
+    # signature exceeded the cap.
+    evidence_capped_counts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass

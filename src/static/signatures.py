@@ -142,6 +142,10 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
     # tracked via a seen-set.
     matched_signatures: set[str] = set()
     evidence_counts: dict[str, int] = defaultdict(int)
+    # RESID-4F observability: count EVERY match per signature (evidence_counts
+    # caps at MAX_EVIDENCE_PER_SIGNATURE, so it can't tell the report how many
+    # were actually seen). total_counts feeds the honest truncation note.
+    total_counts: dict[str, int] = defaultdict(int)
     for file_path, root in files:
         try:
             # errors="strict" (the default): errors="ignore" would read a file
@@ -178,6 +182,7 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
                 if matched_text is None:
                     continue
                 matched_signatures.add(signature.id)
+                total_counts[signature.id] += 1
                 # RESID-4F: record at most MAX_EVIDENCE_PER_SIGNATURE matches per
                 # signature - enough to attribute the finding, not thousands of
                 # near-identical rows. Weight is unaffected (added below once
@@ -195,6 +200,14 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
                     evidence.root_evidence.append(item)
                 elif signature.category == "ssl":
                     evidence.ssl_evidence.append(item)
+
+    # RESID-4F observability: record which signatures hit the display cap and
+    # by how much, so the report can state the truncation instead of silently
+    # implying the retained 50 rows are the whole match set.
+    evidence.capped_counts = {
+        sig_id: total for sig_id, total in total_counts.items()
+        if total > MAX_EVIDENCE_PER_SIGNATURE
+    }
 
     for signature in signatures:
         if signature.id in matched_signatures:

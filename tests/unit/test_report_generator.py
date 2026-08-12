@@ -47,6 +47,34 @@ def test_generate_report_renders_below_threshold_as_inconclusive_retaining_evide
     assert "/system/bin/su" in content
 
 
+def test_generate_report_states_evidence_truncation_honestly(tmp_path):
+    # RESID-4F observability: when a signature matched more than the 50-row cap,
+    # the report must say so ("matched 60x") instead of silently implying the 50
+    # rows shown are the whole match set.
+    root = CategoryVerdict(
+        confidence=0.8, detected=True,
+        evidence=[Evidence(signature_id="root_su_binary_paths", file="Main.java", line_or_offset=1, matched_text="/system/bin/su")],
+    )
+    ssl = CategoryVerdict(confidence=0.0, detected=False, evidence=[])
+    classification = ClassificationResult(
+        action=Action.ROOT_ONLY, root=root, ssl=ssl,
+        evidence_capped_counts={"root_su_binary_paths": 60},
+    )
+
+    report_path = generate_report(
+        run_id="capped", apk_hash="abc123", timestamp="2026-08-11T12:00:00",
+        metadata={"hashes": {"sha256": "abc123"}, "package": {"package_name": "com.example.app"}},
+        classification=classification, verification=None,
+        dynamic_skip_reason="--skip-dynamic passed", correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "Evidence truncated" in content
+    assert "50-row-per-signature display cap" in content
+    assert "root_su_binary_paths` matched 60x" in content
+
+
 def test_generate_report_writes_file_with_expected_content(tmp_path):
     metadata = {
         "hashes": {"sha256": "abc123"},

@@ -320,3 +320,33 @@ def test_pre_coverage_negative_but_full_coverage_counts_tn():
 
     assert report.tier2["root"].true_negative == 1
     assert report.tier2["root"].n == 1
+
+
+def test_calibration_curve_marks_each_runs_own_threshold_as_a_boundary_edge():
+    # FR-9 (Finding D): the curve used one current threshold as the decision
+    # boundary for the whole corpus. Now each run's persisted threshold is merged
+    # into the edge set, so a run classified under a non-default threshold gets
+    # that boundary annotated (a run tuned to 0.85 must split the 0.8-0.9 bucket).
+    from calibration.types import RunRow
+    runs = [
+        RunRow(
+            apk_hash="h1", run_id="r1", action="ROOT_ONLY",
+            root_confidence=0.84, root_detected=True, root_bypassed=True,
+            ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+            decompile_completeness="complete", root_threshold=0.85,
+        ),
+    ]
+    report = compute_calibration_report(
+        runs, ground_truth={}, generated_at="t", ground_truth_commit="c",
+        threshold=0.7,
+    )
+    curve = report.calibration_curve["root"]
+    # 0.85 was this run's governing threshold - it must appear as a bucket edge
+    # even though the current shared threshold passed in is 0.7.
+    edges = {curve[0].range_low, curve[0].range_high}
+    for b in curve:
+        edges.add(b.range_low)
+        edges.add(b.range_high)
+    assert 0.85 in edges
+    # and the run lands in the bucket just below its own 0.85 boundary
+    assert any(b.range_low <= 0.84 < b.range_high for b in curve)

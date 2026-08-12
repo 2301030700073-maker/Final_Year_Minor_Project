@@ -205,6 +205,8 @@ def load_runs_for_calibration(analysis_root: Path) -> list[RunRow]:
                 ssl_all_third_party=bool(r.ssl_all_third_party),
                 decompile_completeness=r.decompile_completeness,
                 coverage=r.coverage,
+                root_threshold=r.threshold,
+                ssl_threshold=r.ssl_threshold,
             )
             for r in records
         ]

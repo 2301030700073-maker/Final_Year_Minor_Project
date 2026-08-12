@@ -158,11 +158,22 @@ def compute_calibration_report(
 
     for category in CATEGORIES:
         confidence_field, detected_field, bypassed_field = _field_names(category)
+        threshold_field = "root_threshold" if category == "root" else "ssl_threshold"
         tier1_counts = {outcome: 0 for outcome in Tier1Outcome}
         tier2_counts = {outcome: 0 for outcome in Tier2Outcome}
         no_gt_count = 0
         partial_count = 0
-        edges = sorted(set(base_edges) | {thresholds[category]})
+        # Finding D: the decision boundary for each run is the threshold it was
+        # actually classified under, which may differ across the corpus once
+        # per-category tuning moves thresholds. Merge every run's own threshold
+        # into the edge set so the curve annotates the boundary that governed
+        # each run, rather than one current threshold over all of history.
+        # None (pre-threshold runs) falls back to the current engine default.
+        per_run_thresholds = {
+            getattr(run, threshold_field) for run in runs
+            if getattr(run, threshold_field) is not None
+        }
+        edges = sorted(set(base_edges) | {thresholds[category]} | per_run_thresholds)
         bucket_hits: list[list[bool]] = [[] for _ in range(len(edges) - 1)]  # per-bucket list of ground_truth booleans
 
         for run in runs:

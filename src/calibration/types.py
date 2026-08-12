@@ -53,6 +53,14 @@ class RunRow:
     # technique; carried here so calibration/consumers can see the qualifier.
     root_all_third_party: bool = False
     ssl_all_third_party: bool = False
+    # FR-9 (Finding D): the decision threshold that governed this run's
+    # classification, persisted per run (root -> the `threshold` column, ssl ->
+    # `ssl_threshold`) so the calibration curve can mark each run's actual
+    # decision boundary rather than applying one current threshold over the
+    # whole historical corpus. None on pre-threshold runs -> curve falls back to
+    # the engine default.
+    root_threshold: float | None = None
+    ssl_threshold: float | None = None
 
 
 @dataclass(frozen=True)

@@ -70,3 +70,40 @@ def test_generate_calibration_report_flags_vacuous_1p00_when_tn_is_zero(tmp_path
 
     assert "has TN=0: the 1.00 precision/recall is a tautology, not a measurement" in content
     assert "Every ground-truthed root case is a positive" in content
+
+
+def test_ssl_verification_partial_consistent_with_success_checks():
+    # C1: ssl_verification_partial (calibration/report.py:115) is hand-maintained
+    # with no guard that it stays true to the success_checks code - the docstring
+    # itself warns it "must be updated by hand and reviewed if it ever silently
+    # goes stale." If the flag were flipped to False ("full SSL verification")
+    # while any check still hardcodes ssl_bypassed=None, the report would falsely
+    # claim full SSL verification. Assert the flag matches the code: it must be
+    # True exactly while some module cannot produce a real SSL verdict.
+    import re
+    from pathlib import Path
+    from calibration.report import CalibrationReport
+
+    checks_dir = Path(__file__).resolve().parents[2] / "src" / "dynamic" / "success_checks"
+    modules = sorted(checks_dir.glob("*.py"))
+    assert modules, "no success_checks modules found - test cannot validate the flag"
+
+    hardcoded_none = [
+        m.name for m in modules
+        if re.search(r"ssl_bypassed\s*=\s*None\s*,", m.read_text(encoding="utf-8"))
+    ]
+    # Lock the current reality so the regex isn't silently vacuous: AndroGoat
+    # implements real verification (ssl_bypassed=True on a fired pin hook), the
+    # three UnCrackable checks hardcode None.
+    assert "androgoat.py" not in hardcoded_none, "AndroGoat implements real SSL verification"
+    assert hardcoded_none, "expected the UnCrackable checks to hardcode ssl_bypassed=None"
+
+    if hardcoded_none:
+        assert CalibrationReport.ssl_verification_partial is True, (
+            f"flag claims FULL SSL verification but {hardcoded_none} still hardcode "
+            "ssl_bypassed=None - flip ssl_verification_partial back to True"
+        )
+    else:
+        assert CalibrationReport.ssl_verification_partial is False, (
+            "all success checks implement real SSL verification - flip ssl_verification_partial to False"
+        )

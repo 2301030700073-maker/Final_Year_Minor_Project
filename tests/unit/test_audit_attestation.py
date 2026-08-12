@@ -6,7 +6,7 @@ partial-evidence-preservation the project applies to ingest, LIM-1/ADR-0005).
 
 import json
 
-from audit.attestation import record_classification, verify_audit_log
+from audit.attestation import record_classification, record_re_attribution, verify_audit_log
 
 
 def test_record_classification_appends_chained_event(tmp_path):
@@ -84,5 +84,71 @@ def test_record_classification_fails_loudly_on_corrupt_log(tmp_path):
         classification={"action": "NEITHER"},
     )
 
+    assert result.status == "failed"
+    assert "corrupt" in result.error.lower()
+
+
+# ---------------------------------------------------------------------------
+# FR-8/ADR-0005: re-attribute is an audited write path (record_re_attribution)
+# ---------------------------------------------------------------------------
+
+
+def test_record_re_attribution_appends_chained_event(tmp_path):
+    log = tmp_path / "audit.jsonl"
+    result = record_re_attribution(
+        audit_log_path=log, justification="CTF", operator="tester",
+        git_commit="deadbeef", runs_updated=3, third_party_only=2,
+        regenerated=3, force=False,
+    )
+    assert result.status == "success"
+    lines = [json.loads(line) for line in log.read_text().splitlines()]
+    assert len(lines) == 1
+    rec = lines[0]
+    assert rec["event"] == "re_attributed"
+    assert rec["justification"] == "CTF"
+    assert rec["operator"] == "tester"
+    assert rec["runs_updated"] == 3
+    assert rec["third_party_only"] == 2
+    assert rec["regenerated"] == 3
+    assert rec["force"] is False
+    assert rec["record_hash"] and rec["prev_hash"] is None  # anchors the chain
+    # not run_authorized/run_completed -> must not break the pairing check
+    check = verify_audit_log(log)
+    assert check["valid"] is True
+    assert check["chained"] == 1
+
+
+def test_record_re_attribution_chains_onto_prior_record(tmp_path):
+    log = tmp_path / "audit.jsonl"
+    first = record_re_attribution(
+        audit_log_path=log, justification="CTF", operator="tester",
+        git_commit="g1", runs_updated=0, third_party_only=0, regenerated=0, force=False,
+    )
+    second = record_re_attribution(
+        audit_log_path=log, justification="OWN_APP", operator="tester",
+        git_commit="g1", runs_updated=1, third_party_only=0, regenerated=1, force=True,
+    )
+    assert first.status == "success" and second.status == "success"
+    lines = [json.loads(line) for line in log.read_text().splitlines()]
+    assert lines[1]["prev_hash"] == lines[0]["record_hash"]
+
+
+def test_record_re_attribution_rejects_invalid_justification(tmp_path):
+    log = tmp_path / "audit.jsonl"
+    result = record_re_attribution(
+        audit_log_path=log, justification="not-a-real-justification", operator="tester",
+        git_commit="g1", runs_updated=0, third_party_only=0, regenerated=0, force=False,
+    )
+    assert result.status == "failed"
+    assert "invalid --justification" in result.error
+
+
+def test_record_re_attribution_fails_loudly_on_corrupt_log(tmp_path):
+    log = tmp_path / "audit.jsonl"
+    log.write_text("not json\n")
+    result = record_re_attribution(
+        audit_log_path=log, justification="CTF", operator="tester",
+        git_commit="g1", runs_updated=0, third_party_only=0, regenerated=0, force=False,
+    )
     assert result.status == "failed"
     assert "corrupt" in result.error.lower()

@@ -319,6 +319,61 @@ def record_classification(
     )
 
 
+def record_re_attribution(
+    audit_log_path: Path,
+    justification: str,
+    operator: str,
+    git_commit: str,
+    runs_updated: int,
+    third_party_only: int,
+    regenerated: int,
+    force: bool,
+    tool_version: str = "0.1.0",
+) -> StageResult:
+    """Append an audit record for a `re-attribute` backfill (FR-8/ADR-0005).
+
+    re-attribute mutates a persisted finding's attribution - a consumer-visible
+    caveat (ADR-0010) - so it is a write to analysis state that happens OUTSIDE
+    the run flow (no record_authorization/record_classification fire for it). To
+    keep that write on the audited trail like every other mutation of analysis
+    state, it records the operator, justification, and how much state changed.
+    Validates justification with the same M3 gate as the run flow. Fails loudly
+    as a StageResult when a corrupt log blocks the write."""
+    start = time.monotonic()
+    if not validate_justification(justification):
+        return StageResult(
+            stage="audit", status="failed", evidence={},
+            error=(
+                f"invalid --justification '{justification}' - must be one of "
+                f"{', '.join(EXACT_JUSTIFICATIONS)} or {AUTHORIZED_ENGAGEMENT_PREFIX}<id>"
+            ),
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
+    record = {
+        "event": "re_attributed",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "justification": justification,
+        "operator": operator,
+        "tool_version": tool_version,
+        "git_commit": git_commit,
+        "runs_updated": runs_updated,
+        "third_party_only": third_party_only,
+        "regenerated": regenerated,
+        "force": force,
+    }
+    try:
+        _append_audit_record(audit_log_path, record)
+    except ValueError as exc:
+        return StageResult(
+            stage="audit", status="failed", evidence={}, error=str(exc),
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
+    return StageResult(
+        stage="audit", status="success", evidence=record,
+        duration_ms=int((time.monotonic() - start) * 1000),
+    )
+
+
 def verify_audit_log(audit_log_path: Path) -> dict:
     """Re-derive the hash chain and report integrity. Returns a dict and never
     raises on corrupt content - it collects every error it finds. Records

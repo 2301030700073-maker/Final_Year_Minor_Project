@@ -32,6 +32,7 @@ from audit.attestation import (
     record_ingest_failure,
     validate_justification,
     record_run_completion,
+    record_re_attribution,
     verify_audit_log,
 )
 from calibration.ground_truth import DEFAULT_PATH as DEFAULT_GROUND_TRUTH_PATH
@@ -745,6 +746,14 @@ def calibration_report(
 
 @app.command("re-attribute")
 def re_attribute_cmd(
+    justification: str = typer.Option(
+        ...,
+        "--justification",
+        help="Authorization justification for mutating stored attribution - must "
+        "be OWN_APP, CTF, ACADEMIC_TRAINING_TARGET, or AUTHORIZED_ENGAGEMENT:<id> "
+        "(FR-8.1/ADR-0005). Required: re-attribute writes consumer-visible state "
+        "and must be as traceable as the run that produced it.",
+    ),
     force: bool = typer.Option(
         False,
         "--force",
@@ -761,6 +770,21 @@ def re_attribute_cmd(
     confidence, or evidence. By default it fills only rows still missing
     attribution (idempotent); --force recomputes even already-attributed rows
     so a taxonomy/namespace fix can correct stale caveats on disk."""
+    # M3 auth gate (FR-8.1/ADR-0005): re-attribute mutates a persisted finding's
+    # attribution - a consumer-visible caveat (ADR-0010) - so it must carry the
+    # same authorization as the run that produced it. Validate BEFORE any DB
+    # write so an invalid justification aborts without touching stored state.
+    if not validate_justification(justification):
+        console.print(
+            f"[bold red]Invalid --justification '{justification}' - aborting before "
+            "re-attribute. Use one of OWN_APP, CTF, ACADEMIC_TRAINING_TARGET, or "
+            "AUTHORIZED_ENGAGEMENT:<id>.[/bold red]"
+        )
+        raise typer.Exit(code=1)
+    # A6: an unverifiable operator aborts before any mutation, so re-attribute
+    # never runs unattributable.
+    operator = _operator_identity()
+
     from sqlalchemy import select
     from sqlalchemy.orm import Session
 
@@ -843,6 +867,25 @@ def re_attribute_cmd(
                 except Exception as exc:  # NFR-1: fail loudly, never silently
                     errors.append(f"{run.run_id}: report regeneration failed: {exc}")
         session.commit()
+    # FR-8/ADR-0005: re-attribute is a write to persisted analysis state OUTSIDE
+    # the run flow - record it on the audited trail like every other mutation,
+    # so a consumer-visible attribution change is attributable. Written even
+    # when 0 rows changed: running the backfill is itself a traceable act.
+    audit = record_re_attribution(
+        audit_log_path=AUDIT_LOG_PATH,
+        justification=justification,
+        operator=operator,
+        git_commit=rendering_commit,
+        runs_updated=updated,
+        third_party_only=third_party_only,
+        regenerated=regenerated,
+        force=force,
+    )
+    if audit.status == "failed":
+        console.print(
+            f"[bold red]re-attribute applied {updated} run(s) but its audit record "
+            f"could not be appended: {audit.error}[/bold red]"
+        )
     console.print(
         f"[bold green]re-attributed {updated} stored run(s); "
         f"{third_party_only} now carry an all-third-party caveat; "

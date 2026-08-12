@@ -18,6 +18,9 @@ TEMPLATE = Template("""\
 **Run ID:** {{ run_id }}
 **Generated:** {{ timestamp }}
 **Analysis code:** {{ git_commit or "unknown" }}
+{% if operator or justification -%}
+**Authorized by:** {{ operator or "unknown" }} (justification: {{ justification or "not stated" }})
+{% endif %}
 **Package:** {{ metadata.package.package_name or "unknown" }}
 **APK SHA-256:** {{ metadata.hashes.sha256 }}
 **Version:** {{ metadata.package.version_name }} (code {{ metadata.package.version_code }})
@@ -155,6 +158,8 @@ def generate_report(
     git_commit: str | None = None,
     coverage: dict | None = None,
     obfuscation_level: str | None = None,
+    operator: str | None = None,
+    justification: str | None = None,
 ) -> Path:
     output_dir = Path(output_dir) / apk_hash
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -176,6 +181,8 @@ def generate_report(
         manifest=manifest,
         coverage=coverage,
         obfuscation_level=obfuscation_level,
+        operator=operator,
+        justification=justification,
     )
     report_path.write_text(content, encoding="utf-8")
     return report_path

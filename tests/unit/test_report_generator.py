@@ -404,3 +404,31 @@ def test_generate_report_renders_git_commit(tmp_path):
     )
     content = report_path.read_text(encoding="utf-8")
     assert "**Analysis code:** unknown" in content
+
+
+def test_generate_report_states_authorization_and_operator(tmp_path):
+    # FR-8/ADR-0005: authorization is a structural property of the analysis,
+    # not just an audit-log entry - the human-facing report that gets shared
+    # must state who ran the analysis and under what justification. The values
+    # already exist in the caller (operator = _operator_identity(), justification),
+    # they just never flowed to the report.
+    from common import VerificationResult
+    metadata = {"hashes": {"sha256": "auth1"}, "package": {"package_name": "test.app"}}
+    report_path = generate_report(
+        run_id="auth-run", apk_hash="auth1", timestamp="2026-08-12T12:00:00",
+        metadata=metadata, classification=_classification(), verification=None,
+        correlation=None, stage_results=[], output_dir=tmp_path,
+        operator="operator@example.com", justification="OWN_APP",
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "**Authorized by:** operator@example.com (justification: OWN_APP)" in content
+
+    # When absent (e.g. a stored-run regeneration that never persisted them),
+    # the report omits the line rather than inventing one.
+    report_path = generate_report(
+        run_id="auth-run2", apk_hash="auth1", timestamp="2026-08-12T12:00:00",
+        metadata=metadata, classification=_classification(), verification=None,
+        correlation=None, stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Authorized by:" not in content

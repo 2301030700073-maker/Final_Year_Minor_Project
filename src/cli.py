@@ -668,6 +668,8 @@ def run(
         git_commit=git_commit,
         coverage=coverage_map,
         obfuscation_level=obfuscation_level,
+        operator=operator,
+        justification=justification,
     )
     report_path = _finalize_run(
         report_kwargs=report_kwargs,

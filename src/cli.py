@@ -582,7 +582,31 @@ def run(
         _print_stage(dynamic_stage)
     else:
         serial = device.discover_device(device_serial)
+        # FR-4.2: install_apk's check=True only confirms adb accepted the
+        # install command - not that the package actually registered. A silent
+        # install failure (signature mismatch, insufficient storage, device
+        # quirk) must fail loudly here via pm list packages, not sail into the
+        # dynamic stage where frida can't attach to a non-installed package and
+        # fails confusingly downstream (NFR-1). verify_installed was dead code;
+        # this is where it belongs.
         device.install_apk(serial, apk)
+        if not device.verify_installed(serial, package_name):
+            dynamic_stage = StageResult(
+                stage="dynamic", status="failed",
+                evidence={
+                    "reason": (
+                        f"install verification failed - package '{package_name}' "
+                        "not found via pm list packages after install"
+                    )
+                },
+                error=(
+                    f"FR-4.2: APK install not verified - '{package_name}' missing "
+                    "from pm list packages"
+                ),
+            )
+            stage_results.append(dynamic_stage)
+            _print_stage(dynamic_stage)
+            _halt(stage_results)
         dynamic_stage = frida_runner.run_dynamic_stage(serial, package_name, classification.action, target=target)
         stage_results.append(dynamic_stage)
         _print_stage(dynamic_stage)

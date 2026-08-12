@@ -59,6 +59,22 @@ def test_correlate_neither_predicted_nor_confirmed_is_a_match():
     assert result.matches is True
 
 
+def test_correlate_not_predicted_but_bypass_explicitly_failed_is_a_match():
+    # FR-5 truth table completion: the cell "not predicted + bypass=False" had
+    # no explicit arm and fell through silently. It is agreement, not conflict -
+    # static said root-detection absent and dynamic attempted a bypass that
+    # found nothing to confirm. It must remain a match (mirrors the already-
+    # explicit "predicted + confirmed" diagonal), and is now locked so the
+    # complete table stays auditable.
+    classification = _classification(root_detected=False, ssl_detected=False)
+    verification = VerificationResult(root_bypassed=False, ssl_bypassed=None, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert result.matches is True
+    assert result.mismatches == []
+
+
 def test_correlate_inconclusive_dynamic_verdict_is_not_a_match():
     # M5: a predicted-positive whose dynamic bypass ran but was inconclusive
     # (bypassed=None, RESID-6F) is NOT agreement - matches=True would fabricate

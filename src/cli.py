@@ -526,6 +526,16 @@ def run(
         _halt(stage_results)
 
     console.print(f"[bold]Decision: {classification.action.value}[/bold]")
+    # Finding J: surface the scan degradation live, not just in the rendered
+    # report - a reviewer watching the console run (cli_output.txt) must see
+    # that the corpus was degraded AND which file failed, not be blindsided by
+    # a CAUTION that only appears in the .md. Mirrors report/generator.py.
+    if classification.unreadable_files:
+        console.print(
+            f"[bold red]CAUTION: {len(classification.unreadable_files)} candidate file(s) "
+            f"could not be read (OSError): {', '.join(classification.unreadable_files)} - "
+            "treat any NEITHER/Inconclusive verdict as degraded, not a full-scan clean.[/bold red]"
+        )
 
     # --- machine-readable ownership caveat (report-only attribution was the gap) ---
     # Attach the root attribution to the classification object itself so it
@@ -1011,6 +1021,7 @@ def _classification_from_json(cj: dict) -> ClassificationResult:
         ssl_threshold=cj.get("ssl_threshold", 0.7),
         scanned_file_count=cj.get("scanned_file_count", 0),
         unreadable_file_count=cj.get("unreadable_file_count", 0),
+        unreadable_files=cj.get("unreadable_files", []),
         root_attribution=cj.get("root_attribution"),
         ssl_attribution=cj.get("ssl_attribution"),
     )

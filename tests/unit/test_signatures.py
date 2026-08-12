@@ -509,6 +509,10 @@ def test_scan_counts_unreadable_files_separately(tmp_path, monkeypatch):
 
     assert evidence.scanned_file_count == 2           # both files walked
     assert evidence.unreadable_file_count == 1        # Blocked.java surfaced, not hidden
+    # Finding J: the count is honest but must also be actionable - the offending
+    # file's path (relative to the root) is carried so the report/console can
+    # name it instead of leaving a reviewer unable to tell which file to inspect.
+    assert evidence.unreadable_files == ["Blocked.java"]
 
 
 def test_scan_raises_loudly_on_regex_backtracking_budget(tmp_path, monkeypatch):
@@ -592,6 +596,8 @@ def test_scan_counts_decode_dropped_files_as_unreadable(tmp_path):
 
     assert evidence.scanned_file_count == 2            # both files walked
     assert evidence.unreadable_file_count == 1         # Malformed.java surfaced, not stripped
+    # Finding J: the decode-failure path names the file too.
+    assert evidence.unreadable_files == ["Malformed.java"]
 
 
 def test_scan_evidence_carries_deterministic_verification_state(tmp_path):

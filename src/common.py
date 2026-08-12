@@ -49,6 +49,11 @@ class StaticEvidence:
     # presented as a full scan - an unreadable corpus is a degradation, and a
     # NEITHER built over it must not read as a confident negative.
     unreadable_file_count: int = 0
+    # Finding J: the count alone is honest but not actionable - a reviewer can
+    # see that N files failed to read but not which file to inspect or reproduce.
+    # Carry the offending paths (relative to the decompiled root, matching
+    # Evidence.file) so the report/console name them. Empty when every file read.
+    unreadable_files: list[str] = field(default_factory=list)
     # RESID-4F observability: total matches per signature that exceeded the
     # 50-row-per-signature display cap, keyed by signature_id -> total matches.
     # The cap keeps the report readable (thousands of near-identical rows add
@@ -87,6 +92,10 @@ class ClassificationResult:
     # RESID-4G: candidate files that could not be read (OSError), carried so
     # the report can flag a verdict built over a degraded corpus.
     unreadable_file_count: int = 0
+    # Finding J: the paths of the files that failed to read (relative to the
+    # decompiled root), carried alongside the count so the report and console
+    # can name the offending file(s) instead of hiding them behind a number.
+    unreadable_files: list[str] = field(default_factory=list)
     # Machine-readable ownership caveat. Attribution used to reach only the
     # human Markdown report (and root-only), so an automated consumer of the
     # stored classification_json read a bundled-SDK-only ROOT_ONLY as the

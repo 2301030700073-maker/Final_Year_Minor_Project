@@ -162,6 +162,11 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
             # scan. Count it separately so reporting/coverage can treat the scan
             # as degraded (partial), not silently certifying absence.
             evidence.unreadable_file_count += 1
+            # Finding J: record WHICH file failed so the degradation is
+            # actionable - the count alone hid the offending path. Relative to
+            # the decompiled root (matching Evidence.file) so a reviewer can
+            # locate it in the bundle's analysis/ tree.
+            evidence.unreadable_files.append(str(file_path.relative_to(root)))
             continue
         for line_number, line in enumerate(lines, start=1):
             line_start = time.monotonic()

@@ -68,6 +68,7 @@ def classify(
         root_threshold=root_threshold, ssl_threshold=ssl_threshold,
         scanned_file_count=static_evidence.scanned_file_count,
         unreadable_file_count=static_evidence.unreadable_file_count,
+        unreadable_files=static_evidence.unreadable_files,
         # RESID-4F observability: carry the capped-signature counts through so
         # the report can state how many matches a signature actually produced.
         evidence_capped_counts=static_evidence.capped_counts,

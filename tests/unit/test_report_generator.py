@@ -11,6 +11,27 @@ def _classification():
     return ClassificationResult(action=Action.ROOT_ONLY, root=root, ssl=ssl)
 
 
+def test_generate_report_names_unreadable_files_in_caution(tmp_path):
+    # Finding J: the CAUTION must name the offending file(s), not just count
+    # them - a reviewer must be able to tell which decompiled file failed to
+    # read and reproduce the degradation. The count alone hid it.
+    classification = _classification()
+    classification.scanned_file_count = 2
+    classification.unreadable_file_count = 1
+    classification.unreadable_files = ["sources/com/example/Blocked.java"]
+
+    report_path = generate_report(
+        run_id="unreadable", apk_hash="unr001", timestamp="2026-08-12T12:00:00",
+        metadata={"hashes": {"sha256": "unr001"}, "package": {"package_name": "com.example.app"}},
+        classification=classification, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "could not be read (OSError)" in content
+    assert "sources/com/example/Blocked.java" in content  # the file is named, not hidden
+
+
 def test_generate_report_renders_below_threshold_as_inconclusive_retaining_evidence(tmp_path):
     # FR-3.2: a below-threshold verdict (detected=False) must render explicitly
     # as Inconclusive - never be silently dropped - and must retain its full

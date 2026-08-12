@@ -803,6 +803,9 @@ def re_attribute_cmd(
         third_party_only = 0
         regenerated = 0
         errors: list[str] = []
+        # FR-8: collect the specific runs the backfill touches so the audit
+        # record names them, not just counts them (ADR-0005 traceability).
+        affected_run_ids: list[str] = []
         # Item 2: the report is rendered by the CURRENT code, so the Analysis-code
         # line must name the rendering commit, not the original run's (which an
         # ancestor that predates the attribution caveat). Compute once, not per row.
@@ -858,6 +861,7 @@ def re_attribute_cmd(
             if changed:
                 run.classification_json = cj
                 updated += 1
+                affected_run_ids.append(run.run_id)
                 if root_third or ssl_third:
                     third_party_only += 1
                 # F2: a changed attribution leaves the persisted .md stale (it
@@ -883,6 +887,7 @@ def re_attribute_cmd(
         runs_updated=updated,
         third_party_only=third_party_only,
         regenerated=regenerated,
+        affected_run_ids=affected_run_ids,
         force=force,
     )
     if audit.status == "failed":

@@ -327,6 +327,7 @@ def record_re_attribution(
     runs_updated: int,
     third_party_only: int,
     regenerated: int,
+    affected_run_ids: list[str],
     force: bool,
     tool_version: str = "0.1.0",
 ) -> StageResult:
@@ -336,9 +337,11 @@ def record_re_attribution(
     caveat (ADR-0010) - so it is a write to analysis state that happens OUTSIDE
     the run flow (no record_authorization/record_classification fire for it). To
     keep that write on the audited trail like every other mutation of analysis
-    state, it records the operator, justification, and how much state changed.
-    Validates justification with the same M3 gate as the run flow. Fails loudly
-    as a StageResult when a corrupt log blocks the write."""
+    state, it records the operator, justification, how much state changed, and
+    the specific run_ids whose attribution was rewritten - so a record is
+    traceable to the findings it touched, not just a count (ADR-0005). Validates
+    justification with the same M3 gate as the run flow. Fails loudly as a
+    StageResult when a corrupt log blocks the write."""
     start = time.monotonic()
     if not validate_justification(justification):
         return StageResult(
@@ -359,6 +362,7 @@ def record_re_attribution(
         "runs_updated": runs_updated,
         "third_party_only": third_party_only,
         "regenerated": regenerated,
+        "affected_run_ids": affected_run_ids,
         "force": force,
     }
     try:

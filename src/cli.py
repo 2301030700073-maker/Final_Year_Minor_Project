@@ -734,14 +734,19 @@ def calibration_report(
         return f"{rate:.2f}" if rate is not None else "N/A"
 
     table = Table(title="Calibration Summary")
-    for column in ("Category", "Tier 1 confirmation", "Tier 2 precision", "Tier 2 recall", "Tier 2 F1", "n"):
+    for column in ("Category", "Tier 1 confirmation", "Tier 2 precision", "Tier 2 recall", "Tier 2 F1", "n", "Excl no-GT"):
         table.add_column(column)
     for category in ("root", "ssl"):
         t1, t2 = report.tier1[category], report.tier2[category]
+        # Excl no-GT: Tier-2 n is the ground-truthed subset - runs whose APK has
+        # no ground-truth entry are excluded (report.py) and must be visible so
+        # the table doesn't read n as the whole corpus (observability parity with
+        # the generated report's "Excluded from Tier 2 (no ground-truth...)").
         table.add_row(
             category,
             f"{_fmt(t1.confirmation_rate.rate)} ({t1.confirmed}/{t1.confirmed + t1.not_confirmed})",
             _fmt(t2.precision.rate), _fmt(t2.recall.rate), _fmt(t2.f1), str(t2.n),
+            str(report.excluded_no_ground_truth.get(category, 0)),
         )
     console.print(table)
     if report.skeleton_warning:

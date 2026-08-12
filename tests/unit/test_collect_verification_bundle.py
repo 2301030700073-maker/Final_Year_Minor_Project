@@ -69,3 +69,24 @@ def test_export_calibration_snapshot_handles_missing_db_gracefully(tmp_path, mon
     bundle.export_calibration_snapshot(bundle_dir)  # must not raise when no run has ever been persisted
 
     assert not (bundle_dir / "calibration_runs_snapshot.json").exists()
+
+
+def test_extract_run_id_parses_fresh_report_from_pipeline_output():
+    # Finding H: the bundle must ship only THIS run's report, not every
+    # historical one for the apk hash. The fresh report's filename is its
+    # run_id, parsed from the pipeline's "Report:" line.
+    from collect_verification_bundle import _extract_run_id
+    stdout = (
+        "\n[bold green]Report: outputs/reports/"
+        "014a5bb124a344909045ec27ec3577d0/014a5bb124a344909045ec27ec3577d0.md"
+        "[/bold green]\n"
+    )
+    assert _extract_run_id(stdout) == "014a5bb124a344909045ec27ec3577d0"
+
+
+def test_extract_run_id_returns_none_when_no_report_was_produced():
+    # A run that failed before the report stage must parse to None so the
+    # bundle ships no reports rather than stale ones from prior runs.
+    from collect_verification_bundle import _extract_run_id
+    assert _extract_run_id("") is None
+    assert _extract_run_id("ingest failed before report generation\n") is None

@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -35,6 +36,20 @@ def _sha256_of(path: Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _extract_run_id(cli_stdout: str) -> str | None:
+    """Pull the fresh run's id from the pipeline's captured stdout.
+
+    The `run` command prints `Report: .../outputs/reports/<apk_hash>/<run_id>.md`
+    on success; the report filename IS the run_id. Returns None when the run
+    produced no report (e.g. ingest or a pre-report stage failed) - the caller
+    then ships no reports rather than stale ones from prior runs."""
+    # The run_id is unambiguous hex terminating at ".md"; trailing rich markup
+    # (e.g. "[/bold green]") may follow on the same line, so don't anchor at
+    # end-of-line.
+    m = re.search(r"Report: .*?/reports/[^/]+/([0-9a-f]+)\.md", cli_stdout)
+    return m.group(1) if m else None
 
 
 def _run(cmd: list[str], timeout: int = 60) -> dict:
@@ -205,9 +220,24 @@ def main() -> int:
         # around in the working directory.
         apk_hash = _sha256_of(Path(args.apk))
 
+        # Copy only THIS run's report, not every report ever written for this
+        # apk_hash - outputs/reports/ accumulates across runs, and shipping 25
+        # historical reports (one per prior run) with no marker invites a
+        # reviewer to mistake a stale one for this invocation's result (Finding
+        # H). The fresh report's filename is its run_id. If the run produced no
+        # report (a pre-report stage failed), ship none - an absent report is
+        # honest; a stale one is not.
         reports_dir = REPO_ROOT / "outputs" / "reports" / apk_hash
-        if reports_dir.exists():
-            shutil.copytree(reports_dir, bundle_dir / "reports" / apk_hash, dirs_exist_ok=True)
+        fresh_run_id = _extract_run_id(pipeline_result["stdout"] or "")
+        if fresh_run_id:
+            fresh_report = reports_dir / f"{fresh_run_id}.md"
+            if fresh_report.exists():
+                (bundle_dir / "reports" / apk_hash).mkdir(parents=True, exist_ok=True)
+                shutil.copy2(fresh_report, bundle_dir / "reports" / apk_hash / f"{fresh_run_id}.md")
+            else:
+                print(f"  (note: report {fresh_report} expected from this run but missing - not shipping any reports)")
+        else:
+            print("  (note: no report path found in this run's output - not shipping stale prior reports)")
 
         # Pull in the full decompiled evidence (jadx sources, apktool output,
         # metadata.json, run_*.json) so a mismatch between what a signature

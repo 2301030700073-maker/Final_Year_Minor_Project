@@ -75,13 +75,22 @@ def test_extract_run_id_parses_fresh_report_from_pipeline_output():
     # Finding H: the bundle must ship only THIS run's report, not every
     # historical one for the apk hash. The fresh report's filename is its
     # run_id, parsed from the pipeline's "Report:" line.
+    #
+    # Finding I: the fixture must be the REAL rich-wrapped output, not a
+    # synthetic single-line path. Rich console.print wraps the long report path
+    # across lines ("[bold green]Report:\noutputs/reports/<hash>\n/<run_id>.md
+    # [/bold green]") when capturing via subprocess (no terminal, default 80-col
+    # wrap). A same-line fixture passed while real output - where "." can't cross
+    # the newline - returned None and shipped zero reports.
     from collect_verification_bundle import _extract_run_id
+    apk_hash = "014a5bb124a344909045ec27ec3577d0" * 2  # 64-char sha256, wrapped onto its own line
+    run_id = "014a5bb124a344909045ec27ec3577d0"  # 32-char run id on the next line
     stdout = (
-        "\n[bold green]Report: outputs/reports/"
-        "014a5bb124a344909045ec27ec3577d0/014a5bb124a344909045ec27ec3577d0.md"
-        "[/bold green]\n"
+        "\n[bold green]Report:\n"
+        f"outputs/reports/{apk_hash}\n"
+        f"/{run_id}.md[/bold green]\n"
     )
-    assert _extract_run_id(stdout) == "014a5bb124a344909045ec27ec3577d0"
+    assert _extract_run_id(stdout) == run_id
 
 
 def test_extract_run_id_returns_none_when_no_report_was_produced():

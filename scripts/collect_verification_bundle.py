@@ -45,10 +45,21 @@ def _extract_run_id(cli_stdout: str) -> str | None:
     on success; the report filename IS the run_id. Returns None when the run
     produced no report (e.g. ingest or a pre-report stage failed) - the caller
     then ships no reports rather than stale ones from prior runs."""
-    # The run_id is unambiguous hex terminating at ".md"; trailing rich markup
-    # (e.g. "[/bold green]") may follow on the same line, so don't anchor at
-    # end-of-line.
-    m = re.search(r"Report: .*?/reports/[^/]+/([0-9a-f]+)\.md", cli_stdout)
+    # Real-output hazards, all verified live:
+    # 1. Rich wraps the long path across lines, and the wrap lands BETWEEN the
+    #    64-char apk_hash and the "/<run_id>.md" - real output is
+    #    "[bold green]Report:\noutputs/reports/<hash>\n/<run_id>.md[/bold green]".
+    #    So both "." and the hash segment must cross newlines: re.DOTALL makes
+    #    "." (and ".*?") span lines, and the hash segment must be ".*?" not
+    #    "[^/\n]+" - "[^/\n]+" stops at the newline before the "/run_id" and then
+    #    finds no "/" right after (Finding I; the friend's "[^/\n]+" suggestion
+    #    fails exactly here).
+    # 2. Trailing rich markup (e.g. "[/bold green]") may follow ".md" on the
+    #    same line, so don't anchor at end-of-line.
+    # The run_id is unambiguous hex terminating at ".md"; the ".*?/reports/.*?/"
+    # anchor skips the 64-char apk_hash (and any line wrap around it) so the
+    # capture is the 32-char run_id, not a prefix of the hash.
+    m = re.search(r"Report:.*?/reports/.*?/([0-9a-f]+)\.md", cli_stdout, re.DOTALL)
     return m.group(1) if m else None
 
 

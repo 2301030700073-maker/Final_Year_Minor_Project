@@ -207,13 +207,16 @@ def parse_aapt2_output(raw: str) -> PackageMetadata:
 
 def parse_signer_info(raw: str) -> SignerInfo:
     def _verified(scheme_label: str) -> bool | None:
-        # Finding G: an ABSENT scheme line must not read as False. apksigner only
-        # prints "Verified using <scheme>:" for schemes the APK is signed with -
-        # a v1-only APK carries no v2/v3/v4 line at all. Returning False for an
-        # absent line conflated "this scheme was checked and FAILED" with "this
-        # scheme was never exercised", a false negative in the signer metadata.
-        # None = scheme not present/not exercised; True/False = present and
-        # verified/failed. (The DB signer_v* columns are already bool|None.)
+        # Finding K (corrects the Finding G premise): real apksigner --verbose
+        # ALWAYS emits all four "Verified using <scheme>:" lines, with an
+        # explicit false for schemes the APK is not signed with - so on real
+        # output every scheme is present and None never fires. The original
+        # False for a "missing" line was therefore accurate, not a false
+        # negative. None is a DEFENSIVE fallback only, for a genuinely-absent
+        # line (partial/truncated tool output): None ("not exercised") is more
+        # honest than False ("checked and failed") when the output never even
+        # reported the scheme. True/False = present and verified/failed. (DB
+        # signer_v* columns are already bool|None.)
         match = re.search(rf"Verified using {re.escape(scheme_label)}.*?:\s*(true|false)", raw)
         if match is None:
             return None

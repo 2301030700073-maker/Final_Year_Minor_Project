@@ -38,6 +38,7 @@ Verifies
 Verified using v1 scheme (JAR signing): true
 Verified using v2 scheme (APK Signature Scheme v2): false
 Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v4 scheme (APK Signature Scheme v4): false
 Number of signers: 1
 Signer #1 certificate DN: CN=Android Debug, O=Android, C=US
 Signer #1 certificate SHA-256 digest: aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99
@@ -64,19 +65,50 @@ def test_parse_aapt2_output_missing_fields_are_none():
 
 
 def test_parse_signer_info_extracts_scheme_verification_and_cert():
+    # Finding K: the fixture is the REAL apksigner shape - all four scheme lines
+    # are always emitted, with an explicit false for unexercised schemes - so v4
+    # reads False (checked-and-failed semantics), not None. None is a defensive
+    # path covered by its own test below, not this real-output one.
     signer = parse_signer_info(APKSIGNER_SAMPLE)
     assert signer.v1_verified is True
     assert signer.v2_verified is False
     assert signer.v3_verified is False
-    assert signer.v4_verified is None  # no v4 line - scheme not exercised, not failed (Finding G)
+    assert signer.v4_verified is False
     assert signer.certificate_dn == "CN=Android Debug, O=Android, C=US"
     assert signer.certificate_sha256 == "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"
 
 
 def test_parse_signer_info_v4_scheme_true_when_present():
-    raw = APKSIGNER_SAMPLE + "Verified using v4 scheme (APK Signature Scheme v4): true\n"
+    # Real apksigner emits all four lines; v4 reads its own explicit verdict.
+    # Self-contained - not appended to APKSIGNER_SAMPLE, which now carries a
+    # v4:false line that re.search would match first.
+    raw = (
+        "Verifies\n"
+        "Verified using v1 scheme (JAR signing): true\n"
+        "Verified using v2 scheme (APK Signature Scheme v2): true\n"
+        "Verified using v3 scheme (APK Signature Scheme v3): false\n"
+        "Verified using v4 scheme (APK Signature Scheme v4): true\n"
+        "Number of signers: 1\n"
+    )
     signer = parse_signer_info(raw)
-    assert signer.v4_verified is True  # v4 (LIM-2) parsed from its own line
+    assert signer.v4_verified is True
+
+
+def test_parse_signer_info_absent_scheme_line_is_none_not_false():
+    # Finding K: real apksigner always emits all four scheme lines, so None
+    # never fires on real output. This is the DEFENSIVE path only - a genuinely
+    # absent line (partial/truncated tool output) reads None ("not exercised"),
+    # not False ("checked and failed"), so a dropped line can't masquerade as a
+    # failed verification.
+    raw = (
+        "Verifies\n"
+        "Verified using v1 scheme (JAR signing): true\n"
+        "Number of signers: 1\n"
+    )
+    signer = parse_signer_info(raw)
+    assert signer.v2_verified is None
+    assert signer.v3_verified is None
+    assert signer.v4_verified is None
 
 
 def test_ingest_preserves_partial_evidence_on_failure(tmp_path, monkeypatch):

@@ -54,7 +54,7 @@ from dynamic.success_checks.androgoat import AndroGoatSuccessCheck
 from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
 from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
 from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
-from ingest.metadata import ingest
+from ingest.metadata import compute_hashes, ingest
 from report.attribution import attribute_root_evidence, gate_all_third_party
 from report.generator import generate_calibration_report, generate_report
 from static.coverage import per_surface_coverage
@@ -70,7 +70,7 @@ from static.native import (
 )
 from static.obfuscation import detect_obfuscation_level
 from static.signatures import load_signatures, scan
-from storage.results import load_runs_for_calibration, save_metadata, save_run
+from storage.results import existing_metadata, load_runs_for_calibration, save_metadata, save_run
 
 app = typer.Typer()
 console = Console()
@@ -358,7 +358,13 @@ def run(
         raise typer.Exit(code=1)
 
     # --- ingest (identification, not gated behind auth - see module docstring) ---
-    ingest_result = ingest(apk)
+    # FR-1.3: re-running against an already-ingested APK references the existing
+    # record rather than re-ingesting. Hash first (cheap, in-memory) to resolve
+    # the record; ingest() then reuses its aapt2/apksigner metadata and skips the
+    # toolchain spawns instead of re-running them on every run. On a hash mismatch
+    # (file changed) ingest falls through to a full tool-backed re-ingest.
+    existing = existing_metadata(ANALYSIS_ROOT, compute_hashes(apk).sha256)
+    ingest_result = ingest(apk, reuse_metadata=existing)
     stage_results.append(ingest_result)
     _print_stage(ingest_result)
     if ingest_result.status == "failed":

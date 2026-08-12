@@ -175,6 +175,10 @@ def parse_aapt2_output(raw: str) -> PackageMetadata:
     # permissions declared via <uses-permission-sdk-23> etc.; the plain form
     # alone silently dropped those from the inventory.
     permissions = re.findall(r"uses-permission(?:-sdk-\d+|-sdk-lite)?: name='([^']*)'", raw)
+    # FR-1.2: dedupe preserving first-seen order - aapt2 can emit the same
+    # permission name more than once (merged manifests, plain + -sdk-N variants
+    # of the same declaration), and a consumer shouldn't see dupes in the inventory.
+    permissions = list(dict.fromkeys(permissions))
 
     return PackageMetadata(
         package_name=package_name,
@@ -214,7 +218,7 @@ def parse_signer_info(raw: str) -> SignerInfo:
     )
 
 
-def ingest(apk_path: Path) -> StageResult:
+def ingest(apk_path: Path, reuse_metadata: dict | None = None) -> StageResult:
     start = time.monotonic()
     evidence: dict = {}
     try:
@@ -234,6 +238,23 @@ def ingest(apk_path: Path) -> StageResult:
         # of throwing away the hashes/size on a later aapt2/apksigner failure.
         evidence["hashes"] = compute_hashes(apk_path).__dict__
         evidence["size_bytes"] = file_size(apk_path)
+        # FR-1.3: a re-run against an already-ingested APK references the existing
+        # record instead of re-running the Android toolchain. The caller resolves
+        # the record by this file's hash and passes it in; if its stored sha256
+        # matches what we just computed (same file), reuse the existing
+        # aapt2/apksigner/tool_versions metadata and skip the process spawns -
+        # the expensive part of a re-ingest. A mismatch (file changed) falls
+        # through to a full tool-backed ingest. Fresh hashes/size are kept - they
+        # are confirmed identical on the reuse path, so evidence stays authoritative.
+        if reuse_metadata:
+            if (reuse_metadata.get("hashes") or {}).get("sha256") == evidence["hashes"]["sha256"]:
+                evidence["package"] = reuse_metadata.get("package")
+                evidence["signer"] = reuse_metadata.get("signer")
+                evidence["tool_versions"] = reuse_metadata.get("tool_versions")
+                return StageResult(
+                    stage="ingest", status="success", evidence=evidence,
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                )
         package_metadata = parse_aapt2_output(run_aapt2_dump(apk_path))
         evidence["package"] = package_metadata.__dict__
         # The downstream dynamic stage hands package_name to frida_runner.attach() ->

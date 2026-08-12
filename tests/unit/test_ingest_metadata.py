@@ -198,6 +198,77 @@ def test_parse_aapt2_output_captures_sdk_variant_permissions():
     ]
 
 
+def test_ingest_reuses_existing_record_and_skips_tools(tmp_path, monkeypatch):
+    """FR-1.3: passing reuse_metadata for a matching sha256 must reference the
+    existing record (reuse its package/signer/tool_versions) and must NOT
+    re-spawn aapt2/apksigner - the expensive part of a re-ingest. If either tool
+    were called, the monkeypatch raises loudly."""
+    sample = tmp_path / "sample.apk"
+    sample.write_bytes(b"PK\x03\x04fr13 reuse path")
+
+    def _must_not_call(*args, **kwargs):
+        raise AssertionError("aapt2/apksigner must not run when reusing an existing record")
+
+    monkeypatch.setattr("ingest.metadata.run_aapt2_dump", _must_not_call)
+    monkeypatch.setattr("ingest.metadata.run_apksigner_verify", _must_not_call)
+
+    existing = {
+        "hashes": compute_hashes(sample).__dict__,
+        "size_bytes": sample.stat().st_size,
+        "package": {"package_name": "com.example.reused", "permissions": []},
+        "signer": {"v1_verified": True, "signer_count": 1},
+        "tool_versions": {"aapt2": "2.0", "apksigner": "1.0"},
+    }
+
+    result = ingest(sample, reuse_metadata=existing)
+
+    assert result.status == "success"
+    assert result.evidence["package"]["package_name"] == "com.example.reused"
+    assert result.evidence["signer"]["v1_verified"] is True
+    assert result.evidence["tool_versions"]["apksigner"] == "1.0"
+    # hashes/size are freshly computed and confirmed equal to the record
+    assert result.evidence["hashes"]["sha256"] == existing["hashes"]["sha256"]
+
+
+def test_ingest_reingests_when_reused_file_hash_mismatches(tmp_path, monkeypatch):
+    """FR-1.3: a changed file (hash mismatch vs the stored record) must NOT
+    reuse stale metadata - it falls through to a full tool-backed re-ingest."""
+    sample = tmp_path / "sample.apk"
+    sample.write_bytes(b"PK\x03\x04different file, must re-ingest")
+
+    monkeypatch.setattr(
+        "ingest.metadata.run_aapt2_dump",
+        lambda *a, **k: "package: name='owasp.mstg.uncrackable1' versionCode='1'\n",
+    )
+    monkeypatch.setattr("ingest.metadata.run_apksigner_verify", lambda *a, **k: "Verifies\n")
+
+    existing = {
+        "hashes": {"sha256": "0" * 64},  # deliberately wrong - must not match the file
+        "package": {"package_name": "com.example.stale"},
+    }
+
+    result = ingest(sample, reuse_metadata=existing)
+
+    assert result.status == "success"
+    assert result.evidence["package"]["package_name"] == "owasp.mstg.uncrackable1"
+    assert result.evidence["hashes"]["sha256"] != "0" * 64
+
+
+def test_parse_aapt2_output_dedupes_permissions():
+    # FR-1.2: aapt2 can emit the same permission more than once (plain + -sdk-N
+    # variants, merged manifests); the inventory must not show duplicates.
+    raw = (
+        "uses-permission: name='android.permission.INTERNET'\n"
+        "uses-permission-sdk-23: name='android.permission.INTERNET'\n"
+        "uses-permission: name='android.permission.CAMERA'\n"
+    )
+    metadata = parse_aapt2_output(raw)
+    assert metadata.permissions == [
+        "android.permission.INTERNET",
+        "android.permission.CAMERA",
+    ]
+
+
 def test_ingest_preserves_tool_error_type_at_boundary(tmp_path, monkeypatch):
     # NEW-G: a named Aapt2Error raised inside a tool call must surface its type
     # at the ingest boundary (error prefixed with 'Aapt2Error:'), not be

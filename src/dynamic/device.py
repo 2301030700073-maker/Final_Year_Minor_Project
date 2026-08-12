@@ -252,13 +252,24 @@ def discover_device(serial: str | None = None) -> str:
             "no connected device/emulator found via 'adb devices' - "
             "pass --skip-dynamic to skip this stage, or connect a rooted device/emulator"
         )
+    if len(lines) > 1:
+        # NFR-7: multiple devices with no --serial - fail loudly rather than
+        # guessing an arbitrary one ("never guess"). A silent lines[0] pick would
+        # analyze a device the operator didn't choose.
+        serials = ", ".join(line.split("\t")[0] for line in lines)
+        raise RuntimeError(
+            f"{len(lines)} devices/emulators connected ({serials}) - pass --serial to "
+            "pick one deterministically; refusing to analyze an arbitrary device"
+        )
     return lines[0].split("\t")[0]
 
 
 def install_apk(serial: str, apk_path: Path) -> None:
     adb = _require_adb()
+    # -t: allow installing testOnly APKs (some training/vulnerable apps are
+    # marked testOnly; install without -t fails INSTALL_FAILED_TEST_ONLY).
     subprocess.run(
-        [adb, "-s", serial, "install", "-r", str(apk_path)],
+        [adb, "-s", serial, "install", "-r", "-t", str(apk_path)],
         capture_output=True, text=True, check=True,
     )
 
@@ -278,7 +289,15 @@ def verify_installed(serial: str, package_name: str) -> bool:
         [adb, "-s", serial, "shell", "pm", "list", "packages", package_name],
         capture_output=True, text=True, check=True,
     )
-    return package_name in result.stdout
+    # FR-4.2: exact match, not substring. `pm list packages <filter>` filters by
+    # substring, and verify used to check `package_name in result.stdout` - so a
+    # similarly-prefixed package (com.x.prod) installed without the target
+    # (com.x) would leave the target's name in stdout and falsely "verify" an
+    # app that isn't there. Match the `package:` lines exactly instead.
+    for line in result.stdout.splitlines():
+        if line.startswith("package:") and line[8:] == package_name:
+            return True
+    return False
 
 
 def capture_logcat(serial: str, timeout_seconds: int = 15) -> str:

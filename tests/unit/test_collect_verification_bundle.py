@@ -35,8 +35,12 @@ def test_export_calibration_snapshot_reads_real_db_and_parses_json_columns(tmp_p
     analysis_dir.mkdir(parents=True)
 
     from sqlalchemy.orm import Session
-    from storage.db import RunRecord, get_engine
+    from storage.db import ApkRecord, RunRecord, get_engine
     with Session(get_engine(analysis_dir)) as session:
+        # FK enforcement (PRAGMA foreign_keys=ON) is on, so the parent apks row
+        # must exist before the run - matching the real save_metadata-before-
+        # save_run flow.
+        session.add(ApkRecord(sha256="abc123", first_ingested_at="2026-01-01T00:00:00", raw_metadata={}))
         session.add(RunRecord(
             run_id="run1", apk_sha256="abc123", timestamp="2026-01-01T00:00:00",
             action="ROOT_ONLY", root_confidence=0.8, root_detected=True,

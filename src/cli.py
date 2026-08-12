@@ -705,6 +705,34 @@ def run(
     )
 
 
+def _calibration_table(report) -> tuple[list[str], list[list[str]]]:
+    """Build the calibration summary as plain data (column headers + string
+    cells). Kept separate from the Rich rendering so header/cell parity is a
+    unit-testable fact rather than a hand-maintained layout: a future cell
+    added without its header (or vice versa) would misalign the table
+    silently. Renders both Tier-2 exclusion counts (no-GT and partial-
+    decompile) for parity with the generated report's two "Excluded from
+    Tier 2..." lines."""
+    def _fmt(rate: float | None) -> str:
+        return f"{rate:.2f}" if rate is not None else "N/A"
+
+    columns = [
+        "Category", "Tier 1 confirmation", "Tier 2 precision", "Tier 2 recall",
+        "Tier 2 F1", "n", "Excl no-GT", "Excl partial",
+    ]
+    rows: list[list[str]] = []
+    for category in ("root", "ssl"):
+        t1, t2 = report.tier1[category], report.tier2[category]
+        rows.append([
+            category,
+            f"{_fmt(t1.confirmation_rate.rate)} ({t1.confirmed}/{t1.confirmed + t1.not_confirmed})",
+            _fmt(t2.precision.rate), _fmt(t2.recall.rate), _fmt(t2.f1), str(t2.n),
+            str(report.excluded_no_ground_truth.get(category, 0)),
+            str(report.excluded_partial_decompile.get(category, 0)),
+        ])
+    return columns, rows
+
+
 @app.command("calibration-report")
 def calibration_report(
     ground_truth: Path = typer.Option(
@@ -730,27 +758,12 @@ def calibration_report(
         threshold={"root": root_threshold, "ssl": ssl_threshold},
     )
 
-    def _fmt(rate: float | None) -> str:
-        return f"{rate:.2f}" if rate is not None else "N/A"
-
+    columns, rows = _calibration_table(report)
     table = Table(title="Calibration Summary")
-    for column in ("Category", "Tier 1 confirmation", "Tier 2 precision", "Tier 2 recall", "Tier 2 F1", "n", "Excl no-GT", "Excl partial"):
+    for column in columns:
         table.add_column(column)
-    for category in ("root", "ssl"):
-        t1, t2 = report.tier1[category], report.tier2[category]
-        # Both Tier-2 exclusion counts surfaced as columns (parity with the
-        # generated report's two "Excluded from Tier 2..." lines): no-GT so n
-        # isn't read as the whole corpus, and partial-decompile so a category
-        # with a still-measurable precision isn't hiding that its negatives were
-        # under-excluded. The conditional N/A note below still explains the
-        # all-excluded case.
-        table.add_row(
-            category,
-            f"{_fmt(t1.confirmation_rate.rate)} ({t1.confirmed}/{t1.confirmed + t1.not_confirmed})",
-            _fmt(t2.precision.rate), _fmt(t2.recall.rate), _fmt(t2.f1), str(t2.n),
-            str(report.excluded_no_ground_truth.get(category, 0)),
-            str(report.excluded_partial_decompile.get(category, 0)),
-        )
+    for row in rows:
+        table.add_row(*row)
     console.print(table)
     if report.skeleton_warning:
         console.print(f"[yellow]{report.skeleton_warning}[/yellow]")

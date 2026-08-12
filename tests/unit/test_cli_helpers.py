@@ -312,3 +312,56 @@ def test_finalize_run_save_run_persists_the_completion_stage(monkeypatch):
     cli._finalize_run(**_finalize_kwargs())
 
     assert "audit" in [s.stage for s in captured["stage_results"]]
+
+
+def test_calibration_table_header_cell_parity_and_exclusion_counts():
+    # Maintainability guard: the calibration table's column headers and row
+    # cells live in one place (_calibration_table), so assert every row matches
+    # the header count - a future added/removed cell can't misalign the Rich
+    # table silently. Also verify both Tier-2 exclusion counts render.
+    from calibration.report import compute_calibration_report
+    from calibration.types import GroundTruthEntry, RunRow
+    from cli import _calibration_table
+
+    runs = [
+        RunRow(
+            apk_hash="h1", run_id="r1", action="ROOT_ONLY",
+            root_confidence=0.9, root_detected=True, root_bypassed=True,
+            ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+            decompile_completeness="complete",
+        ),
+        # h2: a negative from a partial decompile -> partial-decompile exclusion
+        # (disjoint from no-GT; it is partial-excluded and continue'd before the
+        # no-GT check).
+        RunRow(
+            apk_hash="h2", run_id="r2", action="ROOT_ONLY",
+            root_confidence=0.2, root_detected=False, root_bypassed=None,
+            ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+            decompile_completeness="partial",
+        ),
+        # h3: complete decompile, detected, but no ground-truth entry -> no-GT
+        # exclusion (not partial-excluded, so it reaches the no-GT check).
+        RunRow(
+            apk_hash="h3", run_id="r3", action="ROOT_ONLY",
+            root_confidence=0.8, root_detected=True, root_bypassed=True,
+            ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+            decompile_completeness="complete",
+        ),
+    ]
+    report = compute_calibration_report(
+        runs, ground_truth={"h1": GroundTruthEntry("h1", root=True, ssl=False, source="manual")},
+        generated_at="t", ground_truth_commit="c",
+    )
+
+    columns, rows = _calibration_table(report)
+
+    assert len(rows) == 2  # one per category
+    for row in rows:
+        assert len(row) == len(columns), (
+            f"calibration table header/cell parity broken: {len(columns)} columns "
+            f"but {len(row)} cells in row {row[0]}"
+        )
+    assert "Excl no-GT" in columns and "Excl partial" in columns
+    root_row = dict(zip(columns, rows[0]))
+    assert root_row["Excl no-GT"] == "1"
+    assert root_row["Excl partial"] == "1"

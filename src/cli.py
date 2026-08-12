@@ -621,7 +621,24 @@ def run(
             device.clear_logcat(serial)
             logcat_output = device.capture_logcat(serial)
             frida_log = "\n".join(str(m) for m in dynamic_stage.evidence.get("frida_messages", []))
-            success_check = SUCCESS_CHECKS[target]
+            # F: SCRIPTS_BY_TARGET_ACTION and SUCCESS_CHECKS must stay in sync.
+            # run_dynamic_stage degrades gracefully for unknown targets (returns a
+            # skipped StageResult), so reaching here with success means a script ran
+            # but no success check is registered - fail loudly as a StageResult
+            # (NFR-1), not a raw KeyError traceback.
+            success_check = SUCCESS_CHECKS.get(target)
+            if success_check is None:
+                check_stage = StageResult(
+                    stage="success-check", status="failed",
+                    evidence={"target": target},
+                    error=(
+                        f"no success check registered for target '{target}' - "
+                        "SCRIPTS_BY_TARGET_ACTION and SUCCESS_CHECKS are out of sync"
+                    ),
+                )
+                stage_results.append(check_stage)
+                _print_stage(check_stage)
+                _halt(stage_results)
             verification = success_check.check(logcat_output, frida_log)
             correlation_result = correlation_module.correlate(classification, verification)
 

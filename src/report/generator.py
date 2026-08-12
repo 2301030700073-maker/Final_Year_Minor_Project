@@ -116,7 +116,7 @@ Not recorded for this run.
 | Stage | Status | Duration (ms) | Error |
 |---|---|---|---|
 {% for s in stage_results -%}
-| {{ s.stage }} | {{ s.status }} | {{ s.duration_ms }} | {{ s.error or "" }} |
+| {{ s.stage }} | {{ s.status }}{% if s.stage == "dynamic" and s.status == "success" and (verification is none or (verification.root_bypassed is none and verification.ssl_bypassed is none)) %} (machinery ran; bypass not confirmed){% endif %} | {{ s.duration_ms }} | {{ s.error or "" }} |
 {% endfor %}
 ## Limitations
 

@@ -349,6 +349,39 @@ def test_generate_report_renders_inconclusive_bypass_as_not_a_failure(tmp_path):
     assert "- Root bypassed: None" not in content
 
 
+def test_generate_report_annotates_dynamic_success_with_unverified_bypass(tmp_path):
+    # FR-4 (E): a dynamic stage that ran (status="success") but whose bypass is
+    # not confirmed must not read as "bypass verified" in the Stage Results
+    # table - annotate it truthfully, while a confirmed bypass stays plain
+    # (reclassifying the stage to "skipped" would be false: the bypass WAS
+    # attempted, just not confirmed).
+    from common import VerificationResult
+    metadata = {"hashes": {"sha256": "e1"}, "package": {"package_name": "test.app"}}
+    dynamic = StageResult(
+        stage="dynamic", status="success",
+        evidence={"frida_messages": []}, duration_ms=500,
+    )
+
+    unverified = VerificationResult(root_bypassed=None, ssl_bypassed=None, evidence_lines={})
+    report_path = generate_report(
+        run_id="e-unverified", apk_hash="e1", timestamp="2026-08-12T12:00:00",
+        metadata=metadata, classification=_classification(), verification=unverified,
+        correlation=None, stage_results=[dynamic], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "success (machinery ran; bypass not confirmed)" in content
+
+    confirmed = VerificationResult(root_bypassed=True, ssl_bypassed=None, evidence_lines={})
+    report_path2 = generate_report(
+        run_id="e-confirmed", apk_hash="e2", timestamp="2026-08-12T12:00:00",
+        metadata={"hashes": {"sha256": "e2"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=confirmed, correlation=None,
+        stage_results=[dynamic], output_dir=tmp_path,
+    )
+    content2 = report_path2.read_text(encoding="utf-8")
+    assert "success (machinery ran" not in content2
+
+
 def test_generate_report_renders_git_commit(tmp_path):
     # RESID-7A: the report must show which version of the analysis code
     # produced it (reproducibility intent, ADR-0007) - like the toolchain

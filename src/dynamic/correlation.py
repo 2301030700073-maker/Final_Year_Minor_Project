@@ -25,11 +25,19 @@ def correlate(classification: ClassificationResult, verification: VerificationRe
         mismatches.append(
             "dynamic analysis confirmed a root-detection bypass, but static analysis did not predict root-detection"
         )
-    # not predicted + bypass is False/None: static said root-detection absent
-    # and dynamic found nothing to confirm - agreement, deliberately no mismatch
-    # arm. Stated explicitly (rather than falling through silently) so the full
-    # truth table is auditable: this cell cannot fabricate a confirmation the
-    # evidence never showed, so it is a match, not a conflict.
+    if not root_predicted and verification.root_bypassed is False:
+        # False is NOT "dynamic found nothing" - the success checks set False
+        # only in the contradiction branch (hooks confirmed fired AND a block
+        # signal observed, uncrackable1.py:81-90), an anomaly they refuse to
+        # resolve either way. Surfacing it here as a mismatch keeps that
+        # anomaly visible instead of swallowing it as agreement. (Reachable
+        # only defensively today - a root bypass runs only when root is
+        # predicted - so this is future-proofing, not a live path.)
+        mismatches.append(
+            "dynamic analysis observed a root-detection block signal despite no static prediction of root-detection - anomaly, investigate before trusting either signal"
+        )
+    # not predicted + bypass None (inconclusive): static said absent, dynamic
+    # never confirmed anything - agreement by non-claim, so no mismatch arm.
 
     ssl_predicted = classification.ssl.detected
     if ssl_predicted and verification.ssl_bypassed is False:
@@ -44,7 +52,8 @@ def correlate(classification: ClassificationResult, verification: VerificationRe
         mismatches.append(
             "dynamic analysis confirmed an SSL-pinning bypass, but static analysis did not predict SSL-pinning"
         )
-    # not predicted + SSL bypass False/None: agreement, as for root above - the
-    # cell is match by design, made explicit so the truth table stays complete.
+    # not predicted + SSL bypass None (inconclusive): agreement by non-claim, no
+    # mismatch arm. (No current success check sets an SSL False, so that cell is
+    # not reached either way.)
 
     return CorrelationResult(matches=len(mismatches) == 0, mismatches=mismatches)

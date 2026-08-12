@@ -1,7 +1,11 @@
 """run_dynamic_stage's graceful-degradation paths - the ones that never touch
 a device. Anything that reaches `attach()` is validated by real end-to-end
 runs on the reference environment, not a unit test (same split as the rest of
-the dynamic side)."""
+the dynamic side).
+
+FR-4.6 self-termination detection is pure logic (no device) and so is unit
+tested here too.
+"""
 
 from common import Action
 from dynamic import frida_runner
@@ -139,3 +143,49 @@ def test_wait_for_checkpoint_burns_full_window_without_signal(monkeypatch):
 
     assert len(sleeps) >= 7  # polls the full ~2.0s window in 0.25s steps
     assert clock["now"] >= 2.0
+
+
+# ---------------------------------------------------------------------------
+# FR-4.6: self-termination detection (pure logic)
+# ---------------------------------------------------------------------------
+
+from dynamic.frida_runner import _process_is_alive, classify_self_termination
+
+
+def test_classify_self_termination_true_when_process_dead():
+    # A spawned process that is gone after the settle window self-terminated.
+    assert classify_self_termination(False) is True
+
+
+def test_classify_self_termination_false_when_process_alive():
+    # An alive process means the bypass survived - not a self-termination.
+    assert classify_self_termination(True) is False
+
+
+class ProcessNotFoundError(Exception):
+    pass
+
+
+class _FakeAliveDevice:
+    def get_process(self, pid):
+        return {"pid": pid}
+
+
+class _FakeDeadDevice:
+    def get_process(self, pid):
+        raise ProcessNotFoundError("process not found")
+
+
+class _FakeTransientErrorDevice:
+    def get_process(self, pid):
+        raise RuntimeError("transient frida/device error")
+
+
+def test_process_is_alive_is_conservative():
+    # alive -> alive
+    assert _process_is_alive(_FakeAliveDevice(), 1) is True
+    # genuinely gone (ProcessNotFoundError) -> dead -> self-termination signal
+    assert _process_is_alive(_FakeDeadDevice(), 1) is False
+    # a transient frida/device error is NOT evidence of self-termination, so it
+    # must be treated as alive rather than false-flagging a healthy target.
+    assert _process_is_alive(_FakeTransientErrorDevice(), 1) is True

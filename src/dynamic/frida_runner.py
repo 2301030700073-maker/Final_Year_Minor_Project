@@ -100,6 +100,28 @@ def _wait_for_checkpoint(messages: list, settle_seconds: float) -> None:
         time.sleep(_CHECKPOINT_POLL_INTERVAL)
 
 
+def classify_self_termination(process_alive: bool) -> bool:
+    """FR-4.6: after the bypass scripts have run and the settle window elapsed,
+    a spawned process that is no longer alive self-terminated - it detected the
+    instrumentation (Frida/root) and exited (System.exit / killProcess). Returns
+    True when the process is gone, so the dynamic stage can report that as a
+    first-class, logged outcome instead of a generic success or an unexplained
+    crash. Pure - unit-testable anywhere, no device."""
+    return not process_alive
+
+
+def _process_is_alive(device, pid: int) -> bool:
+    """Reference-machine only. True unless frida confirms the process is gone
+    (ProcessNotFoundError). Conservative on purpose: a transient device/frida
+    error is NOT evidence of self-termination, so it is treated as alive rather
+    than risking a false self-termination report on a healthy target."""
+    try:
+        device.get_process(pid)
+        return True
+    except Exception as exc:
+        return type(exc).__name__ != "ProcessNotFoundError"
+
+
 # Target-specific UI actions to reach/trigger a bypass after resume.
 # AndroGoat's pinning runs from the CERTIFICATE PINNING button in
 # TrafficActivity (bounds [53,1167][1387,1335] on the reference emulator,
@@ -192,6 +214,29 @@ def run_dynamic_stage(
                 _run_ui_action(device_serial, ui_action)
             # RESID-6D: signal-aware wait instead of a blind settle sleep.
             _wait_for_checkpoint(messages, settle_seconds)
+
+            # FR-4.6: after the settle window, a spawned process that is no
+            # longer alive self-terminated - it detected the instrumentation
+            # (Frida/root) and exited (System.exit / killProcess). Surface that
+            # as a first-class, logged outcome with an explicit reason instead
+            # of silently reporting a generic success or an unexplained crash.
+            if classify_self_termination(_process_is_alive(device, pid)):
+                outcome["result"] = StageResult(
+                    stage="dynamic", status="failed",
+                    evidence={
+                        "app_self_terminated": True,
+                        "reason": (
+                            "target app self-terminated after resume - detected the "
+                            "instrumentation (Frida/root) and exited before dynamic "
+                            "verification could confirm a bypass"
+                        ),
+                        "scripts_applied": script_names, "pid": pid,
+                        "frida_messages": messages, "target": target,
+                    },
+                    error="app self-terminated due to detected instrumentation (FR-4.6)",
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                )
+                return
 
             outcome["result"] = StageResult(
                 stage="dynamic", status="success",

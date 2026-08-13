@@ -10,3 +10,6 @@ outputs/
 *-debuggable.apk
 tools/objection_cache/
 *.apk
+
+# L-M6: Ghidra install is a build artifact, never committed (~1GB extracted)
+tools/ghidra/

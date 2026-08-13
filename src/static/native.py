@@ -18,6 +18,7 @@ no-ops (principle 3).
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -70,6 +71,15 @@ class NativeLibrary:
     strings: list[str] = field(default_factory=list)        # embedded strings
     stripped: bool = False
     obfuscated: bool = False
+    # L-M6: Ghidra headless decompilation of this lib's function bodies.
+    # ghidra_decompiled is True ONLY when Ghidra genuinely produced functions -
+    # that is the honest "native = scanned" signal that upgrades a stripped/
+    # partial lib to fully_analyzed in compute_degradation. A failed/missing
+    # Ghidra run leaves ghidra_error set and ghidra_decompiled False, so the
+    # surface stays partial/unscannable - never falsely certified scanned.
+    ghidra_functions: list[str] = field(default_factory=list)
+    ghidra_decompiled: bool = False
+    ghidra_error: str | None = None
     # H1/H4: a tool timeout or non-zero exit on this file sets unscannable (not
     # a silent 'stripped' - that would certify a confident negative we couldn't
     # actually rule out). scan_error carries the loud message for the report.
@@ -210,7 +220,16 @@ def compute_degradation(libs: list[NativeLibrary]) -> dict[str, str]:
     scan can't silently under-cover (G6)."""
     coverage: dict[str, str] = {}
     for lib in libs:
-        if lib.unscannable:
+        if lib.ghidra_decompiled:
+            # L-M6: Ghidra decompiled real function bodies, so whatever
+            # readelf/strings missed (stripped, obfuscated, even a tool failure),
+            # the code was scanned at the function-body level - the surface is
+            # genuinely scanned. This is NOT a silent upgrade: ghidra_decompiled
+            # is only True on actual decompilation; a failed run keeps
+            # ghidra_error set and ghidra_decompiled False, so coverage stays
+            # partial/unscannable rather than falsely certified scanned.
+            coverage[lib.abi] = "fully_analyzed"
+        elif lib.unscannable:
             coverage[lib.abi] = "unscannable"
         elif lib.stripped or lib.obfuscated:
             coverage[lib.abi] = "partial"
@@ -344,3 +363,165 @@ def load_native_signatures(path: Path) -> list[NativeSignature]:
         _validate_native_entry(entry, path)
         sigs.append(NativeSignature(**entry))
     return sigs
+
+
+# --- L-M6: Ghidra headless decompilation (native surface -> scanned) ---------
+# The readelf/strings path above sees export symbols and embedded strings, but a
+# stripped or Dex2C-transpiled .so hides its logic in function bodies those two
+# cannot see - exactly the "native = unscannable/partial" gap L-M6 targets. Ghidra
+# headless decompiles every function to C pseudocode; this section feeds those
+# bodies to the SAME deterministic matcher (ADR-0001 - Ghidra is an evidence
+# source like jadx, never a decision tier). Pure parsing/matching is fixture-
+# testable anywhere; run_ghidra_headless is toolchain-gated and fails loudly.
+
+GHIDRA_DECOMPILE_SCRIPT = "ghidra_export_decompiled.java"  # versioned under scripts/
+# Java, not Python: Ghidra 12 removed Jython, and .py headless scripts need
+# PyGhidra which analyzeHeadless does not start with - a .java script always runs.
+GHIDRA_TIMEOUT = 600  # a real .so can take minutes to analyze + decompile
+
+
+@dataclass
+class GhidraFunction:
+    name: str
+    address: str
+    body: str
+
+
+# The Ghidra script writes one block per function: a header line then the
+# decompiled C body until the next header or EOF.
+_GHIDRA_FUNC_HEADER_RE = re.compile(r"^=== FUNC: (.+?) @ (.+?) ===$", re.MULTILINE)
+
+
+def parse_ghidra_decompile(text: str) -> list[GhidraFunction]:
+    """Parse the script's `=== FUNC: <name> @ <addr> ===` block format into
+    GhidraFunction objects. A block whose body is `(no decompilation)` keeps its
+    name/address with an empty body - the function exists but could not be
+    recovered, and the pipeline must never mistake that for an absent function
+    (principle 3)."""
+    funcs: list[GhidraFunction] = []
+    headers = list(_GHIDRA_FUNC_HEADER_RE.finditer(text))
+    for i, m in enumerate(headers):
+        name = m.group(1).strip()
+        address = m.group(2).strip()
+        end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
+        body = text[m.end():end].strip()
+        body = body.removesuffix("(no decompilation)").strip()
+        funcs.append(GhidraFunction(name=name, address=address, body=body))
+    return funcs
+
+
+def match_ghidra_decompile(
+    functions: list[GhidraFunction],
+    signatures: list[NativeSignature],
+) -> NativeScanResult:
+    """Match native signatures against decompiled function bodies. Unlike
+    match_native's exact corpus membership (export/string token lists), a
+    decompiled body is free-form C pseudocode, so a pattern is a substring match
+    - a root check calls access("/system/xbin/su", ...) and the literal appears
+    in the body, or a JNI symbol name appears in the text. Same weight-once-per-
+    signature discipline and Evidence shape as the Java/native matchers; the
+    offset carries the function's address for traceability."""
+    result = NativeScanResult(libraries=[])
+    matched_confidence: set[str] = set()
+    for func in functions:
+        body = func.body.casefold()
+        for sig in signatures:
+            hit_text = None
+            for pat in sig.patterns:
+                if pat.casefold() in body:
+                    hit_text = pat
+                    break
+            if hit_text is None or sig.id in matched_confidence:
+                continue
+            matched_confidence.add(sig.id)
+            item = Evidence(
+                signature_id=sig.id,
+                file=f"ghidra:{func.name}",
+                line_or_offset=func.address,
+                matched_text=hit_text,
+            )
+            if sig.category == "root":
+                result.root_evidence.append(item)
+            elif sig.category == "ssl":
+                result.ssl_evidence.append(item)
+    for sig in signatures:
+        if sig.id in matched_confidence:
+            if sig.category == "root":
+                result.root_confidence = min(1.0, result.root_confidence + sig.weight)
+            elif sig.category == "ssl":
+                result.ssl_confidence = min(1.0, result.ssl_confidence + sig.weight)
+    return result
+
+
+def _find_ghidra_headless() -> str:
+    """Locate analyzeHeadless: $GHIDRA_HOME/support/analyzeHeadless, else the
+    repo's tools/ghidra/ghidra_*/support/analyzeHeadless. Raises loudly (a
+    NativeToolError, catchable per-lib) if Ghidra is absent - never a silent
+    no-op (principle 3)."""
+    candidates: list[Path] = []
+    env = os.environ.get("GHIDRA_HOME")
+    if env:
+        candidates.append(Path(env) / "support" / "analyzeHeadless")
+    candidates.extend(
+        sorted(Path(__file__).resolve().parents[2].joinpath("tools", "ghidra").glob("ghidra_*/support/analyzeHeadless"))
+    )
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    raise NativeToolError(
+        "Ghidra analyzeHeadless not found - set GHIDRA_HOME or install under "
+        "tools/ghidra/ghidra_*/ (Ghidra decompilation runs on the reference environment)"
+    )
+
+
+def run_ghidra_headless(so_path: Path, work_dir: Path, script_dir: Path) -> Path:
+    """Run Ghidra headless on one .so, returning the path to the decompiled-text
+    output. Uses a throwaway project under work_dir so re-runs are clean. Fails
+    loudly on a missing Ghidra, a failed run, or missing output - never a silent
+    empty file misread as 'no native code' (principle 3)."""
+    headless = _find_ghidra_headless()
+    project_dir = work_dir / "ghidra_project"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    out_path = work_dir / "decompiled.txt"
+    if out_path.exists():
+        out_path.unlink()
+    cmd = [
+        headless,
+        str(project_dir), f"proj_{so_path.stem}",
+        "-import", str(so_path),
+        "-scriptPath", str(script_dir),
+        "-postScript", GHIDRA_DECOMPILE_SCRIPT, str(out_path),
+        "-scriptLog", str(work_dir / "ghidra_script.log"),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=GHIDRA_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise NativeToolError(f"Ghidra headless timed out after {GHIDRA_TIMEOUT:.0f}s on {so_path.name}") from None
+    if proc.returncode != 0:
+        lines = (proc.stderr or proc.stdout or "").strip().splitlines()
+        tail = lines[-1] if lines else "no output"
+        raise NativeToolError(
+            f"Ghidra headless exited {proc.returncode} on {so_path.name}: {tail[:200]}"
+        )
+    if not out_path.exists():
+        raise NativeToolError(f"Ghidra headless ran but produced no decompiled output on {so_path.name}")
+    return out_path
+
+
+def analyze_so_ghidra(so_path: Path, work_dir: Path, script_dir: Path | None = None) -> NativeLibrary:
+    """Analyze one .so with readelf/strings AND Ghidra decompilation. Returns a
+    NativeLibrary enriched with ghidra_functions + ghidra_decompiled. A readelf/
+    strings failure on this file still surfaces as unscannable (existing H1/H4
+    behavior); a Ghidra failure is recorded in ghidra_error with ghidra_decompiled
+    False, so coverage is never falsely certified scanned (principle 3)."""
+    lib = analyze_so(so_path)
+    script_dir = script_dir or (Path(__file__).resolve().parents[2] / "scripts")
+    try:
+        out = run_ghidra_headless(so_path, work_dir, script_dir)
+        funcs = parse_ghidra_decompile(out.read_text(encoding="utf-8", errors="replace"))
+        lib.ghidra_functions = [f.name for f in funcs]
+        lib.ghidra_decompiled = bool(funcs)
+    except NativeToolError as exc:
+        lib.ghidra_error = str(exc)
+        lib.ghidra_decompiled = False
+    return lib

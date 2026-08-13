@@ -59,7 +59,7 @@ from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
 from ingest.metadata import compute_hashes, ingest
 from report.attribution import attribute_root_evidence, gate_all_third_party
 from report.generator import generate_calibration_report, generate_report
-from static.coverage import per_surface_coverage
+from static.coverage import coverage_bound_line, per_surface_coverage
 from static.decision_engine import DEFAULT_THRESHOLD, classify
 from static.decompile import decompile
 from static.manifest import ManifestInfo, parse_manifest
@@ -555,6 +555,14 @@ def run(
             f"({jadx_file_count} files, jadx exit {jadx_exit_code}) - "
             "a NEITHER here is a lower bound, not a confident negative; see Limitations.[/bold red]"
         )
+    # L-M4: surface the coverage bound explicitly in the Decision block - the
+    # per-surface map plus, per category, whether a NEITHER would be a confident
+    # negative or a coverage-bound lower bound. L-M7's CAUTION above only covers
+    # java=partial; this also catches native=unscannable / manifest=partial,
+    # which per G-A bind the verdict even when Java is complete (most real apps
+    # ship no scannable .so, so native=unscannable alone already blocks a
+    # confident root/ssl NEITHER).
+    console.print(f"[dim]{coverage_bound_line(coverage_map)}[/dim]")
 
     # --- machine-readable ownership caveat (report-only attribution was the gap) ---
     # Attach the root attribution to the classification object itself so it

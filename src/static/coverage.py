@@ -105,3 +105,20 @@ def category_is_confident_negative(
     if surfaces is None:
         return False
     return all(coverage.get(s) == "fully_analyzed" for s in surfaces)
+
+
+def coverage_bound_line(coverage: dict[str, Coverage]) -> str:
+    """L-M4: one console line making the coverage bound explicit - the per-surface
+    map plus, per detection category, whether a NEITHER there would be a confident
+    negative or a coverage-bound lower bound. A verdict is never read as confident
+    absence when a governing surface is partial/unscannable. Pure string builder
+    (fixture-testable); the console print is wired in cli.py."""
+    surface_part = ", ".join(f"{k}={v}" for k, v in coverage.items())
+    cat_parts = []
+    for category in GOVERNING_SURFACES:
+        statuses = ", ".join(f"{s}={coverage.get(s, 'unknown')}" for s in GOVERNING_SURFACES[category])
+        if category_is_confident_negative(category, coverage):
+            cat_parts.append(f"{category}: NEITHER is a confident negative ({statuses})")
+        else:
+            cat_parts.append(f"{category}: NEITHER is a lower bound, NOT confident ({statuses})")
+    return f"Coverage bound: {surface_part}; " + "; ".join(cat_parts)

@@ -112,3 +112,92 @@
   patterns:
     - 'boolean\s+verify\s*\([^)]*\)\s*\{\s*return\s+true\s*;'
   evidence_type: source
+# --- L-M3: expanded SSL-pinning taxonomy toward the industry-standard 15
+# categories (APKShield-PT / Trafexia / Ostorlab / HackTricks, 2026). Each new
+# id is additive - it fires only when its technique is present, so existing
+# calibrated confidences are untouched. These detect pinning/trust-anchor
+# techniques (and trust-all anti-cert-check patterns) that the original 7 could
+# not see.
+
+- id: webview_ssl_error_handler_proceed
+  category: ssl
+  weight: 0.4
+  pattern_type: regex
+  multiline: true
+  case_sensitive: false
+  # WebView anti-cert-check bypass: onReceivedSslError(...) calls
+  # handler.proceed(), accepting any certificate error. Bounded lazy `.{0,200}?`
+  # keeps the regex linear (ReDoS-safe, NFR-1); DOTALL (via multiline) lets it
+  # span the signature/body newline the decompiler introduces. The proceed()
+  # call is the signal, so false positives are limited to code that genuinely
+  # swallows cert errors.
+  patterns:
+    - 'onReceivedSslError.{0,200}?proceed\s*\('
+  evidence_type: source
+
+- id: trustkit_pinning
+  category: ssl
+  weight: 0.45
+  pattern_type: class_reference
+  case_sensitive: false
+  # TrustKit (com.datatheorem.android.trustkit) is a dedicated pinning library;
+  # its presence means the app enforces certificate pinning through TrustKit's
+  # evaluator (Android's NSC or a custom TrustManager). A class reference, not
+  # the app's own pin - but a real, verifiable pinning-against-the-lib signal.
+  patterns:
+    - 'com.datatheorem.android.trustkit'
+  evidence_type: bytecode_string
+
+- id: keystore_set_certificate_entry
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  case_sensitive: false
+  # KeyStore.setCertificateEntry(...) - a common hand-rolled pinning technique
+  # (Ostorlab): the app pins a server cert into a KeyStore and only accepts
+  # chains anchored there. Detecting the API call is the pin-against-custom-store
+  # signal. Lower weight - storing a cert is necessary for the technique but not
+  # by itself proof of enforcement.
+  patterns:
+    - 'setCertificateEntry'
+  evidence_type: bytecode_string
+
+- id: certificate_factory_x509
+  category: ssl
+  weight: 0.3
+  pattern_type: regex
+  # CertificateFactory.getInstance("X.509") to build a Certificate from raw bytes
+  # is the classic hand-rolled verification pinning path (Ostorlab). The specific
+  # call (not the bare class name) keeps false positives to code that genuinely
+  # parses certificates.
+  patterns:
+    - 'CertificateFactory\.getInstance\s*\(\s*["'']X\.509'
+  evidence_type: bytecode_string
+
+- id: okhttp4_kotlin_certificate_pinner
+  category: ssl
+  weight: 0.5
+  pattern_type: regex
+  multiline: true
+  case_sensitive: false
+  # OkHttp 4 (Kotlin) pins via CertificatePinner.Builder().add("host", "sha256/..")
+  # or the builder-lambda form. The existing okhttp_certificate_pinner matches the
+  # Builder() construction; this requires the actual .add() pin call, catching the
+  # Kotlin DSL variant the single-line pattern can miss when the decompiler wraps
+  # it. Bounded `.{0,80}?` keeps it linear.
+  patterns:
+    - 'CertificatePinner\.Builder.{0,80}?\.add\s*\('
+  evidence_type: source
+
+- id: cronet_cert_verifier
+  category: ssl
+  weight: 0.45
+  pattern_type: string_literal
+  case_sensitive: false
+  # Cronet (org.chromium.net) pins via CronetEngine.Builder.setCertVerifier(...)
+  # with a custom CertVerifier - gRPC-over-Cronet / modern network stacks bypass
+  # OkHttp's CertificatePinner entirely. setCertVerifier is Cronet-specific, so
+  # the string is a low-false-positive pinning signal.
+  patterns:
+    - 'setCertVerifier'
+  evidence_type: bytecode_string

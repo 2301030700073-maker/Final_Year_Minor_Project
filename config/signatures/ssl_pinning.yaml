@@ -78,3 +78,37 @@
     # <pin-set> with real SHA-256 pins was invisible to the old hash signature.
     - 'digest="SHA-256">[A-Za-z0-9+/]{20,}={0,2}'
   evidence_type: resource_xml
+- id: trust_all_x509_checkservertrusted
+  category: ssl
+  weight: 0.4
+  pattern_type: regex
+  multiline: true
+  case_sensitive: false
+  # The canonical trust-all bypass: an X509TrustManager whose
+  # checkServerTrusted(...) body is EMPTY - it accepts any chain. Distinct
+  # from custom_trustmanager_checkservertrusted (which only catches the
+  # `implements X509TrustManager` type reference, not what the impl does). The
+  # jadx decompiler routinely splits the signature and the empty body across
+  # lines, so this opts into the L-M9 multiline whole-text pass; DOTALL lets
+  # `[^)]*` span the parameter newline. Empty-body-only keeps false positives
+  # near zero - a real implementation always has a body.
+  patterns:
+    # `[^{]*` after the params lets a `) throws CertificateException {` clause
+    # sit between the close paren and the body brace (the common real shape).
+    - 'checkServerTrusted\s*\([^)]*\)[^{]*\{\s*\}'
+  evidence_type: source
+- id: hostname_verifier_always_true
+  category: ssl
+  weight: 0.35
+  pattern_type: regex
+  multiline: true
+  case_sensitive: false
+  # Hostname bypass: a HostnameVerifier.verify(...) that unconditionally
+  # returns true accepts any hostname for any certificate - the other half of
+  # the trust-all pair. Case-insensitive so "Boolean"/"VERIFY" naming variants
+  # don't escape (L-M9); multiline because the decompiler wraps the signature
+  # and `return true;`. The unconditional-true body is the bypass, so false
+  # positives are limited to code that genuinely means "accept all hosts".
+  patterns:
+    - 'boolean\s+verify\s*\([^)]*\)\s*\{\s*return\s+true\s*;'
+  evidence_type: source

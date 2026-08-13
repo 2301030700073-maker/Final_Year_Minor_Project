@@ -757,3 +757,130 @@ def test_scan_evidence_carries_deterministic_verification_state(tmp_path):
     assert evidence.root_evidence
     for e in evidence.root_evidence:
         assert e.verification_state == "deterministic_matched"
+
+
+def test_scan_includes_smali_as_a_scanned_surface(tmp_path):
+    # L-M3 (S1): apktool's .smali is the fallback evidence layer that survives
+    # even when jadx's .java decompile is partial (PropertyGuru). Root-detection
+    # string constants appear in smali as const-strings, and the scan must walk
+    # them - previously .smali was excluded from SCANNED_SUFFIXES, so this
+    # evidence surface was walked (apktool output was already a scan root) but
+    # ignored. Verify a .smali const-string is scanned and credited.
+    sig_yaml = tmp_path / "sigs.yaml"
+    sig_yaml.write_text(
+        "- id: root_su\n"
+        "  category: root\n"
+        "  weight: 0.8\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['/system/bin/su']\n"
+        "  evidence_type: root\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "Main.smali").write_text(
+        '.class public Lcom/example/Main;\n'
+        'const-string v0, "/system/bin/su"\n',
+        encoding="utf-8",
+    )
+
+    evidence = scan(tmp_path, load_signatures(sig_yaml))
+
+    assert evidence.root_confidence == 0.8  # smali evidence credited
+    assert len(evidence.root_evidence) == 1
+    assert evidence.root_evidence[0].file == "Main.smali"
+    assert evidence.scanned_file_count == 1  # the .smali file was walked
+
+
+def test_java_regex_signatures_do_not_false_positive_on_smali(tmp_path):
+    # L-M3 (S1): adding .smali to SCANNED_SUFFIXES must be strictly additive -
+    # Java-oriented regex signatures must not misfire against smali's structured
+    # syntax (;->, $Builder, Ljavax/net/ssl/...;). Use the REAL signature files
+    # (not hand-rolled regexes) against the exact smali spellings of the Java
+    # code the patterns legitimately target: the OkHttp pinner as a class ref,
+    # the TrustManager as `.implements`, the runtime exec as an invoke-static.
+    # The fixture deliberately omits root path const-strings (which smali SHOULD
+    # catch) so a nonzero score here would mean a genuine java-regex false positive.
+    root_sigs = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    ssl_sigs = load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")
+
+    (tmp_path / "A.smali").write_text(
+        '.class public Lokhttp3/CertificatePinner$Builder;\n'
+        '.implements Ljavax/net/ssl/X509TrustManager;\n'
+        'invoke-static {}, Ljava/lang/Runtime;->getRuntime()Ljava/lang/Runtime;\n'
+        'invoke-virtual {v0}, Ljava/lang/Runtime;->exec(Ljava/lang/String;)Ljava/lang/Process;\n',
+        encoding="utf-8",
+    )
+
+    evidence_root = scan(tmp_path, root_sigs)
+    evidence_ssl = scan(tmp_path, ssl_sigs)
+
+    # None of the java regex signatures fire on smali syntax - adding .smali to
+    # SCANNED_SUFFIXES is additive, not a new false-positive source.
+    assert evidence_root.root_confidence == 0.0
+    assert evidence_root.root_evidence == []
+    assert evidence_ssl.ssl_confidence == 0.0
+    assert evidence_ssl.ssl_evidence == []
+
+
+def test_ssl_trust_all_and_hostname_bypass_signatures_fire_on_java(tmp_path):
+    # L-M5: the two new SSL signatures (trust_all_x509_checkservertrusted,
+    # hostname_verifier_always_true) must detect the canonical trust-all bypass
+    # pair in real decompiled Java - and use the L-M9 multiline + case-insensitive
+    # flags (which L-M5 noted were available but unused) since the decompiler
+    # splits the signature and body across lines.
+    ssl_sigs = load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")
+    ids = {s.id for s in ssl_sigs}
+    assert "trust_all_x509_checkservertrusted" in ids
+    assert "hostname_verifier_always_true" in ids
+
+    (tmp_path / "TrustAll.java").write_text(
+        "TrustManager tm = new X509TrustManager() {\n"
+        "    public void checkServerTrusted(X509Certificate[] chain,\n"
+        "            String authType) throws CertificateException {\n"
+        "    }\n"
+        "    public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }\n"
+        "};\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "HostBypass.java").write_text(
+        "HostnameVerifier hv = new HostnameVerifier() {\n"
+        "    public Boolean verify(String hostname, SSLSession session) {\n"
+        "        return true;\n"
+        "    }\n"
+        "};\n",
+        encoding="utf-8",
+    )
+
+    evidence = scan(tmp_path, ssl_sigs)
+
+    matched = {e.signature_id for e in evidence.ssl_evidence}
+    assert "trust_all_x509_checkservertrusted" in matched
+    assert "hostname_verifier_always_true" in matched
+    # `Boolean` (boxed, capital B) and the split lines prove the case-insensitive
+    # + multiline flags are actually doing work, not just defaulted.
+    assert evidence.ssl_confidence >= 0.35
+
+
+def test_ssl_new_signatures_do_not_fire_on_well_formed_tls_code(tmp_path):
+    # L-M5 false-positive guard: an empty checkServerTrusted body and an
+    # unconditional-return-true verify are the bypasses - well-formed TLS code
+    # that actually validates must NOT match them.
+    ssl_sigs = load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")
+
+    (tmp_path / "Good.java").write_text(
+        "public void checkServerTrusted(X509Certificate[] chain, String authType) {\n"
+        "    validate(chain, authType);\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "GoodVerify.java").write_text(
+        "public boolean verify(String hostname, SSLSession session) {\n"
+        "    return hostname.equals(expected);\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    evidence = scan(tmp_path, ssl_sigs)
+
+    matched = {e.signature_id for e in evidence.ssl_evidence}
+    assert "trust_all_x509_checkservertrusted" not in matched  # body not empty
+    assert "hostname_verifier_always_true" not in matched       # verify not unconditional-true

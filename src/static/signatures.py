@@ -12,7 +12,15 @@ import yaml
 
 from common import Evidence, StaticEvidence
 
-SCANNED_SUFFIXES = (".java", ".xml")
+# L-M3 (S1): scan the fallback evidence layer too. jadx's .java decompile can be
+# partial on large/obfuscated APKs (PropertyGuru - jadx died on one AndroidX
+# class with 1563 real files written), but apktool's .smali reliably survives
+# and carries root-detection string constants (su paths, test-keys, magisk
+# artifacts) as const-strings even when jadx failed. Java-oriented regex
+# signatures (method calls, `implements X509TrustManager`) cannot match smali's
+# structured syntax (;->, $Builder, Ljavax/net/ssl/...;), so smali scanning is
+# strictly additive evidence on a surface that was previously walked but ignored.
+SCANNED_SUFFIXES = (".java", ".xml", ".smali")
 
 VALID_CATEGORIES = {"root", "ssl"}
 VALID_PATTERN_TYPES = {"string_literal", "class_reference", "regex"}

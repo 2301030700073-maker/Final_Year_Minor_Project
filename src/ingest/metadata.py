@@ -63,6 +63,11 @@ class SignerInfo:
     certificate_sha256: str | None
     signer_count: int
     signers: list[SignerCert] = field(default_factory=list)
+    # L-M10: the COMPLETE, version-agnostic set of "Verified using <scheme>"
+    # lines the installed apksigner emitted, keyed by scheme label. A 2nd
+    # apksigner version (build-tools 34.0.0) emits a v3.1 line the fixed v1..v4
+    # fields below never see; this dict guarantees no scheme is ever dropped.
+    schemes: dict[str, bool] = field(default_factory=dict)
 
 
 def compute_hashes(apk_path: Path) -> HashSet:
@@ -206,26 +211,29 @@ def parse_aapt2_output(raw: str) -> PackageMetadata:
 
 
 def parse_signer_info(raw: str) -> SignerInfo:
-    def _verified(scheme_label: str) -> bool | None:
-        # Finding K (corrects the Finding G premise): real apksigner --verbose
-        # ALWAYS emits all four "Verified using <scheme>:" lines, with an
-        # explicit false for schemes the APK is not signed with - so on real
-        # output every scheme is present and None never fires. The original
-        # False for a "missing" line was therefore accurate, not a false
-        # negative. None is a DEFENSIVE fallback only, for a genuinely-absent
-        # line (partial/truncated tool output): None ("not exercised") is more
-        # honest than False ("checked and failed") when the output never even
-        # reported the scheme. True/False = present and verified/failed. (DB
-        # signer_v* columns are already bool|None.)
-        match = re.search(rf"Verified using {re.escape(scheme_label)}.*?:\s*(true|false)", raw)
-        if match is None:
-            return None
-        return match.group(1) == "true"
+    def _schemes(raw: str) -> dict[str, bool]:
+        # L-M10 (cross-version robustness): capture EVERY "Verified using
+        # <scheme>: <bool>" line the installed apksigner emits, by scheme label,
+        # instead of hardcoding v1..v4. A 2nd apksigner version (verified on
+        # Android build-tools 34.0.0 vs Debian 31.0.2) emits a "v3.1 scheme
+        # (APK Signature Scheme v3.1)" line that a v1..v4-only parser silently
+        # dropped - a scheme ignored is a verification gap. The generic capture
+        # records a future v5/v6 or vendor variant automatically, never drops it.
+        pairs = re.findall(r"Verified using (.+?):\s*(true|false)", raw)
+        return {label.strip(): (state == "true") for label, state in pairs}
 
-    v1 = _verified("v1 scheme (JAR signing)")
-    v2 = _verified("v2 scheme (APK Signature Scheme v2)")
-    v3 = _verified("v3 scheme (APK Signature Scheme v3)")
-    v4 = _verified("v4 scheme (APK Signature Scheme v4)")
+    schemes = _schemes(raw)
+
+    # Specific fields kept for backward compatibility (DB signer_v* columns and
+    # downstream consumers), derived from the generic capture. None ("scheme not
+    # reported") is the defensive fallback for a genuinely-absent line, distinct
+    # from False ("reported and failed") - see Finding K's correction of the
+    # Finding G premise. The full `schemes` dict carries the complete set, so no
+    # scheme apksigner emits is lost to a hardcoded allowlist.
+    v1 = schemes.get("v1 scheme (JAR signing)")
+    v2 = schemes.get("v2 scheme (APK Signature Scheme v2)")
+    v3 = schemes.get("v3 scheme (APK Signature Scheme v3)")
+    v4 = schemes.get("v4 scheme (APK Signature Scheme v4)")
 
     # LIM-3: capture every signer, not just #1. Both finds are prefixed with
     # the label so re.findall can't pick up stray hex runs (e.g. "SHA-256").
@@ -242,6 +250,7 @@ def parse_signer_info(raw: str) -> SignerInfo:
         certificate_sha256=signers[0].sha256 if signers else None,
         signer_count=len(signers),
         signers=signers,
+        schemes=schemes,
     )
 
 

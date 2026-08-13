@@ -1,0 +1,17 @@
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer #1 certificate DN: CN=Dang Chien Duong, OU=IT Department Mobile Team Android, O=Allproperty Media Pte. Ltd., L=Singapore, ST=Singapore, C=65
+Signer #1 certificate SHA-256 digest: 7814fb2b2d0cc4b4f5411be2771faf6217e01b3d9619be485c19f39e53c6af35
+Signer #1 certificate SHA-1 digest: 67f7c23614fddd1b10af42c2ddae384b56e1d507
+Signer #1 certificate MD5 digest: 525b36f290c4a5cf418242ed1fcd9132
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 1024
+Signer #1 public key SHA-256 digest: ba855cb07d6cba7126bb150a7c20287db94dfc980fafd939ca57a2e16873ad38
+Signer #1 public key SHA-1 digest: 279ede82c16ce05986c834974d187e72b36f8326
+Signer #1 public key MD5 digest: b5e4be6c7457821c0495f518840ce6bf

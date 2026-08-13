@@ -472,7 +472,7 @@ def run(
             )
     scan_stage, static_evidence = _wrap_stage(
         "static_scan", scan, static_roots, root_signatures + ssl_signatures,
-        sqlite_path=Path(analysis_root) / apk_hash / "xref.sqlite",
+        sqlite_path=Path(ANALYSIS_ROOT) / apk_hash / "xref.sqlite",
         mapping=mapping,
     )
     stage_results.append(scan_stage)
@@ -651,8 +651,22 @@ def run(
     # --- dynamic analysis ---
     verification: Optional[VerificationResult] = None
     correlation_result = None
+    # L-M2: synthesize a deterministic bypass from the techniques the static
+    # engine detected, so a real app (no hand-authored script) still gets a real
+    # dynamic attempt. Generation is PURE - it needs no device, only deployment
+    # does - so synthesize it for EVERY run and attach the generated script to
+    # the record. This makes the synthesizer provably exercised against a real
+    # classification (never "only unit-verified") and keeps the generated script
+    # in the run evidence even when no device can deploy it.
+    synth = synthesize(classification, classification.action)
     if skip_dynamic:
-        dynamic_stage = StageResult(stage="dynamic", status="skipped", evidence={"reason": "--skip-dynamic passed"})
+        dynamic_stage = StageResult(
+            stage="dynamic", status="skipped",
+            evidence={
+                "reason": "--skip-dynamic passed",
+                "synthesized": {"source": synth.source, "applied_hooks": synth.applied_hooks},
+            },
+        )
         stage_results.append(dynamic_stage)
         _print_stage(dynamic_stage)
     else:
@@ -682,12 +696,10 @@ def run(
             stage_results.append(dynamic_stage)
             _print_stage(dynamic_stage)
             _halt(stage_results)
-        # L-M2: synthesize a deterministic bypass from the techniques the static
-        # engine detected, so a real app (no hand-authored script) still gets a
-        # real dynamic attempt. Passed as synthesized to run_dynamic_stage, which
-        # only consumes it when there's no target-specific script (unknown target /
-        # real app) - hand-authored scripts for known targets take precedence.
-        synth = synthesize(classification, classification.action)
+        # Passed as synthesized to run_dynamic_stage, which only consumes it when
+        # there's no target-specific script (unknown target / real app) - hand-
+        # authored scripts for known targets take precedence. `synth` was computed
+        # above, before the device gate, so it exists even when no device deploys.
         dynamic_stage = frida_runner.run_dynamic_stage(
             serial, package_name, classification.action, target=target,
             synthesized={"source": synth.source, "applied_hooks": synth.applied_hooks},

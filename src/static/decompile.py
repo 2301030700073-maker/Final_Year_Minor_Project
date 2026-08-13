@@ -22,11 +22,14 @@ and a successful apktool that wrote no manifest is treated as failure (D4).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
+import zipfile
 from pathlib import Path
 
 from common import StageResult
@@ -308,6 +311,89 @@ def _build_error_tail(jadx_rc: int, jadx_log: str, apktool_rc: int, apktool_log:
     return None if not parts else "\n".join(parts)
 
 
+def _list_dex_entries(apk_path: Path) -> list[dict]:
+    """L-M1 lazy decompile: enumerate the APK's DEX units (classes*.dex) so jadx
+    can run once per DEX instead of once over the whole APK. Returns [] when the
+    APK is not a readable zip or holds no DEX, in which case decompile() falls
+    back to the whole-APK path (unit tests call decompile() with fake APK paths,
+    so this must degrade to [], not raise)."""
+    apk_path = Path(apk_path)
+    entries = []
+    try:
+        with zipfile.ZipFile(apk_path) as z:
+            names = [n for n in z.namelist()
+                     if re.fullmatch(r"classes\d*\.dex", Path(n).name)]
+            for name in sorted(names):
+                data = z.read(name)
+                entries.append({
+                    "name": name,
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "size": len(data),
+                })
+    except (OSError, zipfile.BadZipFile, KeyError):
+        return []
+    return entries
+
+
+def _dex_cache_key(entry: dict) -> str:
+    """Dex-stable cache key: the DEX's own name plus a hash of its bytes. A DEX
+    identical across APK builds maps to the same cached decompile and is reused
+    (the jadx-headless-mcp disk-code-cache pattern); a changed DEX gets a fresh
+    key and is re-decompiled on its own, leaving untouched DEXes cached."""
+    stem = Path(entry["name"]).stem  # classes, classes2, ...
+    return f"{stem}-{entry['sha256'][:12]}"
+
+
+def _decompile_dexes(
+    apk_path: Path, target_dir: Path, dex_entries: list[dict], jadx: str,
+) -> tuple[int, int, list[dict]]:
+    """L-M1 lazy per-DEX decompile. Runs jadx once per DEX, bounded-memory - a
+    hung/OOM on one DEX no longer discards the whole APK (the all-or-nothing
+    cliff lazy decompile exists to remove). Each DEX output is cached under
+    target_dir/jadx/<dex-key>/ and reused on a later run. Returns
+    (aggregate_returncode, total_java_files, units). aggregate_returncode is 0
+    only when every DEX decompiled cleanly; any failed DEX degrades it to 1
+    (partial) while its siblings' output is preserved, so a partial result still
+    hands real, scannable .java to static analysis."""
+    jadx_dir = target_dir / "jadx"
+    dex_sources = target_dir / "dex_sources"
+    units: list[dict] = []
+    any_failed = False
+    for entry in dex_entries:
+        out_dir = jadx_dir / _dex_cache_key(entry)
+        existing = _count_java_files(out_dir)
+        if existing > 0:
+            # Per-DEX lazy reuse: this exact DEX was already decompiled (same
+            # dex-stable identity) - don't re-run jadx over it.
+            units.append({"dex": entry["name"], "status": "cached", "files": existing})
+            continue
+        dex_file = dex_sources / entry["name"]
+        try:
+            if not dex_file.exists():
+                dex_sources.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(apk_path) as z:
+                    z.extract(entry["name"], dex_sources)
+            rc, log = _run_tool_logged(
+                [jadx, "-d", str(out_dir), str(dex_file)],
+                dex_sources / f"{Path(entry['name']).stem}.log",
+                jadx_timeout_for_size(entry["size"]), "jadx",
+            )
+        except (OSError, zipfile.BadZipFile, KeyError) as exc:
+            rc, log = -1, str(exc)
+        files = _count_java_files(out_dir)
+        # Partial-honesty: a DEX that wrote .java but whose jadx still exited
+        # non-zero is a PARTIAL decompile, not a clean one (the same rule as the
+        # whole-APK path - an exit code of 1 must degrade completeness, never be
+        # laundered into "complete"). Only cached units (proven ok earlier) skip
+        # the check. A files==0 DEX is a hard failure on top of that.
+        if files == 0 or (rc != 0 and files > 0):
+            any_failed = True
+        units.append({"dex": entry["name"], "status": "ok" if files > 0 else "failed",
+                      "files": files, "exit": rc, "error_tail": log if files == 0 else None})
+    jadx_file_count = _count_java_files(jadx_dir)
+    return (1 if any_failed else 0), jadx_file_count, units
+
+
 def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
     start = time.monotonic()
     try:
@@ -333,31 +419,45 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         jadx = _require_tool("jadx")
         apktool = _require_tool("apktool")
 
-        # D5: re-decompile only the half that is missing or hollow. A hollow
-        # half is cleared before re-running so no ambiguous stale state is
-        # left behind; a valid half (real .java / a real manifest already on
-        # disk from a prior partial run) is reused rather than thrown away.
-        jadx_log = target_dir / "jadx.log"
-        if _count_java_files(jadx_dir) > 0:
-            jadx_returncode, jadx_log_text = 0, ""  # reuse existing valid jadx output
+        # L-M1 lazy decompile: when the APK is a zip holding classes*.dex, run
+        # jadx once PER DEX - bounded memory, so a hung/OOM on one DEX no longer
+        # discards the whole APK (the all-or-nothing cliff lazy decompile exists
+        # to remove) - with a per-DEX disk cache keyed by dex-stable identity
+        # (a DEX already decompiled is reused). Fall back to whole-APK jadx when
+        # the APK is not a readable zip or holds no DEX (unit tests use fake
+        # paths, so this branch is what keeps them on the proven whole-APK path).
+        per_dex_units = None
+        dex_entries = _list_dex_entries(apk_path)
+        if dex_entries:
+            jadx_returncode, jadx_file_count, per_dex_units = _decompile_dexes(
+                apk_path, target_dir, dex_entries, jadx)
+            jadx_log_text = ""
         else:
-            if jadx_dir.exists():
-                shutil.rmtree(jadx_dir, ignore_errors=True)
-            # L-M1: size-scaled timeout. The APK always exists here in the real
-            # pipeline (ingest verified it), but decompile() is also called
-            # directly in unit tests with fake paths, so a non-stat-able path
-            # must not crash - fall back to the floor timeout (fail-fast),
-            # which is the safe direction for an absent/corrupt file anyway.
-            try:
-                apk_size = apk_path.stat().st_size
-            except OSError:
-                apk_size = 0
-            jadx_returncode, jadx_log_text = _run_tool_logged(
-                [jadx, "-d", str(jadx_dir), str(apk_path)], jadx_log,
-                jadx_timeout_for_size(apk_size), "jadx",
-            )
-
-        jadx_file_count = _count_java_files(jadx_dir)
+            # D5: re-decompile only the half that is missing or hollow. A hollow
+            # half is cleared before re-running so no ambiguous stale state is
+            # left behind; a valid half (real .java / a real manifest already on
+            # disk from a prior partial run) is reused rather than thrown away.
+            jadx_log = target_dir / "jadx.log"
+            if _count_java_files(jadx_dir) > 0:
+                jadx_returncode, jadx_log_text = 0, ""  # reuse existing valid jadx output
+            else:
+                if jadx_dir.exists():
+                    shutil.rmtree(jadx_dir, ignore_errors=True)
+                # L-M1: size-scaled timeout. The APK always exists here in the
+                # real pipeline (ingest verified it), but decompile() is also
+                # called directly in unit tests with fake paths, so a non-stat-
+                # able path must not crash - fall back to the floor timeout
+                # (fail-fast), which is the safe direction for an absent/corrupt
+                # file anyway.
+                try:
+                    apk_size = apk_path.stat().st_size
+                except OSError:
+                    apk_size = 0
+                jadx_returncode, jadx_log_text = _run_tool_logged(
+                    [jadx, "-d", str(jadx_dir), str(apk_path)], jadx_log,
+                    jadx_timeout_for_size(apk_size), "jadx",
+                )
+            jadx_file_count = _count_java_files(jadx_dir)
 
         if jadx_returncode != 0 and jadx_file_count == 0:
             # Total failure - nothing real to hand downstream. apktool is
@@ -376,7 +476,13 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         # the classes it choked on with a secondary engine instead of leaving a
         # hole. Recorded loudly when tooling is absent (principle 3).
         fallback = {}
-        if jadx_returncode != 0 and jadx_file_count > 0:
+        if per_dex_units is None and jadx_returncode != 0 and jadx_file_count > 0:
+            # L-M1 core: when jadx is partial (exit != 0 but wrote real .java -
+            # the AndroidX LocalBroadcastManager RegionMakerVisitor bug), try to
+            # recover the classes it choked on with a secondary engine instead of
+            # leaving a hole. Recorded loudly when tooling is absent (principle 3).
+            # Only on the whole-APK path - per-DEX is already granular, and
+            # re-running CFR over the whole APK would defeat the memory benefit.
             fallback = _run_secondary_fallback(apk_path, target_dir, jadx_log)
 
         # jadx either fully succeeded, or crashed but left real output behind -
@@ -417,6 +523,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                 "jadx_file_count": jadx_file_count,
                 "jadx_error_tail": error_tail,
                 **fallback,
+                **({"lazy_decompile": True, "dex_units": per_dex_units} if per_dex_units else {}),
             }, indent=2),
             encoding="utf-8",
         )
@@ -429,6 +536,9 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         )
         if fallback:
             result.evidence.update(fallback)
+        if per_dex_units:
+            result.evidence["lazy_decompile"] = True
+            result.evidence["dex_units"] = per_dex_units
         return result
     except Exception as exc:
         # _require_tool RuntimeError, unexpected filesystem/JSON errors. No
@@ -484,7 +594,8 @@ def _cached_result(start: float, jadx_dir: Path, apktool_dir: Path, status_sidec
                 jadx_error_tail=data.get("jadx_error_tail"),
             )
             for key in ("fallback_engine", "fallback_unavailable", "fallback_recovered",
-                        "fallback_output", "fallback_error_tail", "fallback_file_count"):
+                        "fallback_output", "fallback_error_tail", "fallback_file_count",
+                        "lazy_decompile", "dex_units"):
                 if key in data:
                     result.evidence[key] = data[key]
             return result

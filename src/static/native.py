@@ -41,6 +41,13 @@ READELF_TIMEOUT = 60
 NM_TIMEOUT = 60
 STRINGS_TIMEOUT = 60
 UNZIP_TIMEOUT = 120
+# L-M6: Ghidra headless decompilation of native function bodies. The path is
+# discovered under tools/ghidra/ghidra_*/support/, not hardcoded; a missing
+# install degrades gracefully (ghidra_decompile returns ok=False with a loud
+# error) so the lib stays partial rather than crashing the scan or being falsely
+# certified scanned (ADR-0006). Per-lib timeout is generous - the first JVM/
+# headless run is slow - and a hang still surfaces as a loud per-lib failure.
+GHIDRA_TIMEOUT = 300
 
 
 class NativeToolError(RuntimeError):
@@ -173,6 +180,19 @@ def _classify_obfuscated(exports: list[str], strings: list[str]) -> bool:
     return mangle > len(exports) * 0.5
 
 
+def _corpus_contains(corpus: list[str], ghidra_functions: list[str], pattern: str) -> bool:
+    """Exact membership on the symbol/string corpus, plus substring search over
+    Ghidra-decompiled function bodies. Decompiled bodies are multi-line C, so a
+    technique-level call (`ptrace(...)`, `fork()`), a JNI root-check dispatch, or
+    an opaque symbol readelf only sees inside a function is matched against the
+    decompiled text. Body search is applied only to export_symbol signatures
+    (behavioral); string-literal signatures keep exact membership so a substring
+    of a benign symbol never false-positives (ADR-0006)."""
+    if pattern in corpus:
+        return True
+    return bool(ghidra_functions) and any(pattern in body for body in ghidra_functions)
+
+
 def _is_stripped(exports: list[str], text_symbols: str) -> bool:
     """G10: a stripped .so has no .symtab (only the dynamic symbol table from
     readelf -Ws remains). Detected from the presence of a `.symtab` section in
@@ -198,18 +218,24 @@ def match_native(
     for lib in libraries:
         path = f"{lib.abi}/{lib.name}"
         for sig in signatures:
-            # embedded_string matches against the string corpus; export_symbol
-            # (including JNI exports) against the export corpus.
+            # embedded_string matches against the string corpus (exact only - no
+            # function-body search, to keep substring false positives out);
+            # export_symbol (including JNI exports) against the export corpus,
+            # plus Ghidra-decompiled function bodies when present.
             this_corpus = lib.strings if sig.pattern_type == "embedded_string" else lib.exports + lib.jni_exports
+            body_fns = lib.ghidra_functions if sig.pattern_type != "embedded_string" else []
             if sig.require_all:
                 # AND semantics (native anti-debug combo): every pattern must be
                 # present. Otherwise `ptrace` alone would fire on any app that
                 # imports libc's ptrace for a benign reason (ADR-0006).
-                if not all(p in this_corpus for p in sig.patterns):
+                if not all(_corpus_contains(this_corpus, body_fns, p) for p in sig.patterns):
                     continue
                 hit_pattern = sig.patterns[0]
             else:
-                hit_pattern = next((p for p in sig.patterns if p in this_corpus), None)
+                hit_pattern = next(
+                    (p for p in sig.patterns if _corpus_contains(this_corpus, body_fns, p)),
+                    None,
+                )
                 if hit_pattern is None:
                     continue
             key = (sig.id, path)
@@ -217,11 +243,11 @@ def match_native(
                 continue  # already credited this (sig, lib)
             matched.add(key)
             matched_confidence.add(sig.id)
-            idx = this_corpus.index(hit_pattern)
+            idx = this_corpus.index(hit_pattern) if hit_pattern in this_corpus else -1
             item = Evidence(
                 signature_id=sig.id,
                 file=path,
-                line_or_offset=f"symbol[{idx}]",
+                line_or_offset=f"symbol[{idx}]" if idx >= 0 else "decompiled-body",
                 matched_text=hit_pattern,
             )
             if sig.category == "root":
@@ -292,6 +318,73 @@ def _run_tool(cmd: list[str], timeout: float, tool_name: str) -> str:
     return proc.stdout
 
 
+_GHIDRA_FUNC_RE = re.compile(r"^FUNC (\S+)$", re.MULTILINE)
+
+
+def _parse_ghidra_functions(text: str) -> list[str]:
+    """Split DumpFunctions output into one "<name>\\n<body>" string per function.
+    Empty when nothing parsed - the caller must treat that as "Ghidra decompiled
+    nothing", not as proof of absence."""
+    parts = _GHIDRA_FUNC_RE.split(text)
+    bodies: list[str] = []
+    # parts = ["", name1, body1, name2, body2, ...]
+    for i in range(1, len(parts) - 1, 2):
+        body = parts[i + 1].strip()
+        if body:
+            bodies.append(f"{parts[i]}\n{body}")
+    return bodies
+
+
+def _find_ghidra_headless() -> str | None:
+    """Locate the Ghidra headless binary under tools/ghidra/ghidra_*/support/.
+    Returns None (not raising) so a missing install degrades native coverage to
+    partial instead of failing the whole scan - Ghidra is an optional deepening
+    of the symbol/string layer, not a required tool."""
+    root = Path(__file__).resolve().parents[2]
+    candidates = sorted((root / "tools" / "ghidra").glob("ghidra_*/support/analyzeHeadless"))
+    return str(candidates[-1]) if candidates else None
+
+
+def ghidra_decompile(so_path: Path, out_path: Path) -> tuple[bool, list[str], str | None]:
+    """Decompile a .so's function bodies with Ghidra headless.
+
+    Returns (ok, function_bodies, error). ok=True ONLY when Ghidra genuinely
+    produced decompiled functions (bodies non-empty). Any failure - missing
+    Ghidra/script, timeout, non-zero exit, no functions produced - returns
+    ok=False with a loud error and an empty list, so the lib stays
+    partial/unscannable rather than being falsely certified scanned
+    (H1/H4, principle 3, ADR-0006)."""
+    headless = _find_ghidra_headless()
+    if headless is None:
+        return False, [], "ghidra headless not found (tools/ghidra/ghidra_*/support/analyzeHeadless)"
+    script = Path(__file__).resolve().parents[2] / "scripts" / "ghidra" / "DumpFunctions.java"
+    if not script.exists():
+        return False, [], f"ghidra script missing: {script}"
+    project_dir = out_path.parent / "_ghidra_proj"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    if out_path.exists():
+        out_path.unlink()
+    cmd = [
+        headless, str(project_dir), "GhidraProject",
+        "-import", str(so_path),
+        "-scriptPath", str(script.parent),
+        "-postScript", "DumpFunctions", str(out_path),
+        "-deleteProject", "-overwrite",
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, timeout=GHIDRA_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return False, [], f"ghidra timed out after {GHIDRA_TIMEOUT:.0f}s on {so_path.name}"
+    except OSError as exc:
+        return False, [], f"ghidra failed to launch: {exc}"
+    if not out_path.exists():
+        return False, [], "ghidra produced no output file"
+    bodies = _parse_ghidra_functions(out_path.read_text(errors="replace"))
+    if not bodies:
+        return False, [], "ghidra decompiled no functions"
+    return True, bodies, None
+
+
 def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
     """Extract lib/<abi>/*.so from the APK into dest_root. Returns the .so paths.
     Uses `unzip` (present in the reference toolchain); fails loudly if absent.
@@ -348,6 +441,25 @@ def analyze_so(so_path: Path) -> NativeLibrary:
 
     stripped = _is_stripped(exports, sections)
     obfuscated = _classify_obfuscated(exports, embedded)
+
+    # L-M6: deepen coverage by decompiling this lib's function bodies with
+    # Ghidra headless - but ONLY a lib the symbol/string layer left PARTIAL
+    # (stripped or obfuscated), which is exactly where readelf/strings are blind
+    # and function-body decompilation adds real coverage. A healthy lib is
+    # already fully_analyzed and its behavior is visible in symbols/strings, so
+    # running Ghidra on it would only burn 30-60s per lib for no gain (a real
+    # cost on apps with dozens of .so). A failed or absent Ghidra degrades
+    # gracefully (ok=False -> ghidra_error set, ghidra_decompiled stays False)
+    # and the lib remains partial - it is never falsely certified scanned
+    # (ADR-0006).
+    ghidra_functions: list[str] = []
+    ghidra_decompiled = False
+    ghidra_error: str | None = None
+    if stripped or obfuscated:
+        ghidra_decompiled, ghidra_functions, ghidra_error = ghidra_decompile(
+            so_path, so_path.parent / f"{so_path.stem}.ghidra.txt"
+        )
+
     return NativeLibrary(
         abi=abi,
         name=name,
@@ -356,6 +468,9 @@ def analyze_so(so_path: Path) -> NativeLibrary:
         strings=embedded,
         stripped=stripped,
         obfuscated=obfuscated,
+        ghidra_functions=ghidra_functions,
+        ghidra_decompiled=ghidra_decompiled,
+        ghidra_error=ghidra_error,
     )
 
 

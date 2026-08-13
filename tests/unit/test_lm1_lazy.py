@@ -169,3 +169,67 @@ def test_run_dex_fallback_is_loud_when_cfr_absent(tmp_path, monkeypatch):
     assert res["fallback_unavailable"] is True
     assert res["fallback_recovered"] is False
     assert res["fallback_file_count"] == 0
+
+
+def test_per_dex_cfr_recovery_lifts_aggregate_to_clean(tmp_path, monkeypatch):
+    # A jadx-failed DEX that a secondary engine (dex2jar+CFR) independently
+    # re-read with material output is NOT a hole - the aggregate returncode lifts
+    # from partial (1) to clean (0), so completeness can go complete (ADR-0006:
+    # only because the second engine's output is comparable, never on a guess).
+    apk = _make_apk(tmp_path, {"classes.dex": b"AAAA", "classes2.dex": b"BBBB"})
+    dex_entries = _list_dex_entries(apk)
+    from static import decompile as dm
+
+    def fake_fallback(dex_file, target_dir, log_path):
+        return {"fallback_engine": "cfr", "fallback_unavailable": False,
+                "fallback_recovered": True, "fallback_output": str(target_dir / "cfr"),
+                "fallback_file_count": 5, "fallback_error_tail": None}
+
+    monkeypatch.setattr(dm, "_run_dex_fallback", fake_fallback)
+    bindir = tmp_path / "bin"; bindir.mkdir()
+    jadx = bindir / "jadx"
+    jadx.write_text(
+        "#!/bin/sh\n"
+        "[ \"$1\" = \"--version\" ] && echo 1.5.6-fake && exit 0\n"
+        "out=$2; mkdir -p \"$out\"\n"
+        "echo 'class X{}' > \"$out/X.java\"\n"
+        "exit 1\n"  # jadx writes a real file but reports failure (AndroidX bug)
+    )
+    jadx.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ.get('PATH', '')}")
+
+    rc, count, units, fb = dm._decompile_dexes(apk, tmp_path / "tgt", dex_entries, str(jadx))
+    assert rc == 0                                  # recovered dex is not a hole
+    assert all(u["covered"] for u in units)
+    assert all(u["recovered"] for u in units)
+
+
+def test_per_dex_unrecovered_jadx_failure_stays_partial(tmp_path, monkeypatch):
+    # A jadx-failed DEX with NO secondary recovery is still a hole -> aggregate 1
+    # (partial). Recovery being unavailable must never launder it into covered.
+    apk = _make_apk(tmp_path, {"classes.dex": b"AAAA"})
+    dex_entries = _list_dex_entries(apk)
+    from static import decompile as dm
+
+    def fake_fallback(dex_file, target_dir, log_path):
+        return {"fallback_engine": None, "fallback_unavailable": True,
+                "fallback_recovered": False, "fallback_output": None,
+                "fallback_file_count": 0, "fallback_error_tail": "no cfr"}
+
+    monkeypatch.setattr(dm, "_run_dex_fallback", fake_fallback)
+    bindir = tmp_path / "bin"; bindir.mkdir()
+    jadx = bindir / "jadx"
+    jadx.write_text(
+        "#!/bin/sh\n"
+        "[ \"$1\" = \"--version\" ] && echo 1.5.6-fake && exit 0\n"
+        "out=$2; mkdir -p \"$out\"\n"
+        "echo 'class X{}' > \"$out/X.java\"\n"
+        "exit 1\n"
+    )
+    jadx.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ.get('PATH', '')}")
+
+    rc, count, units, fb = dm._decompile_dexes(apk, tmp_path / "tgt2", dex_entries, str(jadx))
+    assert rc == 1
+    assert not units[0]["covered"]
+    assert units[0]["recovered"] is False

@@ -14,13 +14,16 @@ from static.native import (
     NativeLibrary,
     NativeSignature,
     compute_degradation,
+    ghidra_decompile,
     load_native_signatures,
     match_native,
     parse_readelf_symbols,
     parse_strings,
     _classify_obfuscated,
+    _corpus_contains,
     _is_jni_export,
     _is_stripped,
+    _parse_ghidra_functions,
 )
 
 
@@ -177,6 +180,75 @@ def test_match_native_no_match_zero_confidence():
     result = match_native([lib], [sig])
     assert result.root_confidence == 0.0
     assert result.root_evidence == []
+
+
+def test_parse_ghidra_functions_parses_func_markers():
+    # DumpFunctions emits "FUNC <name>" then the multi-line decompiled C body.
+    text = (
+        "FUNC Java_sg_vantagepoint_CodeCheck_bar\n"
+        "void Java_sg_vantagepoint_CodeCheck_bar(void){\n  ptrace(PTRACE_TRACEME,0);\n}\n"
+        "FUNC JNI_OnLoad\n"
+        "jint JNI_OnLoad(void){\n  return 0x6;\n}\n"
+    )
+    bodies = _parse_ghidra_functions(text)
+    assert len(bodies) == 2
+    assert "ptrace" in bodies[0]
+    assert "JNI_OnLoad" in bodies[1]
+
+
+def test_parse_ghidra_functions_empty_on_no_markers():
+    assert _parse_ghidra_functions("no FUNC lines here\n") == []
+
+
+def test_corpus_contains_finds_pattern_in_function_body():
+    # A decompiled body is multi-line C: substring search finds a technique call
+    # that exact symbol membership would miss (L-M6).
+    corpus = ["JNI_OnLoad"]
+    bodies = ["foo\nvoid foo(void){ ptrace(PTRACE_TRACEME); fork(); }"]
+    assert _corpus_contains(corpus, bodies, "ptrace") is True
+    # exact symbol membership still wins first
+    assert _corpus_contains(["ptrace"], [], "ptrace") is True
+    # embedded_string style (no bodies searched): exact-only, no substring FP
+    assert _corpus_contains(["ptrace"], [], "trace") is False
+
+
+def test_match_native_fires_on_ghidra_function_body():
+    # A signature whose pattern is ONLY inside a decompiled body (not an export
+    # symbol / embedded string) fires via the function-body corpus, and the
+    # Evidence records it as a decompiled-body match (L-M6).
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="libx.so", ghidra_decompiled=True,
+        ghidra_functions=["bar\nvoid bar(void){ ptrace(PTRACE_TRACEME,0); fork(); }"],
+    )
+    sig = NativeSignature(id="native_ptrace_fork_antidebug", category="root", weight=0.5,
+                          pattern_type="export_symbol", patterns=["ptrace"])
+    res = match_native([lib], [sig])
+    assert res.root_confidence == 0.5
+    assert res.root_evidence[0].line_or_offset == "decompiled-body"
+
+
+def test_ghidra_decompile_ok_false_when_ghidra_absent(tmp_path, monkeypatch):
+    # A missing Ghidra install must degrade loudly (ok=False + error), never
+    # crash and never falsely certify the lib scanned (principle 3).
+    from static import native as native_mod
+    monkeypatch.setattr(native_mod, "_find_ghidra_headless", lambda: None)
+    ok, bodies, err = native_mod.ghidra_decompile(tmp_path / "lib.so", tmp_path / "o.txt")
+    assert ok is False
+    assert bodies == []
+    assert "ghidra headless not found" in err
+
+
+def test_compute_degradation_ghidra_lifts_stripped_to_fully_analyzed():
+    # A stripped lib that Ghidra genuinely decompiled is scanned at the
+    # function-body level -> fully_analyzed, not partial (L-M6).
+    lib = NativeLibrary(abi="arm64-v8a", name="lib.so", stripped=True,
+                        ghidra_decompiled=True, ghidra_functions=["a\nint a(){return 1;}"])
+    assert compute_degradation([lib])["arm64-v8a"] == "fully_analyzed"
+    # A FAILED Ghidra run must NOT lift it - ghidra_error set, ghidra_decompiled
+    # False keeps the honest partial (ADR-0006).
+    lib2 = NativeLibrary(abi="arm64-v8a", name="lib2.so", stripped=True,
+                         ghidra_decompiled=False, ghidra_error="timed out")
+    assert compute_degradation([lib2])["arm64-v8a"] == "partial"
 
 
 def test_compute_degradation_stripped_is_partial():

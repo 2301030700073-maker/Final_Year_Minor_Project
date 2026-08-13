@@ -496,6 +496,16 @@ def _run_dex_fallback(dex_file: Path, target_dir: Path, log_path: Path) -> dict:
     }
 
 
+# A jadx-failed DEX is treated as "covered" (not a hole) only when a secondary
+# engine (dex2jar+CFR) independently re-read the dex and produced at least this
+# fraction of the .java jadx wrote. dex2jar converts the WHOLE dex, so a
+# comparable recovered count is honest evidence the dex is broadly readable by
+# a second engine; a recovered count far below it means both engines struggled,
+# so the dex stays a partial hole rather than being laundered into full coverage
+# (ADR-0006 - measured, never overclaimed).
+_RECOVERY_COVERAGE_RATIO = 0.5
+
+
 def _decompile_dexes(
     apk_path: Path, target_dir: Path, dex_entries: list[dict], jadx: str,
 ) -> tuple[int, int, list[dict], dict]:
@@ -527,8 +537,10 @@ def _decompile_dexes(
         existing = _count_java_files(out_dir)
         if existing > 0:
             # Per-DEX lazy reuse: this exact DEX was already decompiled (same
-            # dex-stable identity) - don't re-run jadx over it.
-            units.append({"dex": entry["name"], "status": "cached", "files": existing})
+            # dex-stable identity) - don't re-run jadx over it. A cached unit was
+            # proven ok when it was first produced, so it counts as covered.
+            units.append({"dex": entry["name"], "status": "cached", "files": existing,
+                          "covered": True})
             continue
         dex_file = dex_sources / entry["name"]
         try:
@@ -544,16 +556,15 @@ def _decompile_dexes(
         except (OSError, zipfile.BadZipFile, KeyError) as exc:
             rc, log = -1, str(exc)
         files = _count_java_files(out_dir)
-        # Partial-honesty: a DEX that wrote .java but whose jadx still exited
-        # non-zero is a PARTIAL decompile, not a clean one (the same rule as the
-        # whole-APK path - an exit code of 1 must degrade completeness, never be
-        # laundered into "complete"). Only cached units (proven ok earlier) skip
-        # the check. A files==0 DEX is a hard failure on top of that.
-        if files == 0 or (rc != 0 and files > 0):
-            any_failed = True
+        # A DEX that wrote .java but whose jadx still exited non-zero is a
+        # PARTIAL decompile, not a clean one. Whether it is a *covered* DEX (no
+        # hole) is decided AFTER the recovery block below - a secondary engine
+        # that independently re-read it can lift it out of hole territory. A
+        # files==0 DEX that recovery also cannot fill stays a hard hole.
         units.append({"dex": entry["name"], "status": "ok" if files > 0 else "failed",
                       "files": files, "exit": rc, "error_tail": log if files == 0 else None,
-                      "recovered": False, "recovered_count": 0, "recovery_unavailable": False})
+                      "recovered": False, "recovered_count": 0, "recovery_unavailable": False,
+                      "covered": False})
         # Per-DEX recovery: jadx choked on this DEX (exit != 0) - recover the
         # classes it lost with dex2jar+CFR instead of leaving the hole. Cached
         # units were proven ok earlier and are skipped. Recovery is scoped to
@@ -577,6 +588,21 @@ def _decompile_dexes(
             units[-1]["recovered_count"] = dex_fb.get("fallback_file_count")
             units[-1]["recovery_unavailable"] = dex_fb.get("fallback_unavailable")
             units[-1]["recovery_error_tail"] = dex_fb.get("fallback_error_tail")
+        # Finalise per-DEX coverage after recovery: a clean jadx unit is covered;
+        # a jadx-failed unit is covered ONLY if the secondary engine independently
+        # produced material output for it (>= _RECOVERY_COVERAGE_RATIO of the
+        # .java jadx wrote) - otherwise it stays a partial hole, never laundered
+        # into full coverage. A files==0 unit that recovery also cannot fill is a
+        # hole.
+        if rc == 0 and files > 0:
+            units[-1]["covered"] = True
+        elif units[-1]["recovered"] and units[-1]["recovered_count"] > 0:
+            units[-1]["covered"] = (
+                units[-1]["recovered_count"] >= _RECOVERY_COVERAGE_RATIO * max(files, 1))
+    # any_failed is set only by a DEX that is NOT covered after recovery - a hole
+    # the pipeline did not (or could not) fill. This lets a CFR-recovered DEX lift
+    # the aggregate toward complete, while an unrecovered one honestly degrades it.
+    any_failed = not all(u.get("covered", True) for u in units)
     jadx_file_count = _count_java_files(jadx_dir)
     if not fallback["fallback_per_dex"]:
         fallback = {}
@@ -707,8 +733,15 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
             )
 
         # A failure on either side degrades the whole run to partial (D2);
-        # only when both exit 0 is the decompile complete.
-        completeness = "complete" if (jadx_returncode == 0 and apktool_returncode == 0) else "partial"
+        # only when both exit 0 is the decompile complete. On the whole-APK path
+        # a jadx exit 1 can be rescued by a secondary engine that independently
+        # re-read the APK with comparable output - the same covered-after-recovery
+        # rule the per-DEX path applies (ADR-0006 - measured, never overclaimed).
+        jadx_covered = (jadx_returncode == 0) or (
+            bool(fallback.get("fallback_recovered"))
+            and fallback.get("fallback_file_count", 0)
+            >= _RECOVERY_COVERAGE_RATIO * max(jadx_file_count, 1))
+        completeness = "complete" if (jadx_covered and apktool_returncode == 0) else "partial"
         error_tail = _build_error_tail(jadx_returncode, jadx_log_text, apktool_returncode, apktool_log_text)
         status_sidecar.write_text(
             json.dumps({

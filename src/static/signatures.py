@@ -45,6 +45,12 @@ class Signature:
     pattern_type: str
     patterns: list[str]
     evidence_type: str
+    # L-M9 (S5/G10): opt-in matching flags. Defaults reproduce the historical
+    # behavior exactly - case-sensitive, single-line - so existing signature
+    # YAML and every calibrated confidence are unchanged until an author
+    # explicitly opts a pattern into the looser matching.
+    case_sensitive: bool = True
+    multiline: bool = False
 
 
 def _validate_signature_entry(entry: dict, path: Path) -> None:
@@ -73,6 +79,25 @@ def _validate_signature_entry(entry: dict, path: Path) -> None:
         )
     if not entry.get("patterns"):
         raise ValueError(f"{path}: signature '{sig_id}' has no patterns")
+    # L-M9: the new opt-in flags must fail loudly on a typo (a string "true"
+    # instead of a bool) exactly like the other hand-authored fields, instead
+    # of truthy-silently changing detection behavior at scan time.
+    for flag_name in ("case_sensitive", "multiline"):
+        value = entry.get(flag_name)
+        if value is not None and not isinstance(value, bool):
+            raise ValueError(
+                f"{path}: signature '{sig_id}' has invalid {flag_name} "
+                f"{value!r} - must be a boolean"
+            )
+    # multiline only makes sense for regex: string_literal/class_reference
+    # matching is defined per-line and has no cross-line mode, so allowing the
+    # flag there would be a silent no-op. Reject at load instead (same rule as
+    # the invalid-category check).
+    if entry.get("multiline", False) and pattern_type != "regex":
+        raise ValueError(
+            f"{path}: signature '{sig_id}' sets multiline but pattern_type "
+            f"'{pattern_type}' - multiline matching only applies to regex patterns"
+        )
     if pattern_type == "regex":
         # RESID-4B: a typo'd regex (e.g. an unclosed group) would otherwise pass
         # load and raise re.error mid-scan, killing a good APK's whole static
@@ -99,15 +124,29 @@ def load_signatures(path: Path) -> list[Signature]:
 
 
 def _line_matches(line: str, signature: Signature) -> str | None:
-    """Return the matched text if this line matches the signature, else None."""
+    """Return the matched text if this line matches the signature, else None.
+
+    L-M9 (S5/G10): honors the signature's opt-in case_sensitive flag. When
+    case-insensitive, string-literal/class-reference patterns match on
+    folded case and regex patterns compile with re.IGNORECASE, so mixed-case
+    variants of a known technique (e.g. "Test-Keys" or "Su") stop silently
+    escaping detection. Default (case_sensitive=True) is byte-exact current
+    behavior."""
     if signature.pattern_type in ("string_literal", "class_reference"):
+        if not signature.case_sensitive:
+            folded_line = line.casefold()
+            for pattern in signature.patterns:
+                if pattern.casefold() in folded_line:
+                    return pattern
+            return None
         for pattern in signature.patterns:
             if pattern in line:
                 return pattern
         return None
     if signature.pattern_type == "regex":
+        flags = re.IGNORECASE if not signature.case_sensitive else 0
         for pattern in signature.patterns:
-            match = re.search(pattern, line)
+            match = re.search(pattern, line, flags)
             if match:
                 return match.group(0)
         return None
@@ -148,13 +187,17 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
     total_counts: dict[str, int] = defaultdict(int)
     for file_path, root in files:
         try:
-            # errors="strict" (the default): errors="ignore" would read a file
-            # with malformed bytes by silently stripping them, while the file
-            # still counted as fully scanned - a second silent partial-read
-            # path alongside the OSError case. A file that cannot fully decode
-            # is genuinely degraded, so count it unreadable the same way, and
-            # let a NEITHER built over it be flagged rather than read as clean.
-            lines = file_path.read_text(encoding="utf-8").splitlines()
+            # Read the whole text once. errors="strict" (the default):
+            # errors="ignore" would read a file with malformed bytes by silently
+            # stripping them, while the file still counted as fully scanned - a
+            # second silent partial-read path alongside the OSError case. A file
+            # that cannot fully decode is genuinely degraded, so count it
+            # unreadable the same way, and let a NEITHER built over it be flagged
+            # rather than read as clean. The full text is also what the L-M9
+            # multiline whole-text pass matches against; splitlines() derives the
+            # per-line view for the default single-line signatures.
+            text = file_path.read_text(encoding="utf-8")
+            lines = text.splitlines()
         except (OSError, UnicodeDecodeError):
             # RESID-4G: an unreadable file (e.g. chmod-000, a corrupt entry) was
             # silently dropped while scanned_file_count still counted it as
@@ -168,9 +211,37 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
             # locate it in the bundle's analysis/ tree.
             evidence.unreadable_files.append(str(file_path.relative_to(root)))
             continue
+
+        # RESID-4A/4F recording, shared by the per-line and multiline paths so a
+        # hit from either lands identically (same set/counters/Evidence rows).
+        def _record(signature: Signature, matched_text: str, line_number: int) -> None:
+            matched_signatures.add(signature.id)
+            total_counts[signature.id] += 1
+            # RESID-4F: record at most MAX_EVIDENCE_PER_SIGNATURE matches per
+            # signature - enough to attribute the finding, not thousands of
+            # near-identical rows. Weight is unaffected (added below once per
+            # signature via matched_signatures).
+            if evidence_counts[signature.id] >= MAX_EVIDENCE_PER_SIGNATURE:
+                return
+            evidence_counts[signature.id] += 1
+            item = Evidence(
+                signature_id=signature.id,
+                file=str(file_path.relative_to(root)),
+                line_or_offset=line_number,
+                matched_text=matched_text,
+            )
+            if signature.category == "root":
+                evidence.root_evidence.append(item)
+            elif signature.category == "ssl":
+                evidence.ssl_evidence.append(item)
+
+        # Default path: one signature against one line. Multiline signatures are
+        # skipped here - they need the whole text and run in their own pass below.
         for line_number, line in enumerate(lines, start=1):
             line_start = time.monotonic()
             for signature in signatures:
+                if signature.multiline:
+                    continue
                 matched_text = _line_matches(line, signature)
                 # ReDoS backstop (NFR-1 fail-loud): check the budget after every
                 # signature attempt on the line (matched or not - a catastrophic
@@ -186,25 +257,38 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
                     )
                 if matched_text is None:
                     continue
-                matched_signatures.add(signature.id)
-                total_counts[signature.id] += 1
-                # RESID-4F: record at most MAX_EVIDENCE_PER_SIGNATURE matches per
-                # signature - enough to attribute the finding, not thousands of
-                # near-identical rows. Weight is unaffected (added below once
-                # per signature via matched_signatures).
-                if evidence_counts[signature.id] >= MAX_EVIDENCE_PER_SIGNATURE:
-                    continue
-                evidence_counts[signature.id] += 1
-                item = Evidence(
-                    signature_id=signature.id,
-                    file=str(file_path.relative_to(root)),
-                    line_or_offset=line_number,
-                    matched_text=matched_text,
-                )
-                if signature.category == "root":
-                    evidence.root_evidence.append(item)
-                elif signature.category == "ssl":
-                    evidence.ssl_evidence.append(item)
+                _record(signature, matched_text, line_number)
+
+        # L-M9 multiline pass: a regex that spans lines (a technique's pattern
+        # broken across a method call, a string literal split by the decompiler,
+        # a wrapped declaration) can never match any single line, so it runs
+        # against the whole text with DOTALL (and IGNORECASE if the signature
+        # opted into case-insensitivity). Only one match per pattern is recorded
+        # - the goal is to catch the variant, not to enumerate every occurrence.
+        # Its own ReDoS budget guard covers the whole-text match, the same fail-
+        # loud rule as the per-line path.
+        for signature in signatures:
+            if not signature.multiline:
+                continue
+            match_start = time.monotonic()
+            flags = re.DOTALL
+            if not signature.case_sensitive:
+                flags |= re.IGNORECASE
+            for pattern in signature.patterns:
+                match = re.search(pattern, text, flags)
+                if time.monotonic() - match_start > LINE_MATCH_BUDGET_SECONDS:
+                    raise TimeoutError(
+                        f"static scan: multiline matching of {file_path.name} against "
+                        f"signature '{signature.id}' took > {LINE_MATCH_BUDGET_SECONDS:.1f}s - "
+                        f"the regex is catastrophically backtracking (ReDoS). The regex "
+                        f"must be linearized; see signatures.py."
+                    )
+                if match is not None:
+                    # Translate the whole-text match offset back to a 1-based line
+                    # number so the Evidence row stays comparable to per-line hits.
+                    line_number = text.count("\n", 0, match.start()) + 1
+                    _record(signature, match.group(0), line_number)
+                    break
 
     # RESID-4F observability: record which signatures hit the display cap and
     # by how much, so the report can state the truncation instead of silently

@@ -600,6 +600,151 @@ def test_scan_counts_decode_dropped_files_as_unreadable(tmp_path):
     assert evidence.unreadable_files == ["Malformed.java"]
 
 
+def _write_sig(tmp_path, body):
+    """Write one inline signature YAML (defaults: case_sensitive=True,
+    multiline=False) and load it. Used by the L-M9 tests below."""
+    (tmp_path / "sigs.yaml").write_text("---\n" + body + "\n", encoding="utf-8")
+    return load_signatures(tmp_path / "sigs.yaml")
+
+
+def test_scan_case_insensitive_regex_matches_mixed_case_variant(tmp_path):
+    # L-M9 (S5/G10): a case-insensitive regex must catch a mixed-case variant
+    # of a known technique that the case-sensitive default silently misses.
+    # The existing corpus regexes are case-sensitive by default - this is the
+    # opt-in escape hatch that catches "Test-Keys"/"Su" without changing any
+    # calibrated confidence.
+    sigs = _write_sig(
+        tmp_path,
+        "- id: root_build_tags\n"
+        "  category: root\n"
+        "  weight: 0.6\n"
+        "  pattern_type: regex\n"
+        "  patterns: ['Build\\.TAGS.*test-keys']\n"
+        "  evidence_type: bytecode_string\n"
+        "  case_sensitive: false\n",
+    )
+    (tmp_path / "Main.java").write_text('String t = Build.TAGS.contains("TeSt-KeYs");\n')
+
+    evidence = scan(tmp_path, sigs)
+
+    matched = [e for e in evidence.root_evidence if e.signature_id == "root_build_tags"]
+    assert len(matched) == 1
+    assert "TeSt-KeYs" in matched[0].matched_text
+    assert evidence.root_confidence == 0.6
+
+
+def test_scan_case_insensitive_string_literal_matches_mixed_case(tmp_path):
+    # L-M9: the same opt-in applies to string_literal/class_reference patterns
+    # (folded-case comparison), so a literal that real code ships in a different
+    # case - e.g. "Su" instead of "su" in a path check - stops escaping.
+    sigs = _write_sig(
+        tmp_path,
+        "- id: root_su_binary\n"
+        "  category: root\n"
+        "  weight: 0.5\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['/system/bin/su']\n"
+        "  evidence_type: bytecode_string\n"
+        "  case_sensitive: false\n",
+    )
+    (tmp_path / "Main.java").write_text('new File("/system/bin/SU").exists();\n')
+
+    evidence = scan(tmp_path, sigs)
+
+    assert evidence.root_confidence == 0.5
+    assert {e.signature_id for e in evidence.root_evidence} == {"root_su_binary"}
+
+
+def test_scan_case_sensitive_default_still_misses_mixed_case(tmp_path):
+    # Guard against regression: WITHOUT case_sensitive: false, the default must
+    # keep today's exact behavior - a mixed-case literal does NOT match. This
+    # pins that opting a signature in is a deliberate, explicit change, never
+    # something that happens by default to existing calibrated confidence.
+    sigs = _write_sig(
+        tmp_path,
+        "- id: root_su_binary\n"
+        "  category: root\n"
+        "  weight: 0.5\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['/system/bin/su']\n"
+        "  evidence_type: bytecode_string\n",
+    )
+    (tmp_path / "Main.java").write_text('new File("/system/bin/SU").exists();\n')
+
+    evidence = scan(tmp_path, sigs)
+
+    assert evidence.root_confidence == 0
+    assert evidence.root_evidence == []
+
+
+def test_scan_multiline_regex_matches_span_line_variant_with_line_number(tmp_path):
+    # L-M9: a regex that spans lines (a declaration or call wrapped by the
+    # decompiler / formatter) can never match any single line. With multiline:
+    # true the pattern runs against the whole file text under DOTALL, and the
+    # recorded Evidence row points at the line where the match starts.
+    sigs = _write_sig(
+        tmp_path,
+        "- id: root_exec_su\n"
+        "  category: root\n"
+        "  weight: 0.5\n"
+        "  pattern_type: regex\n"
+        "  patterns: ['Runtime\\.getRuntime\\(\\)\\s*\\.exec\\(\\s*\"[^\"]*su']\n"
+        "  evidence_type: bytecode_string\n"
+        "  multiline: true\n",
+    )
+    # The call spans two lines - a single-line scan sees neither the exec( nor
+    # the "su" token together.
+    (tmp_path / "Main.java").write_text(
+        "import android.os.*;\n"
+        "void check() {\n"
+        "    Runtime.getRuntime()\n"
+        "        .exec(\"su -c id\");\n"
+        "}\n"
+    )
+
+    evidence = scan(tmp_path, sigs)
+
+    matched = [e for e in evidence.root_evidence if e.signature_id == "root_exec_su"]
+    assert len(matched) == 1
+    assert matched[0].line_or_offset == 3  # where the match begins (the Runtime.getRuntime() line)
+    assert evidence.root_confidence == 0.5
+
+
+def test_load_signatures_rejects_non_bool_case_sensitive_loudly(tmp_path):
+    # L-M9: a YAML typo (case_sensitive: "true" as a string) must fail at load,
+    # not truthy-silently flip detection behavior at scan time.
+    (tmp_path / "bad.yaml").write_text(
+        "- id: bad\n"
+        "  category: root\n"
+        "  weight: 0.5\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['x']\n"
+        "  evidence_type: bytecode_string\n"
+        "  case_sensitive: 'true'\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="case_sensitive"):
+        load_signatures(tmp_path / "bad.yaml")
+
+
+def test_load_signatures_rejects_multiline_on_non_regex_loudly(tmp_path):
+    # L-M9: multiline matching only exists for regex. Allowing it on a
+    # string_literal/class_reference would be a silent no-op (that path has no
+    # whole-text mode), so it must be rejected at load like any other bad field.
+    (tmp_path / "bad.yaml").write_text(
+        "- id: bad\n"
+        "  category: root\n"
+        "  weight: 0.5\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['x']\n"
+        "  evidence_type: bytecode_string\n"
+        "  multiline: true\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="multiline"):
+        load_signatures(tmp_path / "bad.yaml")
+
+
 def test_scan_evidence_carries_deterministic_verification_state(tmp_path):
     # principle 2 / ADR-0001: every finding carries its verification tier. All
     # evidence from this deterministic engine is deterministic_matched by

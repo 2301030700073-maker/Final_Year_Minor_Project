@@ -23,6 +23,7 @@ and a successful apktool that wrote no manifest is treated as failure (D4).
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -199,6 +200,68 @@ def _enforce_cache_budget(output_root: Path, budget_bytes: int) -> list[str]:
     return evicted
 
 
+def _run_secondary_fallback(apk_path: Path, target_dir: Path, log_path: Path) -> dict:
+    """L-M1 core: recover classes jadx failed to decompile with a secondary
+    engine. jadx 1.5.1 has a RegionMakerVisitor bug that aborts on AndroidX
+    classes like LocalBroadcastManager - a whole APK that would otherwise scan
+    clean loses those classes, and a root/ssl check hidden in them becomes an
+    invisible hole. The fallback converts the dex to .class with dex2jar, then
+    decompiles to .java with CFR. Tooling is discovered (d2j-dex2jar.sh on PATH,
+    CFR via CFR_JAR env or a 'cfr' on PATH); if either is absent the result is
+    recorded loudly as fallback_unavailable rather than silently accepting the
+    partial decompile (principle 3). Returns an evidence dict for the sidecar."""
+    apk_path = Path(apk_path)
+    d2j = shutil.which("d2j-dex2jar.sh")
+    cfr_jar = os.environ.get("CFR_JAR") or ""
+    cfr_bin = shutil.which("cfr")
+    if not d2j or not (cfr_jar or cfr_bin):
+        return {
+            "fallback_engine": None, "fallback_unavailable": True,
+            "fallback_recovered": False, "fallback_output": None,
+            "fallback_error_tail": (
+                "secondary decompiler unavailable (need d2j-dex2jar.sh on PATH "
+                "and a CFR jar via CFR_JAR or a 'cfr' on PATH)"
+            ),
+        }
+    recovered_jar = target_dir / "recovered.jar"
+    cfr_dir = target_dir / "cfr"
+    log_path = Path(log_path)
+    with open(log_path, "a", encoding="utf-8") as logf:
+        try:
+            d2j_rc = subprocess.run(
+                [d2j, "-f", str(apk_path), "-o", str(recovered_jar)],
+                stdout=logf, stderr=subprocess.STDOUT, timeout=600,
+            ).returncode
+        except subprocess.TimeoutExpired:
+            d2j_rc = _TIMEOUT_RC
+        if d2j_rc == 0 and recovered_jar.exists():
+            cmd = ([cfr_bin, str(recovered_jar), "--outputdir", str(cfr_dir)]
+                   if cfr_bin else ["java", "-jar", cfr_jar, str(recovered_jar), "--outputdir", str(cfr_dir)])
+            try:
+                cfr_rc = subprocess.run(
+                    cmd, stdout=logf, stderr=subprocess.STDOUT, timeout=600,
+                ).returncode
+            except subprocess.TimeoutExpired:
+                cfr_rc = _TIMEOUT_RC
+        else:
+            cfr_rc = -1
+    recovered_count = _count_java_files(cfr_dir)
+    if recovered_count > 0:
+        return {
+            "fallback_engine": "cfr", "fallback_unavailable": False,
+            "fallback_recovered": True, "fallback_output": str(cfr_dir),
+            "fallback_error_tail": None, "fallback_file_count": recovered_count,
+        }
+    return {
+        "fallback_engine": "cfr", "fallback_unavailable": False,
+        "fallback_recovered": False, "fallback_output": str(cfr_dir) if cfr_dir.exists() else None,
+        "fallback_file_count": 0,
+        "fallback_error_tail": (
+            f"secondary decompile produced no recoverable .java (d2j rc={d2j_rc}, cfr rc={cfr_rc})"
+        ),
+    }
+
+
 def _run_tool_logged(cmd: list[str], log_path: Path, timeout_s: int, what: str) -> tuple[int, str]:
     """Run one tool, streaming its combined stdout+stderr to log_path (D3 -
     capture_output would buffer megabytes of progress text in RAM that only
@@ -294,6 +357,14 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
+        # L-M1 core: when jadx is partial (exit != 0 but wrote real .java - the
+        # AndroidX LocalBroadcastManager RegionMakerVisitor bug), try to recover
+        # the classes it choked on with a secondary engine instead of leaving a
+        # hole. Recorded loudly when tooling is absent (principle 3).
+        fallback = {}
+        if jadx_returncode != 0 and jadx_file_count > 0:
+            fallback = _run_secondary_fallback(apk_path, target_dir, jadx_log)
+
         # jadx either fully succeeded, or crashed but left real output behind -
         # apktool runs either way, since its failure modes are independent of
         # jadx's.
@@ -331,16 +402,20 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                 "apktool_exit_code": apktool_returncode,
                 "jadx_file_count": jadx_file_count,
                 "jadx_error_tail": error_tail,
+                **fallback,
             }, indent=2),
             encoding="utf-8",
         )
 
-        return _result(
+        result = _result(
             start, jadx_dir, apktool_dir, cached=False,
             decompile_completeness=completeness, jadx_exit_code=jadx_returncode,
             apktool_exit_code=apktool_returncode, jadx_file_count=jadx_file_count,
             jadx_error_tail=error_tail, recovered_from_hollow_cache=cache_was_hollow,
         )
+        if fallback:
+            result.evidence.update(fallback)
+        return result
     except Exception as exc:
         # _require_tool RuntimeError, unexpected filesystem/JSON errors. No
         # CalledProcessError can reach here - both tools run check=False and
@@ -386,7 +461,7 @@ def _cached_result(start: float, jadx_dir: Path, apktool_dir: Path, status_sidec
     if status_sidecar.exists():
         try:
             data = json.loads(status_sidecar.read_text(encoding="utf-8"))
-            return _result(
+            result = _result(
                 start, jadx_dir, apktool_dir, cached=True,
                 decompile_completeness=data.get("decompile_completeness", "unknown"),
                 jadx_exit_code=data.get("jadx_exit_code", 0),
@@ -394,6 +469,11 @@ def _cached_result(start: float, jadx_dir: Path, apktool_dir: Path, status_sidec
                 jadx_file_count=data.get("jadx_file_count"),
                 jadx_error_tail=data.get("jadx_error_tail"),
             )
+            for key in ("fallback_engine", "fallback_unavailable", "fallback_recovered",
+                        "fallback_output", "fallback_error_tail", "fallback_file_count"):
+                if key in data:
+                    result.evidence[key] = data[key]
+            return result
         except (json.JSONDecodeError, OSError):
             pass  # Sidecar unreadable - fall through. The decompiled output
             # itself is untouched and valid; a bookkeeping glitch alone

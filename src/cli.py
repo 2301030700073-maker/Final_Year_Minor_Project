@@ -447,8 +447,15 @@ def run(
         _halt(stage_results)
 
     # --- static signature scan + manifest ---
+    static_roots = [jadx_output, apktool_output]
+    # L-M1: a secondary decompiler fallback that recovered classes jadx missed
+    # leaves its output in fallback_output - scan it too, so the recovered source
+    # is actually walked (otherwise the recovery would have no detection effect).
+    cfr_output = decompile_result.evidence.get("fallback_output")
+    if cfr_output and Path(cfr_output).exists():
+        static_roots.append(Path(cfr_output))
     scan_stage, static_evidence = _wrap_stage(
-        "static_scan", scan, [jadx_output, apktool_output], root_signatures + ssl_signatures
+        "static_scan", scan, static_roots, root_signatures + ssl_signatures
     )
     stage_results.append(scan_stage)
     _print_stage(scan_stage)

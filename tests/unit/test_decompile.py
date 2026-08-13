@@ -9,6 +9,7 @@ from static.decompile import (
     _enforce_cache_budget,
     _load_registry,
     _require_tool,
+    _run_secondary_fallback,
     _tail,
     _tail_file,
     _touch_registry,
@@ -392,3 +393,71 @@ def test_enforce_budget_corrupt_registry_does_not_crash(tmp_path):
 
     assert _enforce_cache_budget(tmp_path, budget_bytes=0) == []
     assert (tmp_path / "hash1").exists()  # untouched when registry is unreadable
+
+
+def test_secondary_fallback_reports_unavailable_when_cfr_missing(tmp_path, monkeypatch):
+    # L-M1 core: when the secondary tooling is absent (no CFR via CFR_JAR or a
+    # 'cfr' on PATH), the fallback must record fallback_unavailable loudly and
+    # NOT attempt any subprocess - a silent accept of the partial decompile
+    # would hide the classes jadx failed on (principle 3).
+    monkeypatch.delenv("CFR_JAR", raising=False)
+
+    def boom(*a, **k):
+        raise AssertionError("must not shell out when tooling absent")
+
+    monkeypatch.setattr("static.decompile.subprocess.run", boom)
+
+    result = _run_secondary_fallback(tmp_path / "a.apk", tmp_path, tmp_path / "jadx.log")
+
+    assert result["fallback_unavailable"] is True
+    assert result["fallback_engine"] is None
+    assert result["fallback_recovered"] is False
+    assert "unavailable" in result["fallback_error_tail"]
+
+
+def test_secondary_fallback_recovers_classes_via_dex2jar_and_cfr(tmp_path, monkeypatch):
+    # L-M1 core happy path: with CFR configured, a partial jadx run recovers the
+    # classes it missed - dex2jar makes recovered.jar, CFR decompiles it to .java,
+    # and the fallback reports the recovered output dir (which cli then scans).
+    monkeypatch.setenv("CFR_JAR", "/opt/cfr.jar")
+
+    def fake_run(cmd, stdout, stderr, timeout):
+        import subprocess
+        if cmd[0].endswith("d2j-dex2jar.sh"):
+            (tmp_path / "recovered.jar").write_bytes(b"PK\x03\x04fake")
+        elif cmd[0] == "java" and "-jar" in cmd:
+            cfr_dir = tmp_path / "cfr"
+            cfr_dir.mkdir(parents=True, exist_ok=True)
+            (cfr_dir / "RecoveredClass.java").write_text("class RecoveredClass {}", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
+
+    result = _run_secondary_fallback(tmp_path / "a.apk", tmp_path, tmp_path / "jadx.log")
+
+    assert result["fallback_engine"] == "cfr"
+    assert result["fallback_unavailable"] is False
+    assert result["fallback_recovered"] is True
+    assert result["fallback_file_count"] == 1
+    assert result["fallback_output"] == str(tmp_path / "cfr")
+
+
+def test_secondary_fallback_no_recovery_when_cfr_produces_nothing(tmp_path, monkeypatch):
+    # L-M1 core: tooling present but CFR writes no .java (e.g. the recovered jar
+    # is still dex-only, which CFR cannot read) - that is an honest non-recovery,
+    # not a fabricated one: fallback_recovered stays False with an error tail.
+    monkeypatch.setenv("CFR_JAR", "/opt/cfr.jar")
+
+    def fake_run(cmd, stdout, stderr, timeout):
+        import subprocess
+        if cmd[0].endswith("d2j-dex2jar.sh"):
+            (tmp_path / "recovered.jar").write_bytes(b"PK\x03\x04fake")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
+
+    result = _run_secondary_fallback(tmp_path / "a.apk", tmp_path, tmp_path / "jadx.log")
+
+    assert result["fallback_recovered"] is False
+    assert result["fallback_file_count"] == 0
+    assert "produced no recoverable .java" in result["fallback_error_tail"]

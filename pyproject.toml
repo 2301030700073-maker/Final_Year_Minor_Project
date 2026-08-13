@@ -20,3 +20,11 @@ package = false
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "scripts"]
+# Scope a bare `uv run pytest` to THIS project's tests. Without testpaths,
+# pytest auto-discovers the whole repo root and errors on the vendored Ghidra
+# bundle (its PyGhidra tests import jpype) and wastes ~80s walking APK_Test/
+# (large APKs), outputs/, and the vendored tools/ tree. The unit suite IS the
+# project's pytest record (per the testing philosophy); the dynamic side is
+# recorded by each phase's real handoff bundle, not pytest.
+testpaths = ["tests/unit"]
+norecursedirs = ["tools", ".git", ".venv", "__pycache__"]

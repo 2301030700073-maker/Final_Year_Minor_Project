@@ -203,6 +203,28 @@ def _enforce_cache_budget(output_root: Path, budget_bytes: int) -> list[str]:
     return evicted
 
 
+def _find_cfr_jar() -> str:
+    """Locate a CFR jar: `CFR_JAR` env first, then `tools/cfr/cfr*.jar` under the
+    repo root (the reference-env install location), mirroring how
+    native._find_ghidra_headless discovers `tools/ghidra/`. Returns "" when none
+    is found so callers can fall back to a `cfr` binary on PATH. This is what
+    makes L-M1's secondary recovery work out-of-the-box: the jar is installed at
+    `tools/cfr/` but the old loader only read `CFR_JAR`/PATH, so a default shell
+    (no profile exports CFR_JAR) silently degraded the whole fallback to
+    `fallback_unavailable`. Discovery is best-effort; absence still fails loudly
+    in the callers (principle 3), never silently accepted."""
+    jar = os.environ.get("CFR_JAR") or ""
+    if jar:
+        return jar
+    try:
+        root = Path(__file__).resolve().parents[2]  # <repo>/src/static -> <repo>
+        for p in sorted((root / "tools" / "cfr").glob("cfr*.jar")):
+            return str(p)
+    except OSError:
+        pass
+    return ""
+
+
 def _run_secondary_fallback(apk_path: Path, target_dir: Path, log_path: Path) -> dict:
     """L-M1 core: recover classes jadx failed to decompile with a secondary
     engine. jadx 1.5.1 has a RegionMakerVisitor bug that aborts on AndroidX
@@ -229,7 +251,7 @@ def _run_secondary_fallback(apk_path: Path, target_dir: Path, log_path: Path) ->
             "fallback_reused": True,
         }
     d2j = shutil.which("d2j-dex2jar.sh")
-    cfr_jar = os.environ.get("CFR_JAR") or ""
+    cfr_jar = _find_cfr_jar()
     cfr_bin = shutil.which("cfr")
     if not d2j or not (cfr_jar or cfr_bin):
         return {
@@ -357,7 +379,7 @@ def _run_dex_fallback(dex_file: Path, target_dir: Path, log_path: Path) -> dict:
     fallback_unavailable, never silently accepted (principle 3)."""
     cfr_dir = target_dir / "cfr"
     d2j = shutil.which("d2j-dex2jar.sh")
-    cfr_jar = os.environ.get("CFR_JAR") or ""
+    cfr_jar = _find_cfr_jar()
     cfr_bin = shutil.which("cfr")
     if not d2j or not (cfr_jar or cfr_bin):
         return {
@@ -450,7 +472,8 @@ def _decompile_dexes(
         if files == 0 or (rc != 0 and files > 0):
             any_failed = True
         units.append({"dex": entry["name"], "status": "ok" if files > 0 else "failed",
-                      "files": files, "exit": rc, "error_tail": log if files == 0 else None})
+                      "files": files, "exit": rc, "error_tail": log if files == 0 else None,
+                      "recovered": False, "recovered_count": 0, "recovery_unavailable": False})
         # Per-DEX recovery: jadx choked on this DEX (exit != 0) - recover the
         # classes it lost with dex2jar+CFR instead of leaving the hole. Cached
         # units were proven ok earlier and are skipped. Recovery is scoped to
@@ -467,6 +490,13 @@ def _decompile_dexes(
                 fallback["fallback_engine"] = dex_fb["fallback_engine"]
                 fallback["fallback_output"] = dex_fb["fallback_output"]
                 fallback["fallback_file_count"] += dex_fb["fallback_file_count"]
+            # Per-dex recovery honesty (friend L-M1 item): a reviewer reading
+            # dex_units must see whether THIS dex was recovered, not just the
+            # aggregate. Merge the recovery result onto the unit just appended.
+            units[-1]["recovered"] = dex_fb.get("fallback_recovered")
+            units[-1]["recovered_count"] = dex_fb.get("fallback_file_count")
+            units[-1]["recovery_unavailable"] = dex_fb.get("fallback_unavailable")
+            units[-1]["recovery_error_tail"] = dex_fb.get("fallback_error_tail")
     jadx_file_count = _count_java_files(jadx_dir)
     if not fallback["fallback_per_dex"]:
         fallback = {}

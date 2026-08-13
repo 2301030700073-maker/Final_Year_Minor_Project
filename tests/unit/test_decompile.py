@@ -7,6 +7,7 @@ import pytest
 from static.decompile import (
     CACHE_REGISTRY_NAME,
     _enforce_cache_budget,
+    _find_cfr_jar,
     _load_registry,
     _require_tool,
     _run_secondary_fallback,
@@ -401,6 +402,11 @@ def test_secondary_fallback_reports_unavailable_when_cfr_missing(tmp_path, monke
     # NOT attempt any subprocess - a silent accept of the partial decompile
     # would hide the classes jadx failed on (principle 3).
     monkeypatch.delenv("CFR_JAR", raising=False)
+    # CFR can now also be discovered under tools/cfr/ (L-M1 fix) - simulate true
+    # absence across every discovery source so the loud-unavailable path is what
+    # gets exercised, not the tools/cfr auto-discovery firing on this repo.
+    monkeypatch.setattr("static.decompile._find_cfr_jar", lambda: "")
+    monkeypatch.setattr("static.decompile.shutil.which", lambda name: None)
 
     def boom(*a, **k):
         raise AssertionError("must not shell out when tooling absent")
@@ -413,6 +419,23 @@ def test_secondary_fallback_reports_unavailable_when_cfr_missing(tmp_path, monke
     assert result["fallback_engine"] is None
     assert result["fallback_recovered"] is False
     assert "unavailable" in result["fallback_error_tail"]
+
+
+def test_find_cfr_jar_prefers_cfr_jar_env(monkeypatch):
+    # L-M1 fix: the explicit CFR_JAR env wins over anything discovered on disk.
+    monkeypatch.setenv("CFR_JAR", "/tmp/some-cfr.jar")
+    assert _find_cfr_jar() == "/tmp/some-cfr.jar"
+
+
+def test_find_cfr_jar_discovers_tools_cfr(monkeypatch):
+    # L-M1 fix: with no CFR_JAR env, the loader must still find the jar the
+    # reference env installs under tools/cfr/ (mirroring Ghidra's tools/ghidra
+    # discovery) - this is what makes the fallback work out-of-the-box instead
+    # of degrading to fallback_unavailable on a default shell.
+    monkeypatch.delenv("CFR_JAR", raising=False)
+    jar = _find_cfr_jar()
+    assert jar.endswith(".jar")
+    assert "cfr" in Path(jar).parts and "tools" in Path(jar).parts
 
 
 def test_secondary_fallback_recovers_classes_via_dex2jar_and_cfr(tmp_path, monkeypatch):

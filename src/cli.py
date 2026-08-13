@@ -475,6 +475,15 @@ def run(
         sqlite_path=Path(ANALYSIS_ROOT) / apk_hash / "xref.sqlite",
         mapping=mapping,
     )
+    # L-M8: the pure scan returns StaticEvidence, but _wrap_stage's generic
+    # wrapper only surfaces status (evidence={}) - so the OSError/unreadable-file
+    # slice was dropped at this boundary and never round-tripped into the SQLite
+    # run row (stage_results_json). It only ever appeared on console/report/in-
+    # memory. Enrich the stage evidence so a reviewer re-querying a past run sees
+    # exactly which candidate files the scan could not read (principle 3).
+    scan_stage.evidence["unreadable_file_count"] = static_evidence.unreadable_file_count
+    scan_stage.evidence["unreadable_files"] = list(static_evidence.unreadable_files)
+    scan_stage.evidence["scanned_file_count"] = static_evidence.scanned_file_count
     stage_results.append(scan_stage)
     _print_stage(scan_stage)
     if scan_stage.status == "failed":

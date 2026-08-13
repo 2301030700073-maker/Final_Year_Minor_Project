@@ -58,6 +58,13 @@ class NativeSignature:
     pattern_type: str
     patterns: list[str]
     evidence_type: str = "native_symbol"
+    # Opt-in AND semantics: when true, EVERY pattern must be present in the
+    # corpus for the signature to fire. Default (False) keeps the historical
+    # OR-within-signature behavior. Needed for techniques defined by a *combo*
+    # of symbols - e.g. the ptrace fork-child anti-debug technique requires both
+    # `ptrace` AND `fork`; matching on `ptrace` alone would false-positive on
+    # any app that imports libc's ptrace for a benign reason (ADR-0006).
+    require_all: bool = False
 
 
 @dataclass
@@ -110,18 +117,30 @@ class NativeScanResult:
 # readelf -Ws dynamic symbol table lines look like:
 #     9: 0000000000000000    18 FUNC    GLOBAL DEFAULT   11 check_root
 # Extract the symbol name as the last whitespace-delimited token.
-_READELF_SYM_RE = re.compile(r"^\s*\d+:\s+[0-9a-fA-F]+\s+\d+\s+\w+\s+\w+\s+\w+\s+\d+\s+(\S+)")
+# Ndx column is `UND` for imported (undefined) symbols, so it must be \S+, not
+# \d+ - otherwise the very libc imports that matter for anti-debug detection
+# (ptrace@LIBC, fork@LIBC) are never captured (verified against UnCrackable-L2
+# libfoo.so). The trailing `(2)` is the version-reference index: `fork@LIBC (2)`.
+_READELF_SYM_RE = re.compile(r"^\s*\d+:\s+[0-9a-fA-F]+\s+\d+\s+\w+\s+\w+\s+\w+\s+\S+\s+(\S+)")
 
 
 def parse_readelf_symbols(text: str) -> list[str]:
     """Extract symbol names from `readelf -Ws` output. Returns the raw names
     (only those that parse); a library that fails to parse yields [] which the
-    caller must interpret via coverage, not as proof of absence."""
+    caller must interpret via coverage, not as proof of absence.
+
+    A symbol-version suffix (`fork@LIBC`, `__stack_chk_fail@GLIBC_2.17`) is
+    stripped: a version is not part of the symbol's identity for detection, and
+    keeping it makes the exact-membership matcher silently miss every imported
+    libc symbol. Verified against real UnCrackable-Level2 libfoo.so, whose
+    ptrace/fork anti-debug combo is exported as `ptrace@LIBC`/`fork@LIBC`."""
     names: list[str] = []
     for line in text.splitlines():
         m = _READELF_SYM_RE.match(line)
         if m:
-            names.append(m.group(1))
+            name = m.group(1)
+            name = name.split("@", 1)[0]
+            names.append(name)
     return names
 
 
@@ -182,26 +201,34 @@ def match_native(
             # embedded_string matches against the string corpus; export_symbol
             # (including JNI exports) against the export corpus.
             this_corpus = lib.strings if sig.pattern_type == "embedded_string" else lib.exports + lib.jni_exports
-            for pattern in sig.patterns:
-                if pattern not in this_corpus:
+            if sig.require_all:
+                # AND semantics (native anti-debug combo): every pattern must be
+                # present. Otherwise `ptrace` alone would fire on any app that
+                # imports libc's ptrace for a benign reason (ADR-0006).
+                if not all(p in this_corpus for p in sig.patterns):
                     continue
-                key = (sig.id, path)
-                if key in matched:
-                    break  # already credited this (sig, lib)
-                matched.add(key)
-                matched_confidence.add(sig.id)
-                idx = this_corpus.index(pattern)
-                item = Evidence(
-                    signature_id=sig.id,
-                    file=path,
-                    line_or_offset=f"symbol[{idx}]",
-                    matched_text=pattern,
-                )
-                if sig.category == "root":
-                    result.root_evidence.append(item)
-                elif sig.category == "ssl":
-                    result.ssl_evidence.append(item)
-                break  # one Evidence row per (sig, lib) - same as Java's cap
+                hit_pattern = sig.patterns[0]
+            else:
+                hit_pattern = next((p for p in sig.patterns if p in this_corpus), None)
+                if hit_pattern is None:
+                    continue
+            key = (sig.id, path)
+            if key in matched:
+                continue  # already credited this (sig, lib)
+            matched.add(key)
+            matched_confidence.add(sig.id)
+            idx = this_corpus.index(hit_pattern)
+            item = Evidence(
+                signature_id=sig.id,
+                file=path,
+                line_or_offset=f"symbol[{idx}]",
+                matched_text=hit_pattern,
+            )
+            if sig.category == "root":
+                result.root_evidence.append(item)
+            elif sig.category == "ssl":
+                result.ssl_evidence.append(item)
+            # one Evidence row per (sig, lib) - same as Java's cap
     for sig in signatures:
         if sig.id in matched_confidence:
             if sig.category == "root":
@@ -353,6 +380,15 @@ def _validate_native_entry(entry: dict, path: Path) -> None:
         )
     if not entry.get("patterns"):
         raise ValueError(f"{path}: native signature '{sig_id}' has no patterns")
+    # require_all is an opt-in bool like the Java-side matching flags - a typo
+    # ("true" as a string) must fail loudly at load, not silently change the
+    # signature into a no-op or an OR.
+    ra = entry.get("require_all")
+    if ra is not None and not isinstance(ra, bool):
+        raise ValueError(
+            f"{path}: native signature '{sig_id}' has invalid require_all "
+            f"{ra!r} - must be a boolean"
+        )
 
 
 def load_native_signatures(path: Path) -> list[NativeSignature]:

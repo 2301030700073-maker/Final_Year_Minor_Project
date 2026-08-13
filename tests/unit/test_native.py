@@ -36,6 +36,20 @@ def test_parse_readelf_symbols_extracts_names():
     assert "Java_com_example_MainActivity_nativeInit" in names
 
 
+def test_parse_readelf_symbols_strips_version_suffix():
+    # Versioned imports (`fork@LIBC`, `ptrace@LIBC`) must parse to the bare
+    # symbol, or the exact-membership matcher silently misses every imported
+    # libc symbol. Verified against UnCrackable-Level2 libfoo.so.
+    text = (
+        "9: 0000000000000000    18 FUNC    GLOBAL DEFAULT   11 fork@LIBC\n"
+        "10: 0000000000001110    16 FUNC    GLOBAL DEFAULT   10 Java_CodeCheck_bar\n"
+        "11: 0000000000000000    0  FUNC    GLOBAL DEFAULT  UND ptrace@LIBC\n"
+    )
+    names = parse_readelf_symbols(text)
+    assert "fork" in names and "ptrace" in names
+    assert all("@" not in n for n in names)
+
+
 def test_parse_readelf_symbols_empty_on_garbage():
     assert parse_readelf_symbols("not a symbol table\n") == []
 
@@ -77,6 +91,37 @@ def test_match_native_export_symbol_finds_evidence():
     assert result.root_evidence[0].signature_id == "native_jni_root_check"
     assert result.root_evidence[0].file == "arm64-v8a/libroot.so"
     assert result.root_evidence[0].matched_text == "check_root"
+
+
+def test_match_native_require_all_needs_every_pattern():
+    # AND semantics (native anti-debug combo): a require_all signature fires only
+    # when ALL patterns are present, so `ptrace` alone on a benign app that
+    # imports libc's ptrace does not fire (ADR-0006 - no false positive).
+    sig = NativeSignature(id="native_ptrace_fork_antidebug", category="root", weight=0.5,
+                          pattern_type="export_symbol", patterns=["ptrace", "fork"],
+                          require_all=True)
+    # Only ptrace present (a benign ptrace importer) -> must NOT fire.
+    partial = NativeLibrary(abi="arm64-v8a", name="liba.so", exports=["ptrace", "strncmp"])
+    assert match_native([partial], [sig]).root_confidence == 0.0
+    assert match_native([partial], [sig]).root_evidence == []
+    # Both present (the genuine fork-child anti-debug combo) -> fires once.
+    full = NativeLibrary(abi="arm64-v8a", name="libb.so",
+                         exports=["ptrace", "fork", "getppid", "waitpid"])
+    result = match_native([full], [sig])
+    assert result.root_confidence == 0.5
+    assert len(result.root_evidence) == 1
+    assert result.root_evidence[0].matched_text == "ptrace"
+
+
+def test_match_native_default_is_or_not_and():
+    # Default require_all=False keeps historical OR-within-signature semantics:
+    # any single pattern present fires (unchanged behavior, regression guard).
+    sig = NativeSignature(id="s", category="root", weight=0.4,
+                          pattern_type="export_symbol", patterns=["a", "b"])
+    lib = NativeLibrary(abi="x86", name="lib.so", exports=["b"])
+    result = match_native([lib], [sig])
+    assert result.root_confidence == 0.4
+    assert result.root_evidence[0].matched_text == "b"
 
 
 def test_match_native_embedded_string_finds_evidence():

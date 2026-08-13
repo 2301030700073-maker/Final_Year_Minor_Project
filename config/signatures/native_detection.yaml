@@ -10,9 +10,30 @@
   weight: 0.5
   pattern_type: export_symbol
   patterns:
-    - "Java_com_example_check_root"
     - "checkRoot"
     - "isRooted"
+    # NOTE: this no longer carries `Java_com_example_*` placeholders - those were
+    # example names no real app exports, so they could never fire (dead weight
+    # that overclaimed detection surface). Real JNI exports are package- and
+    # obfuscation-specific (e.g. UnCrackable-Level2 exports
+    # Java_sg_vantagepoint_uncrackable2_CodeCheck_bar), so a general JNI *name*
+    # rule cannot be written without overfitting to one corpus - hence this
+    # signature keeps only the technique-level symbols and the generic anti-debug
+    # combo is covered by native_ptrace_fork_antidebug below.
+
+- id: native_ptrace_fork_antidebug
+  category: root
+  weight: 0.5
+  pattern_type: export_symbol
+  require_all: true
+  patterns:
+    - "ptrace"
+    - "fork"
+  # The fork-child ptrace anti-debug technique (verified 2026-08 against real
+  # UnCrackable-Level2 libfoo.so, which exports ptrace+fork+getppid+waitpid):
+  # a child forks and ptrace-attaches to detect a debugger. Requiring BOTH
+  # ptrace AND fork (require_all) stops the false positive on the many apps
+  # that import libc's ptrace for a benign reason (ADR-0006).
 
 - id: native_su_binary_embedded
   category: root

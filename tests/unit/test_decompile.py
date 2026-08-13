@@ -461,3 +461,26 @@ def test_secondary_fallback_no_recovery_when_cfr_produces_nothing(tmp_path, monk
     assert result["fallback_recovered"] is False
     assert result["fallback_file_count"] == 0
     assert "produced no recoverable .java" in result["fallback_error_tail"]
+
+
+def test_secondary_fallback_is_lazy_and_reuses_prior_recovery(tmp_path, monkeypatch):
+    # L-M1 (lazy/on-demand): if a prior fallback already recovered .java in
+    # target_dir/cfr, a repeated fresh-decompile run must REUSE it and NOT shell
+    # out to dex2jar/CFR again - re-deriving the same output is the exact waste
+    # lazy decompile avoids. The subprocess guard proves no re-run happens.
+    monkeypatch.setenv("CFR_JAR", "/opt/cfr.jar")
+    cfr_dir = tmp_path / "cfr"
+    cfr_dir.mkdir(parents=True)
+    (cfr_dir / "Recovered.java").write_text("class Recovered {}", encoding="utf-8")
+
+    def boom(*a, **k):
+        raise AssertionError("lazy fallback must not re-run when recovery already exists")
+
+    monkeypatch.setattr("static.decompile.subprocess.run", boom)
+
+    result = _run_secondary_fallback(tmp_path / "a.apk", tmp_path, tmp_path / "jadx.log")
+
+    assert result["fallback_recovered"] is True
+    assert result["fallback_reused"] is True
+    assert result["fallback_file_count"] == 1
+    assert result["fallback_output"] == str(cfr_dir)

@@ -884,3 +884,38 @@ def test_ssl_new_signatures_do_not_fire_on_well_formed_tls_code(tmp_path):
     matched = {e.signature_id for e in evidence.ssl_evidence}
     assert "trust_all_x509_checkservertrusted" not in matched  # body not empty
     assert "hostname_verifier_always_true" not in matched       # verify not unconditional-true
+
+
+def test_scan_offheap_sqlite_xref_is_complete_beyond_inmemory_cap(tmp_path):
+    # L-M1 (off-heap xref): when sqlite_path is given, scan() persists EVERY
+    # match to a SQLite evidence table - complete and queryable off-heap - while
+    # the in-memory list stays capped at MAX_EVIDENCE_PER_SIGNATURE. A signature
+    # matching 100 lines must yield 100 sqlite rows but only 50 in-memory rows.
+    import sqlite3
+    from static.signatures import MAX_EVIDENCE_PER_SIGNATURE
+
+    sig_yaml = tmp_path / "sigs.yaml"
+    sig_yaml.write_text(
+        "- id: root_su\n"
+        "  category: root\n"
+        "  weight: 0.8\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['/system/bin/su']\n"
+        "  evidence_type: root\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "Many.java").write_text("String s = \"/system/bin/su\";\n" * 100, encoding="utf-8")
+    db = tmp_path / "xref.sqlite"
+
+    evidence = scan(tmp_path, load_signatures(sig_yaml), sqlite_path=db)
+
+    con = sqlite3.connect(db)
+    (row_count,) = con.execute("SELECT COUNT(*) FROM evidence").fetchone()
+    (root_rows,) = con.execute(
+        "SELECT COUNT(*) FROM evidence WHERE category='root' AND signature_id='root_su'"
+    ).fetchone()
+    con.close()
+    assert root_rows == 100        # complete off-heap index, uncapped
+    assert row_count == 100
+    assert len(evidence.root_evidence) == MAX_EVIDENCE_PER_SIGNATURE  # in-memory stays capped
+    assert evidence.root_confidence == 0.8  # confidence unaffected by the xref

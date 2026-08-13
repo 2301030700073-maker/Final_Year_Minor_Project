@@ -455,7 +455,8 @@ def run(
     if cfr_output and Path(cfr_output).exists():
         static_roots.append(Path(cfr_output))
     scan_stage, static_evidence = _wrap_stage(
-        "static_scan", scan, static_roots, root_signatures + ssl_signatures
+        "static_scan", scan, static_roots, root_signatures + ssl_signatures,
+        sqlite_path=Path(analysis_root) / apk_hash / "xref.sqlite",
     )
     stage_results.append(scan_stage)
     _print_stage(scan_stage)

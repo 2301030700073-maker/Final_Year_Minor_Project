@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -171,13 +172,31 @@ def _collect_files(roots: list[Path]) -> list[tuple[Path, Path]]:
     return files
 
 
-def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> StaticEvidence:
+def scan(
+    decompiled_roots: Path | list[Path],
+    signatures: list[Signature],
+    sqlite_path: Path | str | None = None,
+) -> StaticEvidence:
     """Scan one or more decompiled-output roots (e.g. jadx's Java sources and
-    apktool's decoded resources) against the given signatures."""
+    apktool's decoded resources) against the given signatures.
+
+    L-M1 (off-heap xref): when sqlite_path is given, every match is ALSO
+    persisted to a SQLite `evidence` table (file, signature_id, category, line,
+    matched_text) - a complete, queryable cross-reference held off-heap, while
+    the in-memory Evidence lists stay capped at MAX_EVIDENCE_PER_SIGNATURE so a
+    large corpus doesn't accumulate unbounded rows in RAM. The in-memory return
+    is unchanged, so the report pipeline is untouched."""
     roots = [decompiled_roots] if isinstance(decompiled_roots, (str, Path)) else list(decompiled_roots)
     roots = [Path(r) for r in roots]
     evidence = StaticEvidence()
     files = _collect_files(roots)
+    con = None
+    if sqlite_path is not None:
+        con = sqlite3.connect(str(sqlite_path))
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS evidence ("
+            "file TEXT, signature_id TEXT, category TEXT, line INTEGER, matched_text TEXT)"
+        )
     # RESID-4C: record how many files were actually walked, so a negative from
     # a near-empty corpus is distinguishable from a full-scan clean result.
     evidence.scanned_file_count = len(files)
@@ -225,6 +244,13 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
         def _record(signature: Signature, matched_text: str, line_number: int) -> None:
             matched_signatures.add(signature.id)
             total_counts[signature.id] += 1
+            if con is not None:
+                con.execute(
+                    "INSERT INTO evidence(file, signature_id, category, line, matched_text) "
+                    "VALUES (?,?,?,?,?)",
+                    (str(file_path.relative_to(root)), signature.id,
+                     signature.category, line_number, matched_text),
+                )
             # RESID-4F: record at most MAX_EVIDENCE_PER_SIGNATURE matches per
             # signature - enough to attribute the finding, not thousands of
             # near-identical rows. Weight is unaffected (added below once per
@@ -313,4 +339,7 @@ def scan(decompiled_roots: Path | list[Path], signatures: list[Signature]) -> St
             elif signature.category == "ssl":
                 evidence.ssl_confidence = min(1.0, evidence.ssl_confidence + signature.weight)
 
+    if con is not None:
+        con.commit()
+        con.close()
     return evidence

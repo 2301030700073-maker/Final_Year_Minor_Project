@@ -211,6 +211,20 @@ def _run_secondary_fallback(apk_path: Path, target_dir: Path, log_path: Path) ->
     recorded loudly as fallback_unavailable rather than silently accepting the
     partial decompile (principle 3). Returns an evidence dict for the sidecar."""
     apk_path = Path(apk_path)
+    cfr_dir = target_dir / "cfr"
+    # Lazy: if a prior fallback already recovered .java here (a repeated or
+    # degenerate fresh-decompile run), reuse it - re-running dex2jar+CFR over a
+    # large APK just to re-derive the same output is the exact waste lazy/on-
+    # demand decompile is meant to avoid. Same shape as a fresh recovery, with a
+    # flag so a reviewer can tell it was reused, not re-run.
+    existing = _count_java_files(cfr_dir)
+    if existing > 0:
+        return {
+            "fallback_engine": "cfr", "fallback_unavailable": False,
+            "fallback_recovered": True, "fallback_output": str(cfr_dir),
+            "fallback_error_tail": None, "fallback_file_count": existing,
+            "fallback_reused": True,
+        }
     d2j = shutil.which("d2j-dex2jar.sh")
     cfr_jar = os.environ.get("CFR_JAR") or ""
     cfr_bin = shutil.which("cfr")

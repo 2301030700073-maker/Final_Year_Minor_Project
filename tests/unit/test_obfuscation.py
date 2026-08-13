@@ -25,6 +25,33 @@ def test_excludes_universal_android_resource_class_R():
     assert obfuscation_from_names(["a", "b", "c", "R", "MainActivity"]) == "heavy"
 
 
+def test_class_simple_names_skips_resource_class_and_its_flattened_inner(tmp_path):
+    # jadx flattens R's nested resource classes into declarations inside R.java
+    # (e.g. `public static final class id`, `class layout`). These are standard
+    # Android generated resource inner classes, never obfuscation - if counted,
+    # a short resource name like `id` inflates the minified ratio and can
+    # mislabel a clear app as heavy. Verified against real output: UnCrackable1's
+    # R.java yields `dimen, id, is, layout, menu, mipmap, string, style`, all of
+    # which must contribute nothing to the obfuscation signal.
+    from static.obfuscation import _class_simple_names
+
+    r_java = tmp_path / "R.java"
+    r_java.write_text(
+        "package com.app;\n"
+        "public final class R {\n"
+        "    public static final class id { public static final int home = 0x7f070000; }\n"
+        "    public static final class layout { public static final int main = 0x7f0a0000; }\n"
+        "}\n"
+    )
+    main = tmp_path / "MainActivity.java"
+    main.write_text("public class MainActivity {}\n")
+    helper = tmp_path / "a.java"
+    helper.write_text("public class a {}\n")
+
+    names = _class_simple_names([r_java, main, helper])
+    assert names == ["MainActivity", "a"]   # R.java contributes nothing, incl. id/layout
+
+
 def test_heavy_when_mostly_single_char():
     names = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "MainActivity"]
     assert obfuscation_from_names(names) == "heavy"

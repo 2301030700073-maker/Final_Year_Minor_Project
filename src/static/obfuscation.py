@@ -40,6 +40,7 @@ def _class_simple_names(java_files: list[Path]) -> list[str]:
         # Match a top-level `public/class|interface|enum <Name>` - take the
         # identifier that follows the class keyword on the same line. This is a
         # deterministic heuristic; it does not need a full Java parser.
+        in_resource_class = False
         for line in text.splitlines():
             stripped = line.strip()
             for kw in ("class ", "interface ", "enum "):
@@ -49,6 +50,16 @@ def _class_simple_names(java_files: list[Path]) -> list[str]:
                 after = stripped[idx + len(kw):].strip()
                 name = after.split(" ")[0].split("{")[0].split("<")[0]
                 name = name.strip()
+                if in_resource_class:
+                    # jadx flattens R's nested resource classes into declarations
+                    # like `public static final class id {` inside R.java. These
+                    # (id, layout, string, dimen, ...) are standard Android
+                    # generated resource inner classes, never obfuscation - skip
+                    # them so they can't inflate the minified ratio (C1/G7).
+                    break
+                if name == "R":
+                    in_resource_class = True
+                    break
                 # R8 emits `a$b` inner-class names; isidentifier() rejects the
                 # `$`, so allow alnum plus `_` and `$` (H6).
                 if name and all(c.isalnum() or c in ("_", "$") for c in name):

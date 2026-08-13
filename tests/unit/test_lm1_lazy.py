@@ -55,9 +55,14 @@ def test_dex_cache_key_is_stable_and_content_sensitive():
     a = {"name": "classes.dex", "sha256": "aaa", "size": 1}
     a_same = {"name": "classes.dex", "sha256": "aaa", "size": 1}
     b = {"name": "classes.dex", "sha256": "bbb", "size": 1}
-    assert _dex_cache_key(a) == _dex_cache_key(a_same)   # identical dex -> same key
-    assert _dex_cache_key(a) != _dex_cache_key(b)         # changed dex -> fresh key
-    assert _dex_cache_key({"name": "classes2.dex", "sha256": "aaa", "size": 1}) != _dex_cache_key(a)
+    assert _dex_cache_key(a, "1.5.6") == _dex_cache_key(a_same, "1.5.6")   # identical dex+ver -> same key
+    assert _dex_cache_key(a, "1.5.6") != _dex_cache_key(b, "1.5.6")         # changed dex -> fresh key
+    assert _dex_cache_key({"name": "classes2.dex", "sha256": "aaa", "size": 1}, "1.5.6") != _dex_cache_key(a, "1.5.6")
+    # A jadx toolchain upgrade must orphan old-version output - the same DEX
+    # under a different jadx maps to a fresh key, so a 1.5.1 partial decompile
+    # can't be relabeled complete by a 1.5.6 run (verified: 1.5.1 leaves
+    # InsecureBankv2 at rc=1/2 errors; 1.5.6 completes it rc=0).
+    assert _dex_cache_key(a, "1.5.1") != _dex_cache_key(a, "1.5.6")
 
 
 def test_decompile_takes_lazy_per_dex_path_for_real_zip(tmp_path, monkeypatch):
@@ -70,11 +75,14 @@ def test_decompile_takes_lazy_per_dex_path_for_real_zip(tmp_path, monkeypatch):
     # Fake jadx/apktool binaries that write one real .java per invocation.
     bindir = tmp_path / "bin"
     bindir.mkdir()
+    # _find_jadx prefers the vendored tools/jadx, so point it at the fake script.
+    monkeypatch.setattr("static.decompile._find_jadx", lambda: str(bindir / "jadx"))
     for tool, args in (("jadx", ["-d"]), ("apktool", ["d"])):
         script = bindir / tool
         if tool == "jadx":
             script.write_text(
                 "#!/bin/sh\n"
+                "[ \"$1\" = \"--version\" ] && echo 1.5.6-fake && exit 0\n"
                 "out=$2; mkdir -p \"$out\"\n"
                 "echo 'class X { }' > \"$out/Out.java\"\n"
                 "exit 0\n"
@@ -114,8 +122,10 @@ def test_per_dex_partial_jadx_exit_degrades_completeness(tmp_path, monkeypatch):
 
     bindir = tmp_path / "bin"
     bindir.mkdir()
+    monkeypatch.setattr("static.decompile._find_jadx", lambda: str(bindir / "jadx"))
     (bindir / "jadx").write_text(
         "#!/bin/sh\n"
+        "[ \"$1\" = \"--version\" ] && echo 1.5.6-fake && exit 0\n"
         "out=$2; mkdir -p \"$out\"\n"
         "echo 'class X{}' > \"$out/Out.java\"\n"
         "exit 1\n"  # jadx writes a real file but reports failure (AndroidX bug)

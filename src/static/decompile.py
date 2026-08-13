@@ -86,6 +86,23 @@ def _require_tool(name: str) -> str:
     return path
 
 
+def _find_jadx() -> str:
+    """Prefer the repo-pinned jadx (tools/jadx/bin/jadx) over whatever is on PATH.
+
+    Mirrors _find_cfr_jar: a pinned, reproducible toolchain beats an ambient
+    system install whose version can drift. The ambient jadx on the reference
+    machine is 1.5.1, which cannot fully decompile some real APKs (verified:
+    InsecureBankv2 finishes with 2 errors, rc=1, so the Java surface degrades to
+    partial), while the pinned 1.5.6 decompiles them cleanly (rc=0) - upgrading
+    genuinely raises completeness without weakening any coverage claim. Falls
+    back to PATH (via _require_tool, which fails loudly) when not vendored."""
+    root = Path(__file__).resolve().parents[2]  # <repo>/src/static -> <repo>
+    vendored = root / "tools" / "jadx" / "bin" / "jadx"
+    if vendored.exists():
+        return str(vendored)
+    return _require_tool("jadx")
+
+
 def _tail(text: str, max_chars: int = 4000) -> str:
     """Keep the last max_chars of a stream - a crash/exception message is
     almost always near the end, and a large real-world APK can make jadx
@@ -138,7 +155,7 @@ def _has_real_cached_content(jadx_dir: Path, apktool_dir: Path) -> bool:
     return _count_java_files(jadx_dir) > 0 and (apktool_dir / "AndroidManifest.xml").exists()
 
 
-def _cached_status_is_clean(status_sidecar: Path) -> bool:
+def _cached_status_is_clean(status_sidecar: Path, current_jadx_version: str = "") -> bool:
     """A cache hit is only trustworthy if the cached decompile was actually
     CLEAN (both tools exited 0). Content presence is not proof of completeness:
     the sidecar is the durable record of the original run's exit codes, and a
@@ -157,6 +174,19 @@ def _cached_status_is_clean(status_sidecar: Path) -> bool:
         data = json.loads(status_sidecar.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return True  # reuse as 'unknown' (see _cached_result) - honest, not laundered
+    # A toolchain upgrade orphans stale cached output: the sidecar records the
+    # jadx version that produced the decompile, so a cache written by an older
+    # jadx (which may have left a partial/error-ridden result - e.g. 1.5.1 leaves
+    # InsecureBankv2 at rc=1/2 errors) is re-decompiled rather than relabeled
+    # complete by the newer tool. A sidecar with no recorded version reads as
+    # stale too - it predates this field, so it cannot prove the output matches
+    # the current toolchain. Mismatch/absence -> not clean -> real re-decompile.
+    # The version check only binds when the caller supplies the current jadx
+    # version ("" keeps the legacy callers, e.g. older tests, on exit-code-only
+    # semantics). With a real version supplied, a sidecar that records a
+    # different version - or none at all (predates the field) - is stale.
+    if current_jadx_version and data.get("jadx_version") != current_jadx_version:
+        return False
     return data.get("jadx_exit_code", 0) == 0 and data.get("apktool_exit_code", 0) == 0
 
 
@@ -379,13 +409,36 @@ def _list_dex_entries(apk_path: Path) -> list[dict]:
     return entries
 
 
-def _dex_cache_key(entry: dict) -> str:
-    """Dex-stable cache key: the DEX's own name plus a hash of its bytes. A DEX
-    identical across APK builds maps to the same cached decompile and is reused
-    (the jadx-headless-mcp disk-code-cache pattern); a changed DEX gets a fresh
-    key and is re-decompiled on its own, leaving untouched DEXes cached."""
+def _jadx_version(jadx: str) -> str:
+    """Short jadx version token for the per-DEX cache key. A toolchain upgrade
+    must invalidate cached decompiles - otherwise a DEX decompiled by an older
+    jadx (which may have left a partial/error-ridden output) is silently reused
+    as if the newer tool had produced it (verified: jadx 1.5.1 leaves InsecureBankv2
+    with 2 errors, rc=1, while 1.5.6 completes it rc=0 - reusing the old output
+    would relabel a partial decompile as complete). Version is read once per
+    decompile; a probe failure degrades to 'unknown' rather than crashing the
+    run (the key just becomes less specific, never more wrong)."""
+    try:
+        out = subprocess.run([jadx, "--version"], capture_output=True, text=True, timeout=60)
+        text = (out.stdout or out.stderr or "").strip()
+        return text.splitlines()[0] if text else "unknown"
+    except Exception:
+        # Any probe hiccup (missing binary, an odd script, a mock without our
+        # kwargs in tests) degrades to 'unknown' - the cache key just becomes
+        # less specific, never more wrong, and the decompile itself is unaffected.
+        return "unknown"
+
+
+def _dex_cache_key(entry: dict, jadx_version: str = "") -> str:
+    """Dex-stable cache key: the DEX's own name plus a hash of its bytes, and the
+    jadx version that produced the output. A DEX identical across APK builds maps
+    to the same cached decompile and is reused (the jadx-headless-mcp disk-code-
+    cache pattern); a changed DEX gets a fresh key and is re-decompiled on its
+    own, leaving untouched DEXes cached. Including jadx_version means a toolchain
+    upgrade orphans the old version's output instead of silently relabeling a
+    previously-partial decompile as complete."""
     stem = Path(entry["name"]).stem  # classes, classes2, ...
-    return f"{stem}-{entry['sha256'][:12]}"
+    return f"{stem}-{entry['sha256'][:12]}-{jadx_version}"
 
 
 def _run_dex_fallback(dex_file: Path, target_dir: Path, log_path: Path) -> dict:
@@ -456,6 +509,11 @@ def _decompile_dexes(
     hands real, scannable .java to static analysis."""
     jadx_dir = target_dir / "jadx"
     dex_sources = target_dir / "dex_sources"
+    # Read the jadx version once so every DEX key carries it. A toolchain upgrade
+    # must orphan the old version's cached output (it may be partial/error-ridden)
+    # instead of silently reusing and relabeling it complete - keying on the DEX
+    # alone let a 1.5.1 partial decompile masquerade as fresh 1.5.6 output.
+    jadx_version = _jadx_version(jadx)
     units: list[dict] = []
     any_failed = False
     # Aggregate per-DEX secondary-recovery evidence (friend L-M1 work item 2):
@@ -465,7 +523,7 @@ def _decompile_dexes(
                 "fallback_recovered": False, "fallback_file_count": 0,
                 "fallback_output": None, "fallback_per_dex": []}
     for entry in dex_entries:
-        out_dir = jadx_dir / _dex_cache_key(entry)
+        out_dir = jadx_dir / _dex_cache_key(entry, jadx_version)
         existing = _count_java_files(out_dir)
         if existing > 0:
             # Per-DEX lazy reuse: this exact DEX was already decompiled (same
@@ -538,8 +596,13 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         _touch_registry(output_root, apk_hash)
 
         cache_was_hollow = False
+        jadx = _find_jadx()
         if jadx_dir.exists() and apktool_dir.exists():
-            if _has_real_cached_content(jadx_dir, apktool_dir) and _cached_status_is_clean(status_sidecar):
+            # A cache hit must be clean AND produced by the current jadx - a
+            # sidecar from an older toolchain version is stale output, re-decompiled.
+            if _has_real_cached_content(jadx_dir, apktool_dir) and _cached_status_is_clean(
+                status_sidecar, _jadx_version(jadx),
+            ):
                 return _cached_result(start, jadx_dir, apktool_dir, status_sidecar)
             cache_was_hollow = True
         # L-M1: this is the decompile-for-real path (not a valid cache hit) - the
@@ -547,7 +610,6 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         # surfaced on the report via the returned list when wired to cli.
         _enforce_cache_budget(output_root, CACHE_SIZE_BUDGET_BYTES)
 
-        jadx = _require_tool("jadx")
         apktool = _require_tool("apktool")
 
         # L-M1 lazy decompile: when the APK is a zip holding classes*.dex, run
@@ -654,6 +716,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                 "jadx_exit_code": jadx_returncode,
                 "apktool_exit_code": apktool_returncode,
                 "jadx_file_count": jadx_file_count,
+                "jadx_version": _jadx_version(jadx),
                 "jadx_error_tail": error_tail,
                 **fallback,
                 **({"lazy_decompile": True, "dex_units": per_dex_units} if per_dex_units else {}),

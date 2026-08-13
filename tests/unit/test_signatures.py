@@ -515,10 +515,33 @@ def test_scan_counts_unreadable_files_separately(tmp_path, monkeypatch):
     assert evidence.unreadable_files == ["Blocked.java"]
 
 
+def test_scan_skips_apktool_original_binary_archival_subtree(tmp_path, monkeypatch):
+    # Real-app finding (verified on InsecureBankv2 / UnCrackable1 / PropertyGuru):
+    # every run reported "1 candidate file(s) could not be read:
+    # original/AndroidManifest.xml". apktool's `original/` subtree is its archival
+    # of the *untouched binary* resources - that AndroidManifest.xml is Android
+    # binary XML, not text - so read_text(utf-8) raised UnicodeDecodeError on
+    # every scan. That false "degraded scan" CAUTION drowned out genuine OSError
+    # surfacing (RESID-4G). The archival subtree must be excluded from collection:
+    # a binary resource is not a source candidate by construction, and the decoded
+    # manifest/resources live at the apktool root and under res/ anyway.
+    decoded_manifest = tmp_path / "AndroidManifest.xml"
+    decoded_manifest.write_text("<manifest><application><pin-set/></application></manifest>\n")
+    arch = tmp_path / "original" / "AndroidManifest.xml"
+    arch.parent.mkdir(parents=True)
+    arch.write_bytes(b"\x03\x00\x08\x00" + b"\x00" * 64)  # Android binary XML magic
+
+    from static.signatures import scan
+
+    sig = load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")
+    evidence = scan(tmp_path, sig)
+
+    assert evidence.scanned_file_count == 1        # only the decoded manifest walked
+    assert evidence.unreadable_file_count == 0     # binary archival not surfaced as a failure
+    assert evidence.unreadable_files == []
+
+
 def test_scan_raises_loudly_on_regex_backtracking_budget(tmp_path, monkeypatch):
-    # ReDoS backstop (NFR-1 fail-loud): a catastrophically-backtracking regex
-    # must halt the scan with a loud TimeoutError, not hang it silently. We
-    # force the budget to ~0 so a merely-slow (not even adversarial) line trips
     # it - proving the guard fires, independent of regex linearity.
     import static.signatures as sig_mod
     monkeypatch.setattr(sig_mod, "LINE_MATCH_BUDGET_SECONDS", 0.0)

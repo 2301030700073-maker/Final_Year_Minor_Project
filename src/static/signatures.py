@@ -164,12 +164,25 @@ def _line_matches(line: str, signature: Signature) -> str | None:
 
 
 def _collect_files(roots: list[Path]) -> list[tuple[Path, Path]]:
-    """Return (file_path, root_it_was_found_under) pairs, for relative-path reporting."""
+    """Return (file_path, root_it_was_found_under) pairs, for relative-path reporting.
+
+    Skips any ``original/`` component in a scanned tree: apktool's ``original/``
+    subtree is its archival of the *untouched binary* resources (e.g.
+    ``original/AndroidManifest.xml`` is Android binary XML, not text). It is never
+    a scannable source - the decoded manifest and resources live at the apktool
+    root and under ``res/`` - so reading it would raise a guaranteed
+    UnicodeDecodeError on every scan and surface a false "degraded scan" signal
+    (RESID-4G), drowning out real OSError surfacing. Excluding it is not hiding a
+    failure: a binary resource is not a source candidate by construction.
+    """
     files = []
     for root in roots:
         for p in root.rglob("*"):
-            if p.is_file() and p.suffix in SCANNED_SUFFIXES:
-                files.append((p, root))
+            if not p.is_file() or p.suffix not in SCANNED_SUFFIXES:
+                continue
+            if "original" in p.relative_to(root).parts:
+                continue
+            files.append((p, root))
     return files
 
 

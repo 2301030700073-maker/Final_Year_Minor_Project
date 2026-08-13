@@ -52,6 +52,7 @@ from common import (
 from dynamic import correlation as correlation_module
 from dynamic import device
 from dynamic import frida_runner
+from dynamic.synthesizer import synthesize
 from dynamic.success_checks.androgoat import AndroGoatSuccessCheck
 from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
 from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
@@ -657,7 +658,16 @@ def run(
             stage_results.append(dynamic_stage)
             _print_stage(dynamic_stage)
             _halt(stage_results)
-        dynamic_stage = frida_runner.run_dynamic_stage(serial, package_name, classification.action, target=target)
+        # L-M2: synthesize a deterministic bypass from the techniques the static
+        # engine detected, so a real app (no hand-authored script) still gets a
+        # real dynamic attempt. Passed as synthesized to run_dynamic_stage, which
+        # only consumes it when there's no target-specific script (unknown target /
+        # real app) - hand-authored scripts for known targets take precedence.
+        synth = synthesize(classification, classification.action)
+        dynamic_stage = frida_runner.run_dynamic_stage(
+            serial, package_name, classification.action, target=target,
+            synthesized={"source": synth.source, "applied_hooks": synth.applied_hooks},
+        )
         stage_results.append(dynamic_stage)
         _print_stage(dynamic_stage)
         if dynamic_stage.status == "failed":

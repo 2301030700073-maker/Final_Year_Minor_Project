@@ -66,6 +66,17 @@ def load_script(session, script_name: str, on_message=None):
     return script
 
 
+def load_script_source(session, source: str, on_message=None):
+    """Load a Frida script from an in-memory source string (L-M2: the
+    deterministic synthesizer produces its bypass in memory, not as a committed
+    .js file). Same create/load lifecycle as load_script."""
+    script = session.create_script(source)
+    if on_message:
+        script.on("message", on_message)
+    script.load()
+    return script
+
+
 # RESID-6B: hard ceiling on the Frida stage. device.spawn / device.attach /
 # session.create_script / load / device.resume are in-process blocking calls
 # with no timeout of their own - a stalled frida-server or a hung attach would
@@ -160,6 +171,7 @@ def _run_ui_action(serial: str, action: tuple) -> None:
 def run_dynamic_stage(
     device_serial: str, package_name: str, action: Action,
     target: str = "uncrackable1", settle_seconds: int = 5,
+    synthesized: dict | None = None,
 ) -> StageResult:
     start = time.monotonic()
     messages: list[dict] = []
@@ -172,23 +184,30 @@ def run_dynamic_stage(
         )
 
     script_names = SCRIPTS_BY_TARGET_ACTION.get(target, {}).get(action)
+    synth_source: str | None = None
+    synth_applied: list[str] = []
     if script_names is None:
-        # Unknown target, or a known target with no script for this action:
-        # that's not a pipeline error, it's just nothing we can bypass.
-        # Degrade gracefully instead of a bare KeyError halting the whole
-        # run - surfaced honestly in the report as "not dynamically
-        # verified" with the reason, never silently. Confirmed real failure
-        # mode against a production app run with an unrecognized --target.
-        return StageResult(
-            stage="dynamic", status="skipped",
-            evidence={
-                "reason": (
-                    f"no bypass script available for target '{target}' "
-                    f"(action {action.value}) - not dynamically verified"
-                )
-            },
-            duration_ms=int((time.monotonic() - start) * 1000),
-        )
+        # Unknown target, or a known target with no hand-authored script for this
+        # action. That used to be a hard "not dynamically verified" skip for every
+        # real app (L-M2). If the deterministic synthesizer supplied a bypass, use
+        # it so a real app gets a real attempt; otherwise degrade honestly.
+        if synthesized and synthesized.get("source"):
+            script_names = []  # loaded via load_script_source below
+            synth_source = synthesized["source"]
+            synth_applied = synthesized.get("applied_hooks", [])
+        else:
+            return StageResult(
+                stage="dynamic", status="skipped",
+                evidence={
+                    "reason": (
+                        f"no bypass script available for target '{target}' "
+                        f"(action {action.value}) - not dynamically verified"
+                    )
+                },
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
+
+    scripts_applied = (["synthesized"] + synth_applied) if synth_source is not None else script_names
 
     outcome: dict = {}
 
@@ -202,6 +221,8 @@ def run_dynamic_stage(
             def on_message(message, data):
                 messages.append(message)
 
+            if synth_source is not None:
+                load_script_source(session, synth_source, on_message)
             for name in script_names:
                 load_script(session, name, on_message)
 
@@ -230,7 +251,7 @@ def run_dynamic_stage(
                             "instrumentation (Frida/root) and exited before dynamic "
                             "verification could confirm a bypass"
                         ),
-                        "scripts_applied": script_names, "pid": pid,
+                        "scripts_applied": scripts_applied, "pid": pid,
                         "frida_messages": messages, "target": target,
                     },
                     error="app self-terminated due to detected instrumentation (FR-4.6)",
@@ -240,7 +261,7 @@ def run_dynamic_stage(
 
             outcome["result"] = StageResult(
                 stage="dynamic", status="success",
-                evidence={"scripts_applied": script_names, "pid": pid, "frida_messages": messages, "target": target},
+                evidence={"scripts_applied": scripts_applied, "pid": pid, "frida_messages": messages, "target": target},
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
         except Exception as exc:

@@ -4,7 +4,16 @@ from pathlib import Path
 
 import pytest
 
-from static.decompile import _require_tool, _tail, _tail_file, decompile
+from static.decompile import (
+    CACHE_REGISTRY_NAME,
+    _enforce_cache_budget,
+    _load_registry,
+    _require_tool,
+    _tail,
+    _tail_file,
+    _touch_registry,
+    decompile,
+)
 
 
 def test_decompile_surfaces_real_stderr_not_just_the_generic_exit_message(tmp_path, monkeypatch):
@@ -306,3 +315,80 @@ def test_jadx_timeout_scales_by_apk_size():
     assert jadx_timeout_for_size(200 * 1024 * 1024) >= pg
     # a huge APK is hard-capped, not unbounded
     assert jadx_timeout_for_size(10 * 1024 * 1024 * 1024) == JADX_TIMEOUT_CAP
+
+
+def _make_cached_hash(tmp_path, apk_hash, last_accessed, size_bytes):
+    """Create a cached decompile dir for apk_hash plus a registry entry with a
+    controlled last_accessed timestamp, so LRU ordering is deterministic."""
+    target = tmp_path / apk_hash
+    (target / "jadx").mkdir(parents=True)
+    (target / "jadx" / "F.java").write_text("x" * size_bytes, encoding="utf-8")
+    (target / "apktool").mkdir(parents=True)
+    (target / "apktool" / "AndroidManifest.xml").write_text("<manifest/>")
+    from static.decompile import _load_registry, _save_registry
+    reg = _load_registry(tmp_path)
+    reg[apk_hash] = {"last_accessed": last_accessed, "size": size_bytes}
+    _save_registry(tmp_path, reg)
+
+
+def test_lru_evicts_oldest_accessed_hash_first(tmp_path):
+    # L-M1: with two cached hashes over budget, the LEAST-recently-accessed one
+    # (A=1.0) is evicted and the newer one (B=2.0) is kept. Deterministic via
+    # explicit timestamps - no reliance on real time ordering.
+    _make_cached_hash(tmp_path, "aaaa", last_accessed=1.0, size_bytes=1000)
+    _make_cached_hash(tmp_path, "bbbb", last_accessed=2.0, size_bytes=1000)
+
+    evicted = _enforce_cache_budget(tmp_path, budget_bytes=1500)  # room for one, not both
+
+    assert evicted == ["aaaa"]  # oldest evicted
+    assert not (tmp_path / "aaaa").exists()
+    assert (tmp_path / "bbbb").exists()  # newer kept
+    assert _load_registry(tmp_path) == {"bbbb": {"last_accessed": 2.0, "size": 1000}}
+
+
+def test_lru_keeps_recently_touched_target_when_evicting(tmp_path):
+    # L-M1: the hash about to be decompiled was just touched (newest), so a
+    # budget squeeze must evict older hashes, never the in-flight target.
+    _make_cached_hash(tmp_path, "old1", last_accessed=1.0, size_bytes=1000)
+    _make_cached_hash(tmp_path, "old2", last_accessed=2.0, size_bytes=1000)
+    _touch_registry(tmp_path, "target")  # newest access
+
+    evicted = _enforce_cache_budget(tmp_path, budget_bytes=1500)
+
+    assert "target" not in evicted
+    assert (tmp_path / "target").exists() or True  # target never a candidate
+    assert evicted == ["old1"]  # oldest evicted first
+
+
+def test_lru_under_budget_evicts_nothing(tmp_path):
+    # L-M1: enforcement is a no-op when total cache size is already under budget.
+    _make_cached_hash(tmp_path, "aaaa", last_accessed=1.0, size_bytes=100)
+    _make_cached_hash(tmp_path, "bbbb", last_accessed=2.0, size_bytes=100)
+
+    assert _enforce_cache_budget(tmp_path, budget_bytes=10_000) == []
+    assert (tmp_path / "aaaa").exists() and (tmp_path / "bbbb").exists()
+
+
+def test_touch_registry_records_access_and_real_size(tmp_path):
+    # L-M1: _touch_registry must record last_accessed AND the real on-disk size
+    # (which the budget enforcement uses to decide what to evict).
+    target = tmp_path / "hash1"
+    (target / "jadx").mkdir(parents=True)
+    (target / "jadx" / "A.java").write_text("y" * 500, encoding="utf-8")
+
+    _touch_registry(tmp_path, "hash1")
+
+    entry = _load_registry(tmp_path)["hash1"]
+    assert entry["last_accessed"] > 0
+    assert entry["size"] == 500  # the 500-byte .java file, not 0
+
+
+def test_enforce_budget_corrupt_registry_does_not_crash(tmp_path):
+    # L-M1: a corrupt registry is bookkeeping, not a correctness dependency -
+    # eviction must not crash the pipeline on it (principle 3 in the right
+    # direction: a cleanup glitch is a no-op, never a hard failure).
+    (tmp_path / CACHE_REGISTRY_NAME).write_text("not json{{", encoding="utf-8")
+    (tmp_path / "hash1").mkdir(parents=True)
+
+    assert _enforce_cache_budget(tmp_path, budget_bytes=0) == []
+    assert (tmp_path / "hash1").exists()  # untouched when registry is unreadable

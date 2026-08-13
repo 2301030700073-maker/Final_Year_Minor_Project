@@ -49,6 +49,15 @@ JADX_TIMEOUT_PER_MB = 4.0    # seconds of jadx headroom per MB of APK
 JADX_TIMEOUT_CAP = 900       # seconds - hard ceiling (was flat 600)
 APKTOOL_TIMEOUT = 300
 
+# L-M1: bound the on-disk decompile cache by size instead of letting every
+# analyzed hash accumulate forever (a PropertyGuru-class APK is 151MB+ of jadx
+# .java plus apktool smali/res; re-analyzing a corpus of them with no eviction
+# grows the cache unbounded). Least-recently-used eviction: when a fresh
+# decompile would push total cache size over the budget, the oldest-accessed
+# hashes are evicted until back under. The budget is injectable for tests.
+CACHE_REGISTRY_NAME = "cache_registry.json"
+CACHE_SIZE_BUDGET_BYTES = 4 * 1024 * 1024 * 1024  # 4 GiB default
+
 _TIMEOUT_RC = -9  # sentinel for "killed by our timeout", distinct from any real exit code
 
 
@@ -125,6 +134,71 @@ def _has_real_cached_content(jadx_dir: Path, apktool_dir: Path) -> bool:
     return _count_java_files(jadx_dir) > 0 and (apktool_dir / "AndroidManifest.xml").exists()
 
 
+def _load_registry(output_root: Path) -> dict[str, dict]:
+    """Read the cache registry (hash -> {last_accessed, size}). A missing or
+    corrupt registry is not a failure - start fresh. A corrupt registry that
+    crashed the pipeline would violate principle 3 (silent/hard failure on a
+    bookkeeping glitch) in the wrong direction: eviction is a best-effort disk
+    bound, not a correctness dependency."""
+    reg_path = Path(output_root) / CACHE_REGISTRY_NAME
+    try:
+        data = json.loads(reg_path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def _save_registry(output_root: Path, registry: dict[str, dict]) -> None:
+    Path(output_root).mkdir(parents=True, exist_ok=True)
+    (Path(output_root) / CACHE_REGISTRY_NAME).write_text(
+        json.dumps(registry, indent=2), encoding="utf-8",
+    )
+
+
+def _dir_size(path: Path) -> int:
+    path = Path(path)
+    if not path.exists():
+        return 0
+    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
+
+
+def _touch_registry(output_root: Path, apk_hash: str) -> None:
+    """Mark this hash as just-accessed and refresh its cached size. Called on
+    every decompile() entry (hit or miss) so LRU eviction always knows what was
+    used last - a cache hit keeps a hash alive, it never ages it."""
+    output_root = Path(output_root)
+    registry = _load_registry(output_root)
+    entry = registry.setdefault(apk_hash, {})
+    entry["last_accessed"] = time.time()
+    entry["size"] = _dir_size(output_root / apk_hash)
+    _save_registry(output_root, registry)
+
+
+def _enforce_cache_budget(output_root: Path, budget_bytes: int) -> list[str]:
+    """Evict least-recently-accessed cached decompiles until total size is under
+    budget. Returns the evicted hashes so the caller/report can state the
+    eviction (not silently). The hash about to be decompiled was just touched,
+    so it sorts newest and is the last candidate for eviction."""
+    output_root = Path(output_root)
+    registry = _load_registry(output_root)
+    total = sum(int(entry.get("size", 0)) for entry in registry.values())
+    evicted: list[str] = []
+    for apk_hash in sorted(registry, key=lambda h: registry[h].get("last_accessed", 0)):
+        if total <= budget_bytes:
+            break
+        cache_dir = output_root / apk_hash
+        if cache_dir.exists():
+            shutil.rmtree(cache_dir, ignore_errors=True)
+        total -= int(registry[apk_hash].get("size", 0))
+        del registry[apk_hash]
+        evicted.append(apk_hash)
+    if evicted:
+        _save_registry(output_root, registry)
+    return evicted
+
+
 def _run_tool_logged(cmd: list[str], log_path: Path, timeout_s: int, what: str) -> tuple[int, str]:
     """Run one tool, streaming its combined stdout+stderr to log_path (D3 -
     capture_output would buffer megabytes of progress text in RAM that only
@@ -166,11 +240,18 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         apktool_dir = target_dir / "apktool"
         status_sidecar = target_dir / STATUS_SIDECAR_NAME
 
+        # L-M1: mark this hash as just-accessed (LRU bookkeeping) on every entry.
+        _touch_registry(output_root, apk_hash)
+
         cache_was_hollow = False
         if jadx_dir.exists() and apktool_dir.exists():
             if _has_real_cached_content(jadx_dir, apktool_dir):
                 return _cached_result(start, jadx_dir, apktool_dir, status_sidecar)
             cache_was_hollow = True
+        # L-M1: this is the decompile-for-real path (not a valid cache hit) - the
+        # cache is about to grow, so enforce the size budget first. Evictions are
+        # surfaced on the report via the returned list when wired to cli.
+        _enforce_cache_budget(output_root, CACHE_SIZE_BUDGET_BYTES)
 
         jadx = _require_tool("jadx")
         apktool = _require_tool("apktool")

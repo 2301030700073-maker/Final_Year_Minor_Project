@@ -201,3 +201,32 @@
   patterns:
     - 'setCertVerifier'
   evidence_type: bytecode_string
+
+- id: certificate_transparency_verifier
+  category: ssl
+  weight: 0.35
+  pattern_type: regex
+  case_sensitive: false
+  # Certificate Transparency: an app enforcing CT log verification (com.google.
+  # certificate.transparency / CTLogInfo / isLogVerifierEnabled) adds a pinning-
+  # adjacent certificate-verification layer. Lower weight - CT is an additional
+  # check on top of pinning, not pinning itself. Case-insensitive so
+  # "CTLOGINFO"/"islogverifierenabled" variants don't escape.
+  patterns:
+    - 'CTLogInfo|isLogVerifierEnabled|com\.google\.certificate\.transparency'
+  evidence_type: bytecode_string
+
+- id: custom_sslsocketfactory
+  category: ssl
+  weight: 0.3
+  pattern_type: regex
+  # A custom javax.net.ssl.SSLSocketFactory subclass that overrides socket
+  # creation to control trust - a hand-rolled TLS pinning/trust technique
+  # distinct from OkHttp's CertificatePinner and the TrustManager path. Requires
+  # the `extends ... SSLSocketFactory` declaration (not the bare class name,
+  # which appears in any SSLContext setup), keeping false positives low. Lower
+  # weight - overriding the factory is necessary for the technique but not by
+  # itself proof of trust-all behavior.
+  patterns:
+    - 'extends\s+[\w<>,\s.]*SSLSocketFactory'
+  evidence_type: bytecode_string

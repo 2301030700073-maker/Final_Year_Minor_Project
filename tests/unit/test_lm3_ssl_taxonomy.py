@@ -18,6 +18,8 @@ NEW_IDS = {
     "certificate_factory_x509",
     "okhttp4_kotlin_certificate_pinner",
     "cronet_cert_verifier",
+    "certificate_transparency_verifier",
+    "custom_sslsocketfactory",
 }
 
 
@@ -33,7 +35,7 @@ def test_new_ssl_signatures_load_from_real_yaml():
     present = {s.id for s in sigs}
     assert NEW_IDS <= present, f"missing from ssl_pinning.yaml: {NEW_IDS - present}"
     # all still valid category/weight per the loader's own validation
-    assert len(sigs) == 13  # 7 original + 6 new
+    assert len(sigs) == 15  # 7 original + 8 added (the 15-category taxonomy)
 
 
 def test_webview_proceed_matches_spans_lines():

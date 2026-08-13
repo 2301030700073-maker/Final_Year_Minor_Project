@@ -61,6 +61,7 @@ from ingest.metadata import compute_hashes, ingest
 from report.attribution import attribute_root_evidence, gate_all_third_party
 from report.generator import generate_calibration_report, generate_report
 from static.coverage import apply_coverage_bound, coverage_bound_line, per_surface_coverage
+from static.deobfuscate import find_mapping_file, parse_mapping
 from static.decision_engine import DEFAULT_THRESHOLD, classify
 from static.decompile import decompile
 from static.manifest import ManifestInfo, parse_manifest
@@ -455,9 +456,24 @@ def run(
     cfr_output = decompile_result.evidence.get("fallback_output")
     if cfr_output and Path(cfr_output).exists():
         static_roots.append(Path(cfr_output))
+    # L-M3 (chimera): if the app bundles an R8/ProGuard mapping.txt (assets/ or
+    # res/raw/), restore obfuscated identifiers before matching so original-name
+    # signatures can hit code the obfuscator renamed. Best-effort identification
+    # surface, additive - the original text is still scanned unchanged. A missing
+    # mapping is the common case and just yields mapping=None (no deobfuscation).
+    mapping = None
+    mapping_path = find_mapping_file(static_roots)
+    if mapping_path is not None:
+        mapping = parse_mapping(mapping_path.read_text(encoding="utf-8", errors="replace"))
+        if mapping:
+            console.print(
+                f"[dim]Deobfuscation: recovered {len(mapping.obfuscated_to_original)} "
+                f"identifier(s) from {mapping_path}[/dim]"
+            )
     scan_stage, static_evidence = _wrap_stage(
         "static_scan", scan, static_roots, root_signatures + ssl_signatures,
         sqlite_path=Path(analysis_root) / apk_hash / "xref.sqlite",
+        mapping=mapping,
     )
     stage_results.append(scan_stage)
     _print_stage(scan_stage)

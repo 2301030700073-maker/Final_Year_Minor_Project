@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 
 from common import Evidence, StaticEvidence
+from static.deobfuscate import MappingTable, deobfuscate_source
 
 # L-M3 (S1): scan the fallback evidence layer too. jadx's .java decompile can be
 # partial on large/obfuscated APKs (PropertyGuru - jadx died on one AndroidX
@@ -176,6 +177,7 @@ def scan(
     decompiled_roots: Path | list[Path],
     signatures: list[Signature],
     sqlite_path: Path | str | None = None,
+    mapping: MappingTable | None = None,
 ) -> StaticEvidence:
     """Scan one or more decompiled-output roots (e.g. jadx's Java sources and
     apktool's decoded resources) against the given signatures.
@@ -185,7 +187,15 @@ def scan(
     matched_text) - a complete, queryable cross-reference held off-heap, while
     the in-memory Evidence lists stay capped at MAX_EVIDENCE_PER_SIGNATURE so a
     large corpus doesn't accumulate unbounded rows in RAM. The in-memory return
-    is unchanged, so the report pipeline is untouched."""
+    is unchanged, so the report pipeline is untouched.
+
+    L-M3 (mapping.txt deobfuscation): when `mapping` is provided (a parsed R8/
+    ProGuard mapping from deobfuscate.parse_mapping), each .java file is ALSO
+    matched against a deobfuscated view in which obfuscated identifiers are
+    restored to originals, so original-name signatures can hit renamed code.
+    Additive and best-effort: the original text is always scanned unchanged, and
+    the deobfuscated view only surfaces more text for the deterministic rules to
+    match (ADR-0001 - it never decides anything)."""
     roots = [decompiled_roots] if isinstance(decompiled_roots, (str, Path)) else list(decompiled_roots)
     roots = [Path(r) for r in roots]
     evidence = StaticEvidence()
@@ -269,60 +279,72 @@ def scan(
             elif signature.category == "ssl":
                 evidence.ssl_evidence.append(item)
 
-        # Default path: one signature against one line. Multiline signatures are
-        # skipped here - they need the whole text and run in their own pass below.
-        for line_number, line in enumerate(lines, start=1):
-            line_start = time.monotonic()
-            for signature in signatures:
-                if signature.multiline:
-                    continue
-                matched_text = _line_matches(line, signature)
-                # ReDoS backstop (NFR-1 fail-loud): check the budget after every
-                # signature attempt on the line (matched or not - a catastrophic
-                # regex can return None after burning the time). A single slow
-                # line means a hand-authored rule is backtracking quadratically,
-                # so scan() raises loudly instead of hanging the whole pipeline.
-                if time.monotonic() - line_start > LINE_MATCH_BUDGET_SECONDS:
-                    raise TimeoutError(
-                        f"static scan: matching line {line_number} of "
-                        f"{file_path.name} took > {LINE_MATCH_BUDGET_SECONDS:.1f}s - "
-                        f"signature '{signature.id}' is catastrophically backtracking "
-                        f"(ReDoS). The regex must be linearized; see signatures.py."
-                    )
-                if matched_text is None:
-                    continue
-                _record(signature, matched_text, line_number)
+        # L-M3: match each file against its original text AND, when a mapping.txt
+        # was provided, a deobfuscated view that restores renamed identifiers - so
+        # original-name signatures can hit code the obfuscator renamed. Additive:
+        # the original is always scanned, the deobfuscated view is extra evidence.
+        texts = [text]
+        if mapping is not None and file_path.suffix == ".java":
+            deobf = deobfuscate_source(text, mapping)
+            if deobf != text:
+                texts.append(deobf)
 
-        # L-M9 multiline pass: a regex that spans lines (a technique's pattern
-        # broken across a method call, a string literal split by the decompiler,
-        # a wrapped declaration) can never match any single line, so it runs
-        # against the whole text with DOTALL (and IGNORECASE if the signature
-        # opted into case-insensitivity). Only one match per pattern is recorded
-        # - the goal is to catch the variant, not to enumerate every occurrence.
-        # Its own ReDoS budget guard covers the whole-text match, the same fail-
-        # loud rule as the per-line path.
-        for signature in signatures:
-            if not signature.multiline:
-                continue
-            match_start = time.monotonic()
-            flags = re.DOTALL
-            if not signature.case_sensitive:
-                flags |= re.IGNORECASE
-            for pattern in signature.patterns:
-                match = re.search(pattern, text, flags)
-                if time.monotonic() - match_start > LINE_MATCH_BUDGET_SECONDS:
-                    raise TimeoutError(
-                        f"static scan: multiline matching of {file_path.name} against "
-                        f"signature '{signature.id}' took > {LINE_MATCH_BUDGET_SECONDS:.1f}s - "
-                        f"the regex is catastrophically backtracking (ReDoS). The regex "
-                        f"must be linearized; see signatures.py."
-                    )
-                if match is not None:
-                    # Translate the whole-text match offset back to a 1-based line
-                    # number so the Evidence row stays comparable to per-line hits.
-                    line_number = text.count("\n", 0, match.start()) + 1
-                    _record(signature, match.group(0), line_number)
-                    break
+        for text in texts:
+            lines = text.splitlines()
+            # Default path: one signature against one line. Multiline signatures are
+            # skipped here - they need the whole text and run in their own pass below.
+            for line_number, line in enumerate(lines, start=1):
+                line_start = time.monotonic()
+                for signature in signatures:
+                    if signature.multiline:
+                        continue
+                    matched_text = _line_matches(line, signature)
+                    # ReDoS backstop (NFR-1 fail-loud): check the budget after every
+                    # signature attempt on the line (matched or not - a catastrophic
+                    # regex can return None after burning the time). A single slow
+                    # line means a hand-authored rule is backtracking quadratically,
+                    # so scan() raises loudly instead of hanging the whole pipeline.
+                    if time.monotonic() - line_start > LINE_MATCH_BUDGET_SECONDS:
+                        raise TimeoutError(
+                            f"static scan: matching line {line_number} of "
+                            f"{file_path.name} took > {LINE_MATCH_BUDGET_SECONDS:.1f}s - "
+                            f"signature '{signature.id}' is catastrophically backtracking "
+                            f"(ReDoS). The regex must be linearized; see signatures.py."
+                        )
+                    if matched_text is None:
+                        continue
+                    _record(signature, matched_text, line_number)
+
+            # L-M9 multiline pass: a regex that spans lines (a technique's pattern
+            # broken across a method call, a string literal split by the decompiler,
+            # a wrapped declaration) can never match any single line, so it runs
+            # against the whole text with DOTALL (and IGNORECASE if the signature
+            # opted into case-insensitivity). Only one match per pattern is recorded
+            # - the goal is to catch the variant, not to enumerate every occurrence.
+            # Its own ReDoS budget guard covers the whole-text match, the same fail-
+            # loud rule as the per-line path.
+            for signature in signatures:
+                if not signature.multiline:
+                    continue
+                match_start = time.monotonic()
+                flags = re.DOTALL
+                if not signature.case_sensitive:
+                    flags |= re.IGNORECASE
+                for pattern in signature.patterns:
+                    match = re.search(pattern, text, flags)
+                    if time.monotonic() - match_start > LINE_MATCH_BUDGET_SECONDS:
+                        raise TimeoutError(
+                            f"static scan: multiline matching of {file_path.name} against "
+                            f"signature '{signature.id}' took > {LINE_MATCH_BUDGET_SECONDS:.1f}s - "
+                            f"the regex is catastrophically backtracking (ReDoS). The regex "
+                            f"must be linearized; see signatures.py."
+                        )
+                    if match is not None:
+                        # Translate the whole-text match offset back to a 1-based line
+                        # number so the Evidence row stays comparable to per-line hits.
+                        line_number = text.count("\n", 0, match.start()) + 1
+                        _record(signature, match.group(0), line_number)
+                        break
 
     # RESID-4F observability: record which signatures hit the display cap and
     # by how much, so the report can state the truncation instead of silently

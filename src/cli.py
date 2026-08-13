@@ -496,11 +496,19 @@ def run(
     if obfuscation_stage.status == "failed":
         _halt(stage_results)
 
+    # L-M7: capture the decompile completeness once so both per_surface_coverage
+    # and the console CAUTION below read the same value. Previously it was only
+    # consumed by the coverage map (and the report), so the console run showed
+    # "OK decompile -> Decision: NEITHER" with no hint the decompile was partial
+    # (Finding L) - a NEITHER there read as a confident negative.
+    decompile_completeness = (
+        decompile_result.evidence.get("decompile_completeness", "unknown")
+        if decompile_result.status == "success" else "unknown"
+    )
+    jadx_file_count = decompile_result.evidence.get("jadx_file_count")
+    jadx_exit_code = decompile_result.evidence.get("jadx_exit_code")
     coverage_map = per_surface_coverage(
-        decompile_completeness=(
-            decompile_result.evidence.get("decompile_completeness", "unknown")
-            if decompile_result.status == "success" else "unknown"
-        ),
+        decompile_completeness=decompile_completeness,
         obfuscation_level=obfuscation_level,
         abi_coverage=(
             native_evidence.abi_coverage
@@ -535,6 +543,17 @@ def run(
             f"[bold red]CAUTION: {len(classification.unreadable_files)} candidate file(s) "
             f"could not be read (OSError): {', '.join(classification.unreadable_files)} - "
             "treat any NEITHER/Inconclusive verdict as degraded, not a full-scan clean.[/bold red]"
+        )
+    # L-M7: the partial-decompile CAUTION was console-invisible (Finding L) - a
+    # reviewer watching cli_output.txt saw the Decision with no lower-bound hint,
+    # while the report carried "CAUTION: based on a PARTIAL decompile". Mirror
+    # the report (generator.py) live so a partial decompile is never read as a
+    # confident negative on the console.
+    if decompile_completeness == "partial":
+        console.print(
+            f"[bold red]CAUTION: based on a PARTIAL decompile "
+            f"({jadx_file_count} files, jadx exit {jadx_exit_code}) - "
+            "a NEITHER here is a lower bound, not a confident negative; see Limitations.[/bold red]"
         )
 
     # --- machine-readable ownership caveat (report-only attribution was the gap) ---

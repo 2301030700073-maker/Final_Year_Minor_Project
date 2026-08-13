@@ -1,83 +1,48 @@
-# Phase 2 Handoff — UnCrackable2
+# Phase 2 — Deterministic-Core Hardening Handoff Work List
 
-## What this phase is
+**Source:** `docs/plans/phase1-limitations-resolution-plan.md` (the resolution counterpart to `project-limitations.md`). This doc turns that plan into a concrete, ordered work list for the next build pass, and records the ADR-style decision the plan's #2 priority (L-M1) requires. It does not re-litigate the plan's honest framing: no limitation below is claimed removable — each has a best verifiable reduction, and the structurally irreducible ones are handed to the documented AI-layer roadmap (ADR-0008 C/D).
 
-Extends the same pipeline validated in Phase 1 to a second target, OWASP UnCrackable Level 2, without changing the core architecture - the point of Phase 2 was to prove the deterministic-signature + Frida-bypass + programmatic-success-check design actually generalizes, not just fits one app. It mostly does.
+**Already resolved in this pass (do not re-open):**
+- **L-M7** (console partial-decompile CAUTION) — implemented in `cli.py`; the partial-decompile CAUTION now prints live after the Decision line, mirroring `report/generator.py`. No console harness exists (only `test_cli_helpers.py`), so it is validated by the real end-to-end run, per the project's testing philosophy.
+- **L-M8** (OSError path persistence) — satisfied by the Finding J fix: `unreadable_files` is carried on `ClassificationResult` and serialized via `asdict` into `classification_json` (the analysis record), not just the rendered report.
+- **L-M10** (ingest edges) — the truncated-zip and tri-state-signer corrections (Findings F/G/K) are in; the only remaining verification is against a second real apksigner version.
 
-## What we found reading the real decompiled code
+---
 
-Level 2's root-detection is the same three checks as Level 1 (PATH-split `su` lookup, `Build.TAGS` test-keys, a 7-path known-indicator-file array), byte-for-byte identical logic, just moved from `sg.vantagepoint.a.c` to `sg.vantagepoint.a.b`. The debug-flag check (`ApplicationInfo.flags & 2`) moved too, from Level 1's `sg.vantagepoint.a.b` to `sg.vantagepoint.a.a` here. Confirmed against the real `b.java`/`a.java` already sitting in this repo under `outputs/analysis/4c7980ef.../jadx/sources/sg/vantagepoint/a/`, not guessed.
+## Ordered work items
 
-Two things are genuinely new:
+### 1. L-M1 — Decompile bottleneck on large / real production apps  (effort: M, Phase 2 core)
+**Decision (ADR-style, captured here):** adopt **lazy / on-demand decompilation + disk-backed code cache + out-of-heap (SQLite) xref + multi-engine fallback**. This is the single decision that gates "works on real apps" (Telegram/PropertyGuru/F-Droid all fail jadx outright or partial).
+- **Lazy decompile:** index metadata at ingest only; decompile per-class on demand; cache derived output under the APK-hash dir keyed by dex-stable identity (`jadx-headless-mcp` pattern). Removes the all-or-nothing OOM cliff.
+- **Out-of-heap xref:** move usage/cross-reference data into SQLite (FTS5 trigram + ripgrep fallback) instead of JVM heap.
+- **Memory tuning:** `-XX:MaxRAMPercentage=60` default, `-Xmx` override for very large APKs; cap the 600s jadx timeout by APK size, not flat.
+- **Multi-engine fallback:** jadx → CFR / Vineflower / Procyon per-class; `apktool --no-res` smali-only fast path (~5×).
+- **Where:** `src/static/decompile.py` (split the monolithic in-memory path into a lazy, cache-backed engine); `src/static/native.py` already handles the `.so` surface separately (see #3).
+- **Verify:** a real Telegram / PropertyGuru run must produce `complete` decompile (or a loud, per-file fallback chain) instead of jadx exit-1 partial.
 
-1. **A background anti-debug check.** `MainActivity.onCreate()` starts an `AsyncTask` that polls `Debug.isDebuggerConnected()` in a tight loop and shows a "Debugger detected!" dialog if it ever returns true. This isn't root-detection or SSL-pinning, so it deliberately has **no signature entry** in `root_detection.yaml` - folding it into that category's confidence score would misrepresent what's actually being measured. It's still hooked in the bypass script (see below), but purely as a defensive precaution, not because it's confirmed necessary - more on that below.
-2. **Nothing SSL-related exists**, same as Level 1. `NEITHER` for SSL is still the correct answer.
+### 2. L-M3 — Signature blind spots (unknown = silently absent)  (effort: M)
+- Expand the signature taxonomy to the industry set (14 root / 15 SSL categories, APKShield-PT).
+- Flag `unknown_uncovered` explicitly per detection-confidence (NFR-7), not just per-surface coverage.
+- **Smali-level scanning:** `apktool --no-res` + scan `.smali` for the same signatures, closing the "only `.java`/`.xml`" hole (S1) without requiring decompile success.
+- **Deobfuscation:** consume R8/ProGuard `mapping.txt` where recoverable (`chimera` pattern).
+- **Multi-line + case-insensitive matching** (fixes S5/G10).
+- **Where:** `config/signatures/*.yaml`, `src/static/signatures.py`, new smali scan surface.
 
-`libfoo.so` (a real native library, present for all 4 ABIs) is confirmed unrelated to root-detection - it's only used for the manual secret-verification flow (`CodeCheck.a()` → native `bar()`), same category as Level 1's AES check. No native/.so analysis capability was needed for this phase, despite that being flagged as a maybe in the original architecture doc.
+### 3. L-M6 — Native `.so` surface unscannable  (effort: M)
+- Scan native libs with the already-present `readelf`/`strings`/capstone for: native pinning anchors, `su`/Magisk/KernelSU strings, Frida-detection strings, JNI export names.
+- For Dex2C-protected logic, Ghidra/IDA headless disassembly (the only 2026 tool that reverses JNI transpilation).
+- **Where:** `src/static/native.py`; goal: `native=unscannable` → `native=scanned`.
 
-## What changed in the pipeline
+### 4. L-M5 — SSL-pinning ground truth  (effort: S-M)
+- Add **RS_CertPinning / RS_Vapour** (both present in `APK_Test/`) to the ground-truth registry so SSL Tier 2 calibration gets a real fully-decompiling `ssl:true` target.
+- Expand 5 SSL patterns to the 15-category taxonomy (see #2); add NSC XML / `network_security_config` as a first-class attributed SSL signal.
+- **Where:** `config/ground_truth.yaml`, `config/signatures/*.yaml`.
 
-**`root_detection.yaml`: zero new signature entries.** Matching is content-based (regex/string scan across files, not tied to class names), so the existing `root_su_via_path_env_check` / `root_build_tags_test_keys` / `root_known_indicator_files` signatures already match `b.java` exactly as they matched `c.java`. Locked in with a new regression test (`test_scan_matches_real_uncrackable2_root_detection_code` in `tests/unit/test_signatures.py`) using the real decompiled source quoted verbatim, same discipline as Phase 1's `c.java` regression test.
+### 5. L-M2 — Dynamic bypass generalization  (effort: L, roadmap C/D)
+- Auto targeted-script generation (APKShield-PT pattern: 14 root + 15 SSL categories), recipe-based bypass engine (`frida-mcp` flow), universal-unpinning fallback, anti-Frida-detection evasion.
+- **Explicitly roadmap:** aligns with ADR-0008 groups C/D (items 12-20); the single biggest functional gap but not a Phase-2 deterministic-core item.
 
-**`frida_runner.py` is now target-aware, not just action-aware.** `SCRIPTS_BY_ACTION` (a flat `Action → scripts` map) became `SCRIPTS_BY_TARGET_ACTION` (`target → Action → scripts`) - Level 1 and Level 2 need different scripts for the identical `ROOT_ONLY` action, since the classes to hook are named differently. `run_dynamic_stage()` takes a new `target` parameter (default `"uncrackable1"`, so nothing about Level 1's behavior changed). `cli.py` passes its existing `--target` flag through - the same flag that already selected the success-check module now also selects the bypass script, which is the more consistent design anyway.
+---
 
-**New: `src/dynamic/scripts/root_bypass_uncrackable2.js`.** Hooks `sg.vantagepoint.a.b.{a,b,c}` (root checks) and `sg.vantagepoint.a.a.a` (debug-flag check), same bounded-poll pattern as `root_bypass_v1.js` (`JAVA_POLL_TIMEOUT_MS`, explicit failure signal instead of hanging). Hook ids are fully-qualified (`"sg.vantagepoint.a.b.a"`, not the short `"b.a"` style Level 1 uses) - Level 2's classes happen to reuse Level 1's short letters for a different purpose, so the full path avoids confusion reading the two scripts side by side. This never caused a runtime bug (each target's success-check only ever parses its own script's messages), just a readability risk worth avoiding while writing a second script from scratch.
-
-Also hooks `android.os.Debug.isDebuggerConnected` and forces it to return `false`. **Read this part carefully, because the first-draft reasoning for it turned out to be wrong before this got implemented:** the assumption going in was that this hook was *necessary* - that the polling loop would otherwise call `System.exit(0)` and kill the app before we could observe anything. Checking the actual decompiled dialog code shows `System.exit(0)` only fires from the dialog's own "OK" button `onClick`, the dialog is `setCancelable(false)`, and this pipeline has no UI-tap step anywhere - so the current run's dialog just sits there, and the root-check hooks already fire and report synchronously in `onCreate`, before the `AsyncTask` is even constructed. Nothing here should actually need the hook to work. It's included anyway as a zero-cost hedge - this project's WSL2-to-Windows Frida relay is enough of a nonstandard bridge that a JDWP-adjacent side effect tripping `Debug.isDebuggerConnected()` in a way vanilla local Frida wouldn't isn't ruled out, and it costs nothing to hook defensively.
-
-**Update, confirmed by the round-1 verification bundle:** the hook does fire, every time - `anti_debug_poll_neutralized` showed up in the real report. Makes sense in hindsight and has nothing to do with the relay: the `AsyncTask`'s `while (!Debug.isDebuggerConnected())` loop calls it every ~100ms unconditionally, Frida attached or not, so it was always going to get called eventually regardless of environment. Whether the app would have actually survived unhooked (per the `System.exit(0)`/no-UI-tap reasoning above) is still untested - we hooked it, so it never got the chance to matter - but "does this method get invoked at all" is no longer an open question.
-
-**New: `src/dynamic/success_checks/uncrackable2.py`.** Same hook-firing-confirmation design as `uncrackable1.py` (requires all three root-check hooks to have actually fired, not just been installed, before treating a run as bypassed - see that module's docstring for the full reasoning, which still applies here unchanged). `BLOCK_SIGNAL_PATTERN` adds `"Debugger detected!"` as an explicit third alternative alongside `"Root detected!"`/`"App is debuggable!"`. The anti-debug poll hook's evidence is tracked under its own `anti_debug_poll_neutralized` key, explicitly never merged into the root-check hook set - firing that hook alone, with none of the three real root checks confirmed, must not and does not flip the verdict to bypassed (covered by its own test).
-
-**`SUCCESS_CHECKS` in `cli.py`** now has `"uncrackable2": UnCrackable2SuccessCheck()` alongside Level 1's entry.
-
-Everything above is covered by 14 new tests (67 total now, all passing locally): `test_root_bypass_uncrackable2_script.py` (source-content regression guard, same rationale as Level 1's - no JS execution harness in this repo), `test_uncrackable2_success_check.py` (mirrors Level 1's test suite plus two Level-2-specific cases: the explicit `"Debugger detected!"` block signal, and the anti-debug-hook-alone-doesn't-flip-the-verdict guard), and the one new signature regression test mentioned above.
-
-## 1. Pull
-
-```bash
-git pull
-uv sync
-```
-
-## 2. Run the verification bundle script
-
-Same script as Phase 1, now pointed at Level 2 - `--target` selects both the bypass script and the success-check module:
-
-```bash
-uv run python scripts/collect_verification_bundle.py --apk APK_Test/UnCrackable-Level2.apk --target uncrackable2 --justification ACADEMIC_TRAINING_TARGET
-```
-
-(`APK_Test/UnCrackable-Level2.apk` should already be there from the earlier decompile work - if not, same source as Level 1/3.)
-
-Look at `SUMMARY.md` and the copied report yourself before pushing - specifically:
-
-- Does `cli_output.txt` say `Decision: ROOT_ONLY`? (Confirms both the root signatures fired and SSL still correctly didn't.)
-- Does the report's evidence show `hook_fired_sg.vantagepoint.a.b.a` / `.b` / `.c` all present, and `root_bypassed: true`? Or `hooks_not_confirmed` (a real problem - the hooks never fired, not the old flip-flop bug)? Or `anomaly` (the still-deferred Phase 1 logcat race resurfacing on a second target - expected if it shows up, not new, see the Phase 1 handoff doc for why it's deferred rather than a surprise).
-- Is there an `anti_debug_poll_neutralized` line in the evidence? If yes, that means `Debug.isDebuggerConnected()` actually got called at runtime and our hook forced it false - genuinely useful to know either way, but **not a pass/fail signal** either way; don't block on this one.
-- Open the copied report under `reports/<apk_hash>/` - does the evidence it cites (file/line/matched text, hook confirmations) actually correspond to real code/behavior you're seeing?
-
-## 3. If something's off
-
-Only these files should need touching to fix a mismatch - if you find yourself needing to change anything else under `src/`, stop and flag it, same rule as Phase 1:
-
-- `config/signatures/root_detection.yaml` - shouldn't need changes (content-based matching, already covers `b.java`), but flag it if it somehow doesn't clear threshold on the real run.
-- `src/dynamic/scripts/root_bypass_uncrackable2.js` - adjust the hook targets if something doesn't match what you observe.
-- `src/dynamic/success_checks/uncrackable2.py` - update `SECRET_REVEALED_PATTERN` / `BLOCK_SIGNAL_PATTERN` if the real strings differ from what's here.
-
-Re-run the script (step 2) after any fix - a fresh bundle each time.
-
-## 4. Push it back
-
-```bash
-git add docs/plans/handoff/bundles/
-git commit -m "Phase 2 verification: <one-line summary of what you found>"
-git push
-```
-
-Same rule as always: the bundle is the report. A verbal "it worked" isn't something we can act on.
-
-## Not part of this round
-
-- The Phase 1 logcat clear/capture race (still deferred, see that handoff doc) - unchanged here, may or may not resurface on Level 2.
-- Level 3's `clear_logcat` crash - still parked for its own phase, not touched.
+## Sequencing note
+Follow the order above (L-M1 first — it gates the rest). Each item's verification is its real end-to-end run on the reference WSL2 environment against a real target; a run's captured evidence (log + report) is the integration-test record, per the project's testing philosophy.

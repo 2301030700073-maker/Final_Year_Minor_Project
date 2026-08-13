@@ -35,10 +35,32 @@ STATUS_SIDECAR_NAME = "decompile_status.json"
 # D1: hard ceilings so a hung tool fails loudly instead of hanging forever.
 # jadx gets more headroom - it is the slower, more memory-hungry of the two,
 # and large/obfuscated APKs (the module's own PropertyGuru note) push it.
-JADX_TIMEOUT = 600
+# L-M1: the jadx ceiling is now SCALED BY APK SIZE, not a flat 600s. A flat
+# ceiling makes a hung jadx on a tiny training APK (which real runs finish in
+# ~7s) burn the full 10 minutes before being killed, while a genuinely large
+# production app (PropertyGuru, 151MB) may want more than 600s even when
+# healthy. Floor for small APKs so a hang fails fast, scale up for large ones,
+# hard-cap so no single run can stall the pipeline forever. (Memory: jadx's own
+# launcher already defaults -XX:MaxRAMPercentage=70, so the plan's memory-flag
+# item needs no action here - the real large-app fix is the multi-engine /
+# lazy-decompile work of L-M1, not a JVM flag.)
+JADX_TIMEOUT_FLOOR = 120     # seconds - minimum headroom for a tiny APK
+JADX_TIMEOUT_PER_MB = 4.0    # seconds of jadx headroom per MB of APK
+JADX_TIMEOUT_CAP = 900       # seconds - hard ceiling (was flat 600)
 APKTOOL_TIMEOUT = 300
 
 _TIMEOUT_RC = -9  # sentinel for "killed by our timeout", distinct from any real exit code
+
+
+def jadx_timeout_for_size(size_bytes: int) -> int:
+    """Size-scaled jadx timeout (L-M1). Small APKs fail a hung jadx fast (a
+    hang is a hang whatever the app size - a tiny training APK should not wait
+    the full old 600s); large ones get proportionally more headroom so a
+    healthy-but-big decompile isn't killed; a hard cap bounds the worst case
+    so one run can't stall the pipeline indefinitely."""
+    mb = size_bytes / (1024 * 1024)
+    scaled = int(JADX_TIMEOUT_FLOOR + mb * JADX_TIMEOUT_PER_MB)
+    return min(scaled, JADX_TIMEOUT_CAP)
 
 
 def _require_tool(name: str) -> str:
@@ -163,8 +185,18 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         else:
             if jadx_dir.exists():
                 shutil.rmtree(jadx_dir, ignore_errors=True)
+            # L-M1: size-scaled timeout. The APK always exists here in the real
+            # pipeline (ingest verified it), but decompile() is also called
+            # directly in unit tests with fake paths, so a non-stat-able path
+            # must not crash - fall back to the floor timeout (fail-fast),
+            # which is the safe direction for an absent/corrupt file anyway.
+            try:
+                apk_size = apk_path.stat().st_size
+            except OSError:
+                apk_size = 0
             jadx_returncode, jadx_log_text = _run_tool_logged(
-                [jadx, "-d", str(jadx_dir), str(apk_path)], jadx_log, JADX_TIMEOUT, "jadx",
+                [jadx, "-d", str(jadx_dir), str(apk_path)], jadx_log,
+                jadx_timeout_for_size(apk_size), "jadx",
             )
 
         jadx_file_count = _count_java_files(jadx_dir)

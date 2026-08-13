@@ -278,3 +278,31 @@ def test_decompile_reuses_valid_jadx_and_reruns_only_hollow_apktool(tmp_path, mo
 def test_require_tool_raises_loudly_when_missing():
     with pytest.raises(RuntimeError, match="not found on PATH"):
         _require_tool("definitely_not_a_real_tool_xyz")
+
+
+def test_jadx_timeout_scales_by_apk_size():
+    # L-M1: the jadx timeout must be size-scaled, not flat. A tiny APK gets the
+    # floor so a hung jadx fails fast instead of burning the old flat 600s; a
+    # large one gets proportionally more headroom; a huge one is hard-capped so
+    # no single run can stall the pipeline indefinitely.
+    from static.decompile import (
+        JADX_TIMEOUT_CAP,
+        JADX_TIMEOUT_FLOOR,
+        JADX_TIMEOUT_PER_MB,
+        jadx_timeout_for_size,
+    )
+
+    assert jadx_timeout_for_size(0) == JADX_TIMEOUT_FLOOR            # empty -> floor
+    # 1MB -> floor + per-MB headroom (122s), not the old flat 600s
+    assert jadx_timeout_for_size(1 * 1024 * 1024) == JADX_TIMEOUT_FLOOR + int(1 * JADX_TIMEOUT_PER_MB)
+    # PropertyGuru-class 151MB app gets more than the floor, less than the cap
+    pg = jadx_timeout_for_size(151 * 1024 * 1024)
+    assert JADX_TIMEOUT_FLOOR < pg < JADX_TIMEOUT_CAP
+    # L-M1 intent guard (the flaw the old 2s/MB constant had): the large-app
+    # headroom must EXCEED the previous flat 600s, not shrink below it. At 4s/MB
+    # a 151MB app gets 724s; at 2s/MB it wrongly got 422s.
+    assert pg > 600, f"large-app headroom shrank below the old flat 600s: {pg}s"
+    # monotonic: a bigger APK never gets a smaller timeout
+    assert jadx_timeout_for_size(200 * 1024 * 1024) >= pg
+    # a huge APK is hard-capped, not unbounded
+    assert jadx_timeout_for_size(10 * 1024 * 1024 * 1024) == JADX_TIMEOUT_CAP

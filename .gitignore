@@ -13,3 +13,6 @@ tools/objection_cache/
 
 # L-M6: Ghidra install is a build artifact, never committed (~1GB extracted)
 tools/ghidra/
+# L-M1: the CFR secondary-decompiler jar is a documented download (see README),
+# pinned on the reference box, not vendored into git
+tools/cfr/

@@ -344,9 +344,64 @@ def _dex_cache_key(entry: dict) -> str:
     return f"{stem}-{entry['sha256'][:12]}"
 
 
+def _run_dex_fallback(dex_file: Path, target_dir: Path, log_path: Path) -> dict:
+    """L-M1: per-DEX secondary recovery - recover classes a single DEX's jadx
+    pass choked on (jadx 1.5.1 RegionMakerVisitor bug). Same dex2jar->CFR
+    recovery as the whole-APK fallback, but scoped to ONE dex so lazy mode does
+    not leave its largest, most-likely-to-choke unit as an unrecovered hole
+    (the friend-flagged design gap). Recovered .java lands in the shared
+    target_dir/cfr - the same dir the whole-APK fallback and the static scan
+    use (cli.py appends fallback_output to the scan roots) - so recovered
+    classes are scanned like any other decompiled output. Tooling discovery
+    mirrors _run_secondary_fallback; absent tooling is recorded loudly as
+    fallback_unavailable, never silently accepted (principle 3)."""
+    cfr_dir = target_dir / "cfr"
+    d2j = shutil.which("d2j-dex2jar.sh")
+    cfr_jar = os.environ.get("CFR_JAR") or ""
+    cfr_bin = shutil.which("cfr")
+    if not d2j or not (cfr_jar or cfr_bin):
+        return {
+            "fallback_engine": None, "fallback_unavailable": True,
+            "fallback_recovered": False, "fallback_file_count": 0,
+            "fallback_error_tail": (
+                "per-DEX secondary decompiler unavailable (need d2j-dex2jar.sh "
+                "on PATH and a CFR jar via CFR_JAR or a 'cfr' on PATH)"
+            ),
+        }
+    recovered_jar = dex_file.with_name(f"{dex_file.stem}-recovered.jar")
+    with open(log_path, "a", encoding="utf-8") as logf:
+        try:
+            d2j_rc = subprocess.run(
+                [d2j, "-f", str(dex_file), "-o", str(recovered_jar)],
+                stdout=logf, stderr=subprocess.STDOUT, timeout=600,
+            ).returncode
+        except subprocess.TimeoutExpired:
+            d2j_rc = _TIMEOUT_RC
+        if d2j_rc == 0 and recovered_jar.exists():
+            cmd = ([cfr_bin, str(recovered_jar), "--outputdir", str(cfr_dir)]
+                   if cfr_bin else ["java", "-jar", cfr_jar, str(recovered_jar), "--outputdir", str(cfr_dir)])
+            try:
+                cfr_rc = subprocess.run(
+                    cmd, stdout=logf, stderr=subprocess.STDOUT, timeout=600,
+                ).returncode
+            except subprocess.TimeoutExpired:
+                cfr_rc = _TIMEOUT_RC
+        else:
+            cfr_rc = -1
+    recovered = _count_java_files(cfr_dir)
+    return {
+        "fallback_engine": "cfr", "fallback_unavailable": False,
+        "fallback_recovered": recovered > 0, "fallback_file_count": recovered,
+        "fallback_output": str(cfr_dir) if recovered > 0 else None,
+        "fallback_error_tail": None if recovered > 0 else (
+            f"per-DEX CFR recovered nothing for {dex_file.name} (d2j rc={d2j_rc}, cfr rc={cfr_rc})"
+        ),
+    }
+
+
 def _decompile_dexes(
     apk_path: Path, target_dir: Path, dex_entries: list[dict], jadx: str,
-) -> tuple[int, int, list[dict]]:
+) -> tuple[int, int, list[dict], dict]:
     """L-M1 lazy per-DEX decompile. Runs jadx once per DEX, bounded-memory - a
     hung/OOM on one DEX no longer discards the whole APK (the all-or-nothing
     cliff lazy decompile exists to remove). Each DEX output is cached under
@@ -359,6 +414,12 @@ def _decompile_dexes(
     dex_sources = target_dir / "dex_sources"
     units: list[dict] = []
     any_failed = False
+    # Aggregate per-DEX secondary-recovery evidence (friend L-M1 work item 2):
+    # a DEX whose jadx exits non-zero - the largest, most-likely-to-choke unit -
+    # must not be left as an unrecovered hole in lazy mode.
+    fallback = {"fallback_engine": None, "fallback_unavailable": False,
+                "fallback_recovered": False, "fallback_file_count": 0,
+                "fallback_output": None, "fallback_per_dex": []}
     for entry in dex_entries:
         out_dir = jadx_dir / _dex_cache_key(entry)
         existing = _count_java_files(out_dir)
@@ -390,8 +451,26 @@ def _decompile_dexes(
             any_failed = True
         units.append({"dex": entry["name"], "status": "ok" if files > 0 else "failed",
                       "files": files, "exit": rc, "error_tail": log if files == 0 else None})
+        # Per-DEX recovery: jadx choked on this DEX (exit != 0) - recover the
+        # classes it lost with dex2jar+CFR instead of leaving the hole. Cached
+        # units were proven ok earlier and are skipped. Recovery is scoped to
+        # this one dex_file, so a hung/partial dex is recovered on its own and
+        # its siblings' output is preserved.
+        if rc != 0:
+            dex_fb = _run_dex_fallback(dex_file, target_dir, dex_sources / f"{Path(entry['name']).stem}.log")
+            dex_fb["dex"] = entry["name"]
+            fallback["fallback_per_dex"].append(dex_fb)
+            if dex_fb.get("fallback_unavailable"):
+                fallback["fallback_unavailable"] = True
+            if dex_fb.get("fallback_recovered"):
+                fallback["fallback_recovered"] = True
+                fallback["fallback_engine"] = dex_fb["fallback_engine"]
+                fallback["fallback_output"] = dex_fb["fallback_output"]
+                fallback["fallback_file_count"] += dex_fb["fallback_file_count"]
     jadx_file_count = _count_java_files(jadx_dir)
-    return (1 if any_failed else 0), jadx_file_count, units
+    if not fallback["fallback_per_dex"]:
+        fallback = {}
+    return (1 if any_failed else 0), jadx_file_count, units, fallback
 
 
 def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
@@ -427,11 +506,13 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         # the APK is not a readable zip or holds no DEX (unit tests use fake
         # paths, so this branch is what keeps them on the proven whole-APK path).
         per_dex_units = None
+        fallback = {}
         dex_entries = _list_dex_entries(apk_path)
         if dex_entries:
-            jadx_returncode, jadx_file_count, per_dex_units = _decompile_dexes(
+            jadx_returncode, jadx_file_count, per_dex_units, per_dex_fallback = _decompile_dexes(
                 apk_path, target_dir, dex_entries, jadx)
             jadx_log_text = ""
+            fallback = per_dex_fallback  # per-DEX recovery evidence (friend L-M1 work item 2)
         else:
             # D5: re-decompile only the half that is missing or hollow. A hollow
             # half is cleared before re-running so no ambiguous stale state is
@@ -474,8 +555,8 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         # L-M1 core: when jadx is partial (exit != 0 but wrote real .java - the
         # AndroidX LocalBroadcastManager RegionMakerVisitor bug), try to recover
         # the classes it choked on with a secondary engine instead of leaving a
-        # hole. Recorded loudly when tooling is absent (principle 3).
-        fallback = {}
+        # hole. Recorded loudly when tooling is absent (principle 3). Whole-APK
+        # path only (per-DEX recovery already ran inside _decompile_dexes).
         if per_dex_units is None and jadx_returncode != 0 and jadx_file_count > 0:
             # L-M1 core: when jadx is partial (exit != 0 but wrote real .java -
             # the AndroidX LocalBroadcastManager RegionMakerVisitor bug), try to

@@ -33,6 +33,7 @@ Versions are pinned here deliberately (NFR-5) — if you install something diffe
 - Android SDK platform-tools (`adb`) — via `sdkmanager` or your distro's `android-sdk-platform-tools` package
 - [jadx](https://github.com/skylot/jadx) ≥ 1.5
 - [apktool](https://apktool.org/) ≥ 2.9
+- dex2jar (`d2j-dex2jar.sh`) and **CFR** (a `cfr` on PATH, or `CFR_JAR` pointing at `cfr-X.Y.jar`) — the L-M1 secondary-recovery engine. On this reference box CFR is vendored at `tools/cfr/cfr-0.152.jar` (download from https://www.benf.org/other/cfr/); export `CFR_JAR="$PWD/tools/cfr/cfr-0.152.jar"` for the fallback to find it. The fallback is *loud* when either is missing — it records `fallback_unavailable`, it never silently skips recovery (principle 3).
 - `pip install frida-tools objection` (or via `uv` if added as project dependencies — check `pyproject.toml`)
 - [mitmproxy](https://mitmproxy.org/)
 

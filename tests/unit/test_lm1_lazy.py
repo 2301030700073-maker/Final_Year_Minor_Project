@@ -14,6 +14,7 @@ from pathlib import Path
 from static.decompile import (
     _dex_cache_key,
     _list_dex_entries,
+    _run_dex_fallback,
     decompile,
 )
 
@@ -138,3 +139,23 @@ def test_per_dex_partial_jadx_exit_degrades_completeness(tmp_path, monkeypatch):
     # Partial, not complete - the exit-1 jadx must not be laundered away.
     assert result.evidence.get("decompile_completeness") == "partial"
     assert result.evidence.get("jadx_exit_code") == 1
+    # Friend L-M1 work item 2: a DEX that exits 1 must be recovered, or the
+    # missing CFR tooling recorded LOUDLY (principle 3) - never silently left
+    # as a hole. The unit-level jadx exit is surfaced in dex_units.
+    assert units[0]["exit"] == 1
+    assert result.evidence.get("fallback") or result.evidence.get("fallback_unavailable") or \
+        result.evidence.get("fallback_per_dex") is not None
+
+
+def test_run_dex_fallback_is_loud_when_cfr_absent(tmp_path, monkeypatch):
+    # L-M1 per-DEX recovery: when CFR is not installed, the fallback must record
+    # fallback_unavailable=True (never silently no-op, principle 3), regardless
+    # of whether d2j is present.
+    monkeypatch.delenv("CFR_JAR", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))  # no d2j, no cfr
+    dex = tmp_path / "classes.dex"
+    dex.write_bytes(b"not-a-real-dex-but-wont-be-touched")
+    res = _run_dex_fallback(dex, tmp_path, tmp_path / "x.log")
+    assert res["fallback_unavailable"] is True
+    assert res["fallback_recovered"] is False
+    assert res["fallback_file_count"] == 0

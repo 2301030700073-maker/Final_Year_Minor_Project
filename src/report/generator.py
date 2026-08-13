@@ -50,7 +50,7 @@ TEMPLATE = Template("""\
 
 ## Classification
 
-**Decision:** {{ classification.action.value }} (root threshold {{ classification.root_threshold }}, ssl threshold {{ classification.ssl_threshold }}){% if decompile_completeness == "partial" %} - **CAUTION: based on a PARTIAL decompile ({{ jadx_file_count }} files, jadx exit {{ jadx_exit_code }}) - see Limitations**{% endif %}
+**Decision:** {{ classification.action.value }} (root threshold {{ classification.root_threshold }}, ssl threshold {{ classification.ssl_threshold }}){% if decompile_completeness == "partial" %} - **CAUTION: based on a PARTIAL decompile ({{ jadx_file_count }} files, jadx exit {{ jadx_exit_code }}) - see Limitations**{% endif %}{% if classification.unknown_uncovered %} - **Coverage-limited (unknown, not absent): {{ classification.unknown_uncovered | join(', ') }} - a NEITHER here is a lower bound, not a confident negative (governing surface not fully analyzed)**{% endif %}
 **Files scanned:** {{ classification.scanned_file_count }} (RESID-4C: a low count means this verdict is based on a small corpus - a NEITHER is not proof of absence){% if classification.unreadable_file_count %}{{ " " }}**CAUTION: {{ classification.unreadable_file_count }} candidate file(s) could not be read (OSError): {% for f in classification.unreadable_files %}`{{ f }}`{% if not loop.last %}, {% endif %}{% endfor %} - treat any NEITHER/Inconclusive verdict as degraded, not a full-scan clean.**{% endif %}
 
 ### Root-detection

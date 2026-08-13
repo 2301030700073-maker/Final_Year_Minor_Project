@@ -60,7 +60,7 @@ from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
 from ingest.metadata import compute_hashes, ingest
 from report.attribution import attribute_root_evidence, gate_all_third_party
 from report.generator import generate_calibration_report, generate_report
-from static.coverage import coverage_bound_line, per_surface_coverage
+from static.coverage import apply_coverage_bound, coverage_bound_line, per_surface_coverage
 from static.decision_engine import DEFAULT_THRESHOLD, classify
 from static.decompile import decompile
 from static.manifest import ManifestInfo, parse_manifest
@@ -541,6 +541,14 @@ def run(
     _print_stage(classify_stage)
     if classify_stage.status == "failed":
         _halt(stage_results)
+
+    # L-M4/L-M3: bind each verdict to its governing-surface coverage. A category
+    # whose surface isn't fully analyzed gets coverage_limited=True on its verdict
+    # and is recorded in classification.unknown_uncovered - the machine-readable
+    # "unknown, not absent" marker - so a NEITHER over an uncovered surface can't
+    # be read as a confident negative by any consumer of the persisted
+    # classification_json (NFR-7). The coverage_map is computed above (line 519).
+    classification = apply_coverage_bound(classification, coverage_map)
 
     console.print(f"[bold]Decision: {classification.action.value}[/bold]")
     # Finding J: surface the scan degradation live, not just in the rendered

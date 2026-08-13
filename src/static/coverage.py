@@ -23,7 +23,10 @@ stripped .so excludes the root category even when Java is complete.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Literal
+
+from common import ClassificationResult
 
 Coverage = Literal["fully_analyzed", "partial", "unscannable"]
 
@@ -122,3 +125,30 @@ def coverage_bound_line(coverage: dict[str, Coverage]) -> str:
         else:
             cat_parts.append(f"{category}: NEITHER is a lower bound, NOT confident ({statuses})")
     return f"Coverage bound: {surface_part}; " + "; ".join(cat_parts)
+
+
+def apply_coverage_bound(
+    classification: ClassificationResult,
+    coverage: dict[str, Coverage],
+) -> ClassificationResult:
+    """L-M4/L-M3: bind each category's verdict to its governing-surface coverage.
+
+    A category whose governing surface is NOT fully analyzed gets
+    verdict.coverage_limited=True (its confidence is an upper bound, not a point
+    estimate) and its name recorded in classification.unknown_uncovered - the
+    L-M3 machine-readable "unknown, not absent" marker - so a NEITHER over an
+    uncovered surface can never be read by a downstream consumer of
+    classification_json as a confident negative (NFR-7). Fully-analyzed
+    categories are untouched, so this is additive: a clean, fully-covered scan
+    yields unknown_uncovered == []. Pure (no I/O), returns a new ClassificationResult.
+    """
+    limited = [
+        cat for cat in GOVERNING_SURFACES
+        if not category_is_confident_negative(cat, coverage)
+    ]
+    return replace(
+        classification,
+        root=replace(classification.root, coverage_limited="root" in limited),
+        ssl=replace(classification.ssl, coverage_limited="ssl" in limited),
+        unknown_uncovered=limited,
+    )

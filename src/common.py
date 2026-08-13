@@ -77,6 +77,13 @@ class CategoryVerdict:
     confidence: float
     detected: bool
     evidence: list[Evidence]
+    # L-M4/L-M3: True when at least one of this category's governing surfaces
+    # (root -> {java,native}, ssl -> {java,native,manifest}) was NOT fully
+    # analyzed. The confidence is then an upper bound, not a point estimate, and
+    # a `detected=False` here is "unknown, not absent" - never a confident
+    # negative. Set by coverage.apply_coverage_bound, which also records the
+    # category in ClassificationResult.unknown_uncovered.
+    coverage_limited: bool = False
 
 
 @dataclass
@@ -114,6 +121,15 @@ class ClassificationResult:
     # matches were truncated (see StaticEvidence.capped_counts). Empty when no
     # signature exceeded the cap.
     evidence_capped_counts: dict[str, int] = field(default_factory=dict)
+    # L-M3 (NFR-7 "unknown, never guess"): the detection categories whose
+    # governing coverage surface was NOT fully analyzed - root and/or ssl - so
+    # an automated consumer of classification_json can distinguish "scanned and
+    # clean" from "not fully analyzed" instead of reading a coverage-bound
+    # NEITHER as a confident negative. Populated by coverage.apply_coverage_bound
+    # from the per-surface coverage map. Empty means every governing surface of
+    # every detected category was fully_analyzed (a true confident negative is
+    # possible).
+    unknown_uncovered: list[str] = field(default_factory=list)
 
 
 @dataclass

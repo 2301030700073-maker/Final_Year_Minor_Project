@@ -138,6 +138,28 @@ def _has_real_cached_content(jadx_dir: Path, apktool_dir: Path) -> bool:
     return _count_java_files(jadx_dir) > 0 and (apktool_dir / "AndroidManifest.xml").exists()
 
 
+def _cached_status_is_clean(status_sidecar: Path) -> bool:
+    """A cache hit is only trustworthy if the cached decompile was actually
+    CLEAN (both tools exited 0). Content presence is not proof of completeness:
+    the sidecar is the durable record of the original run's exit codes, and a
+    stale sidecar recording a non-zero exit can pin a clean APK to 'partial'
+    forever (verified: a Jul-31 UnCrackable1 run cached jadx_exit_code=1 from a
+    transient jadx failure; direct jadx today decompiles that APK cleanly in
+    both whole-APK and per-DEX modes, yet the cache kept reporting partial).
+    Reuse only clean cached output; a partial cache (sidecar explicitly records
+    a non-zero exit) is re-decompiled for real - the per-DEX lazy cache still
+    reuses the proven-ok DEX units, so the re-run is bounded to the units that
+    actually failed. A missing/unreadable sidecar returns True: _cached_result
+    then reports 'unknown' completeness honestly (not laundered to 'complete'),
+    and forcing a re-decompile there would only break the toolchain-free cache
+    path for no benefit."""
+    try:
+        data = json.loads(status_sidecar.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return True  # reuse as 'unknown' (see _cached_result) - honest, not laundered
+    return data.get("jadx_exit_code", 0) == 0 and data.get("apktool_exit_code", 0) == 0
+
+
 def _load_registry(output_root: Path) -> dict[str, dict]:
     """Read the cache registry (hash -> {last_accessed, size}). A missing or
     corrupt registry is not a failure - start fresh. A corrupt registry that
@@ -517,7 +539,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
 
         cache_was_hollow = False
         if jadx_dir.exists() and apktool_dir.exists():
-            if _has_real_cached_content(jadx_dir, apktool_dir):
+            if _has_real_cached_content(jadx_dir, apktool_dir) and _cached_status_is_clean(status_sidecar):
                 return _cached_result(start, jadx_dir, apktool_dir, status_sidecar)
             cache_was_hollow = True
         # L-M1: this is the decompile-for-real path (not a valid cache hit) - the

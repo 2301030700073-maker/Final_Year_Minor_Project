@@ -127,10 +127,14 @@ def test_decompile_total_failure_when_jadx_writes_zero_files(tmp_path, monkeypat
     assert "no usable output" in result.error
 
 
-def test_decompile_cache_hit_preserves_partial_label_from_sidecar(tmp_path):
-    # A second run against the same hash must not silently launder a
-    # partial decompile into looking complete - the exact property
-    # calibration ground-truth integrity depends on.
+def test_decompile_redecompiles_stale_partial_cache(tmp_path, monkeypatch):
+    # Real bug this pins down: a transient jadx failure (a Jul-31 UnCrackable1
+    # run) cached jadx_exit_code=1 in the sidecar. Content presence alone was
+    # treated as a valid cache hit, so a now-clean APK stayed pinned to
+    # 'partial' forever even after jadx recovered and decompiled it cleanly
+    # (direct jadx today returns rc=0 in both whole-APK and per-DEX modes). A
+    # cache hit must require a CLEAN cached status - a partial sidecar means the
+    # cached output is stale/degraded and is re-decompiled for real, not reused.
     target_dir = tmp_path / "cachedpartial"
     (target_dir / "jadx").mkdir(parents=True)
     (target_dir / "jadx" / "SomeClass.java").write_text("class SomeClass {}")
@@ -142,12 +146,35 @@ def test_decompile_cache_hit_preserves_partial_label_from_sidecar(tmp_path):
         "jadx_file_count": 1,
         "jadx_error_tail": "OutOfMemoryError",
     }))
+    (tmp_path / "real.apk").write_bytes(b"PK\x03\x04stale-partial-cache")
+    # whole-APK path (no classes*.dex): the existing jadx files are reused as a
+    # clean result on the re-decompile, so no toolchain is actually invoked -
+    # but the stale partial sidecar must NOT be trusted as a cache hit.
+    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("static.decompile._list_dex_entries", lambda apk: [])
 
-    result = decompile(tmp_path / "huge.apk", tmp_path, "cachedpartial")
+    result = decompile(tmp_path / "real.apk", tmp_path, "cachedpartial")
 
-    assert result.evidence["cached"] is True
-    assert result.evidence["decompile_completeness"] == "partial"
+    assert result.evidence["cached"] is False                    # stale partial not a hit
+    assert result.evidence["decompile_completeness"] == "complete"  # re-decompiled clean
     assert result.evidence["jadx_file_count"] == 1
+
+
+def test_cached_status_is_clean_requires_both_tools_zero(tmp_path):
+    from static.decompile import _cached_status_is_clean
+
+    partial = tmp_path / "partial.json"
+    partial.write_text(json.dumps({"jadx_exit_code": 1, "apktool_exit_code": 0}))
+    assert _cached_status_is_clean(partial) is False
+
+    clean = tmp_path / "clean.json"
+    clean.write_text(json.dumps({"jadx_exit_code": 0, "apktool_exit_code": 0}))
+    assert _cached_status_is_clean(clean) is True
+
+    # Missing/unreadable sidecar: reused as 'unknown' by _cached_result, so not
+    # treated as unclean - forcing a re-decompile there would only break the
+    # toolchain-free cache path for no benefit.
+    assert _cached_status_is_clean(tmp_path / "nope.json") is True
 
 
 def test_decompile_cache_hit_is_unknown_when_no_sidecar_exists(tmp_path):

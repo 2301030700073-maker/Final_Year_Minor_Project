@@ -11,6 +11,20 @@ def test_clear_when_no_single_char_names():
     assert obfuscation_from_names(names) == "clear"
 
 
+def test_excludes_universal_android_resource_class_R():
+    # `R` (and `R$id`, `R$layout`, ...) is the generated Android resource class,
+    # present in EVERY app and always a single char - it is never an obfuscation
+    # signal, so counting it inflates the minified ratio and mislabels clear
+    # apps as heavy (C1/G7). Verified against real output: UnCrackable-Level1
+    # decompiles to `R, a, c, b, a, MainActivity`; `R` must not count toward
+    # the minified ratio (the a/b/c helpers genuinely are R8-renamed, so that
+    # app correctly stays heavy either way).
+    assert obfuscation_from_names(["MainActivity", "R", "HomeActivity"]) == "clear"
+    assert obfuscation_from_names(["MainActivity", "R$id", "R$layout", "HomeActivity"]) == "clear"
+    # Genuine minified helpers still trip heavy once R is excluded.
+    assert obfuscation_from_names(["a", "b", "c", "R", "MainActivity"]) == "heavy"
+
+
 def test_heavy_when_mostly_single_char():
     names = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "MainActivity"]
     assert obfuscation_from_names(names) == "heavy"

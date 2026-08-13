@@ -73,10 +73,15 @@ def _minified_name_ratio(names: list[str]) -> float:
     only missed real R8, which uses two-char and `$` names, so the heavy guard
     never fired on the population it targets (H6); requiring the outer segment to
     also be short keeps clear apps' inner classes from being counted (C1)."""
-    if not names:
+    # The Android resource class `R` (and its inner `R$id`, `R$layout`, ...) is
+    # generated into EVERY app, is always a single char, and is never an
+    # obfuscation signal - counting it inflates the ratio and mislabels clear
+    # apps as heavy (C1/G7). Exclude it before the ratio is computed.
+    app_names = [n for n in names if n != "R" and not n.startswith("R$")]
+    if not app_names:
         return 0.0
-    minified = sum(1 for n in names if _is_minified_name(n))
-    return minified / len(names)
+    minified = sum(1 for n in app_names if _is_minified_name(n))
+    return minified / len(app_names)
 
 
 def detect_obfuscation_level(java_files: list[Path]) -> ObfuscationLevel:

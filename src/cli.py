@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
@@ -535,6 +536,17 @@ def run(
     # save_run upserts via session.merge, so a 32-bit collision would silently
     # overwrite a prior run's record instead of erroring - unacceptable in a
     # dual-use tool that values audit integrity (FR-7.1/ADR-0005).
+    # androguard logs a DEBUG flood via loguru on every APK parse, making real
+    # run output unreadable. Nothing this project reports depends on those
+    # lines (this project's own output is Rich/Typer, not loguru), so drop
+    # DEBUG globally - keep INFO+ (including androguard's useful validations).
+    try:
+        from loguru import logger as _loguru
+        _loguru.remove()
+        _loguru.add(sys.stderr, level="WARNING")
+    except Exception:
+        pass
+
     run_id = uuid.uuid4().hex
     git_commit = _git_commit_hash()
     operator = _operator_identity()

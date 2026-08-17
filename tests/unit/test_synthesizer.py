@@ -264,3 +264,15 @@ def test_build_props_probe_routes_to_build_tags():
     res = synthesize(_cls(Action.ROOT_ONLY, root_ids=["build_props_probe"]), Action.ROOT_ONLY)
     assert res.strategy == "targeted"
     assert "release-keys" in res.source  # Build.TAGS neutralization
+
+
+def test_synthesize_emits_hook_checkpoints_for_applied_hooks():
+    # The technology-level "hooks engaged" signal (success_checks/technology.py)
+    # depends on each applied recipe emitting a frida send({hook: <id>})
+    # checkpoint - prove the synthesizer actually emits them for the applied ids.
+    res = synthesize(_cls(Action.ROOT_ONLY, root_ids=["root_su_binary_paths"]), Action.ROOT_ONLY)
+    assert 'send({hook: "root_su_binary_paths"})' in res.source
+    res2 = synthesize(_cls(Action.BOTH, root_ids=["root_su_binary_paths"],
+                            ssl_ids=["okhttp_certificate_pinner"]), Action.BOTH)
+    assert 'send({hook: "okhttp_certificate_pinner"})' in res2.source
+    assert 'send({hook: "root_su_binary_paths"})' in res2.source

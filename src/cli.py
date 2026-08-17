@@ -58,6 +58,7 @@ from dynamic.success_checks.androgoat import AndroGoatSuccessCheck
 from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
 from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
 from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
+from dynamic.success_checks.technology import TechnologyHooksEngagedCheck
 from ingest.metadata import compute_hashes, ingest
 from ingest.normalize import normalize_input
 from report.attribution import attribute_root_evidence, gate_all_third_party
@@ -1173,15 +1174,33 @@ def run(
                     stage_results.append(check_stage)
                     _print_stage(check_stage)
                     _halt(stage_results)
+                # Unknown real target (not in SCRIPTS_BY_TARGET_ACTION): the
+                # synthesized bypass ran (L-M2). There is no target-specific
+                # SuccessCheck, but each applied recipe hook emits a frida
+                # send({hook: <id>}) checkpoint once attached - so prove which
+                # technology-specific hooks ENGAGED in the live process. Honest,
+                # deterministic, non-app-specific: it records "machinery reached
+                # the app", NOT a bypass confirmation (root/ssl stay None,
+                # principle 2 / ADR-0006). Never a fake pass.
+                tech_check = TechnologyHooksEngagedCheck()
+                verification = tech_check.check(
+                    dynamic_stage.evidence.get("frida_messages", [])
+                )
+                engaged = verification.evidence_lines.get("bypass hooks engaged", "none")
                 check_stage = StageResult(
-                    stage="success-check", status="skipped",
+                    stage="success-check",
+                    status=(
+                        "success"
+                        if engaged != "none (no hook checkpoint observed)"
+                        else "skipped"
+                    ),
                     evidence={
                         "target": target,
-                        "reason": (
-                            f"no success check registered for unknown target "
-                            f"'{target}' - synthesized bypass ran but outcome is not "
-                            "verified (no target-specific success check); correlation "
-                            "reported as not attempted"
+                        "bypass_hooks_engaged": engaged,
+                        "note": (
+                            "no target-specific success check; this is a technology-"
+                            "level hooks-engaged signal, NOT a bypass confirmation "
+                            "(correlation reported as not attempted)"
                         ),
                     },
                 )

@@ -49,6 +49,170 @@ def test_root_corpus_includes_magisk_kernelsu_zygisk_era_signatures():
     assert "com.topjohnwu.magisk" in su_apps.patterns
 
 
+def test_root_corpus_includes_hook_detection_and_owasp_package_list():
+    # 2026 web-grounded expansion: the corpus previously covered Xposed/LSPosed/
+    # Riru but had NO Frida or Cydia Substrate detection - the instrumentation
+    # hook-detection surface real apps probe alongside root - and the OWASP-MSTG
+    # `detectRootManagementApps` list was missing Koushik Dutta's classic
+    # Superuser package. Pin the new IDs and literals so the corpus can't
+    # silently regress to pre-hook-detection coverage.
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    ids = {s.id for s in signatures}
+    assert "frida_detection" in ids
+    assert "cydia_substrate_detection" in ids
+
+    frida = next(s for s in signatures if s.id == "frida_detection")
+    assert "frida-server" in frida.patterns
+    assert "gum-js-loop" in frida.patterns  # the /proc/self/maps thread trace
+    substrate = next(s for s in signatures if s.id == "cydia_substrate_detection")
+    assert "com.saurik.substrate" in substrate.patterns
+    assert "libsubstrate.so" in substrate.patterns
+
+    su_apps = next(s for s in signatures if s.id == "su_management_apps")
+    assert "com.koushikdutta.superuser" in su_apps.patterns
+
+
+def test_scan_matches_frida_detection_and_not_benign(tmp_path):
+    # A real anti-Frida probe (scanning /proc/self/maps for the gum-js-loop
+    # thread / the frida-gadget) surfaces as root evidence; a benign use of the
+    # word "frida" (e.g. "frida" as a name/telemetry) must NOT match, because the
+    # signature uses Frida-specific artifact literals, not the bare token.
+    (tmp_path / "MainActivity.java").write_text(
+        "public class MainActivity {\n"
+        "    boolean antiFrida() {\n"
+        "        String maps = readFile(\"/proc/self/maps\");\n"
+        "        return maps.contains(\"gum-js-loop\") || maps.contains(\"frida-gadget\");\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    evidence = scan(tmp_path, signatures)
+    assert any(e.signature_id == "frida_detection" for e in evidence.root_evidence)
+
+    # benign: "frida" as a plain token, no Frida artifact literal
+    (tmp_path / "MainActivity.java").write_text(
+        "public class MainActivity {\n"
+        "    String name = \"frida\";\n"  # bare token - no frida-server/gadget/gum
+        "}\n",
+        encoding="utf-8",
+    )
+    evidence = scan(tmp_path, signatures)
+    assert not any(e.signature_id == "frida_detection" for e in evidence.root_evidence)
+
+
+def test_root_corpus_includes_boot_integrity_and_play_integrity_verdicts():
+    # A3 corpus-currency + boot-integrity: the corpus must pin the Play Integrity
+    # verdict tokens apps actually compare (MEETS_DEVICE_INTEGRITY etc.) and the
+    # boot-integrity property probes (ro.boot.verifiedbootstate) that catch an
+    # unlocked/rooted device at the boot layer - neither existed before.
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    ids = {s.id for s in signatures}
+    assert "boot_integrity_probe" in ids
+    boot = next(s for s in signatures if s.id == "boot_integrity_probe")
+    assert "ro.boot.verifiedbootstate" in boot.patterns
+    assert "ro.boot.vbmeta.device_state" in boot.patterns
+
+    play = next(s for s in signatures if s.id == "play_integrity_attestation")
+    assert "MEETS_DEVICE_INTEGRITY" in play.patterns
+    assert "MEETS_STRONG_INTEGRITY" in play.patterns
+    assert "DEVICE_INTEGRITY" in play.patterns
+
+    # The Standard/Application Integrity request flow is a distinct API surface
+    # (2026 corpus-currency): an app gates on StandardIntegrityManager via
+    # requestStandardIntegrityToken()/prepareIntegrityToken() rather than the
+    # classic requestIntegrityToken(). Presence of these tokens is evidence the
+    # app genuinely asks for Play Integrity attestation, never vendor-excluded.
+    std = next(s for s in signatures if s.id == "play_integrity_standard_attestation")
+    assert "StandardIntegrityManager" in std.patterns
+    assert "requestStandardIntegrityToken" in std.patterns
+    assert "prepareIntegrityToken" in std.patterns
+    assert "com.google.android.play.core.integrity.StandardIntegrityManager" in std.patterns
+
+
+def test_scan_matches_play_integrity_standard_api_and_not_benign(tmp_path):
+    # A Standard-Integrity token surfaces as root evidence; a bare "integrity"
+    # or "token" reference that is not a Standard-integrity API must not.
+    (tmp_path / "MainActivity.java").write_text(
+        "public class MainActivity {\n"
+        "    void gate() { StandardIntegrityManager m = manager(); }\n"
+        "    void req() { m.requestStandardIntegrityToken(request); }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    evidence = scan(tmp_path, signatures)
+    assert any(
+        e.signature_id == "play_integrity_standard_attestation"
+        for e in evidence.root_evidence
+    )
+
+    (tmp_path / "MainActivity.java").write_text(
+        "public class MainActivity {\n"
+        "    String token = getOAuthToken();\n"  # benign - not Standard integrity
+        "}\n",
+        encoding="utf-8",
+    )
+    evidence = scan(tmp_path, signatures)
+    assert not any(
+        e.signature_id == "play_integrity_standard_attestation"
+        for e in evidence.root_evidence
+    )
+
+
+def test_scan_matches_root_cloaking_detection_and_not_benign(tmp_path):
+    # An app probing for a root-hiding framework (MagiskHide/Shamiko/RootCloak)
+    # is itself root-aware - the token is a distinctive framework name. A bare
+    # generic "hide" reference (low-signal, deliberately excluded) must not fire.
+    (tmp_path / "RootCheck.java").write_text(
+        "public class RootCheck {\n"
+        "    boolean cloaked() { return probe(\"Shamiko\") || probe(\"MagiskHide\"); }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    evidence = scan(tmp_path, signatures)
+    assert any(
+        e.signature_id == "root_cloaking_detection"
+        for e in evidence.root_evidence
+    )
+
+    (tmp_path / "RootCheck.java").write_text(
+        "public class RootCheck {\n"
+        "    boolean hide = true;  // bare generic word - no framework name\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    evidence = scan(tmp_path, signatures)
+    assert not any(
+        e.signature_id == "root_cloaking_detection"
+        for e in evidence.root_evidence
+    )
+
+
+def test_scan_matches_boot_integrity_probe_and_not_benign(tmp_path):
+    # An unlocked-bootloader probe (reading ro.boot.verifiedbootstate) surfaces as
+    # root evidence; a benign reference to "boot" or "integrity" alone must not.
+    (tmp_path / "MainActivity.java").write_text(
+        "public class MainActivity {\n"
+        "    String state() { return getprop(\"ro.boot.verifiedbootstate\"); }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    evidence = scan(tmp_path, signatures)
+    assert any(e.signature_id == "boot_integrity_probe" for e in evidence.root_evidence)
+
+    (tmp_path / "MainActivity.java").write_text(
+        "public class MainActivity {\n"
+        "    boolean integrity = true;\n"  # bare tokens - no property literal
+        "}\n",
+        encoding="utf-8",
+    )
+    evidence = scan(tmp_path, signatures)
+    assert not any(e.signature_id == "boot_integrity_probe" for e in evidence.root_evidence)
+
+
 def test_scan_records_capped_signature_match_count(tmp_path):
     # RESID-4F observability: when a signature matches > MAX_EVIDENCE_PER_SIGNATURE
     # (50) times, scan() must retain the 50-row cap BUT also record the true total
@@ -942,3 +1106,206 @@ def test_scan_offheap_sqlite_xref_is_complete_beyond_inmemory_cap(tmp_path):
     assert row_count == 100
     assert len(evidence.root_evidence) == MAX_EVIDENCE_PER_SIGNATURE  # in-memory stays capped
     assert evidence.root_confidence == 0.8  # confidence unaffected by the xref
+
+
+def test_scan_matches_hybrid_asset_suffixes(tmp_path):
+    # Gap closure: the SCANNED_SUFFIXES expansion to hybrid/asset files
+    # (.js/.jsbundle/.bundle/.json/.properties/.txt) is exercised here so RN /
+    # Flutter-style assets are PROVABLY scanned and matched, not just declared in
+    # the tuple. is_known_third_party(None)=False means an asset file (no
+    # sources//smali/ namespace) is kept and scanned - that is exactly what
+    # surfaces inlined root/SSL checks from bundled JS / config. .yaml stays
+    # excluded, proving the filter is an allow-list, not a broadened everything.
+    sig_yaml = tmp_path / "sigs.yaml"
+    sig_yaml.write_text(
+        "- id: root_su\n"
+        "  category: root\n"
+        "  weight: 0.6\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['/system/bin/su']\n"
+        "  evidence_type: root\n"
+        "- id: ssl_pinner\n"
+        "  category: ssl\n"
+        "  weight: 0.6\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['CertificatePinner']\n"
+        "  evidence_type: ssl\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "index.android.jsbundle").write_text(
+        "if (fs.existsSync('/system/bin/su')) { root = true; }\n"
+        "const ok = new CertificatePinner.Builder().build();\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "config.properties").write_text("su_path=/system/bin/su\n")
+    (tmp_path / "settings.json").write_text('{"pinning":"CertificatePinner"}\n')
+    (tmp_path / "notes.txt").write_text("check /system/bin/su here\n")
+    (tmp_path / "meta.yaml").write_text("root: /system/bin/su\n", encoding="utf-8")
+
+    evidence = scan(tmp_path, load_signatures(sig_yaml))
+
+    # the four hybrid/asset files are scanned; .yaml (and the .yaml sig file) remain excluded
+    assert evidence.scanned_file_count == 4
+    assert evidence.root_confidence == 0.6   # weight once per signature, not per file
+    assert evidence.ssl_confidence == 0.6
+    matched_files = {e.file for e in evidence.root_evidence + evidence.ssl_evidence}
+    assert any(f.endswith(".jsbundle") for f in matched_files)
+    assert any(f.endswith(".json") or f.endswith(".properties") for f in matched_files)
+    assert any(f.endswith(".txt") for f in matched_files)
+
+
+def test_scan_matches_webview_html_container(tmp_path):
+    # Gap A2: WebView containers hold inlined <script> root/SSL checks. .html/.htm
+    # are in SCANNED_SUFFIXES, so an assets/index.html is PROVABLY scanned and
+    # matched (not just declared). An asset file has no sources//smali/ namespace
+    # (is_known_third_party(None)=False), so it is kept and its inlined check
+    # surfaces.
+    sig_yaml = tmp_path / "sigs.yaml"
+    sig_yaml.write_text(
+        "- id: root_su\n"
+        "  category: root\n"
+        "  weight: 0.6\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['/system/bin/su']\n"
+        "  evidence_type: root\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "index.html").write_text(
+        "<html><script>\n"
+        "if (checkSu('/system/bin/su')) { /* rooted */ }\n"
+        "</script></html>\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "index.htm").write_text(
+        "<script>if (busybox('/system/bin/su')) { /* rooted */ }</script>\n",
+        encoding="utf-8",
+    )
+
+    evidence = scan(tmp_path, load_signatures(sig_yaml))
+
+    assert evidence.scanned_file_count == 2
+    assert evidence.root_confidence == 0.6  # weight once per signature, not per file
+    matched_files = {e.file for e in evidence.root_evidence}
+    assert any(f.endswith(".html") for f in matched_files)
+    assert any(f.endswith(".htm") for f in matched_files)
+
+
+def test_scan_marks_unattributed_indicator_category(tmp_path):
+    # Boundary-1: a file with root-DETECTION-shaped code (isRooted()) that
+    # matches NO root signature => root lands in unattributed_indicators, so
+    # coverage can mark it "unknown, not absent" instead of a silent clean.
+    from static.indicators import find_indicator_categories
+
+    (tmp_path / "RootGuard.java").write_text(
+        "public class RootGuard {\n"
+        "    boolean isRooted() { return detectRoot(); }\n"
+        "}\n"
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    evidence = scan(tmp_path, signatures)
+
+    # isRooted()/detectRoot() are indicator idioms, none of which is a signature.
+    assert find_indicator_categories(
+        (tmp_path / "RootGuard.java").read_text()
+    ) == {"root"}
+    assert evidence.root_confidence == 0.0       # no signature matched
+    assert evidence.root_evidence == []
+    assert evidence.unattributed_indicators == {"root": True}
+
+
+def test_scan_no_unattributed_indicator_when_signature_matches(tmp_path):
+    # When a recognized root signature fires, the category is MATCHED - its
+    # indicators belong to a known technique, so it must NOT be unattributed.
+    (tmp_path / "RootCheck.java").write_text(
+        "public class RootCheck {\n"
+        "    boolean isRooted() { return new File(\"/system/bin/su\").exists(); }\n"
+        "}\n"
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    evidence = scan(tmp_path, signatures)
+    assert evidence.root_confidence > 0
+    assert "root" not in evidence.unattributed_indicators
+
+
+def test_scan_clean_file_has_no_unattributed_indicators(tmp_path):
+    (tmp_path / "Main.java").write_text("public class Main { int x = 1; }\n")
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    evidence = scan(tmp_path, signatures)
+    assert evidence.unattributed_indicators == {}
+
+
+def test_scan_matches_emulator_detection_and_not_benign(tmp_path):
+    # A real emulator-detection probe - checking Build.HARDWARE for the
+    # goldfish emulator or the ro.kernel.qemu system property - surfaces as root
+    # evidence; a benign device-ID read that never touches an emulator-specific
+    # value must NOT match (the signature uses emulator-only literals, not the
+    # bare Build.FINGERPRINT/MODEL read by analytics).
+    (tmp_path / "EmulatorCheck.java").write_text(
+        "public class EmulatorCheck {\n"
+        "    boolean isEmulator() {\n"
+        "        String hw = android.os.Build.HARDWARE;\n"
+        "        return hw.contains(\"goldfish\") || hw.contains(\"sdk_gphone\");\n"
+        "    }\n"
+        "    boolean qemu() { return Build.getProp(\"ro.kernel.qemu\") != null; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    evidence = scan(tmp_path, signatures)
+    assert any(e.signature_id == "emulator_detection" for e in evidence.root_evidence)
+
+    # benign: reads Build.FINGERPRINT / Build.MODEL for analytics, no emulator
+    # value and no Build.HARDWARE probe. Overwrite the SAME file so the detection
+    # sample is replaced, not coexisting (scan reads the whole dir).
+    (tmp_path / "EmulatorCheck.java").write_text(
+        "public class EmulatorCheck {\n"
+        "    String id() { return android.os.Build.FINGERPRINT + android.os.Build.MODEL; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    evidence = scan(tmp_path, signatures)
+    assert not any(e.signature_id == "emulator_detection" for e in evidence.root_evidence)
+
+
+def test_scan_matches_build_props_probe_and_not_benign(tmp_path):
+    # A real build-props probe reads ro.debuggable / ro.build.fingerprint to
+    # fingerprint a debug build; a benign string that merely mentions a property
+    # name in prose must not fire as detection.
+    (tmp_path / "BuildCheck.java").write_text(
+        "public class BuildCheck {\n"
+        "    boolean debuggable() {\n"
+        "        return \"1\".equals(Build.getProp(\"ro.debuggable\"));\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    evidence = scan(tmp_path, signatures)
+    assert any(e.signature_id == "build_props_probe" for e in evidence.root_evidence)
+
+    # benign: no ro.* property read, only a generic log line. Overwrite the SAME
+    # file so the detection sample is replaced, not coexisting.
+    (tmp_path / "BuildCheck.java").write_text(
+        "public class BuildCheck { void log() { android.util.Log.d(\"t\", \"secure build\"); } }\n",
+        encoding="utf-8",
+    )
+    evidence = scan(tmp_path, signatures)
+    assert not any(e.signature_id == "build_props_probe" for e in evidence.root_evidence)
+
+
+def test_every_root_and_ssl_signature_has_a_signal():
+    # Corpus-level dead-signature check (Batch D): every id in the real
+    # root_detection + ssl_pinning YAML must carry at least one non-empty pattern
+    # - an id whose patterns are all empty strings can never fire (dead weight
+    # that silently overclaims detection surface). Loader already rejects a
+    # missing patterns list, so this guards the subtler all-empty case and pins
+    # the corpus's real ids, so a renamed/removed signature fails here loudly.
+    for yaml_name in ("root_detection.yaml", "ssl_pinning.yaml"):
+        sigs = load_signatures(REPO_ROOT / "config" / "signatures" / yaml_name)
+        assert sigs, f"{yaml_name} must not be empty"
+        ids = {s.id for s in sigs}
+        assert len(ids) == len(sigs), f"{yaml_name} has duplicate ids"
+        for sig in sigs:
+            assert sig.patterns, f"{yaml_name} id '{sig.id}' has empty patterns"
+            assert all(isinstance(p, str) and p.strip() for p in sig.patterns), \
+                f"{yaml_name} id '{sig.id}' has a blank pattern"

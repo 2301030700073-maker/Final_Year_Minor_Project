@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import typer
 
-from cli import _apply_manifest_ssl_signal, _git_commit_hash, _git_last_commit_touching, _load_thresholds, _wrap_stage
+from cli import _apply_manifest_ssl_signal, _canonical_target, _git_commit_hash, _git_last_commit_touching, _load_thresholds, _wrap_stage
 from common import StageResult, StaticEvidence
 from static.manifest import ManifestInfo
 
@@ -365,3 +365,29 @@ def test_calibration_table_header_cell_parity_and_exclusion_counts():
     root_row = dict(zip(columns, rows[0]))
     assert root_row["Excl no-GT"] == "1"
     assert root_row["Excl partial"] == "1"
+
+
+def test_canonical_target_resolves_androgoat_case_insensitively():
+    # A live AndroGoat dynamic run with `--target androgoat` (lowercase) tripped
+    # the "SCRIPTS_BY_TARGET_ACTION and SUCCESS_CHECKS must stay in sync" halt:
+    # the dynamic stage ran a synthesized bypass, but SUCCESS_CHECKS.get("androgoat")
+    # returned None (the registered key is the mixed-case "AndroGoat") and the
+    # pipeline halted, discarding the captured Frida evidence. The canonical
+    # resolver must map any casing to the registered key so both lookup sites
+    # agree with how a user actually types the target.
+    assert _canonical_target("androgoat") == "AndroGoat"
+    assert _canonical_target("AndroGoat") == "AndroGoat"
+    assert _canonical_target("ANDROGOAT") == "AndroGoat"
+
+
+def test_canonical_target_passes_lowercase_uncrackable_through():
+    # The uncrackable1/2/3 keys are already lowercase - unchanged.
+    for t in ("uncrackable1", "uncrackable2", "uncrackable3"):
+        assert _canonical_target(t) == t
+
+
+def test_canonical_target_passes_unknown_target_through():
+    # A real app target is not a registered key - it must pass through unchanged
+    # so the dynamic stage still degrades gracefully to "no bypass script" rather
+    # than being coerced into a wrong key.
+    assert _canonical_target("com.example.realapp") == "com.example.realapp"

@@ -51,7 +51,26 @@ STATUS_SIDECAR_NAME = "decompile_status.json"
 JADX_TIMEOUT_FLOOR = 120     # seconds - minimum headroom for a tiny APK
 JADX_TIMEOUT_PER_MB = 4.0    # seconds of jadx headroom per MB of APK
 JADX_TIMEOUT_CAP = 900       # seconds - hard ceiling (was flat 600)
-APKTOOL_TIMEOUT = 300
+# LARGE-APP: apktool's timeout is now SCALED BY APK SIZE like jadx's, not a flat
+# 300s. A flat ceiling killed a HEALTHY apktool decode of a large production app
+# mid-smali: WhatsApp (133MB), Facebook (143MB) and Netflix (216MB) resource+smali
+# decode routinely exceeds 5 minutes. Killing it at 300s degraded those runs to
+# partial even when nothing was wrong - the manifest was already written (so the
+# pipeline continued) but the smali/ tree walked by the scan was incomplete. Floor
+# so a hung apktool on a tiny APK still fails fast; scale up for large ones; a
+# hard cap bounds the worst case so one run can't stall the pipeline.
+APKTOOL_TIMEOUT_FLOOR = 180   # seconds - minimum headroom for a tiny APK
+APKTOOL_TIMEOUT_PER_MB = 1.5  # seconds of apktool headroom per MB of APK
+APKTOOL_TIMEOUT_CAP = 1200    # seconds - hard ceiling (was flat 300)
+# NO size bound on decompilation: no APK is refused for being large. A large
+# MULTIDEX APK is decompiled per-DEX (jadx once per classes*.dex - memory-safe by
+# construction, avoiding the whole-APK OOM a multi-hundred-MB file would risk); an
+# APK with no readable DEX falls through to whole-APK jadx, whose produced output
+# is kept as partial on a non-zero exit (partial-tolerance below). The size-scaled
+# timeouts above remain as the NFR-1 hang backstop - a hung tool fails loudly as a
+# partial, never hangs the pipeline, never abandons the app to manual work. The
+# honest bound is coverage labeling (partial, ADR-0006 - never overclaim what a
+# partial decompile covered), not a refusal by size.
 
 # L-M1: bound the on-disk decompile cache by size instead of letting every
 # analyzed hash accumulate forever (a PropertyGuru-class APK is 151MB+ of jadx
@@ -74,6 +93,19 @@ def jadx_timeout_for_size(size_bytes: int) -> int:
     mb = size_bytes / (1024 * 1024)
     scaled = int(JADX_TIMEOUT_FLOOR + mb * JADX_TIMEOUT_PER_MB)
     return min(scaled, JADX_TIMEOUT_CAP)
+
+
+def apktool_timeout_for_size(size_bytes: int) -> int:
+    """Size-scaled apktool timeout (LARGE-APP), mirroring jadx_timeout_for_size.
+    Small APKs fail a hung apktool fast; large ones get proportionally more
+    headroom so a healthy-but-big decode isn't killed mid-smali; a hard cap
+    bounds the worst case. Same rationale as the jadx ceiling, applied to
+    apktool's resource+smali decode which is equally size-bound on the real
+    130-220MB production apps."""
+    mb = size_bytes / (1024 * 1024)
+    scaled = int(APKTOOL_TIMEOUT_FLOOR + mb * APKTOOL_TIMEOUT_PER_MB)
+    return min(scaled, APKTOOL_TIMEOUT_CAP)
+
 
 
 def _require_tool(name: str) -> str:
@@ -636,6 +668,24 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         # surfaced on the report via the returned list when wired to cli.
         _enforce_cache_budget(output_root, CACHE_SIZE_BUDGET_BYTES)
 
+        # No size hard-stop: no APK is refused for being large. A large MULTIDEX
+        # APK takes the bounded per-DEX path below (jadx once per classes*.dex,
+        # per-DEX disk cache) - memory-safe by construction, avoiding the OOM a
+        # single whole-APK jadx over a multi-hundred-MB file would risk. An APK
+        # with NO readable DEX (not a readable zip / no classes*.dex) falls
+        # through to whole-APK jadx, whose produced output is kept as partial on
+        # a non-zero exit (partial-tolerance below); the size-scaled timeout
+        # (jadx_timeout_for_size) is the NFR-1 hang backstop, so a hung run is
+        # killed loudly -> partial, never a silent stall, and never a refusal
+        # that abandons the app to manual work. apk_size still feeds the
+        # size-scaled timeouts; dex_entries drives the per-DEX dispatch and is
+        # enumerated exactly once here.
+        try:
+            apk_size = apk_path.stat().st_size
+        except OSError:
+            apk_size = 0
+        dex_entries = _list_dex_entries(apk_path)
+
         apktool = _require_tool("apktool")
 
         # L-M1 lazy decompile: when the APK is a zip holding classes*.dex, run
@@ -645,9 +695,10 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         # (a DEX already decompiled is reused). Fall back to whole-APK jadx when
         # the APK is not a readable zip or holds no DEX (unit tests use fake
         # paths, so this branch is what keeps them on the proven whole-APK path).
+        # dex_entries was already computed above - reused, never re-read, so a
+        # large APK's dex metadata is enumerated exactly once.
         per_dex_units = None
         fallback = {}
-        dex_entries = _list_dex_entries(apk_path)
         if dex_entries:
             jadx_returncode, jadx_file_count, per_dex_units, per_dex_fallback = _decompile_dexes(
                 apk_path, target_dir, dex_entries, jadx)
@@ -681,13 +732,56 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
             jadx_file_count = _count_java_files(jadx_dir)
 
         if jadx_returncode != 0 and jadx_file_count == 0:
-            # Total failure - nothing real to hand downstream. apktool is
-            # never attempted against an APK jadx couldn't even begin.
+            # Total failure on the PRIMARY surface - jadx wrote nothing usable.
+            # Old behavior hard-failed here WITHOUT ever attempting apktool,
+            # discarding the one surface that reliably survives a jadx crash:
+            # apktool's smali tree. smali/ is in SCANNED_SUFFIXES and
+            # apktool_output is a scan root in cli.py, so smali is genuinely
+            # scannable for root/ssl bytecode signatures.
+            # L-M1: before giving up, attempt an apktool --no-res smali decode as
+            # a last-resort fast path. --no-res skips resource decoding (faster
+            # and more memory-frugal on large/obfuscated APKs, and the manifest
+            # stage reads the binary manifest straight from the APK anyway) but
+            # still emits smali/ + AndroidManifest.xml. If apktool lands real
+            # output, the run continues as an honestly-labeled PARTIAL - the Java
+            # surface is unrecovered (jadx_file_count == 0), so nothing is ever
+            # laundered to complete (ADR-0006; the recovered smali is scanned,
+            # the completeness stays partial). Only when apktool ALSO produces
+            # nothing is this a true hard failure.
+            apktool_fb_rc, apktool_fb_log = _run_tool_logged(
+                [apktool, "d", "-f", "--no-res", "-o", str(apktool_dir), str(apk_path)],
+                target_dir / "apktool_fallback.log", apktool_timeout_for_size(apk_size),
+                "apktool --no-res smali fallback",
+            )
+            if (apktool_dir / "AndroidManifest.xml").exists():
+                status_sidecar.write_text(
+                    json.dumps({
+                        "decompile_completeness": "partial",
+                        "jadx_exit_code": jadx_returncode,
+                        "apktool_exit_code": apktool_fb_rc,
+                        "jadx_file_count": 0,
+                        "jadx_version": _jadx_version(jadx),
+                        "jadx_error_tail": jadx_log_text,
+                        "smali_fallback": True,
+                        "apktool_error_tail": apktool_fb_log,
+                    }, indent=2),
+                    encoding="utf-8",
+                )
+                result = _result(
+                    start, jadx_dir, apktool_dir, cached=False,
+                    decompile_completeness="partial", jadx_exit_code=jadx_returncode,
+                    apktool_exit_code=apktool_fb_rc, jadx_file_count=0,
+                    jadx_error_tail=jadx_log_text,
+                )
+                result.evidence["smali_fallback"] = True
+                result.evidence["apktool_error_tail"] = apktool_fb_log
+                return result
             return StageResult(
                 stage="decompile", status="failed", evidence={},
                 error=(
-                    f"jadx exited {jadx_returncode} and produced no usable output\n"
-                    f"log: {jadx_log_text}"
+                    f"jadx exited {jadx_returncode} and produced no usable output; "
+                    "apktool --no-res smali fallback also produced nothing\n"
+                    f"log: {jadx_log_text}\napktool: {apktool_fb_log}"
                 ),
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
@@ -715,22 +809,33 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         else:
             if apktool_dir.exists():
                 shutil.rmtree(apktool_dir, ignore_errors=True)
+            # LARGE-APP: size-scaled timeout. The APK always exists in the real
+            # pipeline (ingest verified it), but decompile() is also called
+            # directly in unit tests with fake paths, so a non-stat-able path
+            # must not crash - fall back to the floor (fail-fast), the safe
+            # direction for an absent/corrupt file anyway.
+            try:
+                apktool_size = apk_path.stat().st_size
+            except OSError:
+                apktool_size = 0
             apktool_returncode, apktool_log_text = _run_tool_logged(
-                [apktool, "d", "-f", "-o", str(apktool_dir), str(apk_path)], apktool_log, APKTOOL_TIMEOUT, "apktool",
+                [apktool, "d", "-f", "-o", str(apktool_dir), str(apk_path)], apktool_log,
+                apktool_timeout_for_size(apktool_size), "apktool",
             )
 
-        # D4: apktool succeeded but wrote no manifest, or crashed before
-        # writing one - either way there is nothing for parse_manifest to
-        # read and nothing for the scan's apktool pass to walk. Hard fail.
-        if not (apktool_dir / "AndroidManifest.xml").exists():
-            return StageResult(
-                stage="decompile", status="failed", evidence={},
-                error=(
-                    f"apktool exited {apktool_returncode} and produced no "
-                    f"AndroidManifest.xml\nlog: {apktool_log_text}"
-                ),
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
+        # D4 (relaxed, limitation 9): apktool wrote no AndroidManifest.xml. This
+        # used to hard-fail the whole run - discarding an otherwise-good jadx Java
+        # analysis (the primary root/SSL surface) because a SECONDARY tool failed.
+        # That is worse than an honest partial, so now we degrade instead of halt.
+        # Reaching here guarantees jadx produced real output (the jadx-zero-files
+        # gate above already returned). The manifest stage reads the binary
+        # manifest straight from the APK (parse_manifest_apk), and with no decoded
+        # res/ tree a declared NSC degrades the manifest surface to partial too.
+        # ADR-0006: a good analysis continues as an honestly-labeled partial - it
+        # is never discarded, and a clean verdict is never certified from it. A
+        # TOTAL failure (nothing from either tool) still hard-fails at the jadx
+        # gate above.
+        apktool_has_manifest = (apktool_dir / "AndroidManifest.xml").exists()
 
         # A failure on either side degrades the whole run to partial (D2);
         # only when both exit 0 is the decompile complete. On the whole-APK path
@@ -741,7 +846,11 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
             bool(fallback.get("fallback_recovered"))
             and fallback.get("fallback_file_count", 0)
             >= _RECOVERY_COVERAGE_RATIO * max(jadx_file_count, 1))
-        completeness = "complete" if (jadx_covered and apktool_returncode == 0) else "partial"
+        completeness = (
+            "complete"
+            if (apktool_has_manifest and jadx_covered and apktool_returncode == 0)
+            else "partial"
+        )
         error_tail = _build_error_tail(jadx_returncode, jadx_log_text, apktool_returncode, apktool_log_text)
         status_sidecar.write_text(
             json.dumps({
@@ -824,7 +933,7 @@ def _cached_result(start: float, jadx_dir: Path, apktool_dir: Path, status_sidec
             )
             for key in ("fallback_engine", "fallback_unavailable", "fallback_recovered",
                         "fallback_output", "fallback_error_tail", "fallback_file_count",
-                        "lazy_decompile", "dex_units"):
+                        "lazy_decompile", "dex_units", "smali_fallback"):
                 if key in data:
                     result.evidence[key] = data[key]
             return result

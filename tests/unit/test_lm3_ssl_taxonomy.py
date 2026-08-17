@@ -20,6 +20,9 @@ NEW_IDS = {
     "cronet_cert_verifier",
     "certificate_transparency_verifier",
     "custom_sslsocketfactory",
+    # web-grounded 2026 RN pinning surface (gap A3b): the react-native-ssl-pinning
+    # library is the pinning path for RN apps (PG is RN), invisible to OkHttp/NSC.
+    "rn_ssl_pinning_library",
 }
 
 
@@ -35,7 +38,33 @@ def test_new_ssl_signatures_load_from_real_yaml():
     present = {s.id for s in sigs}
     assert NEW_IDS <= present, f"missing from ssl_pinning.yaml: {NEW_IDS - present}"
     # all still valid category/weight per the loader's own validation
-    assert len(sigs) == 15  # 7 original + 8 added (the 15-category taxonomy)
+    # (load_signatures raises on any invalid category/weight, so reaching here
+    # already proves validity). The exact count is intentionally NOT pinned: the
+    # corpus grew past the original 15 as more techniques were added (e.g. the
+    # native/UC3 SSL rules), and freezing a number here breaks the moment the
+    # corpus legitimately grows - the presence of NEW_IDS above is the invariant
+    # that matters, not a total.
+    assert len(sigs) >= 15
+
+
+def test_rn_ssl_pinning_library_matches_and_does_not_false_positive():
+    from tempfile import TemporaryDirectory
+
+    pinning = (
+        "import com.gs.rnsslpinning.SSLPinningFactory;\n"
+        "class X { void pin() { SSLPinningFactory.pinCertificates(react-native-ssl-pinning); } }\n"
+    )
+    benign = (
+        "class X { void f() { int ssl = 1; String pin = \"pinning\"; } }\n"
+    )
+    with TemporaryDirectory() as d:
+        Path(d, "Pinning.java").write_text(pinning)
+        ev = scan(Path(d), load_signatures(SSL_YAML))
+        assert "rn_ssl_pinning_library" in {e.signature_id for e in ev.ssl_evidence}
+        # benign "ssl"/"pinning" fragments must not match the RN library literal
+        Path(d, "Pinning.java").write_text(benign)
+        ev = scan(Path(d), load_signatures(SSL_YAML))
+        assert "rn_ssl_pinning_library" not in {e.signature_id for e in ev.ssl_evidence}
 
 
 def test_webview_proceed_matches_spans_lines():

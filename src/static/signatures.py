@@ -11,8 +11,9 @@ from pathlib import Path
 
 import yaml
 
-from common import Evidence, StaticEvidence
+from common import Evidence, StaticEvidence, derive_namespace, is_known_third_party
 from static.deobfuscate import MappingTable, deobfuscate_source
+from static.indicators import find_indicator_categories
 
 # L-M3 (S1): scan the fallback evidence layer too. jadx's .java decompile can be
 # partial on large/obfuscated APKs (PropertyGuru - jadx died on one AndroidX
@@ -22,7 +23,22 @@ from static.deobfuscate import MappingTable, deobfuscate_source
 # signatures (method calls, `implements X509TrustManager`) cannot match smali's
 # structured syntax (;->, $Builder, Ljavax/net/ssl/...;), so smali scanning is
 # strictly additive evidence on a surface that was previously walked but ignored.
-SCANNED_SUFFIXES = (".java", ".xml", ".smali")
+SCANNED_SUFFIXES = (
+    ".java", ".xml", ".smali",
+    # Hybrid / cross-platform coverage: React Native ships its JS as
+    # assets/index.android.bundle (or index.android.jsbundle) and Flutter/Dart
+    # compile to dart.so under lib/; .js/.jsbundle/.bundle catch inlined
+    # root/SSL checks that survive bundling, .json/.properties carry manifest-
+    # like config (network_security_config, build metadata), .txt covers
+    # plain-text assets, and .html/.htm catch WebView containers (assets/*.html)
+    # whose inlined <script> root/SSL checks the text engine now reads (the
+    # WebView JS-bridge surface, gap A2). is_known_third_party() keeps these (an
+    # asset file has no sources//smali/ namespace, so derive_namespace() returns
+    # None which is NOT treated as vendor - see common.py), so hybrid roots
+    # actually surface.
+    ".js", ".jsbundle", ".bundle", ".json", ".properties", ".txt",
+    ".html", ".htm",
+)
 
 VALID_CATEGORIES = {"root", "ssl"}
 VALID_PATTERN_TYPES = {"string_literal", "class_reference", "regex"}
@@ -186,6 +202,28 @@ def _collect_files(roots: list[Path]) -> list[tuple[Path, Path]]:
     return files
 
 
+_BINARY_PROBE_BYTES = 8192
+
+
+def _is_binary(path: Path) -> bool:
+    """True when the file's first chunk contains a NUL byte - the reliable
+    binary signal. Text (Java, XML, JS, JSON, properties, bundle-as-text) almost
+    never contains NUL, while binary assets (RN Hermes bytecode bundles,
+    bouncycastle `.bin.properties`) do. Used to skip binary non-sources BEFORE a
+    strict UTF-8 read, so they don't land in the unreadable bucket and drown
+    real text-decode failures in degradation noise (RESID-4G). A text file that
+    genuinely fails to decode (no NULs, bad UTF-8) is still caught by the
+    read_text path below and counted degraded."""
+    try:
+        with open(path, "rb") as f:
+            return b"\x00" in f.read(_BINARY_PROBE_BYTES)
+    except OSError:
+        # Can't probe the header either - let the read_text path below surface
+        # it as the authoritative unreadable-file degradation (never a silent
+        # skip).
+        return False
+
+
 def scan(
     decompiled_roots: Path | list[Path],
     signatures: list[Signature],
@@ -215,7 +253,12 @@ def scan(
     files = _collect_files(roots)
     con = None
     if sqlite_path is not None:
-        con = sqlite3.connect(str(sqlite_path))
+        # busy_timeout: a leftover/parallel holder of the SQLite lock used to
+        # hard-fail with "database is locked" (a killed run leaves an orphan
+        # process holding the journal). Wait up to 30s for the lock to free
+        # instead of aborting the whole pipeline (principle 3 - fail loud on a
+        # real error, not on transient contention).
+        con = sqlite3.connect(str(sqlite_path), timeout=30)
         con.execute(
             "CREATE TABLE IF NOT EXISTS evidence ("
             "file TEXT, signature_id TEXT, category TEXT, line INTEGER, matched_text TEXT)"
@@ -230,6 +273,8 @@ def scan(
     # ~Nx fewer reads. Confidence is still added once per matched signature,
     # tracked via a seen-set.
     matched_signatures: set[str] = set()
+    matched_categories: set[str] = set()
+    indicator_categories: set[str] = set()
     evidence_counts: dict[str, int] = defaultdict(int)
     # RESID-4F observability: count EVERY match per signature (evidence_counts
     # caps at MAX_EVIDENCE_PER_SIGNATURE, so it can't tell the report how many
@@ -246,7 +291,28 @@ def scan(
             # rather than read as clean. The full text is also what the L-M9
             # multiline whole-text pass matches against; splitlines() derives the
             # per-line view for the default single-line signatures.
-            text = file_path.read_text(encoding="utf-8")
+            # Skip binary assets (Hermes bytecode bundles, bouncycastle
+            # .bin.properties) BEFORE the text read: they are not source
+            # candidates by construction, and strict UTF-8 would raise
+            # UnicodeDecodeError and mislabel them as degraded text (RESID-4G).
+            # Only a NUL-free file proceeds; a text file that then genuinely
+            # fails to decode is still counted degraded below - the strict-read
+            # observability is preserved for real malformed text.
+            if _is_binary(file_path):
+                continue
+            try:
+                text = file_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                # Java .properties files are spec'd ISO-8859-1 (Properties.load's
+                # default), not UTF-8 - bouncycastle ships many (CertPathReviewer
+                # *_de.properties, etc.). Latin-1 decodes every byte and never
+                # fails, so a .properties that isn't UTF-8 is a legitimate
+                # legacy-text resource, not a degraded file (RESID-4G noise).
+                # ONLY .properties get this fallback; any other file that fails
+                # strict UTF-8 re-raises and is honestly counted degraded below.
+                if file_path.suffix.lower() != ".properties":
+                    raise
+                text = file_path.read_text(encoding="latin-1")
             lines = text.splitlines()
         except (OSError, UnicodeDecodeError):
             # RESID-4G: an unreadable file (e.g. chmod-000, a corrupt entry) was
@@ -264,8 +330,24 @@ def scan(
 
         # RESID-4A/4F recording, shared by the per-line and multiline paths so a
         # hit from either lands identically (same set/counters/Evidence rows).
+        # _third_party_file is computed once per file (not per signature) so the
+        # exclusion check stays off the hot per-line loop.
+        _third_party_file = is_known_third_party(derive_namespace(str(file_path.relative_to(root))))
         def _record(signature: Signature, matched_text: str, line_number: int) -> None:
+            # Third-party exclusion (GAP-1): bundled SDKs (GMS, okhttp, Sentry,
+            # ...) perform their own root/SSL checks. Counting those matches as
+            # the app's own logic inflated confidence and surfaced false
+            # positives - a real Paytm run scored SSL 1.00 from a GMS
+            # X509TrustManager with an empty checkServerTrusted (com.google.*),
+            # not from Paytm's code. Only *recognized* vendor namespaces are
+            # excluded; the app's own package and any unidentifiable namespace
+            # are always kept (conservative, matching report/attribution.py).
+            # derive_namespace is called once per file below; it is not inlined
+            # here so this hot path does no re-splitting per signature.
+            if _third_party_file:
+                return
             matched_signatures.add(signature.id)
+            matched_categories.add(signature.category)
             total_counts[signature.id] += 1
             if con is not None:
                 con.execute(
@@ -301,6 +383,27 @@ def scan(
             deobf = deobfuscate_source(text, mapping)
             if deobf != text:
                 texts.append(deobf)
+
+        # Perf (audit): a bundled SDK file (GMS, okhttp, Sentry, ...) will have
+        # EVERY match discarded by _record()'s _third_party_file guard, so running
+        # the hot per-line _line_matches loop over it (66 signatures x N lines) is
+        # pure wasted work - and the bulk of any large app is SDK code. Skipping
+        # the whole matching pass for such a file is the same outcome, an order of
+        # magnitude cheaper. scanned_file_count is set from len(files) above, so
+        # coverage still reflects the file was examined. The multiline + deobf
+        # passes are skipped together (the same _record() guard would discard
+        # them too).
+        if _third_party_file:
+            continue
+
+        # Boundary-1: technique-agnostic detection idioms in this app-owned file
+        # feed the "unattributed detection" tracker. If they belong to a category
+        # that matched NO signature, that category reads coverage-limited (unknown,
+        # not absent) instead of a silent confident NEITHER - the ADR-0006 half of
+        # the fundamental signature-bounded limitation (ADR-0001). Same app-owned
+        # exclusion as the signatures, so a bundled SDK's detection code never
+        # surfaces as the app's own unknown detection.
+        indicator_categories |= find_indicator_categories(text)
 
         for text in texts:
             lines = text.splitlines()
@@ -373,6 +476,13 @@ def scan(
                 evidence.root_confidence = min(1.0, evidence.root_confidence + signature.weight)
             elif signature.category == "ssl":
                 evidence.ssl_confidence = min(1.0, evidence.ssl_confidence + signature.weight)
+
+    # Boundary-1: a category whose detection indicators fired but whose technique
+    # matched no signature is UNKNOWN, not absent - record it so coverage can mark
+    # it coverage-limited and the report can surface it instead of a silent clean.
+    evidence.unattributed_indicators = {
+        cat: True for cat in indicator_categories if cat not in matched_categories
+    }
 
     if con is not None:
         con.commit()

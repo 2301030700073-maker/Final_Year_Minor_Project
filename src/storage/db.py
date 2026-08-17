@@ -139,7 +139,7 @@ def get_engine(analysis_root: Path):
     engine = create_engine(f"sqlite:///{db_path}")
 
     @event.listens_for(engine, "connect")
-    def _enforce_foreign_keys(dbapi_connection, connection_record):
+    def _enforce_foreign_keys(dbapi_connection, _connection_record):
         # Runs on every new pooled connection - FK enforcement is per-connection,
         # not per-database.
         cursor = dbapi_connection.cursor()

@@ -1,0 +1,96 @@
+# Packer / protector fingerprint signatures (Gap-2, ADR-0008 group A).
+#
+# Each entry names a known Android packer/protector family via deterministic,
+# in-stack artifacts - no external YARA corpus (APKiD). Any ONE of the listed
+# signals matching an APK detects that packer (OR-within-entry):
+#   native_lib  : packer loader .so shipped under lib/<abi>/ (e.g. libDexHelper.so)
+#   application : the stub <application android:name> the packer registers to
+#                 load the real Application dynamically (a packed app's real
+#                 Application is only reachable through this wrapper)
+#   asset       : an encrypted-DEX / config blob under assets/ (e.g. secData0.jar)
+#
+# This is a hand-authored, versioned, extendable set covering the common/known
+# families. It is NOT claimed exhaustive: a novel or unlisted packer keeps the
+# Java/DEX surface honest via the same coverage rule (a packed target's DEX is
+# not fully readable, so a confident negative is never certified) - see the
+# coverage contract in src/static/coverage.py (`packed` -> java=partial).
+#
+# Family names/signals verified against public packer documentation and
+# common reverser knowledge (2026-08). Add a family here by copying the shape.
+
+- id: packer_tencent_legu
+  packer: "Tencent Legu"
+  native_lib:
+    - "libDexHelper.so"
+  application:
+    - "com.tencent.StubShell.TxAppEntry"
+  asset:
+    - "assets/libDexHelper.so"
+
+- id: packer_bangcle_secneo
+  packer: "Bangcle / SecNeo"
+  native_lib:
+    - "libprotectClass.so"
+    - "libsecneo.so"
+  application:
+    - "com.secneo.apkwrapper.ApplicationWrapper"
+  asset:
+    - "assets/secData0.jar"
+    - "assets/0OO00l111"
+
+- id: packer_qihoo_360
+  packer: "Qihoo 360"
+  native_lib:
+    - "libjiagu.so"
+    - "libjiagu_x86.so"
+  application:
+    - "com.qihoo.util.StubApplication"
+  asset:
+    - "assets/jiagu"
+    - "assets/360"
+
+- id: packer_apkprotect
+  packer: "APKProtect"
+  native_lib:
+    - "libAPKProtect.so"
+  application:
+    - "com.apkprotect.dexprotector.StubApplication"
+  asset: []
+
+- id: packer_dexprotector
+  packer: "DexProtector"
+  native_lib:
+    - "libdexprotector.so"
+  application:
+    - "com.licel.ApkWrapper"
+  asset:
+    - "assets/dexprotector.dat"
+
+- id: packer_ijiami
+  packer: "Ijiami (爱加密)"
+  native_lib:
+    - "libexec.so"
+    - "libexecmain.so"
+  application:
+    - "com.shell.SuperApplication"
+  asset:
+    - "assets/ijiami.dat"
+    - "assets/ijiami.txt"
+
+- id: packer_alibaba
+  packer: "Alibaba (阿里聚安全 / AliProtect)"
+  native_lib:
+    - "libmobisec.so"
+    - "libsecexe.so"
+  application:
+    - "com.alibaba.mobisec.sdk.security.AliAppComponent"
+  asset:
+    - "assets/mobisec"
+
+- id: packer_appsealing
+  packer: "AppSealing"
+  native_lib:
+    - "libappsealing.so"
+  application:
+    - "com.appsealing.app"
+  asset: []

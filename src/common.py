@@ -6,6 +6,137 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal, Protocol
 
+# --- Third-party namespace taxonomy (shared by static scan exclusion and report
+# attribution so both agree on what counts as a bundled SDK). Only namespaces
+# under these recognized vendors are ever treated as third-party; everything
+# else is the app's own code (or unidentifiable). Being conservative matters:
+# never assert an SDK we can't verify (see report/attribution.py).
+KNOWN_VENDOR_PREFIXES = (
+    "io.sentry",          # Sentry
+    "com.google",         # Play services, GMS, Firebase, ads
+    "com.firebase",       # Firebase Analytics
+    "com.crashlytics",    # Crashlytics
+    "expo",               # Expo
+    "com.appsflyer",      # AppsFlyer
+    "com.facebook",       # Facebook SDK
+    "com.bugsnag",        # BugSnag
+    "io.invertase",       # React Native Firebase
+    "io.branch",          # Branch
+    "com.onesignal",      # OneSignal
+    "com.microsoft",      # App Center
+    "com.adjust",         # Adjust
+    "com.mixpanel",       # Mixpanel
+    "com.amplitude",      # Amplitude
+    "com.datadog",        # Datadog
+    "org.acra",           # ACRA
+    "io.flutter",         # Flutter
+    "com.flutter",        # Flutter plugins
+    "com.newrelic",       # New Relic
+    "com.appdynamics",    # AppDynamics
+    "com.crittercism",    # Crittercism
+    "androidx.work",      # AndroidX WorkManager (RootedDevice check)
+    "okhttp3",            # OkHttp
+    "com.squareup",       # Square ecosystem
+    "com.reactnativecommunity",  # React Native community modules
+    "com.RNFetchBlob",    # ReactNativeBlobUtil (legacy)
+    "com.ReactNativeBlobUtil",   # ReactNativeBlobUtil
+    # --- broader SDK coverage (boundary-4). Safe to widen because report
+    # attribution now treats the app's OWN package subtree as app-owned even
+    # when it shares one of these prefixes (Bug-B parity - see attribution.py):
+    # an app whose package is com.baidu.myapp keeps its own code app-owned.
+    "com.tencent",        # WeChat SDK, Tencent Bugly
+    "com.umeng",          # Umeng analytics
+    "cn.jpush",           # JPush / JCore
+    "com.alibaba",        # Alibaba mobile SDKs
+    "com.baidu",          # Baidu SDKs (location/ads/security)
+    "com.huawei",         # Huawei HMS
+    "com.vivo",           # vivo push
+    "com.xiaomi",         # Xiaomi push
+    "com.oppo",           # Oppo push
+    "com.stripe",         # Stripe
+    "com.paypal",         # PayPal
+    "com.braintreepayments",  # Braintree
+    "com.intercom",       # Intercom
+    "com.zendesk",        # Zendesk
+    "com.mapbox",         # Mapbox
+    "org.telegram",       # Telegram
+    "org.bouncycastle",   # Bouncy Castle crypto
+    "io.grpc",            # gRPC
+    "io.ktor",            # Ktor
+    "io.socket",          # Socket.IO
+    "retrofit2",          # Retrofit
+    "com.github.bumptech.glide",  # Glide image loader
+)
+# Bundled NATIVE SDK libraries (boundary-4): a root/SSL check that matches
+# inside one of these .so files is a bundled-SDK signal, not the app's own
+# native code. Native evidence carries a .so path (no package namespace), so
+# attribution matches by library basename - the pure-Python analog of a
+# LibScout library fingerprint. Exact basenames (Android libs are unversioned);
+# only SDKs that plausibly do security/telemetry work are listed - generic NDK
+# runtime libs (libc++_shared.so, libz.so) are deliberately absent.
+KNOWN_NATIVE_LIBS = frozenset({
+    "libsentry.so",            # Sentry native
+    "libhermes.so",            # React Native Hermes engine
+    "libfbjni.so",             # Facebook JNI (RN infra)
+    "libappmodules.so",        # React Native app modules
+    "libreactnative.so",       # React Native
+    "librealm-jni.so",         # Realm
+    "libgmscore.so",           # Google Play Services core
+    "libbugly.so",             # Tencent Bugly
+    "libumeng.so",             # Umeng
+    "libjcore.so",             # JPush core
+    "libmsaoaidsec.so",        # Alibaba Security SDK
+    "libmsodsec.so",           # Alibaba Security SDK (variant)
+    "libbaiduprotect.so",      # Baidu app protection
+    "libmobisesdk.so",         # Baidu Security
+    "libflutter.so",           # Flutter engine
+    "libmapbox.so",            # Mapbox
+    "libsentry-core.so",       # Sentry
+})
+# Directory markers inside a decompiled tree that separate package directories
+# from decompiler layout. Classic jadx: 'sources/<pkg>/...'. Modern jadx (>= 1.5,
+# multidex split): 'classes-<hash>-<ver>/sources/<pkg>/...'. apktool: '<smali>/...'.
+_NON_NS_SEGMENTS = ("sources", "resources", "smali")
+
+
+def derive_namespace(file: str) -> str | None:
+    """Turn a decompiled file path into its dotted package namespace.
+
+    Handles BOTH jadx layouts: classic 'sources/<pkg>/...' and modern
+    'classes-<hash>-<ver>/sources/<pkg>/...'. The package namespace starts after
+    the sources/resources/smali marker; anything before it (the classes-* prefix,
+    the marker itself) is decompiler layout, not package. A segment is a class/
+    resource *file* iff it contains a '.' (the extension); a dotless segment is a
+    package directory. Returns None when no namespace can be derived.
+
+    'classes-7c8ed94a0b1d-1.5.6/sources/com/google/android/gms/common/net/zza.java'
+      -> 'com.google.android.gms.common.net'
+    'sources/sg/vantagepoint/a/c.java' -> 'sg.vantagepoint.a'
+    """
+    if not file:
+        return None
+    segs = file.split("/")
+    start = 0
+    for i, seg in enumerate(segs):
+        if seg in _NON_NS_SEGMENTS:
+            start = i + 1
+            break
+    ns_segs = []
+    for seg in segs[start:]:
+        if not seg or "." in seg:
+            break
+        ns_segs.append(seg)
+    return ".".join(ns_segs) if ns_segs else None
+
+
+def is_known_third_party(ns: str | None) -> bool:
+    """True when the namespace is under a recognized bundled-SDK vendor. An
+    unknown namespace is deliberately NOT third-party - it could be the app's
+    own code under a different package, so we never assert it's an SDK."""
+    if not ns:
+        return False
+    return any(ns == p or ns.startswith(p + ".") for p in KNOWN_VENDOR_PREFIXES)
+
 
 @dataclass
 class StageResult:
@@ -54,6 +185,13 @@ class StaticEvidence:
     # Carry the offending paths (relative to the decompiled root, matching
     # Evidence.file) so the report/console name them. Empty when every file read.
     unreadable_files: list[str] = field(default_factory=list)
+    # Boundary-1: which detection categories have detection-shaped code present
+    # in the scanned (app-owned) Java but matched NO signature. A category here
+    # must not certify a confident negative - the technique is unknown, not
+    # absent (ADR-0006). Populated by scan() from indicators.find_indicator_categories
+    # intersected with matched categories; empty when every indicator belongs to
+    # a recognized (matched) technique or there is no detection-shaped code.
+    unattributed_indicators: dict[str, bool] = field(default_factory=dict)
     # RESID-4F observability: total matches per signature that exceeded the
     # 50-row-per-signature display cap, keyed by signature_id -> total matches.
     # The cap keeps the report readable (thousands of near-identical rows add

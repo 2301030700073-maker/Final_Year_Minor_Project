@@ -10,6 +10,9 @@ dependencies = [
     "frida<17",
     "objection>=1.11",
     "sqlalchemy>=2.0",
+    "androguard>=4.1.4",
+    "pyelftools>=0.33",
+    "pyaxmlparser>=0.3.31",
 ]
 
 [dependency-groups]

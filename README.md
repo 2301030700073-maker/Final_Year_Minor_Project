@@ -37,6 +37,10 @@ Versions are pinned here deliberately (NFR-5) — if you install something diffe
 - `pip install frida-tools objection` (or via `uv` if added as project dependencies — check `pyproject.toml`)
 - [mitmproxy](https://mitmproxy.org/)
 
+Optional native-analysis extras — each degrades gracefully (never a silent clean, per principle 3/ADR-0006), but they deepen the native surface when present:
+- **Ghidra headless** (`analyzeHeadless`) — decompiles stripped/obfuscated `.so` function bodies so a technique hidden inside a body (e.g. a `fork` in the ptrace/fork anti-debug combo) can be recovered. Absent ⇒ native stays `partial`.
+- **UPX** — unpacks UPX-packed `.so` files so their real code is analyzable; a packed lib that can't be unpacked reads `partial` (Gap-4). Absent ⇒ packed libs stay `partial`.
+
 Verify each with its `--version` flag before proceeding — don't assume a silent PATH issue isn't there.
 
 ## 4. Rooted emulator or device
@@ -48,7 +52,7 @@ Frida requires root. Use a Google APIs (not Google Play) x86_64 system image if 
 Test target APKs live under `APK_Test/` (e.g. `APK_Test/UnCrackable-Level1.apk`) — keep them there so paths stay consistent across commands, docs, and bundles.
 
 ```bash
-PYTHONPATH=src uv run python -m cli run --apk APK_Test/UnCrackable-Level1.apk --justification ACADEMIC_TRAINING_TARGET
+PYTHONPATH=src uv run python -m cli run --apk APK_Test/UnCrackable-Level1.apk --target owasp.mstg.uncrackable1 --justification ACADEMIC_TRAINING_TARGET
 ```
 
 (`--help` shows the full option list, including `--skip-dynamic`, `--device`, and `--target`.)

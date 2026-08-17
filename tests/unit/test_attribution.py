@@ -133,3 +133,159 @@ def test_attribute_handles_dict_evidence_and_okhttp_as_third_party():
     assert result["vendors"] == ["okhttp3.internal"]
     assert result["all_third_party"] is False
     assert result["mixed"] is True
+
+
+def test_attribute_app_own_package_with_vendor_prefix_is_app_owned():
+    # Bug-B parity: an app whose OWN package shares a vendor prefix (com.google)
+    # must keep its root-detection code app-owned, never asserted a bundled SDK.
+    evidence = [_FakeEvidence("sources/com/google/mybankapp/RootCheck.java")]
+    result = attribution.attribute_root_evidence("com.google.mybankapp", evidence)
+    assert result["app_owned"] == 1
+    assert result["third_party"] == 0
+    assert result["all_third_party"] is False
+    assert result["vendors"] == []
+
+
+def test_attribute_known_native_sdk_lib_is_third_party():
+    # A bundled native SDK doing root/SSL checks is third-party by basename.
+    evidence = [_FakeEvidence("outputs/.../native/lib/x86_64/libsentry.so")]
+    result = attribution.attribute_root_evidence("com.example.app", evidence)
+    assert result["third_party"] == 1
+    assert result["app_owned"] == 0
+    assert result["all_third_party"] is True
+    assert result["vendors"] == ["libsentry.so"]
+
+
+def test_attribute_native_lib_not_namespace_derived():
+    # Native evidence file is `{abi}/{lib}.so` (native.py) - e.g. the real
+    # 'arm64-v8a/libsentry.so'. It carries no package namespace, so attribution
+    # keys off the basename and must NEVER try to namespace-derive the abi dir
+    # (which would yield the garbage ns 'arm64-v8a'). The reorder checks the
+    # native branch before derive_namespace; this pins that behavior: a known
+    # native lib reads third-party by basename, an unknown one reads app-owned,
+    # and neither is ever attributed via a bogus namespace.
+    known = attribution.attribute_root_evidence(
+        "com.example.app", [_FakeEvidence("arm64-v8a/libsentry.so")]
+    )
+    assert known["third_party"] == 1 and known["app_owned"] == 0
+    assert known["vendors"] == ["libsentry.so"]
+    unknown = attribution.attribute_root_evidence(
+        "com.example.app", [_FakeEvidence("arm64-v8a/libmyapp.so")]
+    )
+    assert unknown["app_owned"] == 1 and unknown["third_party"] == 0
+
+
+def test_attribute_unknown_native_lib_is_app_owned():
+    # An unrecognized .so (e.g. the app's own libfoo.so) is conservatively the
+    # app's own native code, never asserted third-party (ADR-0006).
+    evidence = [_FakeEvidence("outputs/.../native/lib/x86_64/libfoo.so")]
+    result = attribution.attribute_root_evidence("com.example.app", evidence)
+    assert result["app_owned"] == 1
+    assert result["third_party"] == 0
+    assert result["all_third_party"] is False
+
+
+def test_attribute_mixed_native_and_java_sdk():
+    # Native SDK + recognized Java vendor both count third-party; app's own
+    # native lib counts app-owned.
+    evidence = [
+        _FakeEvidence("outputs/.../native/lib/x86_64/libhermes.so"),   # RN SDK
+        _FakeEvidence("sources/io/sentry/android/core/RootChecker.java"),
+        _FakeEvidence("outputs/.../native/lib/x86_64/libfoo.so"),      # app's own
+    ]
+    result = attribution.attribute_root_evidence("com.example.app", evidence)
+    assert result["third_party"] == 2
+    assert result["app_owned"] == 1
+    assert result["mixed"] is True
+    assert "io.sentry" in result["vendors"] and "libhermes.so" in result["vendors"]
+
+
+def test_broadened_vendor_prefixes_recognized():
+    # The boundary-4 vendor broadening: these SDK namespaces are third-party.
+    assert attribution.is_known_third_party("com.tencent.bugly") is True
+    assert attribution.is_known_third_party("cn.jpush.android") is True
+    assert attribution.is_known_third_party("com.umeng.commonsdk") is True
+    assert attribution.is_known_third_party("com.baidu.location") is True
+    assert attribution.is_known_third_party("com.alibaba.sdk") is True
+    assert attribution.is_known_third_party("org.telegram.messenger") is True
+    assert attribution.is_known_third_party("retrofit2") is True
+    # Still conservative: an unknown app namespace is NOT third-party.
+    assert attribution.is_known_third_party("com.example.myapp") is False
+
+
+# --- boundary #5: matched-string namespace attribution ---
+
+
+def test_string_vendor_is_dotted_reference():
+    # _is_dotted_reference accepts a fully-qualified class reference but rejects
+    # bare identifiers, filesystem paths, and non-Java tokens.
+    assert attribution._is_dotted_reference("com.google.android.gms.safetynet.SafetyNetApi") is True
+    assert attribution._is_dotted_reference("okhttp3.internal.tls.CertificateChainCleaner") is True
+    assert attribution._is_dotted_reference("CertificatePinner") is False        # bare token
+    assert attribution._is_dotted_reference("/system/bin/su") is False           # path
+    assert attribution._is_dotted_reference("io.sentry:sentry-android") is False  # gradle coord
+    assert attribution._is_dotted_reference("com.google .x") is False            # whitespace
+
+
+def test_string_vendor_recognizes_known_vendor():
+    assert attribution._string_vendor("com.google.android.gms.safetynet.SafetyNetApi") == "com.google"
+    # vendor_namespace collapses to the top two segments -> "okhttp3.internal".
+    assert attribution._string_vendor("okhttp3.internal.tls.CertificateChainCleaner") == "okhttp3.internal"
+    # Unknown / non-dotted / None never assert a vendor.
+    assert attribution._string_vendor("com.example.myapp.RootCheck") is None
+    assert attribution._string_vendor("/system/bin/su") is None
+    assert attribution._string_vendor("CertificatePinner") is None
+    assert attribution._string_vendor(None) is None
+
+
+def test_attribute_dex_string_referencing_sdk_is_third_party():
+    # Boundary #5: the matched STRING is a SafetyNet API reference living in the
+    # app's own class. The file namespace is the app's package, but the string
+    # names Google's SDK - a strict reader expects Google flagged, not app-owned.
+    evidence = [
+        {"file": "sources/com/android/insecurebankv2/util/RootCheck.java",
+         "matched_text": "com.google.android.gms.safetynet.SafetyNetApi"},
+    ]
+    result = attribution.attribute_root_evidence("com.android.insecurebankv2", evidence)
+    assert result["third_party"] == 1
+    assert result["app_owned"] == 0
+    assert result["vendors"] == ["com.google"]
+    assert result["all_third_party"] is True
+
+
+def test_attribute_string_vendor_preserves_app_own_path_string():
+    # A path-string match (the app's own su-path check) is NOT a dotted vendor
+    # reference, so it still falls through to the file-namespace logic and reads
+    # app-owned even when the file sits in a vendor-prefixed package.
+    evidence = [
+        {"file": "sources/com/google/mybankapp/RootCheck.java",
+         "matched_text": "/system/bin/su"},
+    ]
+    result = attribution.attribute_root_evidence("com.google.mybankapp", evidence)
+    assert result["app_owned"] == 1
+    assert result["third_party"] == 0
+    assert result["vendors"] == []
+
+
+def test_attribute_string_vendor_overrides_app_package_for_sdk_reference():
+    # Bug-B preserved for ordinary code (path string -> app-owned), but an app
+    # whose package shares a vendor prefix AND genuinely calls the SDK (the
+    # matched string is that SDK's dotted class) is correctly attributed to the
+    # SDK - the string is a definite vendor reference, not a shared-prefix guess.
+    evidence = [
+        {"file": "sources/com/google/mybankapp/RootCheck.java",
+         "matched_text": "com.google.android.gms.safetynet.SafetyNetApi"},
+    ]
+    result = attribution.attribute_root_evidence("com.google.mybankapp", evidence)
+    assert result["third_party"] == 1
+    assert result["app_owned"] == 0
+    assert result["vendors"] == ["com.google"]
+
+
+def test_attribute_dataclass_evidence_without_matched_text_unchanged():
+    # The existing _FakeEvidence dataclass has no matched_text attr; getattr
+    # default returns None and the file-namespace logic is untouched.
+    evidence = [_FakeEvidence("sources/sg/vantagepoint/a/c.java")]
+    result = attribution.attribute_root_evidence("owasp.mstg.uncrackable1", evidence)
+    assert result["app_owned"] == 1
+    assert result["third_party"] == 0

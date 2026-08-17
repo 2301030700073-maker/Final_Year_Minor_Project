@@ -1,12 +1,17 @@
 """Unit tests for static/coverage.py - the per-surface coverage contract and the
 G-A per-category surface-set exclusion (F2). Pure module, no I/O/toolchain."""
 
+from common import CategoryVerdict
 from static.coverage import (
     GOVERNING_SURFACES,
     _min_coverage,
+    apply_unresolved_java,
+    apply_unresolved_native,
     category_is_confident_negative,
+    confidence_bound,
     coverage_bound_line,
     java_coverage,
+    js_surface_coverage,
     manifest_coverage,
     native_coverage,
     per_surface_coverage,
@@ -26,6 +31,21 @@ def test_java_coverage_heavy_forces_partial_even_on_complete():
 
 def test_java_coverage_light_does_not_force_partial():
     assert java_coverage("complete", "light") == "fully_analyzed"
+
+
+def test_java_coverage_packed_forces_partial_even_on_complete():
+    # Gap-2: a detected packer hides the real DEX behind a loader, so even a
+    # 'complete' decompile only sees the loader stub, never the real code - the
+    # Java surface must read partial (a packed clean NEITHER can't certify a
+    # confident TN, ADR-0006).
+    assert java_coverage("complete", "clear", packed=True) == "partial"
+
+
+def test_java_coverage_packed_not_confident_on_partial():
+    # A packed app whose decompile is already partial stays partial (never a
+    # silent upgrade), and an unknown decompile stays unscannable.
+    assert java_coverage("partial", "clear", packed=True) == "partial"
+    assert java_coverage("unknown", "clear", packed=True) == "unscannable"
 
 
 def test_native_coverage_empty_is_unscannable():
@@ -67,17 +87,18 @@ def test_per_surface_coverage_builds_full_map():
 
 def test_category_confident_negative_requires_all_governing_surfaces():
     # G-A/F2: root negative is confident only when java AND native are full.
-    assert category_is_confident_negative("root", {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "partial"})
+    # js is fully_analyzed here (no binary JS bundle -> vacuously safe).
+    assert category_is_confident_negative("root", {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "partial", "js": "fully_analyzed"})
     # Native partial -> root negative is NOT confident (stripped .so hides the check).
-    assert not category_is_confident_negative("root", {"java": "fully_analyzed", "native": "partial"})
+    assert not category_is_confident_negative("root", {"java": "fully_analyzed", "native": "partial", "js": "fully_analyzed"})
     # Java partial -> also not confident.
-    assert not category_is_confident_negative("root", {"java": "partial", "native": "fully_analyzed"})
+    assert not category_is_confident_negative("root", {"java": "partial", "native": "fully_analyzed", "js": "fully_analyzed"})
 
 
 def test_category_confident_negative_ssl_includes_manifest():
-    # ssl's governing set is {java, native, manifest} - a partial manifest excludes.
-    assert not category_is_confident_negative("ssl", {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "unscannable"})
-    assert category_is_confident_negative("ssl", {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed"})
+    # ssl's governing set is {java, native, manifest, js} - a partial manifest excludes.
+    assert not category_is_confident_negative("ssl", {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "unscannable", "js": "fully_analyzed"})
+    assert category_is_confident_negative("ssl", {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed"})
 
 
 def test_category_confident_negative_unknown_category_never_confident():
@@ -85,8 +106,28 @@ def test_category_confident_negative_unknown_category_never_confident():
 
 
 def test_governing_surfaces_match_the_doc():
-    assert GOVERNING_SURFACES["root"] == ("java", "native")
-    assert GOVERNING_SURFACES["ssl"] == ("java", "native", "manifest")
+    assert GOVERNING_SURFACES["root"] == ("java", "native", "js")
+    assert GOVERNING_SURFACES["ssl"] == ("java", "native", "manifest", "js")
+
+
+def test_js_surface_coverage_degrades_only_on_binary_bundle():
+    # No binary JS bundle -> vacuously fully_analyzed (no JS, or plain-text JS the
+    # text engine already scans); a Hermes/bytecode bundle we can't fully read is
+    # partial so a NEITHER is never a confident negative over bundle-hidden logic.
+    assert js_surface_coverage(False) == "fully_analyzed"
+    assert js_surface_coverage(True) == "partial"
+
+
+def test_js_governing_surface_gates_confident_negative():
+    # root/ssl now govern on `js`: a partial js surface makes NEITHER non-confident.
+    cov_partial_js = {"java": "fully_analyzed", "native": "fully_analyzed", "js": "partial"}
+    assert not category_is_confident_negative("root", cov_partial_js)
+    assert not category_is_confident_negative(
+        "ssl", {**cov_partial_js, "manifest": "fully_analyzed"}
+    )
+    # Fully-analyzed js (no binary bundle) does NOT gate a confident negative.
+    cov_ok = {"java": "fully_analyzed", "native": "fully_analyzed", "js": "fully_analyzed"}
+    assert category_is_confident_negative("root", cov_ok)
 
 
 def test_min_coverage_orders_severity():
@@ -100,21 +141,21 @@ def test_coverage_bound_line_flags_native_unscannable_as_lower_bound():
     # the verdict even when Java is complete. The console line must say so -
     # otherwise a root NEITHER reads as a confident negative it isn't.
     line = coverage_bound_line({
-        "java": "fully_analyzed", "native": "unscannable", "manifest": "fully_analyzed",
+        "java": "fully_analyzed", "native": "unscannable", "manifest": "fully_analyzed", "js": "fully_analyzed",
     })
     assert "native=unscannable" in line
     assert "root: NEITHER is a lower bound, NOT confident" in line
     assert "ssl: NEITHER is a lower bound, NOT confident" in line
     # manifest is fully analyzed, so it is not the binding surface - the bound
     # comes from native, exactly the case L-M7's java-only CAUTION missed.
-    assert "ssl: NEITHER is a lower bound, NOT confident (java=fully_analyzed, native=unscannable, manifest=fully_analyzed)" in line
+    assert "ssl: NEITHER is a lower bound, NOT confident (java=fully_analyzed, native=unscannable, manifest=fully_analyzed, js=fully_analyzed)" in line
 
 
 def test_coverage_bound_line_confirms_confident_negative_when_all_covered():
     # L-M4: when every governing surface is fully analyzed, a NEITHER IS a
     # confident negative and the line must say so (never over-downgrade).
     line = coverage_bound_line({
-        "java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed",
+        "java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed",
     })
     assert "root: NEITHER is a confident negative" in line
     assert "ssl: NEITHER is a confident negative" in line
@@ -126,8 +167,84 @@ def test_coverage_bound_line_mentions_partial_manifest():
     # per G-A governs ssl - so the ssl bound must reflect manifest=partial even
     # when java+native are complete.
     line = coverage_bound_line({
-        "java": "fully_analyzed", "native": "fully_analyzed", "manifest": "partial",
+        "java": "fully_analyzed", "native": "fully_analyzed", "manifest": "partial", "js": "fully_analyzed",
     })
     assert "manifest=partial" in line
     assert "root: NEITHER is a confident negative" in line  # root not governed by manifest
     assert "ssl: NEITHER is a lower bound, NOT confident" in line
+
+
+def test_apply_unresolved_java_downgrades_only_fully_analyzed():
+    # Dynamic code loading present -> java surface degrades to partial so a java
+    # NEITHER is never a confident negative over a dynamically-hidden payload.
+    assert apply_unresolved_java({"java": "fully_analyzed"}, True)["java"] == "partial"
+    # never upgrades, never downgrades below partial
+    assert apply_unresolved_java({"java": "partial"}, True)["java"] == "partial"
+    assert apply_unresolved_java({"java": "fully_analyzed"}, False)["java"] == "fully_analyzed"
+    # other surfaces untouched
+    m = apply_unresolved_java({"java": "fully_analyzed", "native": "fully_analyzed"}, True)
+    assert m["java"] == "partial" and m["native"] == "fully_analyzed"
+    # additive: returns a new dict, original unchanged
+    orig = {"java": "fully_analyzed"}
+    apply_unresolved_java(orig, True)
+    assert orig["java"] == "fully_analyzed"
+
+
+def test_apply_unresolved_java_propagates_to_categories():
+    # Because GOVER==NING_SURFACES for root/ssl both include "java", a partial java
+    # surface removes the confident-negative status for both categories.
+    cov = apply_unresolved_java(
+        {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed"}, True
+    )
+    assert category_is_confident_negative("root", cov) is False
+    assert category_is_confident_negative("ssl", cov) is False
+
+
+def test_confidence_bound_plain_number_when_fully_analyzed():
+    # L-M4: a fully-analyzed verdict's confidence IS a point estimate - render the
+    # bare number, no upper-bound annotation (never over-downgrade).
+    verdict = CategoryVerdict(confidence=0.2, detected=False, evidence=[])
+    line = confidence_bound("root", verdict, {
+        "java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed",
+    })
+    assert line == "0.20"
+    assert "upper bound" not in line
+
+
+def test_confidence_bound_appends_upper_bound_when_native_partial():
+    # L-M4: a coverage-limited verdict's numeric confidence is an upper bound - a
+    # native=partial governing surface means more root detection could exist that
+    # this scan didn't see. The rendered line must say so, naming the binding
+    # surface, instead of printing the point estimate as if the scan were complete.
+    verdict = CategoryVerdict(confidence=0.2, detected=False, evidence=[], coverage_limited=True)
+    line = confidence_bound("root", verdict, {
+        "java": "fully_analyzed", "native": "partial", "manifest": "fully_analyzed",
+    })
+    assert line.startswith("0.20")
+    assert "upper bound" in line
+    assert "native=partial" in line
+    # java is fully analyzed so it is NOT named as the binding surface.
+    assert "java=fully_analyzed" not in line
+
+
+def test_confidence_bound_ssl_mentions_partial_manifest():
+    # L-M4: ssl's governing surfaces are {java, native, manifest} - a partial
+    # manifest resource resolution degrades the manifest surface and must appear
+    # in the rendered upper bound even when java+native are complete.
+    verdict = CategoryVerdict(confidence=0.7, detected=True, evidence=[], coverage_limited=True)
+    line = confidence_bound("ssl", verdict, {
+        "java": "fully_analyzed", "native": "fully_analyzed", "manifest": "partial",
+    })
+    assert line.startswith("0.70")
+    assert "upper bound" in line
+    assert "manifest=partial" in line
+    assert "native=fully_analyzed" not in line
+
+
+def test_confidence_bound_never_alters_numeric_confidence():
+    # L-M4 (ADR-0006): the upper-bound annotation is a RENDERING concern - the
+    # numeric confidence on the verdict object is untouched by rendering it.
+    verdict = CategoryVerdict(confidence=0.35, detected=False, evidence=[], coverage_limited=True)
+    line = confidence_bound("root", verdict, {"native": "unscannable"})
+    assert line.startswith("0.35")
+    assert verdict.confidence == 0.35  # unchanged

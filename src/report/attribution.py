@@ -26,89 +26,27 @@ price of never asserting a false third-party. Do not "solve" it by treating
 opaque namespaces as third-party - that inverts the error and asserts SDKs we
 cannot verify.
 
+Boundary #5 (verified, cosmetic): dex-string evidence is attributed by its FILE
+namespace even when the MATCHED STRING is itself a fully-qualified reference
+into a recognized SDK - e.g. InsecureBankv2's
+`com.google.android.gms.safetynet.SafetyNetApi` string lives in the app's own
+class (so the file reads app-owned) but names Google's SafetyNet API. A strict
+reader reads that as the SDK's API, not the app's own root-check code. `_string_vendor`
+closes this: when a matched string is a dotted reference under a known vendor
+(checked via `is_known_third_party` on the string itself, gated by
+`_is_dotted_reference` so paths and bare tokens never fire), the evidence is
+attributed to that vendor before the app-package guard. Same conservative bound
+as the file side: only a recognized vendor's dotted class reference is ever
+asserted third-party, and no detection impact - it only re-labels which owner
+carries existing evidence.
+
 Pure path/string logic - no AI, no inference beyond the file paths and the
 vendor allowlist. Deterministic and unit-testable anywhere.
 """
 
-import re
+import os
 
-# Non-source roots in a decompiled tree that are never package namespaces.
-_NON_NS_PREFIXES = ("sources/", "resources/")
-
-# Top-level namespaces of bundled SDKs known to do their own telemetry /
-# fraud-detection root checks. Only these are ever called third-party; a match
-# under the app's own package, or under any unrecognized namespace, is not.
-KNOWN_VENDOR_PREFIXES = (
-    "io.sentry",          # Sentry (root checks + telemetry)
-    "com.google",         # Play services, Firebase, GMS, ads
-    "com.firebase",       # Firebase Analytics
-    "com.crashlytics",    # Fabric/Firebase Crashlytics
-    "expo",               # Expo / expo modules (DeviceModule)
-    "com.appsflyer",      # AppsFlyer
-    "com.facebook",       # Facebook SDK
-    "com.bugsnag",        # BugSnag
-    "io.invertase",       # React Native Firebase modules
-    "io.branch",          # Branch
-    "com.onesignal",      # OneSignal
-    "com.microsoft",      # App Center
-    "com.adjust",         # Adjust
-    "com.mixpanel",       # Mixpanel
-    "com.amplitude",      # Amplitude
-    "com.datadog",        # Datadog (decompiled ns is com.datadog.android/.core;
-                          # the com.datadoghq Maven group never appears in code)
-    "org.acra",           # ACRA crash reporter
-    "io.flutter",         # Flutter engine/plugins
-    "com.flutter",        # Flutter plugins
-    # Mobile APM / crash SDKs that ship their own root-detection checks. Without
-    # these, a root match under an APM namespace was mislabeled the app's own
-    # anti-tampering at machine confidence even though it is bundled SDK code.
-    "com.newrelic",       # New Relic Android agent
-    "com.appdynamics",    # AppDynamics
-    "com.crittercism",    # Crittercism (AppDynamics)
-    "androidx.work",      # AndroidX WorkManager (RootedDevice check)
-    # Network / SSL-pinning SDKs (added 2026-08). okhttp3 is the dominant
-    # Android HTTP client whose CertificatePinner performs most real SSL
-    # pinning - an SSL match under okhttp3/okhttp4 (or Square's other libs) is
-    # bundled-SDK pinning, not the app's own logic, and without these prefixes
-    # it was being mislabeled app-owned at machine confidence. React Native's
-    # network/blob libs likewise. All are always-bundled third-party libraries.
-    "okhttp3",            # OkHttp top-level package
-    "com.squareup",       # Square ecosystem: okhttp3/4, retrofit, moshi
-    "com.reactnativecommunity",  # React Native community modules (incl. blobutil)
-    "com.RNFetchBlob",    # ReactNativeBlobUtil (legacy package)
-    "com.ReactNativeBlobUtil",   # ReactNativeBlobUtil
-)
-
-
-def derive_namespace(file: str) -> str | None:
-    """Turn a decompiled file path into its dotted package namespace.
-
-    'sources/io/sentry/android/core/internal/util/RootChecker.java'
-      -> 'io.sentry.android.core.internal.util'
-    'sources/sg/vantagepoint/a/c.java'
-      -> 'sg.vantagepoint.a'
-    Returns None when no package-like namespace can be derived (a path that
-    isn't under a source root, or a bare filename).
-
-    A segment is a class/resource *file* iff it contains a '.' (the extension);
-    a dotless segment is a package directory. Package directories may legally
-    contain uppercase letters - e.g. com.ReactNativeBlobUtil - so the old
-    lowercase-initial guard was wrong: it truncated that namespace to "com" and
-    made the com.ReactNativeBlobUtil vendor prefix unmatchable. Only the
-    extension marks a file.
-    """
-    if not file:
-        return None
-    for pre in _NON_NS_PREFIXES:
-        if file.startswith(pre):
-            file = file[len(pre):]
-            break
-    segments: list[str] = []
-    for seg in file.split("/"):
-        if not seg or "." in seg:
-            break
-        segments.append(seg)
-    return ".".join(segments) if segments else None
+from common import KNOWN_NATIVE_LIBS, derive_namespace, is_known_third_party
 
 
 def vendor_namespace(ns: str) -> str:
@@ -118,13 +56,78 @@ def vendor_namespace(ns: str) -> str:
     return ".".join(parts[:2])
 
 
-def is_known_third_party(ns: str | None) -> bool:
-    """True when the namespace is under a recognized bundled-SDK vendor. An
-    unknown namespace is deliberately NOT third-party - it could be the app's
-    own code under a different package, so we never assert it's an SDK."""
-    if not ns:
+def _under_app_package(ns: str | None, app_package: str) -> bool:
+    """True when a namespace sits under the app's OWN package subtree.
+
+    Bug-B parity with the androguard scanner: an app's own package can share a
+    vendor prefix (the real InsecureBankv2 is com.android.insecurebankv2; a
+    banking app can be com.google.mybankapp). A class under the app's own
+    package is the app's code even when its prefix matches a recognized vendor,
+    so it must be app-owned, never asserted third-party."""
+    return bool(app_package and ns and (ns == app_package or ns.startswith(app_package + ".")))
+
+
+def _is_native_lib(file: str) -> bool:
+    """True when an evidence file points at a native library (.so path). Native
+    evidence carries a .so path with no package namespace, so attribution must
+    key off the library basename instead (see _native_vendor)."""
+    return file.lower().endswith(".so")
+
+
+def _is_dotted_reference(text: str) -> bool:
+    """True when the text is a fully-qualified dotted Java package/class reference
+    (e.g. 'com.google.android.gms.safetynet.SafetyNetApi'), not a bare identifier
+    ('CertificatePinner'), a filesystem path ('/system/bin/su'), or a non-Java
+    token. Requires: starts with a letter, >=1 dot, and every dot-separated
+    segment is a valid Java identifier (alnum/_/$). This is the guard that keeps
+    the boundary-5 string-vendor signal from ever firing on a path string or an
+    ordinary bare token - it can only assert an SDK when the string literally
+    names a vendor's dotted class."""
+    if not text or not text[0].isalpha():
         return False
-    return any(ns == p or ns.startswith(p + ".") for p in KNOWN_VENDOR_PREFIXES)
+    if any(ch in text for ch in "/\\: "):
+        return False
+    segs = text.split(".")
+    if len(segs) < 2:
+        return False
+    for s in segs:
+        if not s or not (s[0].isalpha() or s[0] in "_$"):
+            return False
+        if not all(c.isalnum() or c in "_$" for c in s):
+            return False
+    return True
+
+
+def _string_vendor(matched_text) -> str | None:
+    """The vendor a fully-qualified MATCHED STRING references, or None.
+
+    Boundary #5: dex-string evidence is attributed by its FILE namespace, but the
+    matched string itself can be a fully-qualified class reference into a
+    recognized SDK namespace - e.g. InsecureBankv2's
+    'com.google.android.gms.safetynet.SafetyNetApi' string, which lives in the
+    app's own class but names Google's SafetyNet API. A strict reader reads that
+    as the SDK's API, not the app's own root-check code, so it should attribute to
+    the SDK. Conservative (ADR-0006): only fires when the string is a recognized
+    vendor's dotted class reference - a bare token ('CertificatePinner') or a
+    path ('/system/bin/su') never is, so it never mislabels the app's own logic.
+    Returns the collapsed vendor label ('com.google') or None."""
+    if not matched_text:
+        return None
+    text = matched_text.strip()
+    if not _is_dotted_reference(text):
+        return None
+    if not is_known_third_party(text):
+        return None
+    return vendor_namespace(text)
+
+
+def _native_vendor(file: str) -> str | None:
+    """The basename of a known bundled native SDK lib, or None. Returns the
+    basename ('libsentry.so') when it is a recognized bundled native SDK, else
+    None so the caller counts it app-owned (an unknown .so is conservatively the
+    app's own native code - never asserted third-party)."""
+    base = os.path.basename(file).lower()
+    return base if base in KNOWN_NATIVE_LIBS else None
 
 
 def gate_all_third_party(attr: dict | None, detected: bool) -> dict | None:
@@ -144,10 +147,16 @@ def attribute_root_evidence(app_package: str, evidence: list) -> dict | None:
     Returns None when there's no root evidence (nothing to attribute). The
     result is a plain dict the report template can branch on:
       app_package, app_owned, third_party, vendors, all_third_party, mixed.
-    `evidence` items only need a `.file` (or `["file"]` - dict, as asdict
-    produces for a stored classification_json). A match is third-party only if
-    its namespace is a recognized vendor; everything else counts as the app's
-    own code."""
+    `evidence` items only need a `.file` (or `["file"]` - dict, asdict
+    produces for a stored classification_json).
+
+    A match is third-party only when it is NOT under the app's own package
+    subtree (Bug-B parity - an app whose package shares a vendor prefix keeps its
+    own code app-owned) AND it is a recognized vendor: a Java/Smali namespace
+    under a known vendor prefix, or a bundled native SDK library by basename
+    (boundary-4). Everything else - the app's own package, an unknown namespace,
+    an unknown native lib - counts as the app's own code, never asserted
+    third-party (ADR-0006 conservatism)."""
     if not evidence:
         return None
     app_owned = 0
@@ -159,7 +168,50 @@ def attribute_root_evidence(app_package: str, evidence: list) -> dict | None:
             if isinstance(e, dict)
             else getattr(e, "file", None) or getattr(e, "file_path", None)
         )
+        matched = (
+            e.get("matched_text")
+            if isinstance(e, dict)
+            else getattr(e, "matched_text", None)
+        )
+        if not file:
+            app_owned += 1
+            continue
+        # 1. A bundled native SDK lib is third-party by basename (boundary-4).
+        #    Checked BEFORE namespace derivation: native evidence carries a .so
+        #    path (e.g. 'arm64-v8a/libsentry.so') with no package namespace to
+        #    derive - running derive_namespace on it yields a garbage value (the
+        #    abi dir 'arm64-v8a') that would be meaningless. Native libs are never
+        #    under a package subtree, so this ordering loses no app-owned signal.
+        if _is_native_lib(file):
+            lib = _native_vendor(file)
+            if lib:
+                third_party += 1
+                vendors.add(lib)
+            else:
+                app_owned += 1
+            continue
+        # 1b. Boundary #5: the MATCHED STRING names a recognized SDK's dotted
+        #     class (e.g. the SafetyNet API reference 'com.google.android.gms.
+        #     safetynet.SafetyNetApi' sitting inside the app's own class). The
+        #     string IS the SDK being invoked, so it is checked BEFORE the
+        #     app-package guard - an app that calls SafetyNet is attributed to
+        #     Google even though the call site lives in its own package subtree.
+        #     Conservative: only fires when the string is a fully-qualified
+        #     reference into a known vendor (see _string_vendor), never on a bare
+        #     token or a path, so the app's own code is never mislabeled.
+        sv = _string_vendor(matched)
+        if sv:
+            third_party += 1
+            vendors.add(sv)
+            continue
+        # 2. App's own package subtree is ALWAYS app-owned, even if it matches a
+        #    vendor prefix (Bug B). Guarded next so an app whose package is
+        #    com.google.mybankapp is never asserted a bundled SDK.
         ns = derive_namespace(file)
+        if _under_app_package(ns, app_package):
+            app_owned += 1
+            continue
+        # 3. A recognized vendor namespace is third-party.
         if is_known_third_party(ns):
             third_party += 1
             if ns:

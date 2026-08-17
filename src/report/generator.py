@@ -10,6 +10,7 @@ from jinja2 import Template
 from calibration.report import CalibrationReport
 from common import ClassificationResult, CorrelationResult, StageResult, VerificationResult
 from report import attribution as attribution_module
+from static.coverage import confidence_bound
 from static.manifest import ManifestInfo
 
 TEMPLATE = Template("""\
@@ -43,6 +44,16 @@ TEMPLATE = Template("""\
 {% if manifest.application_present -%}
 **Debuggable:** {{ "yes" if manifest.debuggable else "no" }}
 **Network security config:** {{ manifest.network_security_config or "none" }}{% if manifest.nsc_file_present is false %} (**MISSING** - declared `{{ manifest.network_security_config }}` was not found in the decoded resources){% endif %}
+**Package:** {{ manifest.package_name or "unknown" }}
+**Allow backup:** {{ "yes" if manifest.allow_backup else ("no" if manifest.allow_backup is false else "unset") }}
+**Cleartext permitted (effective):** {{ "yes" if manifest.cleartext_permitted else ("no" if manifest.cleartext_permitted is false else "unset (platform default)") }}
+{% if manifest.permissions -%}
+**Permissions ({{ manifest.permissions | length }}):** {{ manifest.permissions | join(", ") }}
+{% endif -%}
+{% set _exported = manifest.exported_components | selectattr("exported") | list -%}
+{% if _exported -%}
+**Exported components ({{ _exported | length }}):** {% for c in _exported %}`{{ c.type }}: {{ c.name }}`{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif -%}
 {% else -%}
 **Manifest has no &lt;application&gt; element** - debuggable and network-security-config below are defaults, not reads (RESID-5A/5D).
 {% endif %}
@@ -54,7 +65,7 @@ TEMPLATE = Template("""\
 **Files scanned:** {{ classification.scanned_file_count }} (RESID-4C: a low count means this verdict is based on a small corpus - a NEITHER is not proof of absence){% if classification.unreadable_file_count %}{{ " " }}**CAUTION: {{ classification.unreadable_file_count }} candidate file(s) could not be read (OSError): {% for f in classification.unreadable_files %}`{{ f }}`{% if not loop.last %}, {% endif %}{% endfor %} - treat any NEITHER/Inconclusive verdict as degraded, not a full-scan clean.**{% endif %}
 
 ### Root-detection
-- Confidence: {{ "%.2f"|format(classification.root.confidence) }} -> {{ "DETECTED" if classification.root.detected else "Inconclusive" }}{% if root_attribution and root_attribution.all_third_party and classification.root.detected %} (**bundled SDK only** - none of these root-detection matches are in the app's own package){% endif %}
+- Confidence: {{ confidence_bound("root", classification.root, coverage) }} -> {{ "DETECTED" if classification.root.detected else "Inconclusive" }}{% if root_attribution and root_attribution.all_third_party and classification.root.detected %} (**bundled SDK only** - none of these root-detection matches are in the app's own package){% endif %}
 {% for e in classification.root.evidence -%}
 - `{{ e.signature_id }}` at {{ e.file }}:{{ e.line_or_offset }} - `{{ e.matched_text }}`
 {% endfor %}
@@ -64,7 +75,7 @@ TEMPLATE = Template("""\
 > **Attribution:** root-detection matches split across the app's own package ({{ root_attribution.app_owned }}) and bundled third-party libraries ({{ root_attribution.third_party }}: {{ root_attribution.vendors | join(', ') }}).
 {% endif %}
 ### SSL-pinning
-- Confidence: {{ "%.2f"|format(classification.ssl.confidence) }} -> {{ "DETECTED" if classification.ssl.detected else "Inconclusive" }}{% if ssl_attribution and ssl_attribution.all_third_party and classification.ssl.detected %} (**bundled SDK only** - none of these SSL-pinning matches are in the app's own package){% endif %}
+- Confidence: {{ confidence_bound("ssl", classification.ssl, coverage) }} -> {{ "DETECTED" if classification.ssl.detected else "Inconclusive" }}{% if ssl_attribution and ssl_attribution.all_third_party and classification.ssl.detected %} (**bundled SDK only** - none of these SSL-pinning matches are in the app's own package){% endif %}
 {% for e in classification.ssl.evidence -%}
 - `{{ e.signature_id }}` at {{ e.file }}:{{ e.line_or_offset }} - `{{ e.matched_text }}`
 {% endfor %}
@@ -95,10 +106,96 @@ Per-surface bound of this scan - a `partial`/`unscannable` surface is a lower bo
 {% else -%}
 Not recorded for this run.
 {% endif %}
+{% if jni_bindings -%}
+### JNI native-method binding map (boundary #3, static half)
+
+Every `native` method the app's Java code declares, reconciled against the real
+`.so` surface. This is the static half of the runtime-JNI-view boundary: which
+methods *actually fire* on-device is dynamic (Frida, Phase 5+) and is not
+claimed here. Status meaning:
+
+- **resolved** — a `Java_*` export statically binds the method; its body is reachable.
+- **dynamic_candidate** — no `Java_*` export, but a lib defines `JNI_OnLoad`, so the method *may* register at runtime (bodies statically invisible → surface partial).
+- **unresolved** — no `Java_*` export and no `JNI_OnLoad` anywhere; a genuine unexamined surface. If any method is unresolved, native coverage is forced to `partial` and a native NEITHER is **not** a confident negative (ADR-0006).
+
+| Class | Method | Binding |
+|---|---|---|
+{% for b in jni_bindings -%}
+| `{{ b.class_name }}` | `{{ b.method_name }}` | {{ b.status }} |
+{% endfor %}
+{% endif %}
+{% if unaccounted_loads -%}
+### Unaccounted native loads (boundary #4)
+
+The explicit `System.load`/`System.loadLibrary` targets whose `.so` was **not**
+extracted and analyzed statically — loaded from an absolute path, or
+`loadLibrary("foo")` with no `libfoo.so` bundled. Each is a loaded-but-unexamined
+native surface: native coverage is forced to `partial` and a native NEITHER is
+**not** a confident negative (ADR-0006). Only a runtime (Frida, Phase 5+) view
+can confirm what these actually load.
+
+| Load target |
+|---|
+{% for t in unaccounted_loads -%}
+| `{{ t }}` |
+{% endfor %}
+{% endif %}
+{% if dynamic_loads -%}
+### Dynamic code loading (coverage-limited)
+
+The app loads code at runtime via `DexClassLoader` / `PathClassLoader` /
+`Class.forName` / `DexFile` / `loadDex`. The payload DEX is released and loaded
+only at runtime, so it is **invisible to static analysis** - a genuine unexamined
+java surface. Java coverage is forced to `partial` and a java NEITHER is **not** a
+confident negative (ADR-0006). Only a runtime (Frida, Phase 5+) view can confirm
+what this actually loads.
+
+| Call site |
+|---|
+{% for d in dynamic_loads -%}
+| `{{ d }}` |
+{% endfor %}
+{% endif %}
+{% if webview_sites -%}
+### WebView JS bridge (coverage-limited)
+
+The app drives WebView/JS root-detection or SSL-pinning logic through a JS bridge
+(`addJavascriptInterface`) / JS evaluation (`evaluateJavascript` /
+`loadUrl("javascript:")`) / remote page load (`loadDataWithBaseURL`). Local
+HTML/JS containers are now scanned by the text engine, so these call sites are
+labelled for visibility; a **remote** http(s) JS source (an external URL handed to
+`loadUrl`/`loadDataWithBaseURL`) is JS static analysis cannot read, which forces
+the java surface to `partial` - a java NEITHER is **not** a confident negative
+over that unexamined remote JS (ADR-0006). Only a runtime (Frida, Phase 5+) view
+can confirm what the bridge actually checks.
+
+| Call site |
+|---|
+{% for w in webview_sites -%}
+| `{{ w }}` |
+{% endfor %}
+{% endif %}
+{% if js_evidence -%}
+### JavaScript / Hermes bundle (coverage-limited)
+
+The app ships JavaScript compiled to a Hermes/bytecode bundle
+(`assets/*.bundle`, `.hbc`). It is binary, so the text engine skips it and jadx
+only reads DEX. We recover the bundle's string-constant table and match root/SSL
+idioms against it - the literals below are real deterministic evidence, but they
+are constants, not full JS control flow. The `js` surface is forced to `partial`
+and a js/root/ssl NEITHER is **not** a confident negative (ADR-0006). Only a
+runtime (Frida, Phase 5+) view can confirm the surrounding logic.
+
+| Signature | Matched constant | File |
+|---|---|---|
+{% for sig_id, _cat, matched_text, bundle_file in js_evidence -%}
+| `{{ sig_id }}` | `{{ matched_text }}` | `{{ bundle_file }}` |
+{% endfor %}
+{% endif %}
 ## Dynamic Verification
 
-- Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}not run ({{ dynamic_skip_reason or "reason unknown" }}){% endif %}
-- SSL bypassed: {% if verification %}{% if verification.ssl_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.ssl_bypassed }}{% endif %}{% else %}not run ({{ dynamic_skip_reason or "reason unknown" }}){% endif %}
+- Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}attempted, bypass not verified (no target-specific success check){% endif %}{% endif %}
+- SSL bypassed: {% if verification %}{% if verification.ssl_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.ssl_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}attempted, bypass not verified (no target-specific success check){% endif %}{% endif %}
 {% if verification -%}
 {% for key, value in verification.evidence_lines.items() -%}
 - {{ key }}: `{{ value }}`
@@ -160,6 +257,11 @@ def generate_report(
     obfuscation_level: str | None = None,
     operator: str | None = None,
     justification: str | None = None,
+    jni_bindings: list | None = None,
+    unaccounted_loads: list | None = None,
+    dynamic_loads: list | None = None,
+    js_evidence: list | None = None,
+    webview_sites: list | None = None,
 ) -> Path:
     output_dir = Path(output_dir) / apk_hash
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -183,6 +285,12 @@ def generate_report(
         obfuscation_level=obfuscation_level,
         operator=operator,
         justification=justification,
+        jni_bindings=jni_bindings,
+        unaccounted_loads=unaccounted_loads,
+        dynamic_loads=dynamic_loads,
+        js_evidence=js_evidence,
+        webview_sites=webview_sites,
+        confidence_bound=confidence_bound,
     )
     report_path.write_text(content, encoding="utf-8")
     return report_path

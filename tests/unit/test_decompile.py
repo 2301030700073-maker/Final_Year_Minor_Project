@@ -109,6 +109,103 @@ def test_decompile_tolerates_partial_jadx_output_when_real_files_were_written(tm
     assert result.evidence["recovered_from_hollow_cache"] is False  # a genuine first-time decompile, not a recovery
 
 
+def test_large_no_dex_apk_is_decompiled_not_refused(tmp_path, monkeypatch):
+    # Gate removal: a LARGE APK (above the former 100MB MAX_DECOMPILE_SIZE_BYTES)
+    # with no readable DEX was previously REFUSED - decompile() returned a
+    # 'failed' StageResult with manual-decompile instructions, abandoning the app
+    # to manual work. The gate is gone: such an APK now falls through to
+    # whole-APK jadx, whose produced output is kept as partial on a non-zero
+    # exit. A sparse 101MB file gives a real >100MB size without allocating disk.
+    apk = tmp_path / "large_no_dex.apk"
+    with apk.open("wb") as f:
+        f.seek(101 * 1024 * 1024)  # sparse: reports >100MB, occupies ~0 bytes
+        f.write(b"\x00")           # not a valid zip -> _list_dex_entries returns []
+
+    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, stdout, stderr, timeout):
+        if cmd[0].endswith("jadx"):
+            jadx_dir = Path(cmd[2])
+            jadx_dir.mkdir(parents=True, exist_ok=True)
+            (jadx_dir / "BigClass.java").write_text("class BigClass {}")
+            stdout.write("java.lang.OutOfMemoryError: Java heap space")
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+        apktool_dir = Path(cmd[4])
+        apktool_dir.mkdir(parents=True, exist_ok=True)
+        (apktool_dir / "AndroidManifest.xml").write_text("<manifest/>")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
+
+    result = decompile(apk, tmp_path, "large_no_dex_hash")
+
+    # The old gate returned status="failed" here; the removal makes this a real,
+    # partial-preserving decompile instead of a refusal.
+    assert result.status == "success"
+    assert result.evidence["decompile_completeness"] == "partial"
+    assert result.evidence["partial"] is True
+    assert result.evidence["jadx_exit_code"] == 1
+    assert result.evidence["jadx_file_count"] == 1
+
+
+def test_decompile_smali_fallback_rescues_jadx_zero_output_to_partial(tmp_path, monkeypatch):
+    # L-M1: jadx writes ZERO .java (a genuinely unreadable/obfuscated DEX). Old
+    # behavior hard-failed here without attempting apktool, discarding the one
+    # surface that survives a jadx crash: apktool's smali tree. The --no-res smali
+    # fast path must rescue it to an honestly-labeled PARTIAL (never complete -
+    # jadx_file_count is 0, so the Java surface is unrecovered, ADR-0006) with the
+    # smali tree exposed as a scannable apktool_output scan root.
+    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, stdout, stderr, timeout):
+        # jadx crashes (rc=1) and writes nothing; apktool --no-res succeeds and
+        # lands AndroidManifest.xml + a smali tree.
+        if Path(cmd[0]).name == "jadx":
+            stdout.write("jadx crash")
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+        apktool_dir = Path(cmd[cmd.index("-o") + 1])
+        apktool_dir.mkdir(parents=True, exist_ok=True)  # real apktool creates it
+        (apktool_dir / "AndroidManifest.xml").write_text("<manifest/>")
+        (apktool_dir / "smali").mkdir(parents=True, exist_ok=True)
+        (apktool_dir / "smali" / "RootCheck.smali").write_text(
+            ".method public static isRooted()Z\n    const/4 v0, 0x1\n.end method\n"
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
+
+    result = decompile(tmp_path / "broken.apk", tmp_path, "smalifallbackhash")
+
+    assert result.status == "success"          # rescued, not hard-failed
+    assert result.evidence["decompile_completeness"] == "partial"
+    assert result.evidence["smali_fallback"] is True
+    assert result.evidence["jadx_exit_code"] == 1
+    assert result.evidence["apktool_exit_code"] == 0
+    # the smali tree is the scannable output exposed as a scan root
+    assert (Path(result.evidence["apktool_output"]) / "smali" / "RootCheck.smali").exists()
+    # a partial decompile must never be misreported as complete
+    assert result.evidence["partial"] is True
+
+
+def test_decompile_smali_fallback_still_hard_fails_when_apktool_also_empty(tmp_path, monkeypatch):
+    # L-M1 honesty: the smali fast path only rescues a jadx-zero-output run when
+    # apktool actually lands real output. If apktool ALSO writes nothing, this is
+    # still a true hard failure (nothing scannable anywhere) - never a fake partial.
+    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, stdout, stderr, timeout):
+        stdout.write("immediate crash")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
+
+    result = decompile(tmp_path / "broken.apk", tmp_path, "brokenhash")
+
+    assert result.status == "failed"
+    assert "no usable output" in result.error
+    assert "smali fallback also produced nothing" in result.error
+
+
 def test_decompile_total_failure_when_jadx_writes_zero_files(tmp_path, monkeypatch):
     # Same failure mode as before this change - jadx exits nonzero and
     # leaves nothing usable behind, so it's still a hard failure, not a
@@ -534,3 +631,41 @@ def test_secondary_fallback_is_lazy_and_reuses_prior_recovery(tmp_path, monkeypa
     assert result["fallback_reused"] is True
     assert result["fallback_file_count"] == 1
     assert result["fallback_output"] == str(cfr_dir)
+
+
+def test_decompile_degrades_to_partial_when_apktool_writes_no_manifest(tmp_path, monkeypatch):
+    # Limitation 9: apktool wrote no AndroidManifest.xml but jadx produced real
+    # Java output. This USED to hard-fail the whole run, discarding the good Java
+    # analysis (the primary root/SSL surface) because a SECONDARY tool failed.
+    # Now it degrades to an honestly-labeled partial: the manifest stage reads the
+    # binary manifest straight from the APK (parse_manifest_apk) instead. A TOTAL
+    # failure (nothing from either tool) still hard-fails at the jadx-zero-files
+    # gate - only the good-analysis case continues as partial (ADR-0006).
+    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, stdout, stderr, timeout):
+        if cmd[0].endswith("jadx"):
+            jadx_dir = Path(cmd[2])
+            jadx_dir.mkdir(parents=True, exist_ok=True)
+            (jadx_dir / "AuthService.java").write_text("class AuthService {}")
+            stdout.write("decompiling class 10 of 10...\n")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        # apktool runs but produces NO AndroidManifest.xml.
+        apktool_dir = Path(cmd[4])
+        apktool_dir.mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
+
+    result = decompile(tmp_path / "huge.apk", tmp_path, "propertyguru_hash")
+
+    assert result.status == "success"          # no longer a hard failure
+    assert result.evidence["decompile_completeness"] == "partial"
+    assert result.evidence["partial"] is True
+    assert result.evidence["jadx_file_count"] == 1
+    # manifest_path points at the (absent) decoded manifest - cli falls back to
+    # the binary manifest from the APK (parse_manifest_apk).
+    assert not Path(result.evidence["manifest_path"]).exists()
+    # Both tools exited 0 (apktool "succeeded" yet wrote no manifest), so there
+    # is no fabricated error tail - the honest record is completeness=partial.
+    assert result.evidence["jadx_error_tail"] is None

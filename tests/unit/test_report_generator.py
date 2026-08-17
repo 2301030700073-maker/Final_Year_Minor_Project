@@ -127,6 +127,62 @@ def test_generate_report_writes_file_with_expected_content(tmp_path):
     assert "not run (--skip-dynamic passed)" in content
 
 
+def test_generate_report_renders_webview_bridge_block_when_present(tmp_path):
+    # Gap A2: when the java scan surfaces WebView JS-bridge / remote-JS call
+    # sites, the report must render them (the previously "unlabeled" gap). The
+    # block only appears when webview_sites is non-empty.
+    metadata = {
+        "hashes": {"sha256": "wv123"},
+        "package": {"package_name": "com.example.web", "version_name": "1.0", "version_code": "1"},
+    }
+
+    report_path = generate_report(
+        run_id="run-wv",
+        apk_hash="wv123",
+        timestamp="2026-08-16T12:00:00",
+        metadata=metadata,
+        classification=_classification(),
+        verification=None,
+        correlation=None,
+        stage_results=[],
+        output_dir=tmp_path,
+        webview_sites=[
+            'MainActivity.java:42: web.addJavascriptInterface(bridge, "Android");',
+            'MainActivity.java:51: web.loadUrl("https://cdn.example.com/check.js");',
+        ],
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "WebView JS bridge (coverage-limited)" in content
+    assert "addJavascriptInterface(bridge" in content
+    assert "https://cdn.example.com/check.js" in content
+    assert "confident negative" in content
+
+
+def test_generate_report_omits_webview_bridge_block_when_absent(tmp_path):
+    # No webview call sites -> no block (same absent-path discipline as the
+    # dynamic-loading / js_evidence blocks).
+    metadata = {
+        "hashes": {"sha256": "wv000"},
+        "package": {"package_name": "com.example.plain", "version_name": "1.0", "version_code": "1"},
+    }
+
+    report_path = generate_report(
+        run_id="run-plain",
+        apk_hash="wv000",
+        timestamp="2026-08-16T12:00:00",
+        metadata=metadata,
+        classification=_classification(),
+        verification=None,
+        correlation=None,
+        stage_results=[],
+        output_dir=tmp_path,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "WebView JS bridge" not in content
+
+
 def test_generate_report_distinguishes_neither_auto_skip_from_operator_skip(tmp_path):
     # A negative-control run (NEITHER) auto-skips the dynamic stage for a
     # different reason than an operator passing --skip-dynamic - the report
@@ -155,8 +211,12 @@ def test_generate_report_distinguishes_neither_auto_skip_from_operator_skip(tmp_
     assert "not run (--skip-dynamic)" not in content
 
 
-def test_generate_report_falls_back_when_no_skip_reason_given(tmp_path):
-    # dynamic_skip_reason defaults to None - shouldn't render "None" literally.
+def test_generate_report_ran_but_unverified_when_no_skip_reason(tmp_path):
+    # verification=None with no dynamic_skip_reason means the dynamic stage RAN
+    # (synthesized bypass injected) but no success-check confirmed it - e.g. an
+    # unknown target with no target-specific SuccessCheck. The report must say
+    # "attempted, not verified", never "not run (reason unknown)" - the machinery
+    # did run, and "not run" would be a false statement.
     report_path = generate_report(
         run_id="run3",
         apk_hash="ghi789",
@@ -170,7 +230,9 @@ def test_generate_report_falls_back_when_no_skip_reason_given(tmp_path):
     )
 
     content = report_path.read_text(encoding="utf-8")
-    assert "not run (reason unknown)" in content
+    assert "attempted, bypass not verified (no target-specific success check)" in content
+    assert "not run" not in content
+    assert "reason unknown" not in content
 
 
 def test_generate_report_limitations_section_present_and_specific(tmp_path):

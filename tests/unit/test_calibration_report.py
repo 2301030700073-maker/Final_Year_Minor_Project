@@ -16,7 +16,7 @@ def _run(apk_hash, run_id, action, root_confidence, root_detected, root_bypassed
     )
 
 
-FULLY_ANALYZED = {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed"}
+FULLY_ANALYZED = {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed"}
 
 
 def test_rate_with_count_reports_none_not_zero_on_empty_denominator():

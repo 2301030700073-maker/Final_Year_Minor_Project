@@ -12,12 +12,13 @@ an automated consumer can distinguish 'scanned and clean' from 'not fully
 analyzed' - absence is never silently certified. Pure, fixture-testable."""
 
 from common import Action, CategoryVerdict, ClassificationResult
-from static.coverage import apply_coverage_bound
+from static.coverage import apply_coverage_bound, apply_unattributed_indicators
 
 _FULL = {
     "java": "fully_analyzed",
     "native": "fully_analyzed",
     "manifest": "fully_analyzed",
+    "js": "fully_analyzed",
 }
 
 
@@ -85,3 +86,64 @@ def test_bound_is_additive_preserves_existing_fields():
     assert out.evidence_capped_counts == {"root_su_binary_paths": 200}
     assert out.root.coverage_limited is True
     assert out.unknown_uncovered == ["root", "ssl"]
+
+
+def test_unattributed_indicators_marks_category_limited():
+    # Boundary-1: detection-shaped code that matched no signature marks the
+    # category coverage-limited even on a FULLY-analyzed surface - a NEITHER
+    # there is "unknown, not absent", never a confident negative (ADR-0006).
+    out = apply_unattributed_indicators(_cls(), {"ssl": True})
+    assert out.ssl.coverage_limited is True
+    assert out.root.coverage_limited is False
+    assert out.unknown_uncovered == ["ssl"]
+
+
+def test_unattributed_indicators_root_and_ssl():
+    out = apply_unattributed_indicators(_cls(), {"root": True, "ssl": True})
+    assert out.root.coverage_limited is True
+    assert out.ssl.coverage_limited is True
+    assert out.unknown_uncovered == ["root", "ssl"]
+
+
+def test_unattributed_indicators_noop_when_empty():
+    # No indicators -> classification untouched (additive, never over-limits).
+    cls = _cls()
+    out = apply_unattributed_indicators(cls, {})
+    assert out.root.coverage_limited is False
+    assert out.ssl.coverage_limited is False
+    assert out.unknown_uncovered == []
+    assert out is cls  # same object, no spurious copy
+
+
+def test_unattributed_indicators_preserves_existing_uncovered():
+    # A category already limited by completeness (root.coverage_limited=True,
+    # root in unknown_uncovered) stays limited AND keeps its existing entries;
+    # a newly-attributed category (ssl) is appended without disturbing root.
+    root_v = CategoryVerdict(confidence=0.0, detected=False, evidence=[], coverage_limited=True)
+    ssl_v = CategoryVerdict(confidence=0.0, detected=False, evidence=[])
+    cls = ClassificationResult(
+        action=Action.NEITHER, root=root_v, ssl=ssl_v, unknown_uncovered=["root"]
+    )
+    out = apply_unattributed_indicators(cls, {"ssl": True})
+    assert out.root.coverage_limited is True  # preserved from completeness
+    assert out.ssl.coverage_limited is True   # newly marked
+    assert out.unknown_uncovered == ["root", "ssl"]
+
+
+def test_unattributed_indicators_flows_into_persisted_json():
+    from dataclasses import asdict
+
+    d = asdict(apply_unattributed_indicators(_cls(), {"root": True}))
+    assert d["unknown_uncovered"] == ["root"]
+    assert d["root"]["coverage_limited"] is True
+    assert d["ssl"]["coverage_limited"] is False
+
+
+def test_unattributed_indicators_never_upgrades_confidence():
+    # The indicator layer downgrades coverage only; it must never change a
+    # verdict's confidence or detected state (ADR-0001: only the corpus decides).
+    v = CategoryVerdict(confidence=0.0, detected=False, evidence=[])
+    cls = ClassificationResult(action=Action.NEITHER, root=v, ssl=v)
+    out = apply_unattributed_indicators(cls, {"ssl": True})
+    assert out.ssl.confidence == 0.0
+    assert out.ssl.detected is False

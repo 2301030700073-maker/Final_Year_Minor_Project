@@ -33,11 +33,11 @@ Coverage = Literal["fully_analyzed", "partial", "unscannable"]
 # G-A: which surfaces govern each detection category. Adding a surface here is
 # the single point that makes a new evidence source gate Tier-2 (F2).
 GOVERNING_SURFACES: dict[str, tuple[str, ...]] = {
-    "root": ("java", "native"),
-    "ssl": ("java", "native", "manifest"),
+    "root": ("java", "native", "js"),
+    "ssl": ("java", "native", "manifest", "js"),
 }
 
-_ALL_SURFACES: tuple[str, ...] = ("java", "native", "manifest")
+_ALL_SURFACES: tuple[str, ...] = ("java", "native", "manifest", "js")
 
 
 def _min_coverage(states: list[Coverage]) -> Coverage:
@@ -49,15 +49,20 @@ def _min_coverage(states: list[Coverage]) -> Coverage:
     return worst
 
 
-def java_coverage(decompile_completeness: str, obfuscation_level: str) -> Coverage:
-    """G2/G-C/N1: Java surface = decompile completeness, forced to partial under
-    heavy obfuscation. A complete decompile of a clear/light target is
-    fully_analyzed; a heavy target's encrypted strings aren't reachable, so its
-    surface is partial even on exit-0 (a heavy clean NEITHER must not certify as
-    a confident TN)."""
+def java_coverage(
+    decompile_completeness: str, obfuscation_level: str, packed: bool = False
+) -> Coverage:
+    """G2/G-C/N1/Gap-2: Java surface = decompile completeness, forced to partial
+    under heavy obfuscation OR a detected packer. A complete decompile of a
+    clear/light target is fully_analyzed; a heavy target's encrypted strings
+    aren't reachable, so its surface is partial even on exit-0 (a heavy clean
+    NEITHER must not certify as a confident TN). A packed target's real DEX is
+    hidden behind a loader, so its surface is partial the same way - even a
+    'complete' decompile only sees the loader stub, never the real code
+    (ADR-0006)."""
     base = {"complete": "fully_analyzed", "partial": "partial", "unknown": "unscannable"}
     state = base.get(decompile_completeness, "unscannable")
-    if obfuscation_level == "heavy":
+    if obfuscation_level == "heavy" or packed:
         return "partial" if state == "fully_analyzed" else state
     return state
 
@@ -85,15 +90,71 @@ def per_surface_coverage(
     abi_coverage: dict[str, str],
     manifest_parsed: bool,
     resources_complete: bool,
+    packed: bool = False,
 ) -> dict[str, Coverage]:
-    """The full per-surface map, as persisted per run (item 10). Keys are the
-    governing-surface names; a surface with no evidence source reports
-    unscannable so it never certifies a confident negative."""
+    """The per-surface map for the toolchain-derived surfaces: returns
+    java/native/manifest (the ones computable from its parameters). The `js`
+    governing surface is patched in by the caller (cli) from the Hermes-bundle
+    probe, which this function has no evidence input for - so the returned map is
+    not literally every governing-surface name, and a caller must add `js` before
+    feeding it to category_is_confident_negative. A surface with no evidence
+    source reports unscannable so it never certifies a confident negative.
+    `packed` (a detected packer) forces the Java surface to partial - the real
+    DEX is hidden."""
     return {
-        "java": java_coverage(decompile_completeness, obfuscation_level),
+        "java": java_coverage(decompile_completeness, obfuscation_level, packed),
         "native": native_coverage(abi_coverage),
         "manifest": manifest_coverage(manifest_parsed, resources_complete),
     }
+
+
+def js_surface_coverage(has_binary_bundle: bool) -> Coverage:
+    """Real-world gap A1: a Hermes/bytecode JS bundle (React Native release
+    `assets/index.android.bundle`, `.hbc`) is binary, so the text engine skips it
+    and jadx only reads DEX. We can recover its string-constant table, not the
+    surrounding JS control flow - so its surface is `partial`, never a confident
+    negative over root/SSL logic that lives in the bundle. With no binary bundle
+    present the surface is vacuously `fully_analyzed` (either no JS, or plain-text
+    JS the signature engine already scans)."""
+    return "partial" if has_binary_bundle else "fully_analyzed"
+
+
+def apply_unresolved_native(
+    coverage: dict[str, Coverage],
+    has_unresolved: bool,
+) -> dict[str, Coverage]:
+    """Boundary-3: downgrade the native surface to `partial` when a declared
+    `native` method is `unresolved` (no Java_* export AND no JNI_OnLoad in any
+    extracted lib binds it) - a genuine unexamined surface. A NEITHER over a
+    native surface that carries an unresolved declared native method must not
+    certify as a confident negative. Pure: returns a new dict, only ever
+    downgrades fully_analyzed -> partial (never upgrades), so it is additive and
+    safe alongside `apply_coverage_bound`."""
+
+    if not has_unresolved:
+        return coverage
+    if coverage.get("native") == "fully_analyzed":
+        return {**coverage, "native": "partial"}
+    return coverage
+
+
+def apply_unresolved_java(
+    coverage: dict[str, Coverage],
+    has_unresolved: bool,
+) -> dict[str, Coverage]:
+    """Coverage-limited: dynamic code loading present (DexClassLoader /
+    PathClassLoader / Class.forName / DexFile / loadDex) means the app releases
+    and loads a payload DEX at runtime - code the static scan cannot see. Downgrade
+    the java surface to `partial` so a java NEITHER is never a confident negative
+    over a dynamically-hidden payload (ADR-0006). Pure: returns a new dict, only
+    ever downgrades fully_analyzed -> partial (never upgrades), so it is additive
+    and safe alongside `apply_coverage_bound`."""
+
+    if not has_unresolved:
+        return coverage
+    if coverage.get("java") == "fully_analyzed":
+        return {**coverage, "java": "partial"}
+    return coverage
 
 
 def category_is_confident_negative(
@@ -127,6 +188,33 @@ def coverage_bound_line(coverage: dict[str, Coverage]) -> str:
     return f"Coverage bound: {surface_part}; " + "; ".join(cat_parts)
 
 
+def confidence_bound(category: str, verdict, coverage: dict[str, Coverage]) -> str:
+    """L-M4: the rendered confidence for one category verdict, honouring the
+    coverage bound.
+
+    A coverage-limited verdict's numeric confidence is an UPPER bound, not a
+    point estimate: a governing surface (native, manifest...) that was not fully
+    analyzed means more detection could exist that this scan did not see. So for
+    a coverage-limited verdict this renders the bare number plus an explicit
+    "(upper bound: <surface>=<status>...)" annotation naming the non-fully-
+    analyzed governing surfaces - instead of printing the point estimate as if
+    the scan were complete. A fully-analyzed verdict's confidence IS a point
+    estimate, so it renders the bare number unchanged. Pure string builder
+    (fixture-testable); report (generator.py) and console (cli.py) both call it.
+    Never alters verdict.confidence - this is a RENDERING concern only (ADR-0006:
+    the honest bound is surfaced, the numeric value is untouched)."""
+    if not verdict.coverage_limited:
+        return f"{verdict.confidence:.2f}"
+    cov = coverage or {}
+    limited = [
+        f"{s}={cov.get(s, 'unknown')}"
+        for s in GOVERNING_SURFACES.get(category, ())
+        if cov.get(s) != "fully_analyzed"
+    ]
+    bound = ", ".join(limited) if limited else "partial"
+    return f"{verdict.confidence:.2f} (upper bound: {bound})"
+
+
 def apply_coverage_bound(
     classification: ClassificationResult,
     coverage: dict[str, Coverage],
@@ -152,3 +240,31 @@ def apply_coverage_bound(
         ssl=replace(classification.ssl, coverage_limited="ssl" in limited),
         unknown_uncovered=limited,
     )
+
+
+def apply_unattributed_indicators(
+    classification: ClassificationResult,
+    unattributed: dict[str, bool],
+) -> ClassificationResult:
+    """Boundary-1: mark detection categories that carry UNATTRIBUTED detection
+    indicators (detection-shaped code present in a fully-analyzed surface that
+    matched NO signature) as coverage-limited / in unknown_uncovered - so a
+    NEITHER there is never a confident negative (ADR-0006). This complements
+    apply_coverage_bound, which triggers on scan COMPLETENESS; this triggers on
+    CONTENT, closing the signature-bounded hole where a complete, clear decompile
+    still hides a technique the corpus doesn't encode (ADR-0001). Only ever
+    downgrades (coverage_limited already True from completeness stays True) and
+    never touches confidence. Pure, additive: returns a new ClassificationResult."""
+    if not unattributed:
+        return classification
+    root = classification.root
+    ssl = classification.ssl
+    unknown = list(classification.unknown_uncovered)
+    for cat in unattributed:
+        if cat == "root":
+            root = replace(root, coverage_limited=True)
+        elif cat == "ssl":
+            ssl = replace(ssl, coverage_limited=True)
+        if cat not in unknown:
+            unknown.append(cat)
+    return replace(classification, root=root, ssl=ssl, unknown_uncovered=unknown)

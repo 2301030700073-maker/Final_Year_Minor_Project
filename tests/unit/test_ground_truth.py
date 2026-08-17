@@ -20,6 +20,15 @@ def test_load_ground_truth_reads_real_yaml_with_all_four_known_targets():
     assert contacts.root is False
     assert contacts.ssl is False
 
+    # RS_Vapour (com.redshift.rs_vapourtraining) - SSL/root negative control,
+    # independently verified (apktool --no-res dump read directly, not this
+    # pipeline's prediction). Root registered False (no app-owned root indicators
+    # across 72 app-owned classes, no native .so present).
+    rs_vapour = entries["1c747b27b3547a8a8798a03128a7edd903a88e02dbcc5b1b2dbf14db69d7e212"]
+    assert rs_vapour.root is False
+    assert rs_vapour.ssl is False
+    assert rs_vapour.source
+
 
 def test_load_ground_truth_rejects_entry_missing_source(tmp_path):
     bad_file = tmp_path / "ground_truth.yaml"

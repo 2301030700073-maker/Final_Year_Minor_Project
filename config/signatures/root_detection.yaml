@@ -105,6 +105,20 @@
     # no Magisk; presence is a genuine root-management signal. Same weight as
     # the SuperSU-era managers it joins.
     - "com.topjohnwu.magisk"
+    # The rest of the OWASP-MSTG reference `detectRootManagementApps` list that
+    # was still missing (added 2026-08, web-grounded): the classic Koushik Dutta
+    # Superuser package (previously only the /dev/...superuser.daemon path was
+    # matched, not the package an app actually queries via getInstalledPackages),
+    # its ROM-manager sibling, and the remaining SuperSU-clone packages apps
+    # check by name. Each is a specific root-manager identifier - matching one
+    # requires the app to genuinely query for it (MSTG-RESILIENCE-1). The
+    # package-name technique is "necessary but insufficient" (Magisk can rename
+    # its package), so these stay corroborative at the same modest weight, not
+    # decisive.
+    - "com.koushikdutta.superuser"
+    - "com.koushikdutta.rommanager"
+    - "com.thirdparty.superuser"
+    - "com.dimon.laptop.tablet2.honeycomb"
   evidence_type: bytecode_string
 
 - id: root_su_via_path_env_check
@@ -208,4 +222,381 @@
   patterns:
     - "/data/adb/denylist"
     - "/data/adb/magisk/denylist.db"
+  evidence_type: bytecode_string
+
+# --- Root-cloaking detection era (2026, web-grounded) ---
+#
+# Distinct from magisk_denylist_artifacts / magisk_module_dirs above: those fire
+# when the app itself OWNS or READS the denylist/module paths. This category fires
+# when the app PROBES for the root-hiding FRAMEWORKS - MagiskHide (Magisk's built-in
+# hide), Shamiko (the Zygisk hide module), RootCloak / HideMyRoot (Xposed hide
+# modules), suhide (the hide module/tool). An app that scans for a cloaking
+# framework is ITSELF root-aware - it cannot otherwise know to look. Each token is
+# a structurally-unlikely product/framework name, so matching one requires the app
+# to genuinely reference a hide framework; bare generic words ("hide", "deny") are
+# deliberately NOT included (low signal). Absence is NOT evidence of no root.
+- id: root_cloaking_detection
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "MagiskHide"
+    - "Shamiko"
+    - "RootCloak"
+    - "HideMyRoot"
+    - "suhide"
+  evidence_type: bytecode_string
+
+# --- Play Integrity / SafetyNet attestation era (2026) ---
+#
+# The header above names Play Integrity attestation as the dominant modern
+# hardening path - and notes that an app relying solely on it previously scanned
+# at 0.0 confidence, invisible to the path/artifact signatures. These two make
+# the engine ABLE to see that path: they fire on the app's OWN call into the
+# attestation API, so a Play-Integrity-only app now yields a real (moderate)
+# root/device-integrity signal instead of a silent clean.
+#
+# FP analysis (the same discipline the Magisk entries document): the matched
+# strings (requestIntegrityToken / requestAttestation) appear in the APP's own
+# code whenever it invokes attestation, and the app package is never third-party-
+# excluded. Google's own SDK plumbing (com.google.*) IS excluded by the vendor
+# taxonomy, so the SDK's internal IntegrityManager/SafetyNet references do not
+# inflate the app's confidence - only the app's own call does. Absence remains
+# NOT evidence of no root (attestation is optional hardening); presence is a
+# genuine device-integrity/root-detection signal.
+#
+# ADR-0006 caveat (unchanged from the Magisk entries): not yet validated against
+# a Play-Integrity corpus on the reference device - the calibration loop must
+# re-measure precision/recall when such a target is added.
+
+- id: play_integrity_attestation
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "requestIntegrityToken"
+    - "IntegrityTokenResponse"
+    # The verdict-flag literals the app compares against the integrity response
+    # (2026-08, A3 corpus-currency): MEETS_DEVICE_INTEGRITY / MEETS_STRONG_INTEGRITY
+    # are the returned verdict constants, DEVICE_INTEGRITY / STRONG_INTEGRITY /
+    # BASIC_INTEGRITY the request flags - all Play-Integrity-specific tokens that
+    # only appear when the app actually gates on attestation (they are in the
+    # app's own call, never vendor-excluded). Same FP discipline as the rest of
+    # this entry.
+    - "MEETS_DEVICE_INTEGRITY"
+    - "MEETS_STRONG_INTEGRITY"
+    - "DEVICE_INTEGRITY"
+    - "STRONG_INTEGRITY"
+    - "BASIC_INTEGRITY"
+  evidence_type: bytecode_string
+
+- id: safetynet_attestation
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "requestAttestation"
+    - "com.google.android.gms.safetynet"
+  evidence_type: bytecode_string
+
+# --- Play Integrity Standard / Application API (2026, corpus-currency) ---
+# Beyond the classic requestIntegrityToken() API above, Play Integrity split into a
+# *Standard* request flow: the app builds an IntegrityTokenRequest, calls
+# requestStandardIntegrityToken() (or prepares via prepareIntegrityToken()), and
+# receives the verdict via a StandardIntegrityManager. The class/method names
+# (StandardIntegrityManager, requestStandardIntegrityToken, prepareIntegrityToken)
+# and the canonical FQCN com.google.android.play.core.integrity.StandardIntegrityManager
+# are Play-Integrity-specific - they only appear when the app gates on attestation,
+# and are never vendor-excluded. Same FP discipline as play_integrity_attestation.
+- id: play_integrity_standard_attestation
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "StandardIntegrityManager"
+    - "requestStandardIntegrityToken"
+    - "prepareIntegrityToken"
+    - "com.google.android.play.core.integrity.StandardIntegrityManager"
+  evidence_type: bytecode_string
+
+# --- APatch / KernelSU manager / BusyBox / root-tool era (2026, web-grounded) ---
+#
+# Gaps the 2020-era Magisk/SuperSU taxonomy left: APatch (2024+) and the KernelSU
+# manager package had no signature, BusyBox (the root-enabler RootBeer's
+# checkForBusyBoxBinary detects) was absent, and the package of the classic root
+# tool Lucky Patcher was unmatched. Each is a specific, structurally-unlikely
+# identifier - matching one requires the app to genuinely reference a root
+# artifact, keeping false positives low. Same ADR-0006 discipline as the Magisk
+# entries: not yet validated against an APatch/KernelSU corpus on the reference
+# device; additive only, never overclaimed. The APatch and KernelSU MANAGER
+# packages can be renamed like Magisk, so absence is NOT evidence of no root -
+# presence is a genuine root-management signal.
+#
+# SELinux access probe (DirtySepolicy / Duck Detector, 2026): the detection
+# frontier moved from user-space file/process hiding to kernel-layer SELinux
+# policy queries. An app calls SELinux.checkSELinuxAccess() to ask whether an
+# untrusted_app -> magisk/ksu/lsposed context transition is allowed - a root /
+# root-cloaking signal a path check cannot see (the artifact is hidden). The API
+# call is the probe, so matching the method reference limits false positives to
+# code that genuinely queries SELinux policy. Moderate weight - some legit apps
+# query SELinux for unrelated reasons, so this is corroborative, not decisive.
+
+- id: apatch_binary_paths
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "/data/adb/apd"
+    - "/data/adb/ap/bin"
+    - "/data/adb/ap/package_config"
+  evidence_type: bytecode_string
+
+- id: apatch_manager_package
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "me.bmax.apatch"
+  evidence_type: bytecode_string
+
+- id: kernelsu_manager_package
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "me.weishu.kernelsu"
+  evidence_type: bytecode_string
+
+- id: busybox_binary_paths
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "/system/xbin/busybox"
+    - "/system/bin/busybox"
+    - "/sbin/busybox"
+  evidence_type: bytecode_string
+
+- id: lucky_patcher_root_tool
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "com.chelpus.luckypatcher"
+  evidence_type: bytecode_string
+
+- id: selinux_access_probe
+  category: root
+  weight: 0.25
+  pattern_type: string_literal
+  patterns:
+    - "checkSELinuxAccess"
+  evidence_type: bytecode_string
+
+# --- Xposed / LSPosed / Riru / module-framework era (2026, web-grounded) ---
+# The 2026 detection surface moved beyond the su binary to framework/module
+# injection: Xposed, LSPosed (the modern Xposed for Magisk/Zygisk), Riru (Zygote
+# injection, the Zygisk predecessor), alternate Magisk managers (Kitsune), the
+# module overlay dir, extra su-path variants, and SELinux setenforce. Each is a
+# specific identifier present only when the app genuinely references the
+# framework/artifact - low false positives. ADR-0006: additive, not yet
+# corpus-validated; manager packages can be renamed, so absence is NOT evidence.
+
+- id: xposed_framework
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "de.robv.android.xposed"
+    - "XposedBridge"
+  evidence_type: bytecode_string
+
+- id: lsposed_manager
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "org.lsposed.manager"
+  evidence_type: bytecode_string
+
+- id: riru_framework
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "com.rivulus.riru"
+  evidence_type: bytecode_string
+
+- id: magisk_alternate_managers
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "io.github.huskydg.magisk"
+    - "io.github.huskydg.zeroalpha"
+  evidence_type: bytecode_string
+
+- id: magisk_module_dirs
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "/data/adb/modules"
+    - "/data/adb/modules_update"
+  evidence_type: bytecode_string
+
+- id: su_alternate_binary_paths
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "/system/sbin/su"
+    - "/vendor/bin/su"
+    - "/su/bin/su"
+    - "/data/local/su"
+    - "/data/local/bin/su"
+    - "/data/local/xbin/su"
+    - "/system/xbin/sudo"
+  evidence_type: bytecode_string
+
+- id: setenforce_permissive
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "setenforce 0"
+  evidence_type: bytecode_string
+
+- id: root_tools_library
+  category: root
+  weight: 0.4
+  pattern_type: class_reference
+  # RootTools (com.stericson.RootTools) is the OWASP-MSTG-referenced root-check
+  # library - the pure-Python, in-stack analog of the RootBeer class-ref
+  # signature above (rootbeer_framework). It exposes isRootAvailable()/
+  # isAccessGiven()/hasBinary() root queries; its presence is a deterministic
+  # root-detection signal the corpus previously had no entry for, so a target
+  # using it matched no signature and read as a silent clean (boundary-1 gap).
+  patterns:
+    - "com.stericson.RootTools"
+    - "com.stericson.roottools"
+  evidence_type: bytecode_class
+
+# --- Frida / Cydia Substrate hook-detection era (2026, web-grounded) ---
+# The 2026 detection surface the Xposed/LSPosed/Riru block started now extends
+# to runtime *instrumentation* hook detection. Frida (the dominant analysis tool
+# - default control ports 27042/27043, frida-server on device, frida-gadget
+# injected for non-rooted analysis) and Cydia Substrate (the classic hooking
+# framework) are what a real app probes for alongside root: it scans /proc/self/maps
+# for frida/gum traces and its own process for the frida-server gadget. Sources:
+# OWASP-MSTG, the Advanced-Root-Checker and advance_root_detection RASP plugins,
+# and the secfb Frida-bypass list (all 2026). Each literal is structurally-unlikely
+# - matching one requires the app to genuinely reference the instrumentation
+# artifact (MSTG-RESILIENCE-1 anti-instrumentation). Same ADR-0006 discipline as
+# the Magisk/Xposed entries: additive only, not yet corpus-validated on the
+# reference device, never overclaimed. A match is root/hook-detection signal, not
+# proof the app is hooked; absence is NOT evidence of no Frida/Substrate.
+
+- id: frida_detection
+  category: root
+  weight: 0.35
+  pattern_type: string_literal
+  # Process / library / thread names distinctive to Frida, used verbatim in
+  # anti-Frida probes (maps/process scans). These are not bare low-signal
+  # fragments: "frida-server" / "re.frida.server" / "frida-gadget" / "linjector"
+  # are Frida's own artifact names, and "gum-js-loop" is Frida's JS runtime
+  # thread visible in /proc/self/maps - matching them requires the app to
+  # genuinely scan for Frida. The default ports (27042/27043) are deliberately
+  # omitted: bare port integers are not structurally-unlikely (same discipline
+  # that drops bare "/data/adb" fragments elsewhere).
+  patterns:
+    - "frida-server"
+    - "re.frida.server"
+    - "frida-gadget"
+    - "linjector"
+    - "gum-js-loop"
+  evidence_type: bytecode_string
+
+- id: cydia_substrate_detection
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  # Cydia Substrate is the classic hooking framework (Cyanogen/Substrate, the
+  # direct OWASP-MSTG `detectSubstrate` artifact): the app probes for the
+  # com.saurik.substrate package and/or the libsubstrate.so hook library. Both
+  # are Substrate-specific - matching them requires the app to genuinely look
+  # for the framework. Corroborative weight; absence is NOT evidence of no
+  # substrate.
+  patterns:
+    - "com.saurik.substrate"
+    - "libsubstrate.so"
+  evidence_type: bytecode_string
+
+# --- Boot-integrity / verified-boot probe era (2026, web-grounded) ---
+# A rooted/unlocked/repackaged device is caught at the *boot* layer, not just the
+# su binary: the app reads system properties for verified-boot / dm-verity state
+# (`ro.boot.verifiedbootstate` returns "orange"/"yellow" when the bootloader is
+# unlocked, `ro.boot.vbmeta.device_state` "unlocked", `ro.boot.warranty_bit` a
+# tripped Knox flag) and checks dm-verity. These Android system-property /
+# verity literals are distinctive - matching one requires the app to genuinely
+# probe boot integrity (MSTG-RESILIENCE-1), so false positives are low. Same
+# ADR-0006 discipline: additive, corroborative weight (a boot probe is one
+# signal in a multi-signal check), not yet corpus-validated on the reference
+# device. Absence is NOT evidence of a locked bootloader.
+- id: boot_integrity_probe
+  category: root
+  weight: 0.25
+  pattern_type: string_literal
+  patterns:
+    - "ro.boot.verifiedbootstate"
+    - "ro.boot.vbmeta.device_state"
+    - "ro.boot.warranty_bit"
+    - "dm-verity"
+  evidence_type: bytecode_string
+
+# --- Emulator-detection era (2026) ---
+# A real rooted-device check is often a *fake*: on an emulator the app reads
+# Build/system-property values that only an emulator exposes and treats the
+# result as "not rooted" (MSTG-RESILIENCE-1/2). These emulator-only literals
+# are structurally distinctive - `ro.kernel.qemu`, `ro.boot.qemu`, the
+# `sdk_gphone`/`goldfish` build product/hardware names, and the `Build.HARDWARE`
+# constant used to compare to them - so matching one requires the app to
+# genuinely probe for an emulator. Same ADR-0006 discipline as the boot probe:
+# additive, corroborative weight, not yet corpus-validated on the reference
+# device. Absence is NOT evidence of a physical device. Deliberately OMITS bare
+# `Build.FINGERPRINT`/`Build.MODEL`/`isEmulator` alone (too generic - read by
+# benign device-ID analytics), keeping only the emulator-specific values.
+- id: emulator_detection
+  category: root
+  weight: 0.25
+  pattern_type: string_literal
+  patterns:
+    - "ro.kernel.qemu"
+    - "ro.boot.qemu"
+    - "sdk_gphone"
+    - "goldfish"
+    - "generic_x86"
+    - "generic_arm64"
+    - "Build.HARDWARE"
+  evidence_type: bytecode_string
+
+# --- General build-props probe (2026) ---
+# Beyond the single `test-keys` literal, apps probe the build/system properties
+# to fingerprint a debug, debuggable, or unlocked build independent of su:
+# `ro.build.fingerprint` (user vs. eng release), `ro.debuggable` (1 == debuggable),
+# `ro.secure` (0 == insecure/rooted adb), `ro.build.type` (user/eng/userdebug).
+# These Android system-property names are distinctive - reading one requires
+# the app to genuinely query build state. Corroborative weight; absence is NOT
+# evidence of a secure build. Bare `Build.MODEL` is deliberately omitted (read
+# by benign analytics).
+- id: build_props_probe
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "ro.build.fingerprint"
+    - "ro.debuggable"
+    - "ro.secure"
+    - "ro.build.type"
+    - "ro.product.cpu.abi"
   evidence_type: bytecode_string

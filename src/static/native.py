@@ -18,16 +18,21 @@ no-ops (principle 3).
 
 from __future__ import annotations
 
+import concurrent.futures
+import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import yaml
 
-from common import Evidence, StaticEvidence
+from common import KNOWN_NATIVE_LIBS, Evidence
+from static.indicators import find_native_indicator_categories
+from static.upx import is_upx_packed, unpack_upx
 
 VALID_NATIVE_PATTERN_TYPES = {"export_symbol", "embedded_string"}
 
@@ -48,6 +53,26 @@ UNZIP_TIMEOUT = 120
 # certified scanned (ADR-0006). Per-lib timeout is generous - the first JVM/
 # headless run is slow - and a hang still surfaces as a loud per-lib failure.
 GHIDRA_TIMEOUT = 300
+# Bound on how many function bodies Ghidra decompiles per lib (item #3 / time).
+# A giant RN rendering lib (librnskia) can hold tens of thousands of functions;
+# dumping every body is O(unbounded) and monopolizes the pipeline on multi-ABI
+# apps. Real detection logic lives in a small handful of functions, so a generous
+# cap bounds the pathological case while leaving normal libs fully decompiled.
+# Kept in sync with MAX_FUNCTIONS in scripts/ghidra/DumpFunctions.java (passed as
+# the script's second arg here). When the cap is hit, the script emits a sentinel
+# line; ghidra_decompile detects it and the lib reads `partial` (coverage-limited,
+# ADR-0006), never a false fully_analyzed over an unexamined tail.
+GHIDRA_MAX_FUNCTIONS = 1500
+_GHIDRA_TRUNCATED_SENTINEL = "__GHIDRA_TRUNCATED__"
+# Parallel Ghidra decompilation (perf): the native scan's dominant cost is the
+# per-lib Ghidra headless body-decomp, and each pass is a blocking subprocess
+# running its own ~2 GB JVM. The libs are independent, so running the passes
+# concurrently across the reference box's cores is a pure deterministic speedup -
+# no AI, no GPU (Ghidra is a CPU/Java tool; the GPU is the AI phase's asset).
+# Bound is memory-first: the box has 11 GB and each JVM is -Xmx2G, so 2 workers
+# (~4 GB of JVM + the analysis process) is safe while 3+ risks OOM if the process
+# is also holding the static corpus. Tunable via analyze_so_many(max_workers=...).
+MAX_GHIDRA_WORKERS = 2
 
 
 class NativeToolError(RuntimeError):
@@ -85,6 +110,15 @@ class NativeLibrary:
     strings: list[str] = field(default_factory=list)        # embedded strings
     stripped: bool = False
     obfuscated: bool = False
+    # Gap-5: the lib defines JNI_OnLoad/JNI_OnUnload - the dynamic-registration
+    # entry point. Even with no Java_* export, such a lib can register native
+    # methods Java calls, so it has a JNI security surface worth body-decompiling.
+    jni_onload: bool = False
+    # Gap-4: this lib is executable-packed (UPX). The real code is hidden behind
+    # a compressed stub, so it reads partial (like obfuscated) unless we were
+    # able to unpack it - a packed lib is never read as a clean lib (ADR-0006).
+    packed: bool = False
+    packer: str | None = None
     # L-M6: Ghidra headless decompilation of this lib's function bodies.
     # ghidra_decompiled is True ONLY when Ghidra genuinely produced functions -
     # that is the honest "native = scanned" signal that upgrades a stripped/
@@ -94,11 +128,24 @@ class NativeLibrary:
     ghidra_functions: list[str] = field(default_factory=list)
     ghidra_decompiled: bool = False
     ghidra_error: str | None = None
+    # Item #3 / time: True when the per-lib Ghidra body-dump hit its cap
+    # (GHIDRA_MAX_FUNCTIONS). The lib's bodies were examined only up to the cap,
+    # so it MUST read `partial` (coverage-limited, ADR-0006) - never
+    # fully_analyzed - because a technique in the unexamined tail would be
+    # silently missed. compute_degradation honors this.
+    ghidra_truncated: bool = False
     # H1/H4: a tool timeout or non-zero exit on this file sets unscannable (not
     # a silent 'stripped' - that would certify a confident negative we couldn't
     # actually rule out). scan_error carries the loud message for the report.
     unscannable: bool = False
     scan_error: str | None = None
+    # Fix 3 / time: SHA-256 of the .so bytes this NativeLibrary was built from.
+    # When two extracted paths (e.g. lib/arm64-v8a/libfoo.so and a byte-identical
+    # lib/<abi>/libbar.so) hash the same, the expensive readelf/nm/Ghidra pass
+    # runs once on the representative and each path gets a clone sharing the
+    # digest - the ABI/name differ but the analyzed binary is the same, so the
+    # per-ABI coverage and evidence shape are preserved without re-running.
+    sha256: str | None = None
 
 
 @dataclass
@@ -117,6 +164,27 @@ class NativeScanResult:
     # H1/H4: loud messages for libraries a tool failed on (timeout/non-zero exit),
     # so a degraded native surface is visible in stage evidence, not silent.
     errors: list[str] = field(default_factory=list)
+    # Boundary-3 static half: the Java-declared native method reconciliation
+    # (jnibridge.JNIBinding list). Populated by the caller (cli.py) after this
+    # scan, from the decompiled .java declarations against these libraries. Empty
+    # when the caller did not run reconciliation (or the APK has no native libs).
+    jni_bindings: list = field(default_factory=list)
+    # Boundary-2: which detection categories have native runtime-state idioms
+    # present in the app-owned native corpus (su paths, /proc self-inspection,
+    # uid==0 bodies, OpenSSL verify control) but matched NO native signature.
+    # Mirrors StaticEvidence.unattributed_indicators on the native surface: such
+    # a category must not certify a confident native negative (ADR-0006). Merged
+    # into StaticEvidence by _merge_native_evidence so the existing coverage
+    # layer handles it identically to Java indicators. Empty when no app-owned
+    # lib carries an unrecognized native detection idiom.
+    unattributed_indicators: dict[str, bool] = field(default_factory=dict)
+    # Boundary-4: System.load/loadLibrary targets whose .so we did NOT analyze -
+    # native code the app loads from outside the covered lib/<abi>/ set (assets/,
+    # an absolute path, or a name no extracted lib provides). A loaded-but-
+    # unexamined lib is an unexamined native surface: the caller degrades native
+    # coverage to partial so a native NEITHER never certifies a confident
+    # negative over a lib that actually ran but was never read (ADR-0006).
+    unaccounted_loads: list[str] = field(default_factory=list)
 
 
 # --- pure parsing (fixture-testable, no toolchain) ---------------------------
@@ -160,6 +228,25 @@ def _is_jni_export(name: str) -> bool:
     """Java_* JNI-export convention - the entry points native logic calls into
     Java-land (and the most common place native root/SSL checks live)."""
     return name.startswith("Java_")
+
+
+# The JVM calls these by name, so they stay in the dynamic symbol table even on a
+# stripped lib. `JNI_OnLoad` is the registration entry point: a lib that defines
+# it can register native methods via RegisterNatives (reached through the JNIEnv
+# vtable, so statically invisible as a symbol) - meaning its bodies CAN be the
+# target of a Java -> native root/SSL check even with ZERO Java_* exports. This
+# is the Gap-5 refinement: the JNI surface is wider than the Java_* convention.
+_JNI_LOAD_SYMBOLS = {"JNI_OnLoad", "JNI_OnUnload"}
+
+
+def _has_jni_surface(exports: list[str]) -> bool:
+    """True when a lib has ANY JNI surface reachable from Java: a Java_* export
+    OR a JNI_OnLoad/JNI_OnUnload entry point (the dynamic-registration hooks).
+    A JNI_OnLoad-only lib registers methods that Java can call even with no
+    Java_-named export, so its bodies are decompile-worthy (Gap-5)."""
+    if any(_is_jni_export(e) for e in exports):
+        return True
+    return bool(_JNI_LOAD_SYMBOLS & set(exports))
 
 
 def _classify_obfuscated(exports: list[str], strings: list[str]) -> bool:
@@ -261,6 +348,28 @@ def match_native(
                 result.root_confidence = min(1.0, result.root_confidence + sig.weight)
             elif sig.category == "ssl":
                 result.ssl_confidence = min(1.0, result.ssl_confidence + sig.weight)
+
+    # Boundary-2: unattributed NATIVE detection indicators. A category whose
+    # runtime-state idioms appear in the app-owned native corpus but matched no
+    # native signature is UNKNOWN, not absent - record it so the coverage layer
+    # marks it coverage-limited (mirrors the Java boundary-1 scan in signatures.py).
+    # Bundled SDK native libs (libsentry.so, libflutter.so) do their own root/SSL
+    # checks; their indicators must never surface as the app's own unknown
+    # detection (matching the Java _third_party_file exclusion).
+    matched_categories = {sig.category for sig in signatures if sig.id in matched_confidence}
+    indicator_categories: set[str] = set()
+    for lib in libraries:
+        if lib.name.lower() in KNOWN_NATIVE_LIBS:
+            continue
+        corpus_text = (
+            "\n".join(lib.exports) + "\n"
+            + "\n".join(lib.strings) + "\n"
+            + "\n".join(lib.ghidra_functions)
+        )
+        indicator_categories |= find_native_indicator_categories(corpus_text)
+    result.unattributed_indicators = {
+        cat: True for cat in indicator_categories if cat not in matched_categories
+    }
     return result
 
 
@@ -273,7 +382,7 @@ def compute_degradation(libs: list[NativeLibrary]) -> dict[str, str]:
     scan can't silently under-cover (G6)."""
     coverage: dict[str, str] = {}
     for lib in libs:
-        if lib.ghidra_decompiled:
+        if lib.ghidra_decompiled and not lib.ghidra_truncated:
             # L-M6: Ghidra decompiled real function bodies, so whatever
             # readelf/strings missed (stripped, obfuscated, even a tool failure),
             # the code was scanned at the function-body level - the surface is
@@ -282,9 +391,21 @@ def compute_degradation(libs: list[NativeLibrary]) -> dict[str, str]:
             # ghidra_error set and ghidra_decompiled False, so coverage stays
             # partial/unscannable rather than falsely certified scanned.
             coverage[lib.abi] = "fully_analyzed"
+        elif lib.ghidra_truncated:
+            # Item #3 / time: the per-lib body-dump hit its cap, so only a
+            # bounded subset of this lib's functions was examined. The unexamined
+            # tail could hold a technique, so the lib reads `partial`
+            # (coverage-limited, ADR-0006) - a native NEITHER over it is never a
+            # confident negative. Honest cap: bounds the pathological giant-lib
+            # case without falsely certifying an unexamined tail as scanned.
+            coverage[lib.abi] = "partial"
         elif lib.unscannable:
             coverage[lib.abi] = "unscannable"
-        elif lib.stripped or lib.obfuscated:
+        elif lib.stripped or lib.obfuscated or lib.packed:
+            # Gap-4: a packed (UPX) lib's real code is behind a stub - unless we
+            # unpacked it (in which case ghidra/symbols read the real code and
+            # the fully_analyzed branch above fired), it reads partial, matching
+            # Gap-2's packed->java=partial. Never a silent clean.
             coverage[lib.abi] = "partial"
         elif not lib.exports and not lib.strings:
             coverage[lib.abi] = "unscannable"
@@ -335,6 +456,23 @@ def _parse_ghidra_functions(text: str) -> list[str]:
     return bodies
 
 
+def _strip_truncation_sentinel(raw: str) -> tuple[str, bool]:
+    """Pure: detect and strip the DumpFunctions truncation sentinel.
+
+    Returns (text_without_sentinel, truncated). `truncated` is True when the
+    per-lib Ghidra cap (GHIDRA_MAX_FUNCTIONS) was hit - the script wrote the
+    sentinel as its final line(s). The sentinel is stripped from the text so it
+    never pollutes a function body or the matching corpus; truncation is carried
+    by the boolean so the caller can mark the lib `partial` (ADR-0006), never a
+    false fully_analyzed over an unexamined tail."""
+    if _GHIDRA_TRUNCATED_SENTINEL not in raw:
+        return raw, False
+    cleaned = "\n".join(
+        line for line in raw.splitlines() if _GHIDRA_TRUNCATED_SENTINEL not in line
+    )
+    return cleaned, True
+
+
 def _find_ghidra_headless() -> str | None:
     """Locate the Ghidra headless binary under tools/ghidra/ghidra_*/support/.
     Returns None (not raising) so a missing install degrades native coverage to
@@ -345,22 +483,40 @@ def _find_ghidra_headless() -> str | None:
     return str(candidates[-1]) if candidates else None
 
 
-def ghidra_decompile(so_path: Path, out_path: Path) -> tuple[bool, list[str], str | None]:
+def _ghidra_project_dir(out_path: Path) -> Path:
+    """Per-.so Ghidra project dir: `out_path.parent / _ghidra_proj_<stem>`.
+
+    NOT a shared `_ghidra_proj` for the whole ABI dir. Concurrent analyze_so
+    passes (analyze_so_many) would otherwise both write the same project dir and
+    corrupt each other, so each lib gets its own. Serial runs are unchanged (each
+    .so still gets its own); `-deleteProject` removes it after each pass, so
+    nothing accumulates."""
+    return out_path.parent / f"_ghidra_proj_{out_path.stem}"
+
+
+def ghidra_decompile(so_path: Path, out_path: Path) -> tuple[bool, list[str], bool, str | None]:
     """Decompile a .so's function bodies with Ghidra headless.
 
-    Returns (ok, function_bodies, error). ok=True ONLY when Ghidra genuinely
-    produced decompiled functions (bodies non-empty). Any failure - missing
-    Ghidra/script, timeout, non-zero exit, no functions produced - returns
-    ok=False with a loud error and an empty list, so the lib stays
+    Returns (ok, function_bodies, truncated, error). ok=True ONLY when Ghidra
+    genuinely produced decompiled functions (bodies non-empty). Any failure -
+    missing Ghidra/script, timeout, non-zero exit, no functions produced -
+    returns ok=False with a loud error and an empty list, so the lib stays
     partial/unscannable rather than being falsely certified scanned
-    (H1/H4, principle 3, ADR-0006)."""
+    (H1/H4, principle 3, ADR-0006).
+
+    `truncated` is True when the DumpFunctions cap (GHIDRA_MAX_FUNCTIONS) was
+    hit - the lib's bodies were examined only up to the cap. A truncated lib must
+    read `partial` (coverage-limited, ADR-0006), never `fully_analyzed`, because
+    a detection technique in the unexamined tail would be silently missed. The
+    cap bounds the pathological giant-lib case (item #3 / time) without losing
+    honesty."""
     headless = _find_ghidra_headless()
     if headless is None:
-        return False, [], "ghidra headless not found (tools/ghidra/ghidra_*/support/analyzeHeadless)"
+        return False, [], False, "ghidra headless not found (tools/ghidra/ghidra_*/support/analyzeHeadless)"
     script = Path(__file__).resolve().parents[2] / "scripts" / "ghidra" / "DumpFunctions.java"
     if not script.exists():
-        return False, [], f"ghidra script missing: {script}"
-    project_dir = out_path.parent / "_ghidra_proj"
+        return False, [], False, f"ghidra script missing: {script}"
+    project_dir = _ghidra_project_dir(out_path)
     project_dir.mkdir(parents=True, exist_ok=True)
     if out_path.exists():
         out_path.unlink()
@@ -368,29 +524,79 @@ def ghidra_decompile(so_path: Path, out_path: Path) -> tuple[bool, list[str], st
         headless, str(project_dir), "GhidraProject",
         "-import", str(so_path),
         "-scriptPath", str(script.parent),
-        "-postScript", "DumpFunctions", str(out_path),
+        "-postScript", "DumpFunctions", str(out_path), str(GHIDRA_MAX_FUNCTIONS),
         "-deleteProject", "-overwrite",
     ]
     try:
         subprocess.run(cmd, capture_output=True, text=True, timeout=GHIDRA_TIMEOUT)
     except subprocess.TimeoutExpired:
-        return False, [], f"ghidra timed out after {GHIDRA_TIMEOUT:.0f}s on {so_path.name}"
+        return False, [], False, f"ghidra timed out after {GHIDRA_TIMEOUT:.0f}s on {so_path.name}"
     except OSError as exc:
-        return False, [], f"ghidra failed to launch: {exc}"
+        return False, [], False, f"ghidra failed to launch: {exc}"
     if not out_path.exists():
-        return False, [], "ghidra produced no output file"
-    bodies = _parse_ghidra_functions(out_path.read_text(errors="replace"))
+        return False, [], False, "ghidra produced no output file"
+    raw, truncated = _strip_truncation_sentinel(out_path.read_text(errors="replace"))
+    bodies = _parse_ghidra_functions(raw)
     if not bodies:
-        return False, [], "ghidra decompiled no functions"
-    return True, bodies, None
+        return False, [], truncated, "ghidra decompiled no functions"
+    return True, bodies, truncated, None
+
+
+# Boundary-4: a Java `System.load("...")` / `System.loadLibrary("name")` call -
+# the explicit native-library loading a decompiled app performs. Covers the
+# standard `System.loadLibrary("foo")` (loads libfoo.so from lib/<abi>/) AND
+# the non-standard `System.load("assets/x.so")` / absolute-path form (sub-point-1
+# blind spot: native code loaded from outside lib/<abi>/ was not extracted).
+_LOAD_CALL = re.compile(r"(?<![\w$.])System\.load(Library)?\s*\(\s*[\"']([^\"']+)[\"']\s*\)")
+
+
+def find_external_native_loads(java_files: list) -> list[str]:
+    """The targets of every `System.load`/`System.loadLibrary` call in the
+    decompiled Java. Pure: returns the raw target strings (a name like "foo" for
+    loadLibrary, a path like "assets/x.so" / "/data/local/tmp/x.so" for load).
+    Empty when no explicit native loading is present. This is the boundary-4
+    static signal that an app loads native code the lib/<abi>/ extraction alone
+    may not cover."""
+    targets: list[str] = []
+    for p in java_files:
+        try:
+            text = p.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for m in _LOAD_CALL.finditer(text):
+            targets.append(m.group(2))
+    return targets
+
+
+def unaccounted_native_loads(load_targets: list[str], analyzed_names: set[str]) -> list[str]:
+    """The load targets whose library we did NOT analyze. `analyzed_names` is the
+    set of analyzed .so basenames (e.g. "libfoo.so"). A loadLibrary("foo") maps
+    to libfoo.so; a load path maps to its basename. Any target not covered is a
+    loaded-but-unexamined native surface - the caller must degrade native
+    coverage to partial rather than certify a confident negative (ADR-0006)."""
+    analyzed = set(analyzed_names)
+    unaccounted: list[str] = []
+    for t in load_targets:
+        base = os.path.basename(t)
+        if not base.endswith(".so"):
+            # loadLibrary("foo") -> libfoo.so (Android's loadLibrary naming rule).
+            base = base if base.startswith("lib") else "lib" + base
+            base += ".so"
+        if base not in analyzed:
+            unaccounted.append(t)
+    return unaccounted
 
 
 def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
-    """Extract lib/<abi>/*.so from the APK into dest_root. Returns the .so paths.
-    Uses `unzip` (present in the reference toolchain); fails loudly if absent.
-    One structured `lib/<abi>/`-preserving pass only (H5) - a previous `-j`
-    flatten pass dumped ABI-less copies into the same dir, which rglob picked up
-    with abi="unknown", dragging a clean native surface down via _min_coverage."""
+    """Extract lib/<abi>/*.so (and, boundary-4, assets/*.so) from the APK into
+    dest_root. Returns the .so paths. Uses `unzip` (present in the reference
+    toolchain); fails loudly if absent. Two structured, dir-PRESERVING passes
+    only (H5) - a previous `-j` flatten pass dumped ABI-less copies into the same
+    dir, which rglob picked up with abi="unknown", dragging a clean native surface
+    down via _min_coverage. assets/*.so keeps its assets/ dir (abi reads
+    "unknown"), so a loaded-from-assets lib is examined rather than silently
+    missed; callers gate which assets libs to analyze on actual System.load
+    targets (find_external_native_loads) to avoid analyzing never-loaded assets."""
     unzip = _require_tool("unzip")
     dest_root = Path(dest_root)
     dest_root.mkdir(parents=True, exist_ok=True)
@@ -399,65 +605,412 @@ def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
             [unzip, "-o", str(apk_path), "lib/*/*.so", "-d", str(dest_root)],
             check=False, capture_output=True, text=True, timeout=UNZIP_TIMEOUT,
         )
+        # Boundary-4: also pull native libs bundled under assets/ (a real
+        # non-standard packaging - loaded via System.load("assets/x.so")).
+        subprocess.run(
+            [unzip, "-o", str(apk_path), "assets/*.so", "-d", str(dest_root)],
+            check=False, capture_output=True, text=True, timeout=UNZIP_TIMEOUT,
+        )
     except subprocess.TimeoutExpired:
         raise NativeToolError(f"unzip timed out after {UNZIP_TIMEOUT:.0f}s extracting {apk_path}") from None
     # Note: unzip's return code is deliberately NOT checked here - it exits
     # non-zero when nothing matches 'lib/*/*.so' (an APK with no native libs),
     # which is a legitimate 'nothing to scan', not a failure.
-    so_files = sorted(dest_root.rglob("*.so"))
+    # Files only, never directories: a stale .so-named directory (e.g. a leftover
+    # Ghidra work_dir from an older keying) would otherwise match the glob and be
+    # fed to readelf/strings as a "lib", erroring and dragging native coverage to
+    # unscannable. is_file() guarantees only real ELF libs are analyzed.
+    so_files = sorted(f for f in dest_root.rglob("*.so") if f.is_file())
     return so_files
 
 
-def analyze_so(so_path: Path) -> NativeLibrary:
-    """Shell out to readelf/nm/strings to populate a NativeLibrary. Fails loudly
-    if a tool is missing. A timeout/non-zero exit on *this* file marks the lib
-    unscannable with a loud error (H1/H4) rather than misreading empty output as
-    'stripped' - which would falsely certify a confident negative. Pure parsing
-    of the output happens in the fixture-testable functions above."""
+def _try_read_dynsym_pyelftools(so_path: Path) -> list[str] | None:
+    """Arch-agnostic dynamic-symbol read via pyelftools (pure Python - no host
+    binutils, so it is not limited by the host's BFD targets and is
+    unit-testable-anywhere with a real .so). Reads the `.dynsym` table, the same
+    dynamic table `nm -D` surfaces and the source of truth for stripped libs.
+    Returns the symbol names (version suffixes like `@LIBC` already stripped by
+    elftools), or None when pyelftools is unavailable or the file is not a
+    parseable ELF - the caller then falls back to readelf/nm, preserving
+    fail-loud for a genuinely unreadable file (H1/H4)."""
+    try:
+        from elftools.elf.elffile import ELFFile
+    except ImportError:
+        return None
+    try:
+        with so_path.open("rb") as f:
+            elf = ELFFile(f)
+            dynsym = elf.get_section_by_name(".dynsym")
+            if dynsym is None:
+                return None  # no dynamic table - let readelf decide (may be static)
+            names = [s.name for s in dynsym.iter_symbols() if s.name]
+            seen: set[str] = set()
+            return [n for n in names if not (n in seen or seen.add(n))]
+    except Exception:
+        return None
+
+
+def _pyelftools_has_symtab(so_path: Path) -> bool | None:
+    """Arch-agnostic `.symtab`-presence check via pyelftools. True when the lib
+    has a `.symtab` (not stripped), False when it does not (stripped), None when
+    pyelftools is unavailable or cannot parse the file (caller falls back to
+    readelf -S). Mirrors `_is_stripped`'s G10 semantics without needing a shell."""
+    try:
+        from elftools.elf.elffile import ELFFile
+    except ImportError:
+        return None
+    try:
+        with so_path.open("rb") as f:
+            return ELFFile(f).get_section_by_name(".symtab") is not None
+    except Exception:
+        return None
+
+
+def security_triggers(signatures: list[NativeSignature]) -> set[str]:
+    """The union of every native signature pattern - the symbol/string tokens
+    whose presence in a lib marks it as a body-decompilation candidate (Gap-1).
+    Self-maintaining: adding a signature to the corpus grows this set, so the
+    body pass stays aligned with what detection actually cares about."""
+    return {p for sig in signatures for p in sig.patterns}
+
+
+def _has_native_security_signal(
+    exports: list[str], strings: list[str], triggers: set[str]
+) -> bool:
+    """True when the lib's export/string corpus overlaps a native signature
+    pattern - it MAY contain native root/SSL logic the symbol layer cannot see,
+    so its body is worth decompiling even with no Java_* export."""
+    if not triggers:
+        return False
+    return bool((set(exports) | set(strings)) & triggers)
+
+
+def _should_decompile_body(
+    stripped: bool,
+    obfuscated: bool,
+    jni_exports: list[str],
+    exports: list[str],
+    strings: list[str],
+    triggers: set[str],
+) -> bool:
+    """Gap-1 gate: decompile a lib's function bodies when the symbol/string
+    layer left it partial (stripped or obfuscated) AND either it exposes a Java_*
+    JNI export (the historical trigger) OR it shows a native security signal (its
+    corpus overlaps a signature pattern). The security-signal arm closes the
+    blind spot this project's native pass had: a stripped lib that reaches
+    root/anti-debug logic WITHOUT a Java_-named entry (e.g. via .init/.init_array
+    or RegisterNatives) was previously symbol-level-only, so a technique symbol
+    hidden inside a body - the `fork` of the ptrace/fork anti-debug combo, say -
+    was never recovered and the require_all signature never fired. Decompiling
+    recovers the body so match_native's body search can confirm the combo, and
+    compute_degradation can honestly upgrade the lib to fully_analyzed (only when
+    Ghidra genuinely produced bodies). A lib with no signal (benign infra, e.g.
+    libjsi/libc++) still skips the expensive decompilation pass, preserving the
+    performance the Java_*-only gate bought."""
+    if not (stripped or obfuscated):
+        return False
+    # Gap-5: the JNI trigger is the FULL JNI surface, not just Java_* exports. A
+    # stripped lib with JNI_OnLoad (but no Java_* export and no corpus signal)
+    # still registers native methods Java can call - its bodies are exactly the
+    # place a dynamically-registered root/SSL check hides - so it must be
+    # body-decompiled too, not left symbol-level-only. `jni_exports` is kept in
+    # the signature for call-site compatibility; the surface check subsumes it.
+    if _has_jni_surface(exports):
+        return True
+    if _has_native_security_signal(exports, strings, triggers):
+        return True
+    # Boundary #3: a stripped/obfuscated lib that carries a DETECTION IDIOM the
+    # signature corpus does NOT encode - an unrecognized runtime-state idiom
+    # (/sbin/su, /proc/self/* self-inspection, getuid()==0, OpenSSL verify
+    # control) - is precisely the "stripped lib with no signal stays partial"
+    # blind spot this gate exists to close. The indicator scan surfaces it as
+    # coverage-limited at match time, but a partial body is never even EXAMINED;
+    # decompiling it lets Ghidra recover a root/SSL check the symbol layer cannot
+    # see, and lets compute_degradation upgrade the lib honestly to fully_analyzed
+    # when the body is benign. Pure: only widens the gate to idiom-bearing libs,
+    # never fabricates a finding.
+    corpus = "\n".join(exports) + "\n" + "\n".join(strings)
+    return bool(find_native_indicator_categories(corpus))
+
+
+# ---------------------------------------------------------------------------
+# Native analysis disk cache
+#
+# The Ghidra headless body-decompile inside _analyze_so_uncached dominates the
+# native scan (~42 min on a 90-lib app like PropertyGuru) and is not cached on
+# disk, so every run re-executes readelf/nm/strings/Ghidra from scratch. That is
+# real, avoidable work for an unchanged APK. This cache keys each result on the
+# .so bytes' SHA-256 + an analysis-version + the security-trigger set, and
+# returns the byte-identical NativeLibrary on a hit without re-running any
+# toolchain. Invalidation is explicit, not silent: bump _ANALYZE_CACHE_VERSION
+# when the readelf/nm/Ghidra logic, the native signature semantics, or a
+# toolchain upgrade changes what analysis produces for the same bytes - the same
+# discipline as the DEX/jadx cache-invalidation commit. A stale entry (wrong
+# version or trigger set) is simply not served, so old rules can never certify a
+# lib analyzed under different rules (ADR-0002, no silent staleness).
+# ---------------------------------------------------------------------------
+
+_ANALYZE_CACHE_VERSION = "native-analyze-v1"
+
+
+def _trigger_key(security_triggers: set[str] | None) -> str:
+    """Deterministic key for the security-trigger set. _analyze_so_uncached's
+    behavior - above all the Gap-1 Ghidra body gate (_should_decompile_body) -
+    depends on which signature patterns are present, so a lib analyzed under one
+    corpus must never be served from a cache entry built under another."""
+    return ",".join(sorted(security_triggers or ())) or "<none>"
+
+
+def _load_analyze_cache(cache_dir: Path, so_hash: str, version: str, trigger_key: str) -> NativeLibrary | None:
+    """Return the cached NativeLibrary for this .so, or None on any miss/staleness.
+    A corrupt or wrong-version entry is a miss - it is never treated as a valid
+    lib (a partial write or old analysis must not silently certify a scan)."""
+    entry = cache_dir / f"{so_hash}.json"
+    if not entry.is_file():
+        return None
+    try:
+        data = json.loads(entry.read_text(encoding="utf-8"))
+        if data.get("version") != version or data.get("trigger_key") != trigger_key:
+            return None
+        return NativeLibrary(**data["lib"])
+    except Exception:
+        return None
+
+
+def _save_analyze_cache(cache_dir: Path, so_hash: str, version: str, trigger_key: str, lib: NativeLibrary) -> None:
+    """Persist a NativeLibrary for this .so. Writes via tmp + atomic replace so a
+    crash mid-write can never leave a partial entry that later reads as a valid
+    lib (a corrupt cache is a miss, never a wrong result)."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    tmp = cache_dir / f"{so_hash}.json.tmp"
+    tmp.write_text(
+        json.dumps({"version": version, "trigger_key": trigger_key, "lib": asdict(lib)}),
+        encoding="utf-8",
+    )
+    tmp.replace(cache_dir / f"{so_hash}.json")
+
+
+def analyze_so(so_path: Path, security_triggers: set[str] | None = None, cache_dir: Path | None = None) -> NativeLibrary:
+    """Analyze one .so, optionally through a disk cache.
+
+    With `cache_dir` set, the expensive readelf/nm/strings/Ghidra pass
+    (_analyze_so_uncached) runs once per distinct .so bytes; a subsequent call
+    with the same bytes, analysis version, and security-trigger set returns the
+    identical NativeLibrary from disk without re-running any toolchain. Cache
+    semantics are lossless: the cached lib is the exact dataclass the uncached
+    pass would have returned. With `cache_dir` None (the test default) behavior
+    is unchanged - always a fresh analysis."""
+    if cache_dir is None:
+        return _analyze_so_uncached(so_path, security_triggers)
+    so_hash = _sha256_file(so_path)
+    trigger_key = _trigger_key(security_triggers)
+    cached = _load_analyze_cache(cache_dir, so_hash, _ANALYZE_CACHE_VERSION, trigger_key)
+    if cached is not None:
+        return cached
+    lib = _analyze_so_uncached(so_path, security_triggers)
+    _save_analyze_cache(cache_dir, so_hash, _ANALYZE_CACHE_VERSION, trigger_key, lib)
+    return lib
+
+
+def analyze_so_many(
+    so_paths,
+    security_triggers: set[str] | None = None,
+    cache_dir: Path | None = None,
+    max_workers: int | None = None,
+) -> list[NativeLibrary]:
+    """analyze_so for many .so files concurrently, preserving input order.
+
+    Pure orchestrator over analyze_so - it holds no toolchain logic itself. The
+    heavy work stays inside analyze_so's own subprocesses, so a THREAD pool is
+    correct: the GIL is released while each thread blocks on its readelf/nm/
+    Ghidra subprocess, which is what actually runs concurrently. Workers are
+    bounded (default MIN(MAX_GHIDRA_WORKERS, cpu_count)) so N concurrent ~2 GB
+    Ghidra JVMs cannot exhaust the reference box's RAM.
+
+    Results are returned in input order (concurrent.futures.map preserves it),
+    so the caller's (abi,name)-keyed evidence and per-ABI coverage are unchanged
+    from the serial loop. Per-.so failures are already contained inside
+    analyze_so (NativeToolError -> an `unscannable` NativeLibrary, never a
+    raise); a MISSING TOOL raises RuntimeError in every worker and surfaces here
+    as a stage-halting exception (principle 3), never a silent no-op."""
+    reps = list(so_paths)
+    if not reps:
+        return []
+    workers = max_workers or min(MAX_GHIDRA_WORKERS, os.cpu_count() or 1)
+    workers = max(1, min(workers, len(reps)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        return list(ex.map(
+            lambda p: analyze_so(p, security_triggers=security_triggers, cache_dir=cache_dir),
+            reps,
+        ))
+
+
+def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = None) -> NativeLibrary:
+    """Populate a NativeLibrary from a real .so, arch-agnostic first via
+    pyelftools (pure Python, no host-binutils arch limit - closes limitation 8,
+    the per-ABI native-coverage degradation), then the proven readelf/nm/strings
+    shell path as fallback. Fails loudly (unscannable + error) when the file is
+    genuinely unreadable by every path - never misreads empty output as
+    'stripped', which would falsely certify a confident negative (H1/H4). Pure
+    parsing of readelf/nm output happens in the fixture-testable functions above;
+    the pyelftools read is itself fixture-testable with any real .so.
+    `security_triggers` (union of native signature patterns, from
+    `security_triggers()`) drives the Gap-1 body-decompilation gate: a
+    stripped/obfuscated lib whose corpus overlaps a signature pattern gets its
+    function bodies decompiled even with NO Java_* export, recovering a
+    technique hidden inside a body (e.g. the `fork` of the ptrace/fork
+    anti-debug combo)."""
     readelf = _require_tool("readelf")
     nm = _require_tool("nm")
     strings_tool = _require_tool("strings")
 
     abi = so_path.parent.name if so_path.parent.name in KNOWN_ABIS else "unknown"
     name = so_path.name
+    # Stream the .so's digest once up front so every return path below (including
+    # the UPX-fail and NativeToolError early returns) carries the identity of the
+    # bytes actually analyzed - lets the Fix 3 dedup group clones by digest even
+    # when the representative could not be fully read.
+    so_digest = _sha256_file(so_path)
+
+    # Gap-4: UPX / native packing. A UPX-packed .so's symbols/strings read from
+    # the compressed stub come back empty - reading it as clean would falsely
+    # certify a confident negative over code we never read (ADR-0006). Detect
+    # from the ELF's own markers (.UPX* sections / UPX! magic) and, when the
+    # optional `upx` unpacker is present, recover the real uncompressed code so
+    # the proven symbol/string/Ghidra path below analyses the ACTUAL library.
+    # When unpacking is impossible (upx absent or fails) the lib reads as
+    # packed -> partial, never clean - matching Gap-2's packed -> java=partial.
+    effective_path = so_path
+    packed = False
+    packer: str | None = None
+    if is_upx_packed(so_path):
+        packed = True
+        packer = "UPX"
+        unpacked_path = so_path.parent / f"{so_path.stem}.unpacked.so"
+        ok, err = unpack_upx(so_path, unpacked_path)
+        if not ok:
+            return NativeLibrary(
+                abi=abi, name=name,
+                packed=True, packer=packer, obfuscated=True,
+                scan_error=f"UPX-packed and could not unpack: {err}",
+                sha256=so_digest,
+            )
+        effective_path = unpacked_path
 
     try:
-        exports = parse_readelf_symbols(
-            _run_tool([readelf, "-Ws", str(so_path)], READELF_TIMEOUT, "readelf")
-        )
-        dyn_exports = parse_readelf_symbols(
-            _run_tool([nm, "-D", str(so_path)], NM_TIMEOUT, "nm")
-        )
-        # nm -D output is "0000000000000000 T check_root" - reuse the symbol tokenizer.
-        exports = dyn_exports or exports  # dynamic table is the source of truth for stripped
+        # Arch-agnostic pure-Python symbol + section read first: host readelf/nm
+        # are GNU-binutils and may lack the BFD target for a given ABI (e.g. a
+        # host built without i386 cannot read ELF32-x86 - "file format not
+        # recognized"), which drags that lib's surface to unscannable on a
+        # multi-arch APK. pyelftools parses the ELF structure directly regardless
+        # of target arch. On any unavailability or parse failure we fall through
+        # to readelf/nm below - fail-loud for a genuinely unreadable file stays.
+        pe_dyn = _try_read_dynsym_pyelftools(effective_path)
+        pe_has_symtab = _pyelftools_has_symtab(effective_path)
+        if pe_dyn is not None:
+            # pyelftools read the .dynsym table arch-agnostically - the same
+            # dynamic table nm -D surfaces and the source of truth for stripped.
+            exports = pe_dyn
+        else:
+            exports = parse_readelf_symbols(
+                _run_tool([readelf, "-Ws", str(effective_path)], READELF_TIMEOUT, "readelf")
+            )
+            # nm reads the SAME symbol table readelf -Ws above just populated. A
+            # host `nm` built without the BFD target for this arch exits non-zero
+            # even though readelf parsed the file completely - a redundant-tool
+            # degradation, not an unreadable lib, so fall back to readelf exports
+            # rather than marking the lib unscannable (H1/H4 preserved for a real
+            # unreadable file by the outer except below).
+            dyn_exports: list[str] = []
+            try:
+                dyn_exports = parse_readelf_symbols(
+                    _run_tool([nm, "-D", str(effective_path)], NM_TIMEOUT, "nm")
+                )
+            except NativeToolError:
+                pass  # nm unavailable for this arch: readelf exports above are complete.
+            exports = dyn_exports or exports  # dynamic table is the source of truth for stripped
         jni_exports = [e for e in exports if _is_jni_export(e)]
+        jni_onload = bool(_JNI_LOAD_SYMBOLS & set(exports))
         embedded = parse_strings(
-            _run_tool([strings_tool, str(so_path)], STRINGS_TIMEOUT, "strings")
+            _run_tool([strings_tool, str(effective_path)], STRINGS_TIMEOUT, "strings")
         )
-        sections = _run_tool([readelf, "-S", str(so_path)], READELF_TIMEOUT, "readelf")
+        # Stripped detection: pyelftools reads .symtab presence arch-agnostically
+        # when available; otherwise fall back to readelf -S (G10).
+        if pe_has_symtab is not None:
+            stripped = not pe_has_symtab
+        else:
+            sections = _run_tool([readelf, "-S", str(so_path)], READELF_TIMEOUT, "readelf")
+            stripped = _is_stripped(exports, sections)
     except NativeToolError as exc:
-        # We could not read this file at all - never certify a negative from it.
-        return NativeLibrary(abi=abi, name=name, unscannable=True, scan_error=str(exc))
+        # We could not read this file with pyelftools/readelf/nm/strings. Before
+        # certifying it `unscannable` - a confident lower bound that abandons the
+        # lib - try Ghidra as a LAST RESORT: it is a wholly different parser and
+        # can read a binary the GNU binutils BFD cannot (a non-standard or
+        # partially-unreadable ELF variant), recovering function bodies where the
+        # symbol layer read nothing. This is the "even a tool failure" recovery
+        # compute_degradation's ghidra_decompiled branch already intends (L375):
+        # a lib whose BODIES Ghidra genuinely decompiled is scanned, not a silent
+        # lower bound. Ghidra either reads it (bodies recovered -> the lib reads
+        # fully_analyzed, or partial if truncated) or fails too (returns False) ->
+        # genuinely unscannable, certified as today. Bounded by GHIDRA_TIMEOUT, so
+        # an unreadable file can never hang the pipeline (NFR-1).
+        ghidra_decompiled, ghidra_functions, ghidra_truncated, ghidra_error = ghidra_decompile(
+            effective_path, effective_path.parent / f"{effective_path.stem}.ghidra.txt"
+        )
+        if ghidra_decompiled and ghidra_functions:
+            return NativeLibrary(
+                abi=abi, name=name,
+                ghidra_functions=ghidra_functions, ghidra_decompiled=True,
+                ghidra_truncated=ghidra_truncated, ghidra_error=ghidra_error,
+                scan_error=(
+                    f"symbol layer failed ({exc}); recovered "
+                    f"{len(ghidra_functions)} function bodies via Ghidra last-resort"
+                ),
+                sha256=so_digest,
+            )
+        return NativeLibrary(
+            abi=abi, name=name, unscannable=True, scan_error=str(exc), sha256=so_digest,
+        )
 
-    stripped = _is_stripped(exports, sections)
     obfuscated = _classify_obfuscated(exports, embedded)
 
-    # L-M6: deepen coverage by decompiling this lib's function bodies with
-    # Ghidra headless - but ONLY a lib the symbol/string layer left PARTIAL
-    # (stripped or obfuscated), which is exactly where readelf/strings are blind
-    # and function-body decompilation adds real coverage. A healthy lib is
-    # already fully_analyzed and its behavior is visible in symbols/strings, so
-    # running Ghidra on it would only burn 30-60s per lib for no gain (a real
-    # cost on apps with dozens of .so). A failed or absent Ghidra degrades
-    # gracefully (ok=False -> ghidra_error set, ghidra_decompiled stays False)
-    # and the lib remains partial - it is never falsely certified scanned
-    # (ADR-0006).
+    # L-M6 / Gap-1: deepen coverage by decompiling this lib's function bodies
+    # with Ghidra headless - but ONLY a lib the symbol/string layer left PARTIAL
+    # (stripped or obfuscated) AND that has native security surface. The gate
+    # (`_should_decompile_body`) is proven, not guessed, from match_native's
+    # semantics:
+    #   - embedded_string signatures NEVER consult Ghidra bodies, so
+    #     decompiling for them is pure waste.
+    #   - export_symbol signatures match from the export corpus ALONE (the
+    #     ptrace/fork anti-debug combo fires off `-Ws` exports, which include
+    #     imported symbols); a Ghidra body is an ADDITIONAL confirmation source
+    #     when the technique symbol is hidden.
+    # The trigger is (a) a Java_* JNI export (historical: the entry points a
+    # Java -> native root/ssl check reaches) OR (b) a native security signal -
+    # the lib's corpus overlaps a signature pattern. Arm (b) is the Gap-1 fix:
+    # a stripped lib can reach security logic WITHOUT a Java_-named entry (via
+    # .init/.init_array constructors or RegisterNatives), and such a lib was
+    # previously symbol-level-only, so a technique symbol hidden inside a body -
+    # the `fork` of the ptrace/fork combo - was never recovered and the
+    # require_all signature never fired. Decompiling recovers the body so the
+    # combo can be confirmed. A lib with neither a Java_* export nor a security
+    # signal (benign infra, e.g. React Native's libjsi/libc++/libavif) still
+    # skips the expensive pass - Verified 2026-08: of PropertyGuru's 90 libs, 21
+    # have Java_* JNI and 69 are infra with none; most of those 69 also carry no
+    # security signal, so the performance the Java_*-only gate bought is kept
+    # while the blind spot is closed.
+    # A failed or absent Ghidra degrades gracefully (ok=False -> ghidra_error
+    # set, ghidra_decompiled stays False) and the lib remains partial - it is
+    # never falsely certified scanned (ADR-0006).
     ghidra_functions: list[str] = []
     ghidra_decompiled = False
     ghidra_error: str | None = None
-    if stripped or obfuscated:
-        ghidra_decompiled, ghidra_functions, ghidra_error = ghidra_decompile(
-            so_path, so_path.parent / f"{so_path.stem}.ghidra.txt"
+    ghidra_truncated = False
+    if _should_decompile_body(stripped, obfuscated, jni_exports, exports, embedded, security_triggers or set()):
+        # Gap-4: decompile the UNPACKED library when the lib was UPX-packed, so
+        # Ghidra sees the real code, not the compressed stub.
+        ghidra_decompiled, ghidra_functions, ghidra_truncated, ghidra_error = ghidra_decompile(
+            effective_path, effective_path.parent / f"{effective_path.stem}.ghidra.txt"
         )
 
     return NativeLibrary(
@@ -468,10 +1021,56 @@ def analyze_so(so_path: Path) -> NativeLibrary:
         strings=embedded,
         stripped=stripped,
         obfuscated=obfuscated,
+        jni_onload=jni_onload,
+        packed=packed,
+        packer=packer,
         ghidra_functions=ghidra_functions,
         ghidra_decompiled=ghidra_decompiled,
         ghidra_error=ghidra_error,
+        ghidra_truncated=ghidra_truncated,
+        sha256=so_digest,
     )
+
+
+def _sha256_file(path: Path) -> str:
+    """Streamed SHA-256 of a file - the identity key for the Fix 3 dedup group."""
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def group_identical_so_files(so_files: list[Path]) -> list[tuple[str, list[Path]]]:
+    """Group extracted .so paths by byte-identical SHA-256, preserving order.
+
+    Pure, fixture-testable anywhere (no toolchain). Returns one `(digest, paths)`
+    per distinct binary, so the caller can run the expensive readelf/nm/Ghidra
+    pass once on the representative (paths[0]) and clone the result for the rest.
+    ABI variants are distinct builds, so groups are normally size 1 - this is a
+    correctness-preserving dedup, not a shortcut (the ~42-min native scan is
+    genuine per-ABI analysis; identical bytes across paths are rare).
+    """
+    groups: list[tuple[str, list[Path]]] = []
+    by_digest: dict[str, list[Path]] = {}
+    order: list[str] = []
+    for so in so_files:
+        digest = _sha256_file(so)
+        if digest not in by_digest:
+            by_digest[digest] = []
+            order.append(digest)
+        by_digest[digest].append(so)
+    return [(digest, by_digest[digest]) for digest in order]
+
+
+def _clone_lib_for_path(base: "NativeLibrary", so_path: Path) -> "NativeLibrary":
+    """Clone a representative NativeLibrary for another path in the same digest
+    group, overriding only the ABI/name that derive from that path. All analysis
+    fields (exports, strings, ghidra_functions, ...) are read-only after analyze_so
+    returns, so sharing them across clones is safe and keeps the result per-ABI
+    (abi_coverage and match_native Evidence key on (abi, name))."""
+    abi = so_path.parent.name if so_path.parent.name in KNOWN_ABIS else "unknown"
+    return replace(base, abi=abi, name=so_path.name)
 
 
 # --- YAML loading (mirrors signatures.py's loud-validation discipline) -------
@@ -516,163 +1115,3 @@ def load_native_signatures(path: Path) -> list[NativeSignature]:
     return sigs
 
 
-# --- L-M6: Ghidra headless decompilation (native surface -> scanned) ---------
-# The readelf/strings path above sees export symbols and embedded strings, but a
-# stripped or Dex2C-transpiled .so hides its logic in function bodies those two
-# cannot see - exactly the "native = unscannable/partial" gap L-M6 targets. Ghidra
-# headless decompiles every function to C pseudocode; this section feeds those
-# bodies to the SAME deterministic matcher (ADR-0001 - Ghidra is an evidence
-# source like jadx, never a decision tier). Pure parsing/matching is fixture-
-# testable anywhere; run_ghidra_headless is toolchain-gated and fails loudly.
-
-GHIDRA_DECOMPILE_SCRIPT = "ghidra_export_decompiled.java"  # versioned under scripts/
-# Java, not Python: Ghidra 12 removed Jython, and .py headless scripts need
-# PyGhidra which analyzeHeadless does not start with - a .java script always runs.
-GHIDRA_TIMEOUT = 600  # a real .so can take minutes to analyze + decompile
-
-
-@dataclass
-class GhidraFunction:
-    name: str
-    address: str
-    body: str
-
-
-# The Ghidra script writes one block per function: a header line then the
-# decompiled C body until the next header or EOF.
-_GHIDRA_FUNC_HEADER_RE = re.compile(r"^=== FUNC: (.+?) @ (.+?) ===$", re.MULTILINE)
-
-
-def parse_ghidra_decompile(text: str) -> list[GhidraFunction]:
-    """Parse the script's `=== FUNC: <name> @ <addr> ===` block format into
-    GhidraFunction objects. A block whose body is `(no decompilation)` keeps its
-    name/address with an empty body - the function exists but could not be
-    recovered, and the pipeline must never mistake that for an absent function
-    (principle 3)."""
-    funcs: list[GhidraFunction] = []
-    headers = list(_GHIDRA_FUNC_HEADER_RE.finditer(text))
-    for i, m in enumerate(headers):
-        name = m.group(1).strip()
-        address = m.group(2).strip()
-        end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
-        body = text[m.end():end].strip()
-        body = body.removesuffix("(no decompilation)").strip()
-        funcs.append(GhidraFunction(name=name, address=address, body=body))
-    return funcs
-
-
-def match_ghidra_decompile(
-    functions: list[GhidraFunction],
-    signatures: list[NativeSignature],
-) -> NativeScanResult:
-    """Match native signatures against decompiled function bodies. Unlike
-    match_native's exact corpus membership (export/string token lists), a
-    decompiled body is free-form C pseudocode, so a pattern is a substring match
-    - a root check calls access("/system/xbin/su", ...) and the literal appears
-    in the body, or a JNI symbol name appears in the text. Same weight-once-per-
-    signature discipline and Evidence shape as the Java/native matchers; the
-    offset carries the function's address for traceability."""
-    result = NativeScanResult(libraries=[])
-    matched_confidence: set[str] = set()
-    for func in functions:
-        body = func.body.casefold()
-        for sig in signatures:
-            hit_text = None
-            for pat in sig.patterns:
-                if pat.casefold() in body:
-                    hit_text = pat
-                    break
-            if hit_text is None or sig.id in matched_confidence:
-                continue
-            matched_confidence.add(sig.id)
-            item = Evidence(
-                signature_id=sig.id,
-                file=f"ghidra:{func.name}",
-                line_or_offset=func.address,
-                matched_text=hit_text,
-            )
-            if sig.category == "root":
-                result.root_evidence.append(item)
-            elif sig.category == "ssl":
-                result.ssl_evidence.append(item)
-    for sig in signatures:
-        if sig.id in matched_confidence:
-            if sig.category == "root":
-                result.root_confidence = min(1.0, result.root_confidence + sig.weight)
-            elif sig.category == "ssl":
-                result.ssl_confidence = min(1.0, result.ssl_confidence + sig.weight)
-    return result
-
-
-def _find_ghidra_headless() -> str:
-    """Locate analyzeHeadless: $GHIDRA_HOME/support/analyzeHeadless, else the
-    repo's tools/ghidra/ghidra_*/support/analyzeHeadless. Raises loudly (a
-    NativeToolError, catchable per-lib) if Ghidra is absent - never a silent
-    no-op (principle 3)."""
-    candidates: list[Path] = []
-    env = os.environ.get("GHIDRA_HOME")
-    if env:
-        candidates.append(Path(env) / "support" / "analyzeHeadless")
-    candidates.extend(
-        sorted(Path(__file__).resolve().parents[2].joinpath("tools", "ghidra").glob("ghidra_*/support/analyzeHeadless"))
-    )
-    for c in candidates:
-        if c.is_file():
-            return str(c)
-    raise NativeToolError(
-        "Ghidra analyzeHeadless not found - set GHIDRA_HOME or install under "
-        "tools/ghidra/ghidra_*/ (Ghidra decompilation runs on the reference environment)"
-    )
-
-
-def run_ghidra_headless(so_path: Path, work_dir: Path, script_dir: Path) -> Path:
-    """Run Ghidra headless on one .so, returning the path to the decompiled-text
-    output. Uses a throwaway project under work_dir so re-runs are clean. Fails
-    loudly on a missing Ghidra, a failed run, or missing output - never a silent
-    empty file misread as 'no native code' (principle 3)."""
-    headless = _find_ghidra_headless()
-    project_dir = work_dir / "ghidra_project"
-    project_dir.mkdir(parents=True, exist_ok=True)
-    out_path = work_dir / "decompiled.txt"
-    if out_path.exists():
-        out_path.unlink()
-    cmd = [
-        headless,
-        str(project_dir), f"proj_{so_path.stem}",
-        "-import", str(so_path),
-        "-scriptPath", str(script_dir),
-        "-postScript", GHIDRA_DECOMPILE_SCRIPT, str(out_path),
-        "-scriptLog", str(work_dir / "ghidra_script.log"),
-    ]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=GHIDRA_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        raise NativeToolError(f"Ghidra headless timed out after {GHIDRA_TIMEOUT:.0f}s on {so_path.name}") from None
-    if proc.returncode != 0:
-        lines = (proc.stderr or proc.stdout or "").strip().splitlines()
-        tail = lines[-1] if lines else "no output"
-        raise NativeToolError(
-            f"Ghidra headless exited {proc.returncode} on {so_path.name}: {tail[:200]}"
-        )
-    if not out_path.exists():
-        raise NativeToolError(f"Ghidra headless ran but produced no decompiled output on {so_path.name}")
-    return out_path
-
-
-def analyze_so_ghidra(so_path: Path, work_dir: Path, script_dir: Path | None = None) -> NativeLibrary:
-    """Analyze one .so with readelf/strings AND Ghidra decompilation. Returns a
-    NativeLibrary enriched with ghidra_functions + ghidra_decompiled. A readelf/
-    strings failure on this file still surfaces as unscannable (existing H1/H4
-    behavior); a Ghidra failure is recorded in ghidra_error with ghidra_decompiled
-    False, so coverage is never falsely certified scanned (principle 3)."""
-    lib = analyze_so(so_path)
-    script_dir = script_dir or (Path(__file__).resolve().parents[2] / "scripts")
-    try:
-        out = run_ghidra_headless(so_path, work_dir, script_dir)
-        funcs = parse_ghidra_decompile(out.read_text(encoding="utf-8", errors="replace"))
-        lib.ghidra_functions = [f.name for f in funcs]
-        lib.ghidra_decompiled = bool(funcs)
-    except NativeToolError as exc:
-        lib.ghidra_error = str(exc)
-        lib.ghidra_decompiled = False
-    return lib

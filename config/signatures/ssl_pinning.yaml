@@ -230,3 +230,275 @@
   patterns:
     - 'extends\s+[\w<>,\s.]*SSLSocketFactory'
   evidence_type: bytecode_string
+
+- id: custom_x509extended_trustmanager
+  category: ssl
+  weight: 0.35
+  pattern_type: regex
+  # X509ExtendedTrustManager is the TrustManager subclass used by TLS 1.3 and
+  # SSLEngine-based stacks (okhttp 4+, async sockets). Apps implementing pinning
+  # there subclass it via `extends X509ExtendedTrustManager` - which the existing
+  # custom_trustmanager_checkservertrusted (`implements X509TrustManager`) cannot
+  # see, so a real pin/trust-decision impl was an invisible hole. Requires the
+  # `extends ... X509ExtendedTrustManager` declaration, not the bare class name
+  # (which appears in any SSLContext setup/import). Lower weight - a custom
+  # implementation can exist for non-pinning trust decisions too, the same
+  # honesty as custom_trustmanager_checkservertrusted.
+  patterns:
+    - 'extends\s+[\w<>,\s.]*X509ExtendedTrustManager'
+  evidence_type: bytecode_string
+
+# --- web-grounded 2026 SSL-pinning taxonomy expansion ---
+# Each is additive and structurally-unlikely, so it only fires when the app
+# genuinely implements the technique. Same ADR-0006 discipline as the earlier
+# expansions: additive only, not yet corpus-validated against each library.
+
+- id: expect_certificate_pin
+  category: ssl
+  weight: 0.4
+  pattern_type: string_literal
+  # The classic moxie0/ssl-pinning OkHttp interceptor API:
+  # PinningTrustManager / expectCertificatePin("host", "sha256/...") - a whole
+  # pinning library keyed on this single method. The method reference is
+  # library-specific, so it only appears when the app actually uses it to pin.
+  patterns:
+    - "expectCertificatePin"
+  evidence_type: bytecode_string
+
+- id: certificate_pinner_add_host
+  category: ssl
+  weight: 0.3
+  pattern_type: regex
+  # OkHttp's per-hostname pin: .add("host", "sha256/...") on a CertificatePinner
+  # Builder. Distinct from okhttp_certificate_pinner (matches the Builder()
+  # construction) and okhttp4_kotlin (matches the DSL .add) - this is the specific
+  # Java form that names the pinned host, present only in a real pin config.
+  # Bounded lazy .{0,20}? keeps the regex linear (ReDoS-safe, NFR-1).
+  patterns:
+    - '\.add\(\s*"[^"]+",\s*"sha256/'
+  evidence_type: bytecode_string
+
+- id: sha1_pin_hash_literal
+  category: ssl
+  weight: 0.25
+  pattern_type: regex
+  # OkHttp pins may be SHA-1 (or SHA-256): the "sha1/<b64>" form is a real pin
+  # digest that certificate_pin_hash_literal ("sha256/...") cannot see. The
+  # "sha1/" scheme prefix only occurs inside a real pin specification, keeping
+  # false positives low.
+  patterns:
+    - 'sha1/[A-Za-z0-9+/]{20,}={0,2}'
+  evidence_type: bytecode_string
+
+- id: okhttp_hostname_verifier_set
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  # OkHttpClient.Builder().hostnameVerifier(...) installs a custom hostname
+  # verifier - the standard hook point for a trust-all or pin-specific verifier.
+  # The builder method is OkHttp-specific, so it only appears when the app
+  # explicitly overrides hostname verification (a TLS trust control).
+  patterns:
+    - "hostnameVerifier("
+  evidence_type: bytecode_string
+
+- id: sslcontext_init_with_trustmanager
+  category: ssl
+  weight: 0.3
+  pattern_type: regex
+  multiline: true
+  case_sensitive: false
+  # The certificate-embedding pinning technique: SSLContext.init(null,
+  # trustManagers, ...) where the TrustManagerFactory was initialized from a
+  # KeyStore of pinned certs. Requires both the TLS SSLContext.getInstance and a
+  # nearby .init( call (bounded, so the regex stays linear). Moderate weight and
+  # an honest note: setting up a custom trust store is necessary for the technique
+  # but not by itself proof of pinning (could be a user-CA trust store).
+  patterns:
+    - 'SSLContext\.getInstance\([^)]*TLS[^)]*\).{0,200}?\.init\s*\('
+  evidence_type: source
+
+# --- web-grounded 2026 expansion II: legacy & custom pinning hooks ---
+# Targets the custom-manual and legacy implementations the OkHttp/NSC signatures
+# cannot see: Volley's HurlStack, the setSSLSocketFactory / setDefaultHostnameVerifier
+# trust hooks, the manual SPKI-hash pin function, a custom X509KeyManager (mTLS),
+# and NSC user-cert trust. Each is specific enough to keep false positives low.
+# ADR-0006: additive, not yet corpus-validated.
+
+- id: hurlstack_sslsocketfactory
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "HurlStack"
+  evidence_type: bytecode_string
+
+- id: set_sslsocketfactory
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "setSSLSocketFactory"
+  evidence_type: bytecode_string
+
+- id: set_default_hostname_verifier
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "setDefaultHostnameVerifier"
+  evidence_type: bytecode_string
+
+- id: spki_sha256_pin
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "spkiSha256Pin"
+  evidence_type: bytecode_string
+
+- id: custom_x509keymanager
+  category: ssl
+  weight: 0.25
+  pattern_type: regex
+  patterns:
+    - 'implements\s+X509KeyManager'
+  evidence_type: bytecode_string
+
+- id: nsc_user_cert_trust
+  category: ssl
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - '<certificates src="user"'
+    - '<debug-overrides>'
+  evidence_type: resource_xml
+
+# --- Integrated external pattern set: aancw/smali-sslpin-patterns (MIT) ---
+# The well-known open-source smali pinning-pattern collection (28 categories,
+# 44 patterns) was fetched and curated into the deterministic engine. These are
+# SMALI-specific signatures (the `;` and `->` syntax only occurs in .smali, which
+# the Java-oriented regex rules above cannot see), so they are strictly additive
+# to the smali surface scan() already walks. Each fires on the APP's own smali
+# reference to a named pinning framework - a real pinning implementation, not a
+# generic SDK doing unrelated checks. Only the framework signatures that were NOT
+# already covered are integrated; redundant ones (okhttp/squareup/trustkit class
+# refs already handled) were dropped to avoid inflating confidence.
+# ADR-0006: sourced from an MIT third party, additive, not yet corpus-validated.
+# Third-party note: the app's own smali reference to these APIs lives in the app
+# package (never vendor-excluded); the vendored library's internal file would be
+# excluded only where the namespace is a recognized vendor (none of these are).
+
+- id: pin_appcelerator_https
+  category: ssl
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "appcelerator/https/PinningTrustManager;->checkServerTrusted"
+  evidence_type: bytecode_string
+
+- id: pin_ibm_worklight
+  category: ssl
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "com/worklight/wlclient/api/WLClient;->pinTrustedCertificatePublicKey"
+  evidence_type: bytecode_string
+
+- id: pin_worklight_hostname_verifier
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "com/worklight/wlclient/certificatepinning/HostNameVerifierWithCertificatePinning;->verify"
+  evidence_type: bytecode_string
+
+- id: pin_cwac_netsecurity
+  category: ssl
+  weight: 0.35
+  pattern_type: string_literal
+  patterns:
+    - "com/commonsware/cwac/netsecurity/conscrypt/CertPinManager;->isChainValid"
+  evidence_type: bytecode_string
+
+- id: pin_netty_fingerprint_tmf
+  category: ssl
+  weight: 0.35
+  pattern_type: string_literal
+  patterns:
+    - "io/netty/handler/ssl/util/FingerprintTrustManagerFactory;->checkTrusted"
+  evidence_type: bytecode_string
+
+- id: pin_phonegap_ssl_checker
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "nl/xservices/plugins/sslCertificateChecker;->execute"
+  evidence_type: bytecode_string
+
+- id: pin_flutter_http_cert
+  category: ssl
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "diefferson/http_certificate_pinning/HttpCertificatePinning;->checkConnexion"
+  evidence_type: bytecode_string
+
+- id: pin_flutter_sslpinning_plugin
+  category: ssl
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "com/macif/plugin/sslpinningplugin/SslPinningPlugin;->checkConnexion"
+  evidence_type: bytecode_string
+
+- id: pin_cronet_add_public_key_pins
+  category: ssl
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "org/chromium/net/impl/CronetEngineBuilderImpl;->addPublicKeyPins"
+  evidence_type: bytecode_string
+
+- id: pin_conscrypt_trustmanagerimpl
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "com/android/org/conscrypt/TrustManagerImpl;->verifyChain"
+  evidence_type: bytecode_string
+
+- id: pin_boye_abstractverifier
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "ch/boye/httpclientandroidlib/conn/ssl/AbstractVerifier;->verify"
+  evidence_type: bytecode_string
+
+- id: pin_apache_abstractverifier
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "org/apache/http/conn/ssl/AbstractVerifier;->verify"
+  evidence_type: bytecode_string
+
+# --- web-grounded 2026 expansion III: React-Native pinning ---
+# RN apps pin through the react-native-ssl-pinning library (SSLPinningFactory,
+# com.gs.rnsslpinning) - a whole pinning surface invisible to the OkHttp/NSC
+# rules (the RN JS-side pins are separately covered by the hermes js_ssl_pinner
+# idioms, gap A1). The literal is library-specific and lives in the APP's own
+# reference to the API (not vendor-excluded), so it only fires when the app
+# genuinely uses the library to pin. ADR-0006: additive, not yet corpus-validated.
+- id: rn_ssl_pinning_library
+  category: ssl
+  weight: 0.4
+  pattern_type: string_literal
+  case_sensitive: false
+  patterns:
+    - "SSLPinningFactory"
+    - "com.gs.rnsslpinning"
+    - "react-native-ssl-pinning"
+  evidence_type: bytecode_string

@@ -205,6 +205,39 @@ def _find_windows_user(users_dir: Path = WINDOWS_USERS_DIR) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _ensure_frida_server(adb: str, serial: str) -> None:
+    """Ensure frida-server is running on the device before connecting.
+
+    A frida-server that is pushed but not started is the usual reason the dynamic
+    stage silently hangs: the relay forwards, no server answers, and
+    enumerate_processes() blocks with no timeout. Start it (as root) if the
+    binary is present, or fail loudly with the exact push/run commands if it is
+    missing - never hang silently (principle 3)."""
+    server_path = "/data/local/tmp/frida-server"
+    running = subprocess.run(
+        [adb, "-s", serial, "shell", "ps", "-A"],
+        capture_output=True, text=True, timeout=20,
+    )
+    if "frida-server" in (running.stdout + running.stderr):
+        return
+    present = subprocess.run(
+        [adb, "-s", serial, "shell", "ls", server_path],
+        capture_output=True, text=True, timeout=20,
+    )
+    if present.returncode != 0:
+        raise RuntimeError(
+            "frida-server binary not found on device at "
+            f"{server_path}. Push it first:\n"
+            f"  adb root\n  adb push tools/frida-server-16.7.19-x86_64 {server_path}\n"
+            f"  adb shell chmod 755 {server_path}\n"
+            "then re-run (or pass --skip-dynamic to skip this stage)."
+        )
+    subprocess.run(
+        [adb, "-s", serial, "shell", "nohup", server_path, ">/dev/null", "2>&1", "&"],
+        capture_output=True, text=True, timeout=20,
+    )
+
+
 def setup_frida_connection(device_serial: str) -> frida.Device:
     """Connect Frida to frida-server on the device, bridging WSL2 → Windows.
 
@@ -212,6 +245,11 @@ def setup_frida_connection(device_serial: str) -> frida.Device:
     On WSL2 starts an ADB forward + Windows Python relay, then connects
     via ``add_remote_device()``.
     """
+    # The most common dynamic-stage failure is a pushed-but-not-started
+    # frida-server; start it (or fail loudly) before connecting so the stage
+    # never hangs silently on a dead server (principle 3).
+    _ensure_frida_server(_require_adb(), device_serial)
+
     if not _in_wsl():
         return frida.get_device(device_serial, timeout=10)
 
@@ -220,7 +258,10 @@ def setup_frida_connection(device_serial: str) -> frida.Device:
 
     mgr = frida.get_device_manager()
     device = mgr.add_remote_device(f"{win_ip}:{_FRIDA_RELAY_PORT}")
-    # Verify connection
+    # Verify connection. (frida 16.7.19 has no timeout kwarg on
+    # enumerate_processes; the _ensure_frida_server guard above is what prevents
+    # the common dead-server hang, so this stays plain rather than adding fragile
+    # threading to bound it.)
     device.enumerate_processes()
     return device
 

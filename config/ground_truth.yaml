@@ -89,3 +89,17 @@ bea63726d7025d2bb8f81bf7f94fa096a9f86090d724086f3640c3957536f232:  # com.redshif
     this app's decompile was partial (jadx exit 1), so absence of
     certificate pinning is not confirmed. Evidence bundle:
     docs/plans/handoff/bundles/20260731T122254Z.
+
+1c747b27b3547a8a8798a03128a7edd903a88e02dbcc5b1b2dbf14db69d7e212:  # com.redshift.rs_vapourtraining (RS_Vapour training app - SSL/root negative control)
+  root: false
+  ssl: false
+  source: >
+    Independently verified 2026-08-16 (apktool --no-res dump read directly,
+    not this pipeline's prediction). AndroidManifest.xml has no
+    networkSecurityConfig. The only OkHttp classes are the bundled library
+    (203 smali under okhttp3/, vendor-excluded - bundled lib is not
+    app-owned pinning); zero app-owned references to CertificatePinner,
+    TrustManager, HostnameVerifier, or NSC. No app-owned root indicators
+    (no su paths, Superuser.apk, test-keys, Magisk, Runtime.exec su) across
+    72 app-owned classes. No native .so present in the APK. Registered as
+    the SSL (and root) negative control alongside RS_CertPinning (ssl:true).

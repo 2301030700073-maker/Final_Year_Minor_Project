@@ -9,22 +9,30 @@ import subprocess
 
 import pytest
 
-from common import Evidence
 from static.native import (
     NativeLibrary,
     NativeSignature,
     compute_degradation,
-    ghidra_decompile,
+    find_external_native_loads,
     load_native_signatures,
     match_native,
     parse_readelf_symbols,
     parse_strings,
+    security_triggers,
+    unaccounted_native_loads,
     _classify_obfuscated,
+    _clone_lib_for_path,
     _corpus_contains,
+    _has_jni_surface,
+    _has_native_security_signal,
     _is_jni_export,
     _is_stripped,
     _parse_ghidra_functions,
+    _should_decompile_body,
+    group_identical_so_files,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_parse_readelf_symbols_extracts_names():
@@ -173,6 +181,45 @@ def test_native_su_binary_embedded_exact_membership_and_reachability():
     assert len(result.root_evidence) == 1
 
 
+def test_native_frida_detection_exact_membership_and_not_benign():
+    # native_frida_detection (2026, native anti-instrumentation). Same two
+    # guarantees as native_su_binary_embedded:
+    #  1. Exact membership, not substring: a lib whose strings merely contain
+    #     "frida" inside a longer token (e.g. a debug symbol "frida_config") gets
+    #     ZERO confidence - bare-substring never FP-matches.
+    #  2. A lib embedding an exact Frida artifact literal (frida-server, gum-js-
+    #     loop, linjector) does match - structurally distinctive anti-instrumenta-
+    #     tion probes (ADR-0006).
+    repo = Path(__file__).resolve().parents[2]
+    sig = next(
+        s for s in load_native_signatures(repo / "config/signatures/native_detection.yaml")
+        if s.id == "native_frida_detection"
+    )
+    assert "frida-server" in sig.patterns
+    assert "gum-js-loop" in sig.patterns
+    assert "linjector" in sig.patterns
+
+    # benign: only a longer token containing "frida" as a substring - exact
+    # membership means it never matches the standalone Frida artifact literals.
+    benign = NativeLibrary(
+        abi="arm64-v8a", name="libanalytics.so",
+        strings=["frida_config", "afridaconf", "hello"],
+    )
+    result = match_native([benign], [sig])
+    assert result.root_confidence == 0.0
+    assert result.root_evidence == []
+
+    # real signal: a lib that scans /proc/self/maps for the frida-server
+    # binary name or the gum-js-loop thread marker.
+    probing = NativeLibrary(
+        abi="arm64-v8a", name="libnativeso.so",
+        strings=["frida-server", "gum-js-loop"],
+    )
+    result = match_native([probing], [sig])
+    assert result.root_confidence == 0.4
+    assert len(result.root_evidence) == 1
+
+
 def test_match_native_no_match_zero_confidence():
     lib = NativeLibrary(abi="arm64-v8a", name="libclean.so", exports=["JNI_OnLoad"], strings=["hello"])
     sig = NativeSignature(id="native_jni_root_check", category="root", weight=0.5,
@@ -180,6 +227,88 @@ def test_match_native_no_match_zero_confidence():
     result = match_native([lib], [sig])
     assert result.root_confidence == 0.0
     assert result.root_evidence == []
+
+
+def test_match_native_marks_unattributed_native_root_indicator():
+    # Boundary-2: an app-owned lib carrying a runtime-state idiom (/sbin/su) that
+    # matches NO native signature surfaces as an unattributed root indicator -
+    # the native-side analog of the Java boundary-1 scan. The category must not
+    # certify a confident native negative (ADR-0006).
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="libnativecheck.so",
+        exports=["JNI_OnLoad"], strings=["/sbin/su", "hello"],
+    )
+    result = match_native([lib], [])
+    assert result.unattributed_indicators == {"root": True}
+
+
+def test_match_native_unattributed_ssl_indicator():
+    # A lib reading the system CA store signals native TLS-validation logic with
+    # no native SSL signature -> ssl is unattributed.
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="libtls.so", strings=["/system/etc/security/cacerts"],
+    )
+    result = match_native([lib], [])
+    assert result.unattributed_indicators == {"ssl": True}
+
+
+def test_match_native_unattributed_ssl_hostname_verify_indicator():
+    # A lib setting the expected server hostname (X509_VERIFY_PARAM_set1_host /
+    # SSL_set1_host) signals native hostname-verification logic. Like
+    # SSL_CTX_set_verify, these anchors are present in ordinary correct TLS clients,
+    # so they are NEVER scored as pinning - only flagged as an unknown native TLS
+    # capability (coverage-limited, ADR-0006) so a native clean never over-claims.
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="libboringtls.so",
+        exports=["JNI_OnLoad"], strings=["X509_VERIFY_PARAM_set1_host", "hello"],
+    )
+    result = match_native([lib], [])
+    assert result.unattributed_indicators == {"ssl": True}
+
+    lib2 = NativeLibrary(
+        abi="arm64-v8a", name="libssl.so",
+        exports=["JNI_OnLoad"], strings=["SSL_set1_host", "hello"],
+    )
+    result2 = match_native([lib2], [])
+    assert result2.unattributed_indicators == {"ssl": True}
+
+
+def test_match_native_no_unattributed_when_signature_matches_category():
+    # Boundary-2: when a native signature already matched the category, the
+    # indicator is NOT unattributed (the technique is recognized, not unknown).
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="libnativecheck.so",
+        exports=["JNI_OnLoad"], strings=["/sbin/su"],
+    )
+    sig = NativeSignature(id="native_su_binary_embedded", category="root", weight=0.4,
+                          pattern_type="embedded_string", patterns=["/sbin/su"])
+    result = match_native([lib], [sig])
+    assert result.root_confidence == 0.4
+    assert result.unattributed_indicators == {}  # root matched -> not unattributed
+
+
+def test_match_native_third_party_lib_indicators_excluded():
+    # Boundary-2: a bundled SDK native lib (libsentry.so) does its own root check;
+    # its indicators must NOT surface as the app's own unknown detection - the
+    # native analog of the Java _third_party_file exclusion.
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="libsentry.so", strings=["/sbin/su"],
+    )
+    result = match_native([lib], [])
+    assert result.unattributed_indicators == {}
+    # an unknown (app-owned) lib with the same idiom still surfaces it
+    lib2 = NativeLibrary(abi="arm64-v8a", name="libappcheck.so", strings=["/sbin/su"])
+    result2 = match_native([lib2], [])
+    assert result2.unattributed_indicators == {"root": True}
+
+
+def test_match_native_clean_lib_no_unattributed_indicators():
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="libclean.so",
+        exports=["JNI_OnLoad"], strings=["hello world"],
+    )
+    result = match_native([lib], [])
+    assert result.unattributed_indicators == {}
 
 
 def test_parse_ghidra_functions_parses_func_markers():
@@ -227,14 +356,43 @@ def test_match_native_fires_on_ghidra_function_body():
     assert res.root_evidence[0].line_or_offset == "decompiled-body"
 
 
+def test_match_native_resolves_ptrace_fork_combo_via_recovered_body():
+    # Gap-1 end-to-end at the pure level: a STRIPPED lib with NO Java_* export
+    # imports `ptrace` but hides `fork` inside a function body. The broadened
+    # gate (_should_decompile_body) fires on the ptrace security signal -> Ghidra
+    # recovers the body -> the require_all ptrace+fork combo is confirmed via the
+    # decompiled body. Before the fix this lib was symbol-level-only: require_all
+    # failed on the missing visible `fork` AND no Java_* export ever triggered
+    # decompilation, so the anti-debug technique was completely missed.
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="libfoo.so",
+        exports=["ptrace", "getppid"],          # ptrace visible, fork hidden
+        stripped=True, ghidra_decompiled=True,
+        ghidra_functions=["anti_debug\nvoid anti_debug(void){ pid_t p=fork(); ptrace(PTRACE_TRACEME); }"],
+    )
+    sig = NativeSignature(id="native_ptrace_fork_antidebug", category="root", weight=0.5,
+                          pattern_type="export_symbol", patterns=["ptrace", "fork"], require_all=True)
+    res = match_native([lib], [sig])
+    # The require_all combo FIRES - the missing visible `fork` is confirmed via
+    # the recovered body. Evidence anchors on the visible `ptrace` export
+    # (patterns[0]), which is what actually triggered the gate.
+    assert res.root_confidence == 0.5
+    assert res.root_evidence[0].matched_text == "ptrace"
+    # And the gate that got this lib decompiled fires on the ptrace signal alone
+    # (no Java_* export present) - the Gap-1 blind spot is closed.
+    assert _should_decompile_body(lib.stripped, lib.obfuscated, lib.jni_exports,
+                                  lib.exports, lib.strings, {"ptrace", "fork"}) is True
+
+
 def test_ghidra_decompile_ok_false_when_ghidra_absent(tmp_path, monkeypatch):
     # A missing Ghidra install must degrade loudly (ok=False + error), never
     # crash and never falsely certify the lib scanned (principle 3).
     from static import native as native_mod
     monkeypatch.setattr(native_mod, "_find_ghidra_headless", lambda: None)
-    ok, bodies, err = native_mod.ghidra_decompile(tmp_path / "lib.so", tmp_path / "o.txt")
+    ok, bodies, truncated, err = native_mod.ghidra_decompile(tmp_path / "lib.so", tmp_path / "o.txt")
     assert ok is False
     assert bodies == []
+    assert truncated is False
     assert "ghidra headless not found" in err
 
 
@@ -259,6 +417,44 @@ def test_compute_degradation_stripped_is_partial():
 def test_compute_degradation_obfuscated_is_partial():
     lib = NativeLibrary(abi="arm64-v8a", name="lib.so", obfuscated=True)
     assert compute_degradation([lib])["arm64-v8a"] == "partial"
+
+
+def test_compute_degradation_upx_packed_is_partial():
+    # Gap-4: a UPX-packed lib we could not unpack reads partial (the real code is
+    # hidden behind the stub), never clean - matching Gap-2's packed->java=partial.
+    lib = NativeLibrary(abi="arm64-v8a", name="lib.so", packed=True, packer="UPX")
+    assert compute_degradation([lib])["arm64-v8a"] == "partial"
+
+
+def test_strip_truncation_sentinel_detects_and_cleans():
+    # Item #3 / time: when the per-lib Ghidra cap is hit, the script appends the
+    # sentinel; it must be detected (truncated=True) and stripped so it never
+    # pollutes a function body or the matching corpus.
+    from static import native as native_mod
+    raw = "FUNC f\nint f(){return 1;}\n" + native_mod._GHIDRA_TRUNCATED_SENTINEL + " 1500\n"
+    cleaned, truncated = native_mod._strip_truncation_sentinel(raw)
+    assert truncated is True
+    assert native_mod._GHIDRA_TRUNCATED_SENTINEL not in cleaned
+    assert "FUNC f" in cleaned  # real bodies survive the strip
+    # A normal (uncapped) dump has no sentinel.
+    clean2, trunc2 = native_mod._strip_truncation_sentinel("FUNC g\nint g(){}\n")
+    assert trunc2 is False and clean2 == "FUNC g\nint g(){}\n"
+
+
+def test_compute_degradation_truncated_ghidra_is_partial_not_fully_analyzed():
+    # Item #3 / time: a lib whose Ghidra body-dump hit the cap was only PARTIALLY
+    # decompiled - the unexamined tail could hold a technique, so it reads
+    # `partial` (coverage-limited, ADR-0006), NEVER fully_analyzed over the
+    # unexamined tail. This is the honest bound that lets the cap cut time on
+    # giant RN libs without silently certifying an unexamined surface as scanned.
+    full = NativeLibrary(abi="arm64-v8a", name="lib.so", stripped=True,
+                         ghidra_decompiled=True, ghidra_functions=["a\nint a(){}"],
+                         ghidra_truncated=False)
+    assert compute_degradation([full])["arm64-v8a"] == "fully_analyzed"
+    truncated = NativeLibrary(abi="arm64-v8a", name="librnskia.so", stripped=True,
+                              ghidra_decompiled=True, ghidra_functions=["a\nint a(){}"],
+                              ghidra_truncated=True)
+    assert compute_degradation([truncated])["arm64-v8a"] == "partial"
 
 
 def test_compute_degradation_empty_is_unscannable():
@@ -344,3 +540,535 @@ def test_analyze_so_marks_unscannable_on_nonzero_returncode(tmp_path, monkeypatc
 
     assert lib.unscannable is True
     assert "readelf exited 1" in lib.scan_error
+
+
+def test_match_native_fires_from_exports_even_when_gate_skips_body():
+    # Regression for the Ghidra JNI gate (native.py analyze_so): detection must
+    # NEVER depend on body-decompilation - a technique in a lib's EXPORT corpus
+    # (readelf -Ws includes imports) must fire from exports alone, even when
+    # ghidra_functions is empty. (Since Gap-5 a JNI_OnLoad lib IS decompiled, but
+    # a lib Ghidra simply failed on - ghidra_error set, empty bodies - must still
+    # be detected from its symbols; the two sources are independent.) Verified
+    # against real PG libs (sentry's ptrace import is symbol-caught).
+    sig = NativeSignature(id="native_ptrace_fork_antidebug", category="root", weight=0.5,
+                          pattern_type="export_symbol", patterns=["ptrace", "fork"],
+                          require_all=True)
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="libfoo.so",
+        exports=["JNI_OnLoad", "ptrace", "fork"],  # technique symbol-visible
+        jni_exports=[],  # no Java_* -> the gate skips body-decompilation
+        stripped=True,
+        ghidra_functions=[],  # what the gate-skipped lib looks like to the matcher
+    )
+    result = match_native([lib], [sig])
+    assert any(e.signature_id == "native_ptrace_fork_antidebug" for e in result.root_evidence)
+    assert result.root_confidence == pytest.approx(0.5)
+
+
+def test_try_read_dynsym_pyelftools_parses_real_so():
+    # Limitation-8 fix: pyelftools reads a real .so's .dynsym in pure Python, no
+    # host binutils, so a lib for which the host readelf/nm lacks a BFD target
+    # still parses (arch-agnostic). This exercises the helper against an actual
+    # installed C-extension .so - the exact kind of real ELF analyze_so consumes.
+    import sys
+    from static.native import _pyelftools_has_symtab, _try_read_dynsym_pyelftools
+
+    sp = Path(sys.prefix) / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+    so = next(sp.rglob("*.so"), None)
+    if so is None:
+        pytest.skip("no real .so in site-packages to parse")
+    syms = _try_read_dynsym_pyelftools(so)
+    assert syms is not None and syms, f"pyelftools failed to read dynsym of {so}"
+    assert all(isinstance(s, str) and s for s in syms)
+    # A glibc-linked .so imports libc symbols; elftools strips `@LIBC` version
+    # suffixes, so the raw names must be clean (the same guarantee the readelf
+    # tokenizer provides, so match_native's exact-membership still fires).
+    assert all("@" not in s for s in syms)
+    # .symtab presence check runs on the same file without erroring.
+    assert _pyelftools_has_symtab(so) is not None
+
+
+def test_compute_degradation_gate_skipped_lib_is_partial():
+    # A stripped lib the JNI gate deliberately did NOT body-decompile must be
+    # honest: `partial` (bodies unexamined -> no confident native negative), never
+    # `fully_analyzed` (would overclaim, ADR-0006) and never `unscannable` (we
+    # DID read its symbols/strings). Locks in the coverage bound PG reports.
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="librn.so",
+        exports=["JNI_OnLoad"], strings=["app"],
+        stripped=True, ghidra_decompiled=False,
+    )
+    cov = compute_degradation([lib])
+    assert cov["arm64-v8a"] == "partial"
+
+
+# --- Gap-1: native body-decompilation gate (stripped, no-Java_* blind spot) ---
+
+def test_security_triggers_union_of_all_patterns():
+    sigs = [
+        NativeSignature(id="a", category="root", weight=0.5, pattern_type="export_symbol",
+                        patterns=["ptrace", "fork"], require_all=True),
+        NativeSignature(id="b", category="ssl", weight=0.5, pattern_type="embedded_string",
+                        patterns=["pin_cert_sha256"]),
+    ]
+    assert security_triggers(sigs) == {"ptrace", "fork", "pin_cert_sha256"}
+
+
+def test_has_native_security_signal_true_on_overlap():
+    # A stripped lib importing `ptrace` but NOT `fork` overlaps the corpus -> it
+    # is a body-decompilation candidate even with no Java_* export. Overlap is
+    # EXACT membership, mirroring match_native's exact embedded_string semantics
+    # (a substring rule would over-trigger on benign `supersu`-style tokens).
+    assert _has_native_security_signal(["ptrace"], [], {"ptrace", "fork"}) is True
+    assert _has_native_security_signal([], ["/system/xbin/su"], {"/system/xbin/su"}) is True
+
+
+def test_has_jni_surface_detects_full_surface():
+    # Gap-5: the JNI surface is Java_* exports OR the JNI_OnLoad/OnUnload
+    # dynamic-registration entry points - not Java_* alone.
+    assert _has_jni_surface(["Java_foo", "helper"]) is True
+    assert _has_jni_surface(["JNI_OnLoad"]) is True
+    assert _has_jni_surface(["JNI_OnUnload"]) is True
+    assert _has_jni_surface(["app_helper", "sqrt"]) is False
+    assert _has_jni_surface([]) is False
+
+
+def test_has_native_security_signal_false_when_no_overlap():
+    assert _has_native_security_signal(["JNI_OnLoad"], ["app"], {"ptrace", "fork"}) is False
+    assert _has_native_security_signal(["ptrace"], [], set()) is False
+
+
+def test_should_decompile_body_fires_on_signal_without_jni_export():
+    # Gap-1 core: a STRIPPED lib with a security signal (ptrace, part of the
+    # require_all anti-debug combo) but NO Java_* export must be decompiled - the
+    # hidden `fork` in a body is what resolves the combo. Before this gate it was
+    # symbol-level-only and the technique was never recovered.
+    assert _should_decompile_body(True, False, [], ["ptrace"], [], {"ptrace", "fork"}) is True
+
+
+def test_should_decompile_body_fires_on_jni_onload_surface():
+    # Gap-5: a stripped lib that defines JNI_OnLoad (even with NO Java_* export
+    # and NO corpus signal) has a JNI registration surface Java can call - its
+    # bodies may hold a dynamically-registered root/SSL check, so it MUST be
+    # body-decompiled, not left symbol-level-only (the pre-Gap-5 blind spot).
+    assert _should_decompile_body(True, False, [], ["JNI_OnLoad"], ["app"], {"ptrace", "fork"}) is True
+
+
+def test_should_decompile_body_skips_no_jni_surface_and_no_signal():
+    # The performance guard is kept: a stripped lib with neither a JNI surface
+    # (no Java_*, no JNI_OnLoad) nor a security signal (benign infra like
+    # libjsi/libc++) skips decompilation.
+    assert _should_decompile_body(True, False, [], ["app_helper"], ["app"], {"ptrace", "fork"}) is False
+
+
+def test_should_decompile_body_fires_on_unattributed_native_indicator():
+    # Boundary #3: a stripped lib with NO JNI surface and NO native-signature
+    # signal but carrying an UNRECOGNIZED detection idiom (/sbin/su - an
+    # indicator, not a signature pattern) was previously left partial-unexamined.
+    # The indicator now drives the gate, so its body is decompiled and a hidden
+    # root check is actually examined instead of staying a blind spot.
+    assert _should_decompile_body(True, False, [], [], ["/sbin/su"], {"ptrace", "fork"}) is True
+    # The native SSL indicator (OpenSSL verify control) also drives the gate.
+    assert _should_decompile_body(True, False, [], ["SSL_CTX_set_verify"], [], {"ptrace", "fork"}) is True
+    # A benign stripped lib with no detection idiom still skips (guard kept).
+    assert _should_decompile_body(True, False, [], ["app_helper"], ["hello"], {"ptrace", "fork"}) is False
+
+
+def test_should_decompile_body_keeps_jni_export_trigger():
+    # Historical behavior preserved: a stripped lib exposing a Java_* JNI export
+    # (in its export corpus, of which jni_exports is a subset) is decompiled even
+    # if its corpus happens not to overlap the signature set.
+    assert _should_decompile_body(True, False, ["Java_foo"], ["Java_foo"], [], {"ptrace", "fork"}) is True
+
+
+def test_should_decompile_body_skips_healthy_unstripped():
+    # A fully-symbolized (unstripped) lib needs no body decompilation - symbols
+    # already expose the technique.
+    assert _should_decompile_body(False, False, ["Java_foo"], ["check_root"], [], {"check_root"}) is False
+
+
+def test_should_decompile_body_fires_on_obfuscated_with_signal():
+    assert _should_decompile_body(False, True, [], ["ptrace"], [], {"ptrace", "fork"}) is True
+
+
+# --- boundary #4: System.load/loadLibrary targets and unaccounted loads ---
+
+
+def test_find_external_native_loads_loadlibrary(tmp_path):
+    f = tmp_path / "A.java"
+    f.write_text(
+        'class A { static { System.loadLibrary("crypto"); }\n'
+        'void x() { System.loadLibrary("rootcheck"); } }'
+    )
+    targets = find_external_native_loads([f])
+    assert "crypto" in targets and "rootcheck" in targets
+
+
+def test_find_external_native_loads_load_abs_and_assets(tmp_path):
+    f = tmp_path / "A.java"
+    f.write_text(
+        'System.load("/data/local/tmp/evil.so");\n'
+        'System.load("assets/native/x.so");\n'
+        'notASystem.load("skip");'
+    )
+    # The `System.load` (absolute path) and `System.load("assets/...")` targets
+    # are caught; a bare `load(...)` on another receiver is not a System load.
+    targets = find_external_native_loads([f])
+    assert "/data/local/tmp/evil.so" in targets
+    assert "assets/native/x.so" in targets
+    assert "skip" not in targets
+
+
+def test_find_external_native_loads_empty_when_none(tmp_path):
+    f = tmp_path / "A.java"
+    f.write_text("class A { int x = 1; }")
+    assert find_external_native_loads([f]) == []
+
+
+def test_find_external_native_loads_skips_unreadable(tmp_path):
+    assert find_external_native_loads([tmp_path / "missing.java"]) == []
+
+
+def test_unaccounted_native_loads_loadlibrary_name_mapping():
+    # loadLibrary("foo") -> libfoo.so; covered if that basename was analyzed.
+    analyzed = {"libcrypto.so", "librootcheck.so"}
+    assert unaccounted_native_loads(["crypto", "rootcheck"], analyzed) == []
+    assert unaccounted_native_loads(["crypto", "missing"], analyzed) == ["missing"]
+
+
+def test_unaccounted_native_loads_abs_path_uses_basename():
+    # An absolute-path load maps to its exact basename ("evil.so"): accounted
+    # only if a lib of that name was extracted+analyzed (an assets/ or standalone
+    # .so, not libfoo.so under lib/<abi>/).
+    assert unaccounted_native_loads(["/data/local/tmp/evil.so"], {"evil.so"}) == []
+    # A load target with no corresponding analyzed .so is unaccounted.
+    assert unaccounted_native_loads(["/data/local/tmp/other.so"], {"evil.so"}) == [
+        "/data/local/tmp/other.so"
+    ]
+
+
+def test_unaccounted_native_loads_already_dot_so():
+    analyzed = {"x.so"}
+    assert unaccounted_native_loads(["assets/native/x.so"], analyzed) == []
+    assert unaccounted_native_loads(["assets/native/y.so"], analyzed) == [
+        "assets/native/y.so"
+    ]
+
+
+def test_unaccounted_native_loads_empty():
+    assert unaccounted_native_loads([], set()) == []
+    # A loadLibrary("libfoo") that already starts with lib is not double-prefixed.
+    assert unaccounted_native_loads(["libfoo"], {"libfoo.so"}) == []
+
+
+# --- Fix 3: SHA-256 byte-dedup -----------------------------------------------
+
+def _write_so(tmp_path, name, data):
+    p = tmp_path / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(data)
+    return p
+
+
+def test_group_identical_so_files_dedups_same_bytes(tmp_path):
+    a = _write_so(tmp_path, "arm64-v8a/libfoo.so", b"\x7fELF-A")
+    b = _write_so(tmp_path, "arm64-v8a/libbar.so", b"\x7fELF-A")  # identical bytes
+    c = _write_so(tmp_path, "x86_64/libfoo.so", b"\x7fELF-B")     # different bytes
+    groups = group_identical_so_files([a, b, c])
+    assert len(groups) == 2
+    digests = [g[0] for g in groups]
+    assert digests[0] != digests[1]
+    # identical-byte paths share a group (order preserved: [a, b])
+    group_a = next(g for g in groups if g[0] == digests[0])
+    assert set(group_a[1]) == {a, b}
+    # different-byte path is its own group
+    group_c = next(g for g in groups if g[0] == digests[1])
+    assert group_c[1] == [c]
+
+
+def test_group_identical_so_files_preserves_individual_digests(tmp_path):
+    a = _write_so(tmp_path, "arm64-v8a/libfoo.so", b"\x7fELF-A")
+    b = _write_so(tmp_path, "arm64-v8a/libbar.so", b"\x7fELF-A")
+    groups = group_identical_so_files([a, b])
+    assert len(groups) == 1
+    digest, paths = groups[0]
+    assert len(paths) == 2
+    # each member's own streamed digest equals the group key
+    from static.native import _sha256_file
+    for p in paths:
+        assert _sha256_file(p) == digest
+
+
+def test_group_identical_so_files_empty_and_singleton(tmp_path):
+    assert group_identical_so_files([]) == []
+    a = _write_so(tmp_path, "arm64-v8a/libfoo.so", b"\x7fELF-A")
+    groups = group_identical_so_files([a])
+    assert len(groups) == 1
+    assert groups[0][1] == [a]
+
+
+def test_clone_lib_for_path_overrides_abi_and_name(tmp_path):
+    base = NativeLibrary(abi="arm64-v8a", name="libfoo.so", sha256="abc123",
+                         exports=["check_root"], stripped=True,
+                         jni_onload=True, ghidra_functions=["int check_root(void)"])
+    other = _write_so(tmp_path, "x86_64/libbar.so", b"\x7fELF")
+    cloned = _clone_lib_for_path(base, other)
+    assert cloned.abi == "x86_64"
+    assert cloned.name == "libbar.so"
+    assert cloned.sha256 == "abc123"          # identity preserved
+    assert cloned.exports == base.exports     # analysis fields shared
+    assert cloned.stripped is True
+    assert cloned.jni_onload is True
+    assert cloned.ghidra_functions == base.ghidra_functions
+
+
+def test_clone_lib_for_path_unknown_abi(tmp_path):
+    base = NativeLibrary(abi="arm64-v8a", name="libfoo.so")
+    other = _write_so(tmp_path, "weird/libbar.so", b"\x7fELF")
+    assert _clone_lib_for_path(base, other).abi == "unknown"
+
+
+# --- native-analysis disk cache (analyze_so cache_dir) -----------------------
+# The uncached analyze_so body needs a real .so + toolchain, so these tests pin
+# the pure cache-contract instead: lossless round-trip, and correct invalidation
+# on a version change or a security-trigger change (a stale entry must read as a
+# miss, never serve old analysis - ADR-0002 no-silent-staleness).
+
+
+def test_native_analyze_cache_round_trip_lossless(tmp_path):
+    from static.native import _ANALYZE_CACHE_VERSION, _load_analyze_cache, _save_analyze_cache
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="libroot.so", exports=["check_root", "strncmp"],
+        strings=["/system/bin/su", "magisk"], stripped=True, obfuscated=False,
+        jni_onload=True, ghidra_functions=["int check_root(void) { return 1; }"],
+        ghidra_decompiled=True, ghidra_error=None, ghidra_truncated=False,
+        sha256="feedbeef",
+    )
+    cache_dir = tmp_path / "natcache"
+    _save_analyze_cache(cache_dir, "feedbeef", _ANALYZE_CACHE_VERSION, "check_root", lib)
+    loaded = _load_analyze_cache(cache_dir, "feedbeef", _ANALYZE_CACHE_VERSION, "check_root")
+    assert loaded is not None
+    assert loaded == lib  # dataclass equality - the cache is lossless
+
+
+def test_native_analyze_cache_stale_version_is_a_miss(tmp_path):
+    from static.native import _load_analyze_cache, _save_analyze_cache
+    lib = NativeLibrary(abi="arm64-v8a", name="libroot.so")
+    cache_dir = tmp_path / "natcache"
+    _save_analyze_cache(cache_dir, "deadbeef", "native-analyze-v1", "sigA", lib)
+    # A bump to v2 (analysis logic / toolchain change) must NOT serve the v1 entry.
+    assert _load_analyze_cache(cache_dir, "deadbeef", "native-analyze-v2", "sigA") is None
+
+
+def test_native_analyze_cache_trigger_change_is_a_miss(tmp_path):
+    from static.native import _load_analyze_cache, _save_analyze_cache
+    lib = NativeLibrary(abi="arm64-v8a", name="libroot.so")
+    cache_dir = tmp_path / "natcache"
+    _save_analyze_cache(cache_dir, "cafebabe", "native-analyze-v1", "check_root", lib)
+    # A different security-trigger set means the Ghidra body gate could have
+    # decompiled different functions - the entry must not be served.
+    assert _load_analyze_cache(cache_dir, "cafebabe", "native-analyze-v1", "other_sig") is None
+
+
+def test_analyze_so_ghidra_last_resort_recovers_tool_failure(tmp_path, monkeypatch):
+    # The Ghidra last-resort: when the symbol layer (pyelftools/readelf/nm/
+    # strings) raises NativeToolError, analyze_so must NOT immediately certify the
+    # lib `unscannable` - it tries Ghidra as a last resort. If Ghidra recovers
+    # function bodies, the lib is scanned (not a silent lower bound), and
+    # compute_degradation lifts it to fully_analyzed. Without the last-resort this
+    # lib was abandoned to `unscannable` - recoverable data dropped.
+    so = tmp_path / "lib.so"
+    so.write_bytes(b"\x7fELF opaque")
+
+    from static import native as native_mod
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=60)  # symbol layer fails
+
+    monkeypatch.setattr(native_mod, "_require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(native_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        native_mod, "ghidra_decompile",
+        lambda p, out: (True, ["int check_root(void) { return 1; }"], False, None),
+    )
+
+    lib = native_mod.analyze_so(so)
+
+    assert lib.unscannable is False        # recovered, not abandoned
+    assert lib.ghidra_decompiled is True
+    assert lib.ghidra_functions            # bodies recovered by Ghidra
+    assert compute_degradation([lib])[lib.abi] == "fully_analyzed"
+
+
+def test_analyze_so_ghidra_last_resort_falls_back_to_unscannable_when_ghidra_fails(tmp_path, monkeypatch):
+    # The honest negative: if Ghidra ALSO fails to read the lib (returns no
+    # bodies), analyze_so must still certify it `unscannable` - never a silent
+    # partial or a false clean. The last-resort only lifts the lib when Ghidra
+    # genuinely recovers code.
+    so = tmp_path / "lib.so"
+    so.write_bytes(b"\x7fELF opaque")
+
+    from static import native as native_mod
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=60)
+
+    monkeypatch.setattr(native_mod, "_require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(native_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        native_mod, "ghidra_decompile",
+        lambda p, out: (False, [], False, "ghidra could not read it"),
+    )
+
+    lib = native_mod.analyze_so(so)
+
+    assert lib.unscannable is True
+    assert lib.scan_error is not None
+    assert compute_degradation([lib])[lib.abi] == "unscannable"
+
+
+def test_every_native_signature_has_reachable_signal():
+    # Corpus-level dead-signature check for the native corpus (Batch D). Every id
+    # must carry a non-empty pattern, and every embedded_string pattern must be
+    # >=4 chars - the `strings` extraction bound (min printable length 4 in
+    # analyze_so) means a shorter literal can never be recovered from a real .so,
+    # so it would be unreachable dead weight (same ADR-0006 discipline as
+    # native_su_binary_embedded). This pins the real native ids so a renamed or
+    # unreachable signature fails here loudly.
+    sigs = load_native_signatures(REPO_ROOT / "config" / "signatures" / "native_detection.yaml")
+    assert sigs
+    ids = {s.id for s in sigs}
+    assert len(ids) == len(sigs), "native_detection.yaml has duplicate ids"
+    for sig in sigs:
+        assert sig.patterns, f"native id '{sig.id}' has empty patterns"
+        for p in sig.patterns:
+            assert isinstance(p, str) and p.strip(), f"native id '{sig.id}' has a blank pattern"
+            if sig.pattern_type == "embedded_string":
+                assert len(p) >= 4, (
+                    f"native id '{sig.id}' embedded_string pattern '{p}' is <4 chars - "
+                    "unreachable under the strings min-printable-length-4 extraction bound"
+                )
+
+
+def test_native_ssl_pinning_verify_matches_and_not_benign():
+    # native_ssl_pinning_verify (category ssl, export_symbol): a lib exporting a
+    # certificate-pinning verify symbol fires ssl evidence; a benign lib exporting
+    # only generic crypto symbols does not (exact export membership, ADR-0006).
+    sig = next(
+        s for s in load_native_signatures(REPO_ROOT / "config" / "signatures" / "native_detection.yaml")
+        if s.id == "native_ssl_pinning_verify"
+    )
+    pinning = NativeLibrary(
+        abi="arm64-v8a", name="libpinning.so",
+        exports=["checkCertificatePinning", "verify_certificate"],
+    )
+    result = match_native([pinning], [sig])
+    assert result.ssl_confidence == 0.5
+    assert any(e.signature_id == "native_ssl_pinning_verify" for e in result.ssl_evidence)
+
+    benign = NativeLibrary(abi="arm64-v8a", name="libssl.so", exports=["SSL_read", "SSL_write"])
+    result = match_native([benign], [sig])
+    assert result.ssl_confidence == 0.0
+    assert result.ssl_evidence == []
+
+
+def test_native_ssl_custom_verify_callback_matches_and_not_benign():
+    # native_ssl_custom_verify_callback (category ssl, export_symbol): the
+    # canonical OpenSSL native-pinning idiom SSL_CTX_set_cert_verify_callback.
+    # A lib importing it (readelf -Ws includes imports, match_native matches the
+    # export corpus) is an unambiguous native pinning hook; a lib importing only
+    # the generic verify setters (not scored - see the YAML) must not fire.
+    sig = next(
+        s for s in load_native_signatures(REPO_ROOT / "config" / "signatures" / "native_detection.yaml")
+        if s.id == "native_ssl_custom_verify_callback"
+    )
+    hooked = NativeLibrary(
+        abi="arm64-v8a", name="libpinning.so",
+        exports=["SSL_CTX_set_cert_verify_callback"],
+    )
+    result = match_native([hooked], [sig])
+    assert result.ssl_confidence == 0.4
+    assert any(e.signature_id == "native_ssl_custom_verify_callback" for e in result.ssl_evidence)
+
+    # generic verify setter that the YAML deliberately does NOT score (SSL_VERIFY_NONE)
+    benign = NativeLibrary(
+        abi="arm64-v8a", name="libssl.so",
+        exports=["SSL_CTX_set_verify", "SSL_set_verify"],
+    )
+    result = match_native([benign], [sig])
+    assert result.ssl_confidence == 0.0
+    assert result.ssl_evidence == []
+
+
+# --- parallel Ghidra decompilation (analyze_so_many + per-.so project dir) ---
+# The parallelism is a pure orchestrator over analyze_so, so these tests are
+# fixture-testable anywhere by monkeypatching analyze_so - no readelf/Ghidra.
+# The per-.so Ghidra project dir (_ghidra_project_dir) is the correctness
+# prerequisite: concurrent analyze_so passes must never write one shared dir.
+
+def test_ghidra_project_dir_is_per_so(tmp_path):
+    from static import native as native_mod
+    a = native_mod._ghidra_project_dir(tmp_path / "liba.so")
+    b = native_mod._ghidra_project_dir(tmp_path / "libb.so")
+    assert a != b
+    assert a.name == "_ghidra_proj_liba"
+    assert a.parent == tmp_path
+
+
+def test_analyze_so_many_preserves_order(monkeypatch):
+    from static import native as native_mod
+    from pathlib import Path
+    seen = []
+
+    def fake(p, security_triggers=None, cache_dir=None):
+        seen.append(p.name)
+        return native_mod.NativeLibrary(abi="x", name=p.name)
+
+    monkeypatch.setattr(native_mod, "analyze_so", fake)
+    paths = [Path(f"/tmp/lib{i}.so") for i in range(5)]
+    out = native_mod.analyze_so_many(paths, max_workers=3)
+    assert [o.name for o in out] == [f"lib{i}.so" for i in range(5)]
+    assert seen == [f"lib{i}.so" for i in range(5)]
+
+
+def test_analyze_so_many_bounds_concurrency(monkeypatch):
+    import time
+    from static import native as native_mod
+    from pathlib import Path
+    state = {"active": 0, "peak": 0}
+
+    def fake(p, security_triggers=None, cache_dir=None):
+        state["active"] += 1
+        state["peak"] = max(state["peak"], state["active"])
+        time.sleep(0.03)
+        state["active"] -= 1
+        return native_mod.NativeLibrary(abi="x", name=p.name)
+
+    monkeypatch.setattr(native_mod, "analyze_so", fake)
+    paths = [Path(f"/tmp/lib{i}.so") for i in range(6)]
+    native_mod.analyze_so_many(paths, max_workers=3)
+    assert state["peak"] <= 3
+
+
+def test_analyze_so_many_max_workers_1_is_serial(monkeypatch):
+    import time
+    from static import native as native_mod
+    from pathlib import Path
+    state = {"active": 0, "peak": 0}
+
+    def fake(p, security_triggers=None, cache_dir=None):
+        state["active"] += 1
+        state["peak"] = max(state["peak"], state["active"])
+        time.sleep(0.01)
+        state["active"] -= 1
+        return native_mod.NativeLibrary(abi="x", name=p.name)
+
+    monkeypatch.setattr(native_mod, "analyze_so", fake)
+    paths = [Path(f"/tmp/lib{i}.so") for i in range(4)]
+    native_mod.analyze_so_many(paths, max_workers=1)
+    assert state["peak"] == 1
+
+
+def test_analyze_so_many_empty_input():
+    from static import native as native_mod
+    assert native_mod.analyze_so_many([]) == []

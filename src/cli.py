@@ -47,6 +47,7 @@ from common import (
     CorrelationResult,
     Evidence,
     StageResult,
+    SuccessCheck,
     VerificationResult,
 )
 from dynamic import correlation as correlation_module
@@ -58,22 +59,38 @@ from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
 from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
 from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
 from ingest.metadata import compute_hashes, ingest
+from ingest.normalize import normalize_input
 from report.attribution import attribute_root_evidence, gate_all_third_party
 from report.generator import generate_calibration_report, generate_report
-from static.coverage import apply_coverage_bound, coverage_bound_line, per_surface_coverage
+from static.coverage import (
+    apply_coverage_bound,
+    apply_unattributed_indicators,
+    apply_unresolved_java,
+    apply_unresolved_native,
+    confidence_bound,
+    coverage_bound_line,
+    js_surface_coverage,
+    per_surface_coverage,
+)
+from static.dynload import find_dynamic_loading
+from static.hermes import is_binary_bundle, is_bundle_candidate, scan_bundle
+from static.webview import find_webview_js
+from static.jnibridge import has_unresolved
 from static.deobfuscate import find_mapping_file, parse_mapping
 from static.decision_engine import DEFAULT_THRESHOLD, classify
+from static.androguard_scanner import scan_dex_strings
 from static.decompile import decompile
-from static.manifest import ManifestInfo, parse_manifest
+from static.manifest import ManifestInfo, parse_manifest, parse_manifest_apk
 from static.native import (
-    analyze_so,
     compute_degradation,
     extract_native_libs,
     load_native_signatures,
     match_native,
 )
 from static.obfuscation import detect_obfuscation_level
+from static.packers import detect_packers, load_packer_signatures
 from static.signatures import load_signatures, scan
+from static.stringrecover import match_recovered_strings, recover_hidden_strings
 from storage.results import existing_metadata, load_runs_for_calibration, save_metadata, save_run
 
 app = typer.Typer()
@@ -85,12 +102,33 @@ REPORTS_ROOT = OUTPUTS_ROOT / "reports"
 CALIBRATION_REPORTS_ROOT = OUTPUTS_ROOT / "reports" / "calibration"
 AUDIT_LOG_PATH = OUTPUTS_ROOT / "audit_log.jsonl"
 
-SUCCESS_CHECKS = {
+# The Protocol is the live contract for the dispatch table: every concrete
+# success check must satisfy `check(logcat_output, frida_log) -> VerificationResult`
+# (structural subtyping), so adding a check that deviates from the signature
+# fails at the type/contract level, not silently at runtime.
+SUCCESS_CHECKS: dict[str, SuccessCheck] = {
     "uncrackable1": UnCrackable1SuccessCheck(),
     "uncrackable2": UnCrackable2SuccessCheck(),
     "uncrackable3": UnCrackable3SuccessCheck(),
     "AndroGoat": AndroGoatSuccessCheck(),
 }
+
+
+def _canonical_target(target: str) -> str:
+    """Normalize a user-typed --target to the registered lookup key.
+
+    SCRIPTS_BY_TARGET_ACTION and SUCCESS_CHECKS both key on lowercase
+    ``uncrackable1/2/3`` but mixed-case ``AndroGoat``. A natural lowercase
+    ``--target androgoat`` matches neither dict - the dynamic stage degrades
+    to a synthesized bypass, then SUCCESS_CHECKS.get("androgoat") returns None
+    and the run halts with a spurious "no success check registered" after the
+    Frida evidence was already captured (a real bug the live AndroGoat run
+    surfaced). Resolving AndroGoat case-insensitively keeps the two lookup
+    sites - and the "must stay in sync" invariant they share - consistent with
+    how a user actually types the target. Unmatched targets pass through
+    unchanged so real apps still degrade gracefully to "no bypass script."
+    """
+    return "AndroGoat" if target.lower() == "androgoat" else target
 
 
 def _git_commit_hash() -> str:
@@ -135,28 +173,107 @@ def _git_last_commit_touching(path: Path) -> str:
         return "unknown"
 
 
-def _run_native_scan(apk_path, analysis_root, apk_hash):
+def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
     """Extract lib/<abi>/*.so, analyze each with readelf/nm/strings, match native
     signatures, and return a NativeScanResult (including per-ABI coverage).
     Returns None when the APK has no native libs (a legitimate 'nothing to scan',
-    which the coverage contract records as native=unscannable, not a failure)."""
-    from static.native import NativeScanResult
+    which the coverage contract records as native=unscannable, not a failure).
+
+    Boundary-3 static half: when `java_files` (the decompiled .java sources) is
+    supplied, every Java-declared `native` method is reconciled against these
+    libraries into a JNI binding map (jnibridge), so a declared native method is
+    never a silent blind spot - an `unresolved` binding is the unexamined-surface
+    signal the caller degrades native coverage for (ADR-0006)."""
+    from static.native import (
+        NativeScanResult, _clone_lib_for_path, analyze_so_many,
+        find_external_native_loads, group_identical_so_files, security_triggers,
+        unaccounted_native_loads,
+    )
+    # Native-analysis disk cache: keyed on .so bytes' SHA-256 + analysis version
+    # + security-trigger set, so the expensive readelf/nm/Ghidra pass runs once
+    # per distinct .so and is served from disk on re-analysis of unchanged bytes
+    # (see native.analyze_so cache_dir). A repo-level cache, not per-run: the
+    # same lib analyzed across APKs and re-runs is the same result, and this is
+    # what makes the ~42-min native pass on PG-sized apps a one-time cost.
+    native_cache_dir = Path("outputs/cache/native")
+    from static.jnibridge import extract_declared_natives, resolve_jni_bindings
 
     native_dir = Path(analysis_root) / apk_hash / "native"
     so_files = extract_native_libs(apk_path, native_dir)
     if not so_files:
         return NativeScanResult(libraries=[], abi_coverage={})
+    # Load signatures BEFORE the scan so the Gap-1 body-decompilation gate can be
+    # driven by the actual detection corpus: a stripped lib whose exports/strings
+    # overlap a signature pattern gets its bodies decompiled even with no Java_*
+    # export (closing the stripped-non-JNI blind spot). The trigger set is the
+    # union of every pattern - self-maintaining as signatures are added.
+    signatures = load_native_signatures(Path("config/signatures/native_detection.yaml"))
+    triggers = security_triggers(signatures)
     libraries = []
     errors: list[str] = []
-    for so in so_files:
-        lib = analyze_so(so)
-        libraries.append(lib)
+    # Fix 3 / time: group extracted .so by byte-identical SHA-256 so the
+    # expensive readelf/nm/Ghidra pass runs once per DISTINCT binary, then clone
+    # the representative result for the other paths in the group (ABI/name
+    # overridden, all analysis fields shared). This preserves per-ABI coverage
+    # (abi_coverage keys on ABI) and match_native Evidence (keys on (abi, name))
+    # while never re-running Ghidra on the same bytes. ABI variants are distinct
+    # builds, so groups are normally size 1 - a correctness-preserving dedup, not
+    # a shortcut; the real ~42-min scan is genuine per-ABI analysis.
+    groups = group_identical_so_files(so_files)
+    # Parallelize the expensive per-lib analysis (readelf/nm/strings + the Ghidra
+    # body-decomp) across the digest-group representatives with a bounded thread
+    # pool (native.analyze_so_many). Each representative is analyzed once; the
+    # byte-identical group is cloned in group order below, so per-ABI coverage
+    # and match_native (abi,name) evidence are unchanged from the serial loop.
+    # A cache-warm run is near-instant regardless of workers (analyze_so serves
+    # unchanged bytes from disk); parallelism is what turns the cold ~42-min
+    # Ghidra pass on PG-sized apps into ~N/2 wall-clock. A missing tool raises
+    # loudly through analyze_so_many -> this stage fails, never a silent no-op.
+    representatives = [group[0] for _, group in groups]
+    analyzed = analyze_so_many(
+        representatives, security_triggers=triggers, cache_dir=native_cache_dir,
+    )
+    lib_by_path = dict(zip(representatives, analyzed))
+    for _, group in groups:
+        # analyze_so is the single Ghidra integration point (L-M6, ADR-0008): it
+        # runs readelf/nm/strings AND, for a stripped/obfuscated lib where those
+        # are blind, Ghidra headless decompiles the function bodies so
+        # compute_degradation() can upgrade it to fully_analyzed and match_native()
+        # can match decompiled bodies. A Ghidra failure degrades gracefully
+        # (ghidra_error set, lib stays partial) - never a silent no-op, never a
+        # hard scan failure.
+        representative = group[0]
+        lib = lib_by_path[representative]
+        if len(group) == 1:
+            libraries.append(lib)
+        else:
+            for so in group:
+                libraries.append(lib if so == representative else _clone_lib_for_path(lib, so))
         if lib.scan_error:
             errors.append(lib.scan_error)
-    signatures = load_native_signatures(Path("config/signatures/native_detection.yaml"))
     result = match_native(libraries, signatures)
     result.abi_coverage = compute_degradation(libraries)
     result.errors = errors
+    # Boundary-3 static half: reconcile every Java-declared native method against
+    # these libraries. A declared method with no Java_* export and no JNI_OnLoad
+    # anywhere is `unresolved` - a genuine unexamined surface the report flags and
+    # that degrades native coverage (see _apply_jni_binding_coverage). Only runs
+    # when the decompiled sources are available; otherwise the binding map stays
+    # empty and coverage is untouched (the pre-existing behavior).
+    if java_files:
+        declared = extract_declared_natives(java_files)
+        result.jni_bindings = resolve_jni_bindings(declared, libraries)
+    # Boundary-4: record which explicit System.load/loadLibrary targets are NOT
+    # covered by an extracted+analyzed .so (loaded from an absolute path, or
+    # loadLibrary("foo") with no libfoo.so bundled). Each is a loaded-but-
+    # unexamined native surface; the caller degrades native coverage to partial
+    # for them (see _native_unexamined in the pipeline). lib/<abi>/*.so AND
+    # assets/*.so are both extracted+analyzed, so an assets-loaded lib is
+    # accounted for - only genuinely missing/absolute-path loads surface here.
+    result.unaccounted_loads = unaccounted_native_loads(
+        find_external_native_loads(java_files) if java_files else [],
+        {so.name for so in so_files},
+    )
     return result
 
 
@@ -164,11 +281,81 @@ def _merge_native_evidence(static_evidence, native_evidence) -> None:
     """Native evidence feeds the same confidence model as Java (ADR-0001): merge
     native root/ssl confidence + evidence into StaticEvidence so classify() and
     the report treat both identically. Confidence is capped at 1.0 per category,
-    same as the Java matcher's cap."""
+    same as the Java matcher's cap. Native unattributed indicators (boundary-2)
+    are unioned into StaticEvidence.unattributed_indicators so the single
+    apply_unattributed_indicators call in the pipeline marks those categories
+    coverage-limited exactly as it does Java-side - no separate coverage path."""
     static_evidence.root_confidence = min(1.0, static_evidence.root_confidence + native_evidence.root_confidence)
     static_evidence.ssl_confidence = min(1.0, static_evidence.ssl_confidence + native_evidence.ssl_confidence)
     static_evidence.root_evidence.extend(native_evidence.root_evidence)
     static_evidence.ssl_evidence.extend(native_evidence.ssl_evidence)
+    static_evidence.unattributed_indicators.update(native_evidence.unattributed_indicators)
+
+
+def _merge_dex_evidence(static_evidence, dex_evidence, signatures, app_package) -> int:
+    """Merge androguard DEX matches into StaticEvidence, deduped per-signature so
+    a signature the java/smali scan already matched is NOT double-counted. Only
+    newly-matched signatures get their weight applied (capped at 1.0 per category,
+    the same cap _merge_native_evidence uses). Returns the number of new
+    signatures added. app_package is used only to label the evidence file."""
+    weight = {s.id: s.weight for s in signatures}
+    cat = {s.id: s.category for s in signatures}
+    already = {e.signature_id for e in static_evidence.root_evidence}
+    already |= {e.signature_id for e in static_evidence.ssl_evidence}
+    added = 0
+    for ev in dex_evidence:
+        if ev.signature_id in already:
+            continue
+        w = weight.get(ev.signature_id, 0.0)
+        c = cat.get(ev.signature_id)
+        if c == "root":
+            static_evidence.root_confidence = min(1.0, static_evidence.root_confidence + w)
+            static_evidence.root_evidence.append(ev)
+        elif c == "ssl":
+            static_evidence.ssl_confidence = min(1.0, static_evidence.ssl_confidence + w)
+            static_evidence.ssl_evidence.append(ev)
+        else:
+            continue
+        already.add(ev.signature_id)
+        added += 1
+    return added
+
+
+_JS_EVIDENCE_WEIGHT = 0.2
+
+
+def _merge_js_evidence(static_evidence, js_matches) -> int:
+    """Merge Hermes/binary JS-bundle idiom matches into StaticEvidence. Each
+    `js_matches` entry is (sig_id, category, matched_text, file) recovered from a
+    binary JS bundle's string table - deterministic evidence (the literal is really
+    present in the app) at a modest fixed weight, because we recover string
+    constants, not full JS control flow (the surface stays `partial`). Deduped per
+    signature_id across bundles and routed by category exactly like
+    _merge_dex_evidence. Returns the number of new signatures added."""
+    already = {e.signature_id for e in static_evidence.root_evidence}
+    already |= {e.signature_id for e in static_evidence.ssl_evidence}
+    added = 0
+    for sig_id, category, matched_text, bundle_file in js_matches:
+        if sig_id in already:
+            continue
+        ev = Evidence(
+            signature_id=sig_id,
+            file=bundle_file,
+            line_or_offset=0,
+            matched_text=matched_text[:200],
+            verification_state="deterministic_matched",
+        )
+        if category == "root":
+            static_evidence.root_confidence = min(1.0, static_evidence.root_confidence + _JS_EVIDENCE_WEIGHT)
+            static_evidence.root_evidence.append(ev)
+        elif category == "ssl":
+            static_evidence.ssl_confidence = min(1.0, static_evidence.ssl_confidence + _JS_EVIDENCE_WEIGHT)
+            static_evidence.ssl_evidence.append(ev)
+        else:
+            continue
+        already.add(sig_id)
+        added += 1
+    return added
 
 
 def _apply_manifest_ssl_signal(static_evidence, manifest_info) -> None:
@@ -365,6 +552,13 @@ def run(
         )
         raise typer.Exit(code=1)
 
+    # Resolve the --target to the canonical key once, up front, so the bypass
+    # dispatch (SCRIPTS_BY_TARGET_ACTION) and the success-check lookup
+    # (SUCCESS_CHECKS) below both agree on the same key regardless of casing
+    # (uncrackable1/2/3 are lowercase; AndroGoat is mixed-case). The raw
+    # `target` is still what the report shows - what the operator asked for.
+    target_canonical = _canonical_target(target)
+
     # --- ingest (identification, not gated behind auth - see module docstring) ---
     # FR-1.3: re-running against an already-ingested APK references the existing
     # record rather than re-ingesting. Hash first (cheap, in-memory) to resolve
@@ -374,6 +568,14 @@ def run(
     # Hash once, use twice: resolve the FR-1.3 reuse record by the hash, then
     # pass the precomputed HashSet into ingest so the file isn't streamed a
     # second time for its evidence (a full SHA-256/SHA-1/MD5 read per run).
+    # --- input normalization (real-world deliveries) ---
+    # The pipeline below assumes a single self-contained APK (root manifest, root
+    # classes*.dex, lib/<abi>/*.so). An Android App Bundle (.aab) or a split-APK
+    # directory carries that content under base/ or across several zips, so before
+    # hashing we synthesize a single root-level APK (pure zipfile, no new toolchain).
+    # The normalized APK is what gets hashed -> the output dir keys to the content
+    # actually analyzed, and every downstream reader stays unchanged.
+    apk = normalize_input(apk, ANALYSIS_ROOT / "normalized")
     prehashed = compute_hashes(apk)
     existing = existing_metadata(ANALYSIS_ROOT, prehashed.sha256)
     ingest_result = ingest(apk, reuse_metadata=existing, precomputed_hashes=prehashed)
@@ -481,17 +683,56 @@ def run(
     # run row (stage_results_json). It only ever appeared on console/report/in-
     # memory. Enrich the stage evidence so a reviewer re-querying a past run sees
     # exactly which candidate files the scan could not read (principle 3).
-    scan_stage.evidence["unreadable_file_count"] = static_evidence.unreadable_file_count
-    scan_stage.evidence["unreadable_files"] = list(static_evidence.unreadable_files)
-    scan_stage.evidence["scanned_file_count"] = static_evidence.scanned_file_count
+    # Guard: _wrap_stage returns static_evidence=None when the scan itself raised
+    # (status="failed"), so enrich only on success - otherwise the real error is
+    # masked by a None deref instead of halting loudly (principle 3).
+    if static_evidence is not None:
+        scan_stage.evidence["unreadable_file_count"] = static_evidence.unreadable_file_count
+        scan_stage.evidence["unreadable_files"] = list(static_evidence.unreadable_files)
+        scan_stage.evidence["scanned_file_count"] = static_evidence.scanned_file_count
     stage_results.append(scan_stage)
     _print_stage(scan_stage)
     if scan_stage.status == "failed":
         _halt(stage_results)
 
+    # androguard (the FIRST static evidence source in the cascade): read the raw
+    # DEX constant pools and match app-owned strings against the SAME signature
+    # corpus, then merge only newly-matched signatures. This closes the
+    # "jadx/apktool under-decompile" hole - a string_literal signature source
+    # decompilation dropped can still be recovered from the raw DEX. Per-signature
+    # dedup in _merge_dex_evidence keeps it non-duplicative with the java/smali
+    # scan. An absent/unreadable androguard degrades to a note, not a halt: it is
+    # an enhancement source and the pipeline still has real decompiled roots.
+    try:
+        dex_scan = scan_dex_strings(apk, root_signatures + ssl_signatures)
+        merged = _merge_dex_evidence(static_evidence, dex_scan["evidence"],
+                                     root_signatures + ssl_signatures, dex_scan["app_package"])
+        if merged:
+            console.print(
+                f"[dim]androguard: {merged} new DEX-level signature(s) "
+                f"from {dex_scan['string_count']} app-owned string(s)[/dim]"
+            )
+        else:
+            console.print(
+                f"[dim]androguard: {dex_scan['string_count']} app-owned DEX string(s), no new matches[/dim]"
+            )
+    except Exception as exc:  # androguard absent / unreadable - enhancement, not a halt
+        console.print(f"[yellow]androguard skipped: {exc}[/yellow]")
+
     # RESID-5C: pass the apktool output root so parse_manifest can resolve the
     # declared NSC reference against res/xml/ and say whether the file exists.
-    manifest_stage, manifest_info = _wrap_stage("manifest_parse", parse_manifest, manifest_path, apktool_output)
+    # Prefer the decoded apktool manifest when present (full NSC resolution
+    # against the decoded res/ tree); when apktool produced none, fall back to
+    # reading the BINARY manifest straight from the APK via pyaxmlparser
+    # (parse_manifest_apk), so a manifest is never lost to an apktool failure
+    # (limitation 9). The binary path still honors apktool_output as the resource
+    # root when present; without it, a declared NSC degrades the manifest surface
+    # to partial rather than certifying clean (ADR-0006).
+    if manifest_path.exists():
+        _manifest_callable, _manifest_args = parse_manifest, (manifest_path, apktool_output)
+    else:
+        _manifest_callable, _manifest_args = parse_manifest_apk, (apk, apktool_output)
+    manifest_stage, manifest_info = _wrap_stage("manifest_parse", _manifest_callable, *_manifest_args)
     stage_results.append(manifest_stage)
     _print_stage(manifest_stage)
     # 5-1: a successful manifest parse now feeds the SSL evidence (NSC presence)
@@ -509,13 +750,59 @@ def run(
     # loudly if the native toolchain (readelf/nm/strings/unzip) is missing - it
     # never silently no-ops (principle 3).
     native_evidence = None
-    native_stage, native_evidence = _wrap_stage("native_scan", _run_native_scan, apk, ANALYSIS_ROOT, apk_hash)
+    # Boundary-3 static half: feed the decompiled .java sources into the native
+    # scan so it can reconcile every declared `native` method against the libs
+    # (jnibridge). Only when jadx produced sources; otherwise reconciliation is
+    # skipped and coverage is untouched.
+    native_java_files = list(Path(jadx_output).rglob("*.java")) if jadx_output else []
+    # Coverage-limited: dynamic code loading (DexClassLoader/PathClassLoader/
+    # Class.forName/DexFile/loadDex) releases and loads a payload DEX at runtime -
+    # code we cannot see statically. Detect the loading call sites over the same
+    # corpus; when present we degrade the java surface to partial so a java
+    # NEITHER is never a confident negative over the dynamically-hidden payload
+    # (ADR-0006). Mirrors the boundary-4 unaccounted-loads handling, java surface.
+    dynamic_loads = find_dynamic_loading(native_java_files) if native_java_files else []
+    # Coverage-limited: WebView JS bridge (gap A2). A WebView that loads JS via
+    # addJavascriptInterface / evaluateJavascript / loadUrl("javascript:") /
+    # loadDataWithBaseURL may run root/SSL checks in JS. Local HTML/JS containers
+    # are now scannable (.html/.htm in SCANNED_SUFFIXES), so the bridge call sites
+    # are labelled below without degrading coverage; only a *remote* http(s) JS
+    # source is JS we cannot read statically and forces the java surface to
+    # partial (handled in the apply_unresolved_java fold below, ADR-0006).
+    webview_sites, webview_has_remote_js = (
+        find_webview_js(native_java_files) if native_java_files else ([], False)
+    )
+    native_stage, native_evidence = _wrap_stage(
+        "native_scan", _run_native_scan, apk, ANALYSIS_ROOT, apk_hash, native_java_files
+    )
     stage_results.append(native_stage)
     _print_stage(native_stage)
     if native_stage.status == "failed":
         _halt(stage_results)
     if native_evidence is not None:
         _merge_native_evidence(static_evidence, native_evidence)
+
+    # Real-world gap A1: Hermes/binary JS bundles (React Native release
+    # assets/index.android.bundle, .hbc) are binary, so the text engine skips them
+    # (signatures._is_binary NUL-probe) and jadx only reads DEX. Recover each
+    # bundle's string-constant table and match root/SSL idioms against it. The
+    # recovered constants are real deterministic evidence, but we see constants,
+    # not full JS control flow - so a binary bundle also degrades the `js` surface
+    # to partial below (ADR-0006). Plain-text JS needs no work here: the signature
+    # engine already scans `.js/.jsbundle/.bundle`.
+    js_matches: list[tuple[str, str, str, str]] = []
+    has_binary_bundle = False
+    assets_root = apktool_output / "assets" if apktool_output else None
+    if assets_root is not None and assets_root.is_dir():
+        for bundle in assets_root.rglob("*"):
+            if not is_bundle_candidate(bundle) or not is_binary_bundle(bundle):
+                continue
+            res = scan_bundle(bundle)
+            has_binary_bundle = has_binary_bundle or res["kind"] in ("hermes", "binary", "opaque")
+            for sig_id, category, matched_text in res["matches"]:
+                js_matches.append((sig_id, category, matched_text, str(bundle)))
+    if js_matches:
+        _merge_js_evidence(static_evidence, js_matches)
 
     # --- obfuscation level (ADR-0008 item 2) + coverage (items 9-11) ---
     # Pure deterministic signals. obfuscation_level drives the Java surface's
@@ -529,6 +816,65 @@ def run(
     _print_stage(obfuscation_stage)
     if obfuscation_stage.status == "failed":
         _halt(stage_results)
+
+    # --- packer / protector identification (Gap-2) + coverage ---
+    # A detected packer forces the Java/DEX surface to partial - the real DEX is
+    # hidden behind a loader, so a packed app can never certify a confident
+    # static negative over code that wasn't actually read (ADR-0006). The
+    # detector is deterministic and in-stack (native loader libs, stub
+    # Application class, encrypted-DEX assets), versioned in
+    # config/signatures/packers.yaml. Absence of a match is NOT proof of absence
+    # of packing - an unlisted packer is still bounded by the same partial rule
+    # whenever the DEX is not fully readable. androguard absence/unreadability
+    # degrades to a note, not a halt (enhancement source, like the androguard
+    # DEX scan).
+    packer_signatures = load_packer_signatures(Path("config/signatures/packers.yaml"))
+    packer_stage, packer_findings = _wrap_stage(
+        "packers", detect_packers, apk, packer_signatures
+    )
+    stage_results.append(packer_stage)
+    _print_stage(packer_stage)
+    if packer_stage.status == "failed":
+        console.print(f"[yellow]packer detection degraded (non-fatal): {packer_stage.error}[/yellow]")
+        packed = False
+    else:
+        packed = bool(packer_findings)
+        for pf in packer_findings:
+            console.print(
+                f"[yellow]packer: {pf.packer} ({pf.packer_id}) -> {', '.join(pf.signals)}[/yellow]"
+            )
+
+    # --- string-deobfuscation (Gap-3) ---
+    # The obfuscation stage detects *that* strings are hidden and forces the Java
+    # surface to partial; this recovers the flat pure-numeric R8 decryptor back to
+    # plaintext and matches it against the SAME signature corpus - so a hidden
+    # `new String(int[])` holding "su" can fire root evidence the plain-text scan
+    # can't see. Deterministic and additive: every match is a real literal decoded
+    # from the binary (ADR-0001), and _merge_dex_evidence dedups per-signature so
+    # a signature the java/smali/dex scan already fired is never double-counted.
+    # Honest boundary (ADR-0006): only flat pure-numeric arrays are recoverable
+    # pure-Python; algorithmic/expression-built decryptors are a full DEX
+    # deobfuscator's domain, so that hidden-string surface stays `partial` -
+    # recovery is additive, never an exhaustive-cleanup claim. Recovery degrades
+    # to a note on any read error (enhancement source, like the androguard scan).
+    if jadx_output:
+        java_files = list(Path(jadx_output).rglob("*.java"))
+        try:
+            recovered = recover_hidden_strings(java_files)
+        except Exception as exc:
+            recovered = []
+            console.print(f"[yellow]string-recovery skipped: {exc}[/yellow]")
+        if recovered:
+            recovered_evidence = match_recovered_strings(
+                recovered, root_signatures + ssl_signatures
+            )
+            recovered_added = _merge_dex_evidence(
+                static_evidence, recovered_evidence, root_signatures + ssl_signatures, None
+            )
+            console.print(
+                f"[dim]string-recovery: {len(recovered)} hidden string(s) recovered, "
+                f"{recovered_added} new signature(s)[/dim]"
+            )
 
     # L-M7: capture the decompile completeness once so both per_surface_coverage
     # and the console CAUTION below read the same value. Previously it was only
@@ -555,7 +901,48 @@ def run(
         resources_complete=(
             manifest_info.resources_complete if manifest_stage.status == "success" else False
         ),
+        # Gap-2: a detected packer forces the Java surface to partial - the real
+        # DEX is hidden, so a confident static negative is impossible.
+        packed=packed,
     )
+    # Boundary-3 static half: a declared `native` method that no extracted lib
+    # statically binds and no JNI_OnLoad can dynamically register is `unresolved`
+    # - a genuine unexamined surface. It downgrades the native surface to partial
+    # so a native NEITHER is never a confident negative over it (ADR-0006). The
+    # binding map itself flows to the report so the analyst sees which methods
+    # only a runtime (Frida) view can confirm.
+    # Boundary-3 static half: a declared `native` method that no extracted lib
+    # statically binds and no JNI_OnLoad can dynamically register is `unresolved`
+    # - a genuine unexamined surface. Boundary-4 adds the sibling case: an
+    # explicit System.load/loadLibrary target whose .so was not extracted+analyzed
+    # (loaded from an absolute path, or loadLibrary("foo") with no libfoo.so
+    # bundled) is likewise a loaded-but-unexamined native surface. Either one
+    # downgrades the native surface to partial so a native NEITHER is never a
+    # confident negative over it (ADR-0006). Additive: never touches confidence,
+    # never invents evidence.
+    _native_unexamined = (
+        has_unresolved(native_evidence.jni_bindings)
+        if native_evidence is not None else False
+    ) or bool(
+        native_evidence is not None and native_evidence.unaccounted_loads
+    )
+    coverage_map = apply_unresolved_native(coverage_map, _native_unexamined)
+    # Coverage-limited: dynamic class loading present -> the payload DEX is
+    # invisible statically, so the java surface degrades to partial. Same
+    # additive, downgrade-only semantics as the native case above (ADR-0006).
+    # Coverage-limited: WebView remote JS (gap A2) is folded into the same java
+    # downgrade - a remote http(s) JS source (loadUrl/loadDataWithBaseURL with an
+    # external URL) is JS we cannot read statically, semantically the same
+    # unexamined-java case as dynamic class loading. apply_unresolved_java is
+    # idempotent (fully_analyzed -> partial only), so combining is safe.
+    _java_dynamic_unexamined = bool(dynamic_loads) or bool(webview_has_remote_js)
+    coverage_map = apply_unresolved_java(coverage_map, _java_dynamic_unexamined)
+    # Real-world gap A1: a Hermes/binary JS bundle present degrades the `js` surface
+    # to partial - we recover its string constants, not full JS control flow, so a
+    # js/root/ssl NEITHER is never a confident negative over bundle-hidden logic
+    # (ADR-0006). Always set (fully_analyzed when no binary bundle), because `js` is
+    # now a governing surface in coverage.py.
+    coverage_map["js"] = js_surface_coverage(has_binary_bundle)
 
     # --- decision engine (per-category thresholds, 4-3) ---
     root_threshold, ssl_threshold = _load_thresholds()
@@ -574,6 +961,15 @@ def run(
     # be read as a confident negative by any consumer of the persisted
     # classification_json (NFR-7). The coverage_map is computed above (line 519).
     classification = apply_coverage_bound(classification, coverage_map)
+    # Boundary-1: surface UNATTRIBUTED detection indicators (detection-shaped
+    # code that matched no signature) as coverage-limited too - a fully-analyzed
+    # surface can still hide a technique the corpus doesn't encode (ADR-0001),
+    # and such a NEITHER must read as "unknown, not absent", never a confident
+    # clean (ADR-0006). Additive: only ever marks coverage_limited, never touches
+    # confidence, never removes what apply_coverage_bound already flagged.
+    classification = apply_unattributed_indicators(
+        classification, static_evidence.unattributed_indicators
+    )
 
     console.print(f"[bold]Decision: {classification.action.value}[/bold]")
     # Finding J: surface the scan degradation live, not just in the rendered
@@ -605,6 +1001,19 @@ def run(
     # ship no scannable .so, so native=unscannable alone already blocks a
     # confident root/ssl NEITHER).
     console.print(f"[dim]{coverage_bound_line(coverage_map)}[/dim]")
+    # L-M4: mirror the report's per-category confidence lines on the console so
+    # the numeric confidence a reviewer watches is never read as a bare point
+    # estimate on a coverage-limited category. confidence_bound appends the
+    # "(upper bound: ...)" annotation only when that verdict is coverage-limited;
+    # a fully-analyzed category prints the plain number, identical to the report.
+    console.print(
+        f"  Root: {confidence_bound('root', classification.root, coverage_map)} -> "
+        f"{'DETECTED' if classification.root.detected else 'Inconclusive'}"
+    )
+    console.print(
+        f"  SSL : {confidence_bound('ssl', classification.ssl, coverage_map)} -> "
+        f"{'DETECTED' if classification.ssl.detected else 'Inconclusive'}"
+    )
 
     # --- machine-readable ownership caveat (report-only attribution was the gap) ---
     # Attach the root attribution to the classification object itself so it
@@ -660,6 +1069,14 @@ def run(
     # --- dynamic analysis ---
     verification: Optional[VerificationResult] = None
     correlation_result = None
+    verification = None
+    # GAP-2: a failed dynamic stage used to _halt and discard the already-correct
+    # static analysis + report (a frida-server connection reset lost the static
+    # report entirely). Dynamic is a separate concern from the deterministic
+    # static core, so a dynamic failure now still produces the static report with
+    # correlation=not_attempted and the failure surfaced in the report + a loud
+    # non-zero exit after the report is written (see _finalize_run below).
+    dynamic_failed = False
     # L-M2: synthesize a deterministic bypass from the techniques the static
     # engine detected, so a real app (no hand-authored script) still gets a real
     # dynamic attempt. Generation is PURE - it needs no device, only deployment
@@ -710,13 +1127,17 @@ def run(
         # authored scripts for known targets take precedence. `synth` was computed
         # above, before the device gate, so it exists even when no device deploys.
         dynamic_stage = frida_runner.run_dynamic_stage(
-            serial, package_name, classification.action, target=target,
+            serial, package_name, classification.action, target=target_canonical,
             synthesized={"source": synth.source, "applied_hooks": synth.applied_hooks},
         )
         stage_results.append(dynamic_stage)
         _print_stage(dynamic_stage)
         if dynamic_stage.status == "failed":
-            _halt(stage_results)
+            # GAP-2: produce the static report instead of discarding it. The
+            # failure is already in stage_results (shown in the report) and is
+            # surfaced loudly after the report is written. correlation stays None
+            # -> reported as "not attempted", never a fake pass.
+            dynamic_failed = True
         if dynamic_stage.status == "success":
             device.clear_logcat(serial)
             logcat_output = device.capture_logcat(serial)
@@ -726,21 +1147,49 @@ def run(
             # skipped StageResult), so reaching here with success means a script ran
             # but no success check is registered - fail loudly as a StageResult
             # (NFR-1), not a raw KeyError traceback.
-            success_check = SUCCESS_CHECKS.get(target)
+            success_check = SUCCESS_CHECKS.get(target_canonical)
             if success_check is None:
+                # A missing SuccessCheck is config-drift ONLY for a KNOWN target
+                # (one with hand-authored bypass scripts in SCRIPTS_BY_TARGET_ACTION):
+                # there the F invariant requires both dicts to hold it, and a missing
+                # entry is a real defect to surface loudly. For an UNKNOWN target (a
+                # real app not in SCRIPTS_BY_TARGET_ACTION, e.g. propertyguru), the
+                # dynamic stage just ran the L-M2 *synthesized* bypass and there is no
+                # target-specific success check to register - that is the normal,
+                # expected case, not drift. Halting here would discard a complete,
+                # correct static + dynamic run (GAP-2's lesson: never lose good static
+                # work to a downstream stage). Degrade honestly instead: record a
+                # skipped check and leave verification/correlation None, so the report
+                # says "not verified / not attempted", never a fake pass.
+                if target_canonical in frida_runner.SCRIPTS_BY_TARGET_ACTION:
+                    check_stage = StageResult(
+                        stage="success-check", status="failed",
+                        evidence={"target": target},
+                        error=(
+                            f"no success check registered for target '{target}' - "
+                            "SCRIPTS_BY_TARGET_ACTION and SUCCESS_CHECKS are out of sync"
+                        ),
+                    )
+                    stage_results.append(check_stage)
+                    _print_stage(check_stage)
+                    _halt(stage_results)
                 check_stage = StageResult(
-                    stage="success-check", status="failed",
-                    evidence={"target": target},
-                    error=(
-                        f"no success check registered for target '{target}' - "
-                        "SCRIPTS_BY_TARGET_ACTION and SUCCESS_CHECKS are out of sync"
-                    ),
+                    stage="success-check", status="skipped",
+                    evidence={
+                        "target": target,
+                        "reason": (
+                            f"no success check registered for unknown target "
+                            f"'{target}' - synthesized bypass ran but outcome is not "
+                            "verified (no target-specific success check); correlation "
+                            "reported as not attempted"
+                        ),
+                    },
                 )
                 stage_results.append(check_stage)
                 _print_stage(check_stage)
-                _halt(stage_results)
-            verification = success_check.check(logcat_output, frida_log)
-            correlation_result = correlation_module.correlate(classification, verification)
+            else:
+                verification = success_check.check(logcat_output, frida_log)
+                correlation_result = correlation_module.correlate(classification, verification)
 
     # dynamic_stage.evidence["reason"] already distinguishes "operator passed
     # --skip-dynamic" from "NEITHER classification - no bypass technique to
@@ -770,8 +1219,20 @@ def run(
         obfuscation_level=obfuscation_level,
         operator=operator,
         justification=justification,
+        jni_bindings=(
+            native_evidence.jni_bindings if native_evidence is not None else None
+        ),
+        unaccounted_loads=(
+            native_evidence.unaccounted_loads if native_evidence is not None else None
+        ),
+        dynamic_loads=dynamic_loads or None,
+        js_evidence=js_matches or None,
+        webview_sites=webview_sites or None,
     )
-    report_path = _finalize_run(
+    # The report path is returned (not used) here - _finalize_run writes the .md
+    # and prints it itself, so binding the return to a local was a dead assignment
+    # (pyflakes F841). Dropped: the report is produced and surfaced by _finalize_run.
+    _finalize_run(
         report_kwargs=report_kwargs,
         analysis_root=ANALYSIS_ROOT,
         apk_hash=apk_hash,
@@ -803,6 +1264,19 @@ def run(
             ),
         ),
     )
+
+    if dynamic_failed:
+        # GAP-2: the static analysis + report were still produced and audited;
+        # the run failed only at the dynamic stage. Surface that loudly - the
+        # report's Stage Results table already shows the failed dynamic stage and
+        # correlation is "not attempted" - and exit non-zero so no automated
+        # consumer mistakes a dynamic-failed run for a fully verified one.
+        console.print(
+            f"[bold red]Dynamic stage FAILED ({dynamic_stage.error or 'see report'}) - "
+            f"static analysis and report were still produced; dynamic verification "
+            f"is NOT attempted for this run (correlation=not_attempted).[/bold red]"
+        )
+        raise typer.Exit(code=1)
 
 
 def _calibration_table(report) -> tuple[list[str], list[list[str]]]:
@@ -1049,7 +1523,13 @@ def re_attribute_cmd(
         )
 
 
-def _regenerate_report(run: RunRecord, apk, rendering_commit: str) -> None:
+def _regenerate_report(run, apk, rendering_commit: str) -> None:
+    # `run` is intentionally un-annotated: RunRecord is imported function-locally
+    # inside the re-attribute command (~line 1027), so it is not in module scope
+    # here. With `from __future__ import annotations` any annotation would be a
+    # lazy string never resolved at runtime, and pyflakes resolves names inside
+    # even quoted string annotations - so annotating would only invite a false
+    # F821. The docstring documents the type instead.
     """Re-render a stored run's .md from its persisted JSON, so a classification
     backfill (re-attribute) is reflected on disk, not just in the DB. The header
     metadata comes from the stored APK record's raw ingest metadata (the exact

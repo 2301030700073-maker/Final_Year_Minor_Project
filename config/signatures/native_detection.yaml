@@ -66,6 +66,19 @@
     - "verify_certificate"
     - "checkCertificatePinning"
 
+# Native SSL pinning is covered by native_ssl_pinning_verify (export symbols) and
+# native_pinning_embedded (strings) above. OWASP UnCrackable-Level3 previously had
+# a dedicated rule matching Java_sg_vantagepoint_uncrackable3_MainActivity_init/baz
+# - REMOVED after verification: Ghidra decompilation of Level3's libfoo.so showed
+# those exports are the secret/PIN mechanism, not TLS. baz is a stub that just
+# returns a constant, and CodeCheck_bar does a byte-array secret compare; there is
+# no X509/cert/pin logic anywhere in the decompiled native body. The rule matched a
+# symbol name and manufactured a false SSL finding (0.70 -> BOTH) on a target with
+# no pinning, and was dead for every real app anyway (overfit to one package) - a
+# false positive AND unused logic, so it is removed rather than scoped. A real
+# pinning lib exposes certificate logic in exports/strings/bodies, which the two
+# generic rules above (and match_native's body matching via Ghidra, L-M6) catch.
+
 - id: native_pinning_embedded
   category: ssl
   weight: 0.3
@@ -73,3 +86,42 @@
   patterns:
     - "certificate pinning"
     - "CertificatePinner"
+
+# Boundary-2 (native SSL): the canonical OpenSSL native certificate-pinning hook.
+# SSL_CTX_set_cert_verify_callback installs a CUSTOM verification callback that
+# overrides default chain validation - the unambiguous native pinning/verification
+# idiom. It is statically visible as an IMPORTED libssl symbol (readelf -Ws
+# includes imports, and match_native matches the export corpus), so a native
+# pinning implementation is recoverable statically, not only at runtime.
+# Only the callback form is SCORED (unambiguous); the generic SSL_CTX_set_verify /
+# SSL_set_verify (present for SSL_VERIFY_NONE too) are NOT scored - they stay in
+# the boundary-2 indicator layer as an unknown-native-TLS-capability signal so a
+# NEITHER never over-claims (ADR-0006).
+- id: native_ssl_custom_verify_callback
+  category: ssl
+  weight: 0.4
+  pattern_type: export_symbol
+  patterns:
+    - "SSL_CTX_set_cert_verify_callback"
+
+# Native Frida/instrumentation-detection strings (2026). The Java layer already
+# detects the Frida/Substrate packages (root_detection.yaml frida_detection /
+# cydia_substrate_detection); this closes the native blind spot: apps that probe
+# for instrumentation from C/C++ embed the Frida artifacts as .so strings and
+# scan /proc/self/maps for them. These literals are structurally distinctive
+# (a real app does not ship "frida-server"/"gum-js-loop"/"linjector" for a benign
+# reason) and all exceed the `strings` min-length-4 extraction bound, so they are
+# reachable as exact embedded-string matches (native.py analyze_so). Same
+# ADR-0006 discipline as native_su_binary_embedded: exact membership, not
+# substring; corroborative anti-instrumentation weight.
+- id: native_frida_detection
+  category: root
+  weight: 0.4
+  pattern_type: embedded_string
+  patterns:
+    - "frida-server"
+    - "re.frida.server"
+    - "frida-gadget"
+    - "gum-js-loop"
+    - "linjector"
+    - "libfrida.so"

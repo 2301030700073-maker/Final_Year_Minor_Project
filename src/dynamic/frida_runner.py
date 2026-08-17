@@ -12,6 +12,17 @@ from dynamic.device import _require_adb, setup_frida_connection
 
 SCRIPT_DIR = Path(__file__).parent / "scripts"
 
+# Vendored third-party universal bypass: ssecurityy's
+# "universal-robust-advanced-root--ssl-pinning-bypass", retrieved via
+# `frida --codeshare`. Kept at repo-root scripts/ (not SCRIPT_DIR, which holds
+# this project's own hand-authored scripts) to preserve provenance and mark it
+# third-party. Loaded as a SUPPLEMENT alongside the findings-specific synthesized
+# bypass for unknown targets (L-M2), so a real app gets both the targeted recipes
+# and the broad external universal. Not this project's code - used as-is (see
+# scripts/VENDORED.md for provenance and the integrity caveat).
+VENDORED_UNIVERSAL = "universal-robust-advanced-root--ssl-pinning-bypass"
+VENDORED_UNIVERSAL_PATH = Path(__file__).resolve().parents[2] / "scripts" / f"{VENDORED_UNIVERSAL}.js"
+
 # Keyed by target, not just action - UnCrackable1 and UnCrackable2 need
 # different scripts for the same ROOT_ONLY action, since their root-check
 # code lives in differently-named classes (confirmed against real
@@ -207,7 +218,13 @@ def run_dynamic_stage(
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
-    scripts_applied = (["synthesized"] + synth_applied) if synth_source is not None else script_names
+    # The synthesized bypass (findings-specific) is supplemented by the vendored
+    # third-party universal for unknown targets - the app gets both the targeted
+    # recipes and the broad external bypass.
+    scripts_applied = (
+        (["synthesized"] + synth_applied + [f"universal({VENDORED_UNIVERSAL})"])
+        if synth_source is not None else script_names
+    )
 
     outcome: dict = {}
 
@@ -223,6 +240,16 @@ def run_dynamic_stage(
 
             if synth_source is not None:
                 load_script_source(session, synth_source, on_message)
+                # Supplement the findings-specific bypass with the vendored
+                # third-party universal so an unknown real app gets the broad
+                # external bypass too. The file is committed; if it is ever
+                # missing, read_text raises and the outer except fails the stage
+                # loudly - never a silent skip (principle 3).
+                load_script_source(
+                    session,
+                    VENDORED_UNIVERSAL_PATH.read_text(encoding="utf-8"),
+                    on_message,
+                )
             for name in script_names:
                 load_script(session, name, on_message)
 

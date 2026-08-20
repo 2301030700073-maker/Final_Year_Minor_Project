@@ -231,6 +231,28 @@ def test_native_ssl_bypass_emits_custom_verify_hooks():
     assert "SSL_set_custom_verify" in res.source
 
 
+def test_native_bypass_observes_handshakes_for_pure_native_hosts():
+    # A pure-native app (Flutter dart:io in libflutter.so, Unity libunity.so, or a
+    # renamed vendored BoringSSL) has no Java SSL stack, so the Java
+    # ConscryptEngineSocket/SSLSocket observer hooks never fire - without a native
+    # observation a real completed handshake would report as "none observed" (a
+    # false negative). The SSL effect observer must hook SSL_do_handshake across
+    # the symbol-scanned modules and emit ssl-handshake on completion. Observation
+    # only - it must NOT invent a native pin-check (the platform's own BoringSSL
+    # uses the same verify slots, so that would over-claim) - so confirmation is
+    # unchanged and the handshake is simply no longer invisible (ADR-0006).
+    res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["native_ssl_custom_verify_callback"]), Action.SSL_ONLY)
+    assert "SSL_do_handshake" in res.source
+    assert "Process.enumerateModules()" in res.source
+    assert "bypassEffect: 'ssl-handshake'" in res.source
+    # the native observer is handshake-only: the SSL_do_handshake hook must NOT
+    # itself emit a native pin-check (the platform's own BoringSSL uses the same
+    # verify slots, so a native pin-check would over-claim). The Java-path
+    # pin-check (from CertificatePinner/TrustManagerImpl) is separate and stays.
+    handshake_region = res.source[res.source.index("SSL_do_handshake"):]
+    assert "'ssl-pin-check'" not in handshake_region
+
+
 def test_native_root_path_hiding_fires_for_native_su_embedded():
     # native_su_binary_embedded now routes to the libc path-hiding recipe (was the
     # one native root gap - previously it fell to universal). It must hide root

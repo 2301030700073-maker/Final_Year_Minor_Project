@@ -1180,10 +1180,25 @@ def run(
             # hand-authored scripts for known targets take precedence. `synth` was
             # computed above, before the device gate, so it exists even when no
             # device deploys.
-            dynamic_stage = frida_runner.run_dynamic_stage(
-                serial, package_name, classification.action, target=target_canonical,
-                synthesized={"source": synth.source, "applied_hooks": synth.applied_hooks},
-            )
+            try:
+                dynamic_stage = frida_runner.run_dynamic_stage(
+                    serial, package_name, classification.action, target=target_canonical,
+                    synthesized={"source": synth.source, "applied_hooks": synth.applied_hooks},
+                )
+            except Exception as exc:
+                # GAP-2 on an UNEXPECTED dynamic-stage exception: run_dynamic_stage
+                # returns clean failed/skipped StageResults for its known failure
+                # modes (timeout, no script, install), but a real app can still hit
+                # an unmapped error (a new frida/device failure, a synthesized-script
+                # quirk). Letting that propagate would discard the already-complete
+                # static report - the same report-losing bug fixed for install. Record
+                # it as a failed dynamic stage, continue to the static report, surface
+                # the error loudly, and exit non-zero after the report is written.
+                dynamic_stage = StageResult(
+                    stage="dynamic", status="failed",
+                    evidence={"reason": "unexpected dynamic-stage exception"},
+                    error=f"dynamic stage raised unexpectedly: {exc}",
+                )
             stage_results.append(dynamic_stage)
             _print_stage(dynamic_stage)
             if dynamic_stage.status == "failed":

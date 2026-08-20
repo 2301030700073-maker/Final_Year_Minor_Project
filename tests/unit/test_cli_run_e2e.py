@@ -172,3 +172,54 @@ def test_install_failure_preserves_static_report_and_exits_nonzero(run_setup, mo
     assert "Root-detection" in text
     # the loud post-report failure was surfaced, not a silent swallow
     assert any("Dynamic stage FAILED" in c for c in captured)
+
+
+def test_unexpected_dynamic_exception_preserves_static_report_and_exits_nonzero(run_setup, monkeypatch):
+    # GAP-2 on an UNEXPECTED dynamic-stage exception (not a clean failed/skipped
+    # StageResult): a real-world app that makes run_dynamic_stage throw - an
+    # unmapped frida/device error, a synthesized-script quirk - must NOT propagate
+    # out of cli.run and discard the already-complete static report. It must be
+    # recorded as a failed dynamic stage, the full static report still written,
+    # the error surfaced, and the run exit non-zero. Same guarantee as the install
+    # failure, for the run_dynamic_stage call itself.
+    from dynamic import device as device_mod
+
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
+    monkeypatch.setattr(
+        cli, "synthesize",
+        lambda classification, action: SimpleNamespace(source="root", applied_hooks=[]),
+    )
+    # the dynamic stage throws unexpectedly for this real app
+    monkeypatch.setattr(
+        "dynamic.frida_runner.run_dynamic_stage",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("unmapped frida-server error")),
+    )
+
+    captured = []
+    original_print = cli.console.print
+    cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
+    try:
+        with pytest.raises(typer.Exit) as ei:
+            cli.run(
+                apk=run_setup / "fixture.apk",
+                justification="ACADEMIC_TRAINING_TARGET",
+                skip_dynamic=False,
+                device_serial=None,
+                target="uncrackable1",
+            )
+    finally:
+        cli.console.print = original_print
+
+    assert ei.value.exit_code == 1  # dynamic-failed run must exit non-zero
+    reports_dir = run_setup / "reports"
+    report_files = sorted(reports_dir.rglob("*.md"))
+    assert report_files, "an unexpected dynamic exception must NOT discard the static report"
+    text = report_files[0].read_text(encoding="utf-8")
+    # the unexpected error is surfaced in the report's Stage Results row
+    assert "unmapped frida-server error" in text
+    # the static detection work is still present in the preserved report
+    assert "Root-detection" in text
+    # the loud post-report failure was surfaced, not a silent swallow
+    assert any("Dynamic stage FAILED" in c for c in captured)

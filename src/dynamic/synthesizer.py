@@ -59,12 +59,22 @@ _ROOT_ARTIFACT_PATHS = [
 
 
 def _file_exists_patch(paths: list[str] | None = None) -> str:
-    """Patch java.io.File.exists to report false for ANY root-artifact path and
-    emit a probeHit so the app's own root-check being defeated is observed.
+    """Patch java.io.File existence/access probes to report false for ANY
+    root-artifact path and emit a probeHit so the app's own root-check being
+    defeated is observed.
+
+    A real root check is not limited to File.exists: it is just as likely to
+    probe a root artifact through canRead (is /system/bin/su accessible), canWrite
+    (is /system writable - a rooted mount), or isDirectory (is /data/adb present).
+    All four are hidden by the same superset membership and emit the same probeHit,
+    so a Java root check that uses any of these common File probes is defeated AND
+    observed - not just the exists() form (symmetric to the native statx/faccessat
+    coverage). For a non-root path each method calls through to its real impl, the
+    same proven pattern as the original exists-only hook.
 
     The `paths` argument is retained for recipe-source readability but the hook
     hides the shared `_ROOT_ARTIFACT_PATHS` superset - see that constant for why:
-    with several root recipes each installing a File.exists patch, Frida replaces
+    with several root recipes each installing a File probe patch, Frida replaces
     the slot, so hiding the same superset in every patch means the last one
     installed still hides every root artifact (no lost paths, no root check that
     slips through, and every hidden probe is observed)."""
@@ -85,16 +95,22 @@ def _file_exists_patch(paths: list[str] | None = None) -> str:
         "  var patch = function () {\n"
         "    var File = Java.use('java.io.File');\n"
         f"    var paths = {lit};\n"
-        "    File.exists.implementation = function () {\n"
-        "      var p = this.getAbsolutePath();\n"
-        "      for (var i = 0; i < paths.length; i++) {\n"
-        "        if (p === paths[i] || p.indexOf(paths[i] + '/') === 0) {\n"
-        "          send({probeHit: 'root', path: p});\n"
-        "          return false;\n"
+        "    var applyPatch = function (m) {\n"
+        "      File[m].implementation = function () {\n"
+        "        var p = this.getAbsolutePath();\n"
+        "        for (var i = 0; i < paths.length; i++) {\n"
+        "          if (p === paths[i] || p.indexOf(paths[i] + '/') === 0) {\n"
+        "            send({probeHit: 'root', path: p});\n"
+        "            return false;\n"
+        "          }\n"
         "        }\n"
-        "      }\n"
-        "      return this.exists();\n"
+        "        return this[m]();\n"
+        "      };\n"
         "    };\n"
+        "    applyPatch('exists');\n"
+        "    applyPatch('canRead');\n"
+        "    applyPatch('canWrite');\n"
+        "    applyPatch('isDirectory');\n"
         "  };\n"
         "  try { Java.performNow(patch); } catch (e) { Java.perform(patch); }\n"
         "})();"

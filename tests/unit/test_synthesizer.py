@@ -471,6 +471,23 @@ def test_root_recipes_emit_probe_hit_effect_evidence():
     assert "probeHit" in res2.source
 
 
+def test_file_patch_hides_canread_canwrite_isdirectory_alongside_exists():
+    # A real Java root check probes a root artifact through canRead (su accessible),
+    # canWrite (/system rw - a rooted mount), or isDirectory (/data/adb present) just
+    # as often as File.exists - previously only exists() was hidden, so those checks
+    # slipped past and never emitted the probeHit that confirms root. The shared
+    # File patch must hide all four with the same superset membership + probeHit.
+    res = synthesize(_cls(Action.ROOT_ONLY, root_ids=["root_su_binary_paths"]), Action.ROOT_ONLY)
+    src = res.source
+    assert "applyPatch('exists')" in src
+    assert "applyPatch('canRead')" in src
+    assert "applyPatch('canWrite')" in src
+    assert "applyPatch('isDirectory')" in src
+    assert "probeHit" in src
+    # the patch calls through to the real impl for a non-root path - no infinite loop
+    assert "return this[m]();" in src
+
+
 def test_predefined_script_match_reported_by_category():
     # Fix-5: a bypass action is deterministically matched to the predefined
     # universal for its detected categories - the no-AI predefined-script match.

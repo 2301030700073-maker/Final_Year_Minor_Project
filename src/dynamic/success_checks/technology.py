@@ -166,9 +166,15 @@ class TechnologyHooksEngagedCheck:
                 else "none observed (no root check reached during the run)"
             ),
             # Fix-1: observable SSL effect - a TLS handshake completed through the
-            # neutralized stack, evidence the bypass had a real effect.
+            # neutralized stack, evidence the bypass had a real effect. This line
+            # reports ONLY the handshake effect, not every bypassEffect in the run:
+            # a pin-check alone (ssl-pin-check with no completed handshake) is not a
+            # handshake and must not be reported under a "handshakes completed"
+            # heading - a mislabeled line for any real app whose only effect is the
+            # pin-check.
             "TLS handshakes completed post-bypass": (
-                ", ".join(dict.fromkeys(effects)) if effects
+                "yes (a TLS handshake completed through the neutralized stack)"
+                if "ssl-handshake" in effects
                 else "none observed (no TLS handshake reached during the run)"
             ),
             # Confirmed SSL bypass, on the app's own observable behavior: its pin-

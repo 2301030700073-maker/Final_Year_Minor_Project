@@ -109,7 +109,21 @@ def test_surfaces_probe_hit_and_bypass_effect_evidence():
     # non-pinned app also completes one; no pin-check was observed).
     assert v.ssl_bypassed is None
     assert "/system/bin/su" in v.evidence_lines["root artifact probes answered-false"]
-    assert "ssl-handshake" in v.evidence_lines["TLS handshakes completed post-bypass"]
+    assert "TLS handshake completed" in v.evidence_lines["TLS handshakes completed post-bypass"]
+
+
+def test_handshake_line_not_polluted_by_pin_check_only():
+    # The "TLS handshakes completed post-bypass" line reports ONLY the handshake
+    # observation. A real app whose only effect is the pin-check (ssl-pin-check,
+    # no completed handshake) must NOT be reported under a "handshakes completed"
+    # heading - previously the line joined every bypassEffect, so a pin-check-only
+    # run read "TLS handshakes completed: ssl-pin-check", a mislabeled line.
+    v = TechnologyHooksEngagedCheck().check(
+        [{"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}}]
+    )
+    assert v.evidence_lines["TLS handshakes completed post-bypass"] == \
+        "none observed (no TLS handshake reached during the run)"
+    assert "ssl-pin-check" not in v.evidence_lines["TLS handshakes completed post-bypass"]
 
 
 def test_root_confirmed_on_observed_probe_hit():

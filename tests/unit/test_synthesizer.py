@@ -488,6 +488,28 @@ def test_file_patch_hides_canread_canwrite_isdirectory_alongside_exists():
     assert "return this[m]();" in src
 
 
+def test_root_exec_su_covers_which_id_array_and_processbuilder():
+    # The exec-based root check does Runtime.exec("su"), Runtime.exec("which su"),
+    # Runtime.exec({"/system/bin/su","-c","id"}) (the String[] overload), or
+    # new ProcessBuilder("su","-c","id").start(). The recipe must neutralize all
+    # four - previously only the single-String exact-"su" form was caught, so
+    # which su / array / ProcessBuilder probes were silent (never emitted the
+    # probeHit that confirms root). Conservative detector: only root-binary
+    # references, never a benign command.
+    res = synthesize(_cls(Action.ROOT_ONLY, root_ids=["root_runtime_exec_su"]), Action.ROOT_ONLY)
+    assert res.strategy == "targeted"
+    src = res.source
+    assert "root_runtime_exec_su" in res.applied_hooks
+    assert "which su" in src
+    assert "Runtime.exec.overload('java.lang.String').implementation" in src
+    assert "Runtime.exec.overload('[Ljava.lang.String;').implementation" in src
+    assert "ProcessBuilder" in src
+    assert "PB.start.implementation" in src
+    assert "probeHit" in src
+    # a benign command (no root-binary reference) is NOT blocked
+    assert "isRootExec" in src
+
+
 def test_predefined_script_match_reported_by_category():
     # Fix-5: a bypass action is deterministically matched to the predefined
     # universal for its detected categories - the no-AI predefined-script match.

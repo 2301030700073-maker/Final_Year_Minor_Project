@@ -101,6 +101,11 @@ FRIDA_STAGE_TIMEOUT = 60.0  # seconds
 # giving up and burning the remaining settle window (see _wait_for_checkpoint).
 _CHECKPOINT_POLL_INTERVAL = 0.25
 
+# RESID-6E: how long to let the synthesized bypass's 200 ms checkpoint timer fire
+# before loading the heavy vendored universal. Must exceed the synth's setTimeout
+# (200 ms) with margin; 0.5 s verified on a real target. See the load site.
+_SYNTH_CHECKPOINT_SETTLE = 0.5
+
 
 def _wait_for_checkpoint(messages: list, settle_seconds: float) -> None:
     """Wait for the bypass scripts to signal that their hooks are installed, or
@@ -240,6 +245,14 @@ def run_dynamic_stage(
 
             if synth_source is not None:
                 load_script_source(session, synth_source, on_message)
+                # RESID-6E: let the synthesized bypass's checkpoint fire before
+                # loading the heavy vendored universal. Empirically verified on a
+                # real target (RS_CertPinning): loading the 114 KB vendor script
+                # immediately after the synth suppresses delivery of the synth's
+                # `send({hook:...})` checkpoint (the live frida_messages came back
+                # empty); a brief settle so its 200 ms checkpoint timer fires first
+                # restores it. This is the delivery-timing fix, not a blind sleep.
+                time.sleep(_SYNTH_CHECKPOINT_SETTLE)
                 # Supplement the findings-specific bypass with the vendored
                 # third-party universal so an unknown real app gets the broad
                 # external bypass too. The file is committed; if it is ever

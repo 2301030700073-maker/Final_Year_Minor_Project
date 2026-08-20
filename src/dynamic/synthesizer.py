@@ -432,8 +432,8 @@ def _matched_ids(evidence) -> list[str]:
     return [e.signature_id for e in evidence]
 
 
-def _join_script(hooks: list[str], applied: list[str]) -> str:
-    checkpoint = "\n".join(f'send({{hook: {json.dumps(h)}}});' for h in applied)
+def _join_script(hooks: list[str], checkpoint_ids: list[str]) -> str:
+    checkpoint = "\n".join(f'send({{hook: {json.dumps(h)}}});' for h in checkpoint_ids)
     parts = list(hooks)
     if checkpoint:
         parts.append("setTimeout(function () {\n" + checkpoint + "\n}, 200);")
@@ -512,7 +512,13 @@ def synthesize(classification: ClassificationResult, action: Action) -> Synthesi
             universal.append("ssl")
 
     all_hooks = evasion_hooks + root_hooks + ssl_hooks
-    source = _join_script(all_hooks, applied)
+    # Checkpoints for the technology-level "hooks engaged" signal cover BOTH the
+    # dedicated recipe hooks AND the category universal base (labelled
+    # universal:<cat>). Without this, a bypass that only used the universal base
+    # would emit no checkpoint and the signal would silently read "none" even
+    # though the bypass ran (RS_CertPinning exposed this).
+    checkpoint_ids = list(applied) + [f"universal:{c}" for c in universal]
+    source = _join_script(all_hooks, checkpoint_ids)
 
     return SynthesisResult(
         source=source,

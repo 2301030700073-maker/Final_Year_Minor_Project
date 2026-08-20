@@ -24,13 +24,54 @@ from __future__ import annotations
 
 from common import VerificationResult
 
+# Cap on how many raw frida messages are surfaced into the report so the
+# engagement evidence stays bounded and auditable (ADR-0006), never a dump.
+_MESSAGE_SAMPLE_LIMIT = 8
+_PAYLOAD_TRUNCATE = 80
+
+
+def _summarize(message: dict, limit: int = _PAYLOAD_TRUNCATE) -> str:
+    """Render one frida message compactly so the report shows what was actually
+    observed, not just a pass/fail label. A log message carries a string payload;
+    a send() carries a dict (the synthesized hook checkpoints land here)."""
+    if not isinstance(message, dict):
+        return f"malformed:{type(message).__name__}"
+    mtype = message.get("type", "?")
+    payload = message.get("payload")
+    if isinstance(payload, dict):
+        if "hook" in payload:
+            body = f"hook:{payload['hook']}"
+        else:
+            keys = ",".join(sorted(str(k) for k in payload.keys()))
+            body = f"dict{{{keys}}}"
+    elif isinstance(payload, str):
+        body = payload if len(payload) <= limit else payload[:limit] + "…"
+    elif payload is None:
+        body = "null"
+    else:
+        body = type(payload).__name__
+    return f"{mtype}:{body}"
+
+
+# The vendored universal reports native-hook engagement via console.log lines of
+# this shape (observed on a real app): e.g. "[OK] [ROOT] libc.stat native" or
+# "[OK] [SSL] libssl.SSL_CTX_set_cert_cb native". These are direct, observable
+# third-party confirmations that the injected agent hooked native functions; they
+# are engagement evidence, not a bypass pass (root/ssl stay None - only a
+# target-specific live SuccessCheck can confirm the app's own check was defeated).
+_VENDOR_ROOT_MARKER = "[OK] [ROOT]"
+_VENDOR_SSL_MARKER = "[OK] [SSL]"
+
 
 class TechnologyHooksEngagedCheck:
-    """Report which synthesized recipe hooks engaged in the running process."""
+    """Report which synthesized recipe hooks engaged in the running process, and
+    surface a bounded sample of the actual frida messages so the engagement
+    claim is auditable (a "none" is distinguishable from an empty capture)."""
 
     def check(self, frida_messages: list | None) -> VerificationResult:
+        messages = frida_messages or []
         engaged: list[str] = []
-        for m in frida_messages or []:
+        for m in messages:
             if not isinstance(m, dict):
                 continue
             payload = m.get("payload")
@@ -38,13 +79,30 @@ class TechnologyHooksEngagedCheck:
                 hook = payload.get("hook")
                 if hook and str(hook) not in engaged:
                     engaged.append(str(hook))
+            elif isinstance(payload, str) and (
+                _VENDOR_ROOT_MARKER in payload or _VENDOR_SSL_MARKER in payload
+            ):
+                # Vendored-universal native-hook engagement, labelled distinctly
+                # from a synthesized recipe checkpoint.
+                token = (
+                    "vendor:native-root"
+                    if _VENDOR_ROOT_MARKER in payload else "vendor:native-ssl"
+                )
+                if token not in engaged:
+                    engaged.append(token)
+        evidence_lines = {
+            "bypass hooks engaged": (
+                ", ".join(engaged) if engaged
+                else "none (no hook checkpoint observed)"
+            ),
+            "frida messages observed": (
+                f"{len(messages)} total; sample: "
+                + (", ".join(_summarize(m) for m in messages[:_MESSAGE_SAMPLE_LIMIT])
+                   if messages else "(none captured)")
+            ),
+        }
         return VerificationResult(
             root_bypassed=None,
             ssl_bypassed=None,
-            evidence_lines={
-                "bypass hooks engaged": (
-                    ", ".join(engaged) if engaged
-                    else "none (no hook checkpoint observed)"
-                )
-            },
+            evidence_lines=evidence_lines,
         )

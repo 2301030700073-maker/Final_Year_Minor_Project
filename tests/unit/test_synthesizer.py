@@ -266,6 +266,18 @@ def test_build_props_probe_routes_to_build_tags():
     assert "release-keys" in res.source  # Build.TAGS neutralization
 
 
+def test_universal_path_emits_universal_checkpoint():
+    # A technique with no dedicated hook falls to the category universal base -
+    # that path must STILL emit a provable "universal:<cat>" checkpoint so the
+    # technology hooks-engaged signal is honest, not silently "none".
+    res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["certificate_transparency_verifier"]), Action.SSL_ONLY)
+    assert res.strategy == "universal"
+    assert 'send({hook: "universal:ssl"})' in res.source
+    res2 = synthesize(_cls(Action.ROOT_ONLY, root_ids=["xposed_framework"]), Action.ROOT_ONLY)
+    assert res2.strategy == "universal"
+    assert 'send({hook: "universal:root"})' in res2.source
+
+
 def test_synthesize_emits_hook_checkpoints_for_applied_hooks():
     # The technology-level "hooks engaged" signal (success_checks/technology.py)
     # depends on each applied recipe emitting a frida send({hook: <id>})

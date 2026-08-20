@@ -269,6 +269,18 @@ def test_native_root_path_hiding_fires_for_native_su_embedded():
     assert "openat" in res.source
 
 
+def test_native_root_path_hiding_covers_statx():
+    # A real-world native root check is as likely to probe a root artifact through
+    # the modern libc statx primitive as through stat/lstat. The envelope must
+    # intercept statx too (path is arg 1, like openat), or an app using it would
+    # never produce the probeHit that confirms root - a silent native-root blind
+    # spot. Pure observation of a root-artifact path; never a false positive.
+    res = synthesize(
+        _cls(Action.ROOT_ONLY, root_ids=["native_su_binary_embedded"]), Action.ROOT_ONLY
+    )
+    assert "hidePathProbe('statx', 1, -1)" in res.source
+
+
 def test_root_alias_su_alternate_routes_targeted():
     # su_alternate_binary_paths is the same artifact check under another name; it
     # must route to the targeted su-path patch, not the category universal.

@@ -103,13 +103,16 @@ def _file_exists_patch(paths: list[str] | None = None) -> str:
 
 def _native_root_path_hiding(paths: list[str]) -> str:
     """Hide root artifacts from a native root check that probes them through
-    libc (access/stat/lstat/open/openat/fopen) - the JNI equivalent of the Java
-    File.exists patch (L-M2, no native root recipe existed). When the path
+    libc (access/stat/lstat/statx/open/openat/fopen) - the JNI equivalent of the
+    Java File.exists patch (L-M2, no native root recipe existed). When the path
     argument matches a root artifact, the call returns failure (ENOENT, or NULL
-    for fopen) so the native probe believes the artifact is absent. Deterministic;
-    try/catch per symbol so a missing libc export degrades silently. Routed via
-    native_su_binary_embedded, which already fires only when root paths are
-    embedded in native code (low false-positive, ADR-0006)."""
+    for fopen) so the native probe believes the artifact is absent. statx is the
+    modern libc stat primitive a real-world native root check is as likely to use
+    as stat/lstat, so it is covered too (path is arg 1, like openat). Deterministic;
+    try/catch per symbol so a missing libc export (e.g. statx on an older device)
+    degrades silently. Routed via native_su_binary_embedded, which already fires
+    only when root paths are embedded in native code (low false-positive,
+    ADR-0006)."""
     lit = json.dumps(paths)
     return (
         "var ROOT_PATHS = " + lit + ";\n"
@@ -145,6 +148,7 @@ def _native_root_path_hiding(paths: list[str]) -> str:
         "hidePathProbe('access', 0, -1);\n"
         "hidePathProbe('stat', 0, -1);\n"
         "hidePathProbe('lstat', 0, -1);\n"
+        "hidePathProbe('statx', 1, -1);\n"
         "hidePathProbe('open', 0, -1);\n"
         "hidePathProbe('openat', 1, -1);\n"
         "hidePathProbe('fopen', 0, 0);\n"

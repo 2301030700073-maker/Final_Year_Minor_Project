@@ -833,7 +833,6 @@ SSL_RECIPES: dict[str, str] = {
 SSL_RECIPES["sslcontext_init_with_trustmanager"] = SSL_RECIPES["custom_trustmanager_checkservertrusted"]
 SSL_RECIPES["custom_sslsocketfactory"] = SSL_RECIPES["custom_trustmanager_checkservertrusted"]
 SSL_RECIPES["set_default_hostname_verifier"] = SSL_RECIPES["hostname_verifier_always_true"]
-SSL_RECIPES["hostname_verifier_set"] = SSL_RECIPES["hostname_verifier_always_true"]
 
 # --- Alternate spellings routed to existing proven neutralizers (root) ---------
 # Many root signatures are the same artifact/exec checks under different names or

@@ -184,7 +184,7 @@ def test_ssl_control_aliases_route_to_existing_neutralizers():
         res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=[sid]), Action.SSL_ONLY)
         assert res.strategy == "targeted", sid
         assert "checkServerTrusted" in res.source, sid
-    for sid in ["set_default_hostname_verifier", "hostname_verifier_set"]:
+    for sid in ["set_default_hostname_verifier", "okhttp_hostname_verifier_set"]:
         res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=[sid]), Action.SSL_ONLY)
         assert res.strategy == "targeted", sid
         assert "HostnameVerifier" in res.source, sid

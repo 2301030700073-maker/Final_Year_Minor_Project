@@ -122,6 +122,24 @@ NATIVE_SSL_INDICATORS: tuple[str, ...] = (
     r"/system/etc/security/cacerts",
     r"SSL_CTX_set_verify\b",
     r"SSL_set_verify\b",
+    # Modern BoringSSL custom-verify API (SSL_CTX_set_custom_verify /
+    # SSL_set_custom_verify) - the verify-control idiom Conscrypt/Cronet/Flutter
+    # use to pin. Deliberately an INDICATOR, never a scored signature: verified
+    # against a real production libcronet.so, these symbols are stripped/renamed
+    # in shipping BoringSSL, so they are statically absent even when the app pins
+    # this way. Surfacing them as a coverage-limited "unknown native TLS
+    # capability" (like SSL_CTX_set_verify) is the honest signal, not a confident
+    # clean negative (ADR-0006).
+    r"SSL_CTX_set_custom_verify\b",
+    r"SSL_set_custom_verify\b",
+    # Xamarin/Mono runtime entrypoints (mono_jit_init / mono_assembly_load /
+    # mono_register_bundled_assemblies). Presence of the Mono runtime means TLS is
+    # likely handled by the bundled BoringSSL/Mono path, outside the scanned Java
+    # and the universal hooks - so the SSL category must not certify a confident
+    # negative for a Xamarin app. An indicator only; never scored as pinning.
+    r"mono_jit_init\b",
+    r"mono_assembly_load\b",
+    r"mono_register_bundled_assemblies\b",
     r"X509_VERIFY_PARAM_set1_host\b",
     r"SSL_set1_host\b",
     r"SSL_load_verify_locations",

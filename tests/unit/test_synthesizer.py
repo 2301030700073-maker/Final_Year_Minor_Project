@@ -180,28 +180,15 @@ def test_cronet_verifier_routes_to_native_verify():
     assert "libcronet.so" in res.source
 
 
-def test_boringssl_custom_verify_routes_to_native_bypass():
-    # The modern BoringSSL custom-verify API (Conscrypt/Cronet/Flutter pinning) is
-    # a dedicated native SSL technique - it must route to the extended native
-    # bypass (which now neutralizes both custom-verify entrypoints), not universal.
-    res = synthesize(
-        _cls(Action.SSL_ONLY, ssl_ids=["native_boringssl_custom_verify"]), Action.SSL_ONLY
-    )
+def test_native_ssl_bypass_emits_custom_verify_hooks():
+    # The BoringSSL custom-verify entrypoints remain part of the shared native
+    # bypass, exercised by the surviving native SSL signatures (the custom_verify
+    # and xamarin_mono_runtime ids are no longer scored signatures - see
+    # indicators.py - but the hook bodies still ship inside the native bypass).
+    res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["native_ssl_custom_verify_callback"]), Action.SSL_ONLY)
     assert res.strategy == "targeted"
-    assert "native_boringssl_custom_verify" in res.applied_hooks
     assert "SSL_CTX_set_custom_verify" in res.source
     assert "SSL_set_custom_verify" in res.source
-
-
-def test_xamarin_mono_runtime_routes_to_native_bypass():
-    # Xamarin/Mono bundles BoringSSL; the runtime signature routes to the proven
-    # native bypass (user-confirmed "detect + route to proven handles"), not a
-    # fabricated Mono-only hook. Assert it lands on the extended bypass.
-    res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["xamarin_mono_runtime"]), Action.SSL_ONLY)
-    assert res.strategy == "targeted"
-    assert "xamarin_mono_runtime" in res.applied_hooks
-    assert "SSL_CTX_set_custom_verify" in res.source
-    assert "Process.enumerateModules" in res.source
 
 
 def test_native_root_path_hiding_fires_for_native_su_embedded():

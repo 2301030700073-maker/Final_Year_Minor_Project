@@ -126,33 +126,11 @@
     - "linjector"
     - "libfrida.so"
 
-# Boundary (native SSL, 2026-08): the modern BoringSSL certificate-pinning API.
-# SSL_CTX_set_custom_verify / SSL_set_custom_verify install a per-verify callback
-# that overrides the default trust store - the contemporary way Conscrypt (Android's
-# default TLS provider), Cronet/gRPC, Flutter dart:io, and RN pin certs, as opposed
-# to the older SSL_CTX_set_verify / SSL_CTX_set_cert_verify_callback. Like
-# native_ssl_custom_verify_callback it is an IMPORTED BoringSSL symbol, so it is
-# statically recoverable from the export corpus and SCORED (unambiguous pin/verify
-# idiom). Routes to the native family bypass which now also neutralizes it.
-- id: native_boringssl_custom_verify
-  category: ssl
-  weight: 0.4
-  pattern_type: export_symbol
-  patterns:
-    - "SSL_CTX_set_custom_verify"
-    - "SSL_set_custom_verify"
-
-# Xamarin/Mono runtime (2026-08): a distinctive set of Mono runtime exports in
-# libmonodroid.so / libmonosgen-*.so. Detected so the app can be routed to the
-# proven BoringSSL native bypass - Xamarin.Android bundles BoringSSL and most of
-# its TLS is handled natively, outside the Java trust-manager the universal hooks.
-# LOW weight and commented as heuristic: runtime presence is not itself an SSL
-# technique, it is a trigger to apply the native unpin that the framework needs.
-- id: xamarin_mono_runtime
-  category: ssl
-  weight: 0.3
-  pattern_type: export_symbol
-  patterns:
-    - "mono_jit_init"
-    - "mono_assembly_load"
-    - "mono_register_bundled_assemblies"
+# NOTE: the modern BoringSSL custom-verify API (SSL_CTX_set_custom_verify /
+# SSL_set_custom_verify) and the Xamarin/Mono runtime are deliberately NOT scored
+# signatures here. Verified against real production apps (Netflix libcronet.so
+# bundles BoringSSL yet strips every verify symbol): production BoringSSL/Mono
+# strips or renames these symbols, so an export_symbol signature cannot fire on a
+# shipping app, and scoring it would over-claim detection. They live in the
+# boundary-2 native indicator layer (static/indicators.py) instead, surfacing the
+# app as coverage-limited rather than a confident negative (ADR-0006).

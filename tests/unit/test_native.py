@@ -104,37 +104,14 @@ def test_match_native_export_symbol_finds_evidence():
     assert result.root_evidence[0].matched_text == "check_root"
 
 
-def test_native_boringssl_custom_verify_signature_loads_and_matches():
-    # The BoringSSL custom-verify signature must load from the shipped YAML and
-    # fire on a lib exporting the modern pinning API (Conscrypt/Cronet/Flutter).
+def test_native_signature_yaml_no_longer_scores_stripped_boringssl_ids():
+    # Production BoringSSL/Mono strip these symbols (verified on Netflix
+    # libcronet.so), so the custom-verify and xamarin ids must NOT be scored
+    # signatures - they live in the indicator layer instead (test_indicators.py).
     sigs = load_native_signatures(Path("config/signatures/native_detection.yaml"))
-    sig = next((s for s in sigs if s.id == "native_boringssl_custom_verify"), None)
-    assert sig is not None, "native_boringssl_custom_verify must be present in YAML"
-    assert sig.category == "ssl"
-    # Imported BoringSSL symbol is matched against the export corpus (readelf -Ws
-    # includes imports) - one of the two patterns present must fire (OR).
-    lib = NativeLibrary(abi="arm64-v8a", name="libconscrypt_jni.so",
-                        exports=["SSL_CTX_set_custom_verify"])
-    result = match_native([lib], [sig])
-    assert result.ssl_confidence == pytest.approx(sig.weight)
-    assert result.ssl_evidence[0].signature_id == "native_boringssl_custom_verify"
-    # The per-SSL instance (SSL_set_custom_verify) fires too.
-    lib2 = NativeLibrary(abi="x86", name="libboringssl.so", exports=["SSL_set_custom_verify"])
-    assert match_native([lib2], [sig]).ssl_evidence[0].matched_text == "SSL_set_custom_verify"
-
-
-def test_native_xamarin_mono_runtime_signature_loads_and_matches():
-    # The Xamarin/Mono runtime signature must load and fire on a lib exporting a
-    # Mono runtime symbol (libmonodroid.so / libmonosgen-*.so), routing the app
-    # to the native BoringSSL bypass.
-    sigs = load_native_signatures(Path("config/signatures/native_detection.yaml"))
-    sig = next((s for s in sigs if s.id == "xamarin_mono_runtime"), None)
-    assert sig is not None, "xamarin_mono_runtime must be present in YAML"
-    assert sig.category == "ssl"
-    lib = NativeLibrary(abi="arm64-v8a", name="libmonodroid.so", exports=["mono_jit_init"])
-    result = match_native([lib], [sig])
-    assert result.ssl_confidence == pytest.approx(sig.weight)
-    assert result.ssl_evidence[0].signature_id == "xamarin_mono_runtime"
+    ids = {s.id for s in sigs}
+    assert "native_boringssl_custom_verify" not in ids
+    assert "xamarin_mono_runtime" not in ids
 
 
 def test_match_native_require_all_needs_every_pattern():

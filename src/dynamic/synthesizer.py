@@ -377,13 +377,6 @@ SSL_RECIPES: dict[str, str] = {
     # A native cert-verify callback (SSL_CTX_set_cert_verify_callback) is exactly
     # what _native_ssl_pin_bypass neutralizes (accept-all) - route it there.
     "native_ssl_custom_verify_callback": _native_ssl_pin_bypass(),
-    # The modern BoringSSL custom-verify API (SSL_CTX_set_custom_verify /
-    # SSL_set_custom_verify) is neutralized by the extended native bypass too.
-    "native_boringssl_custom_verify": _native_ssl_pin_bypass(),
-    # Xamarin/Mono bundles BoringSSL; most of its TLS is handled natively, outside
-    # the Java trust-manager the universal hooks. Routing the runtime signature to
-    # the native bypass is the proven handle (user-confirmed), not a Mono-only hook.
-    "xamarin_mono_runtime": _native_ssl_pin_bypass(),
 }
 
 # Signatures that are alternate spellings of the same SSL-control technique

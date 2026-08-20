@@ -313,6 +313,25 @@ def test_native_root_path_hiding_covers_faccessat():
     assert "hidePathProbe('faccessat', 1, -1)" in res.source
 
 
+def test_native_root_exec_blocking_covered_for_su_embedded():
+    # A JNI root check can EXECUTE a root binary directly - fork+execve("/system/bin/su")
+    # or system("which su") - never touching the Java Runtime.exec/ProcessBuilder the
+    # Java recipe covers. The native_su_binary_embedded recipe must also block libc
+    # execve (by root-binary basename) and system (by root-binary command reference),
+    # emitting the probeHit that confirms root - or those exec probes would be silent.
+    res = synthesize(
+        _cls(Action.ROOT_ONLY, root_ids=["native_su_binary_embedded"]), Action.ROOT_ONLY
+    )
+    src = res.source
+    assert "'execve'" in src
+    assert "'system'" in src
+    assert "isRootBin" in src
+    assert "which su" in src
+    assert "probeHit" in src
+    # conservative: only a root-binary basename/reference blocks, never a benign exec
+    assert "isRootBin(nbasename(p))" in src
+
+
 def test_native_build_props_probe_routes_to_prop_hiding():
     # A native (JNI) test-keys root check reads ro.build.tags / ro.build.type via
     # libc __system_property_get. Previously only the Java Build.TAGS patch

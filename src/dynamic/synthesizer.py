@@ -174,6 +174,57 @@ def _native_root_path_hiding(paths: list[str]) -> str:
     )
 
 
+def _native_root_exec_blocking() -> str:
+    """Block a JNI root check that EXECUTES a root binary rather than probing a
+    path - the native counterpart to the Java root_runtime_exec_su recipe. A
+    native root check does fork+execve("/system/bin/su", ...) or system("which su")
+    directly (never touching Java Runtime.exec/ProcessBuilder), so hiding libc
+    stat/access alone misses it. execve(path,...) is blocked when the basename is a
+    root binary (su/magisk/ksu/apatch); system(cmd) is blocked when the shell
+    string references one or uses the which/command -v idiom. A blocked execve makes
+    the child exit non-zero (execve -1 -> _exit(127)), and a blocked system returns
+    -1 - so the parent's waitpid/return sees "not rooted". Conservative: only a root
+    binary basename/reference triggers, never a benign exec. Each blocked probe emits
+    the probeHit that confirms root. Deterministic; try/catch per symbol so a missing
+    export degrades silently (ADR-0006)."""
+    return (
+        "function nbasename(p) { var i = p.lastIndexOf('/'); return i === -1 ? p : p.substr(i + 1); }\n"
+        "function isRootBin(b) { return b === 'su' || b === 'magisk' || b === 'ksu' || b === 'apatch'; }\n"
+        "function isRootExecStr(s) {\n"
+        "  if (!s) return false;\n"
+        "  var t = ' ' + s.replace(/[\"']/g, ' ') + ' ';\n"
+        "  return t.indexOf(' su ') !== -1 || t.indexOf('/su ') !== -1\n"
+        "      || t.indexOf(' magisk ') !== -1 || t.indexOf(' ksu ') !== -1\n"
+        "      || t.indexOf('which su') !== -1 || t.indexOf('which magisk') !== -1\n"
+        "      || t.indexOf('command -v su') !== -1 || t.indexOf('type su') !== -1;\n"
+        "}\n"
+        "try {\n"
+        "  var ev = Module.findExportByName('libc.so', 'execve');\n"
+        "  if (ev) Interceptor.attach(ev, {\n"
+        "    onEnter: function (args) {\n"
+        "      this.block = false;\n"
+        "      try { var p = args[0].readUtf8String(); if (p && isRootBin(nbasename(p))) { this.block = true; this.p = p; } } catch (e) {}\n"
+        "    },\n"
+        "    onLeave: function (ret) {\n"
+        "      if (this.block) { try { send({probeHit: 'root', path: this.p}); } catch (e) {} ret.replace(ptr(-1)); }\n"
+        "    }\n"
+        "  });\n"
+        "} catch (e) { console.log('[synth] execve hook unavailable'); }\n"
+        "try {\n"
+        "  var sy = Module.findExportByName('libc.so', 'system');\n"
+        "  if (sy) Interceptor.attach(sy, {\n"
+        "    onEnter: function (args) {\n"
+        "      this.block = false;\n"
+        "      try { var c = args[0].readUtf8String(); if (c && isRootExecStr(c)) { this.block = true; this.c = c; } } catch (e) {}\n"
+        "    },\n"
+        "    onLeave: function (ret) {\n"
+        "      if (this.block) { try { send({probeHit: 'root', path: this.c}); } catch (e) {} ret.replace(ptr(-1)); }\n"
+        "    }\n"
+        "  });\n"
+        "} catch (e) { console.log('[synth] system hook unavailable'); }\n"
+    )
+
+
 def _native_build_props_hiding() -> str:
     """Hide the Android emulator/test-keys build fingerprint from a NATIVE root
     check - the JNI counterpart to the Java Build.TAGS patch
@@ -534,7 +585,9 @@ ROOT_RECIPES: dict[str, str] = {
     # code (native_su_binary_embedded fires, low-FP), hide them from libc
     # access/stat/open/fopen probes so a JNI root check believes the artifact is
     # absent - the native counterpart to the Java File.exists patch above.
-    "native_su_binary_embedded": _native_root_path_hiding(_ROOT_ARTIFACT_PATHS),
+    "native_su_binary_embedded": (
+        _native_root_path_hiding(_ROOT_ARTIFACT_PATHS) + "\n\n" + _native_root_exec_blocking()
+    ),
     # Native build-props root check (was a native blind spot - the Java
     # Build.TAGS patch has no native counterpart). When the app embeds
     # ro.build.tags / ro.build.type in native code (native_build_props_probe

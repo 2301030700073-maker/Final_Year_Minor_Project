@@ -4,6 +4,10 @@ and returns a Frida JS source string. The core L-M2 guarantee tested here: a rea
 app with detected techniques (or even none specific) always gets a real bypass
 attempt, never a silent "skipped, no bypass script available"."""
 
+import json
+import shutil
+import subprocess
+
 import pytest
 
 from common import Action, CategoryVerdict, ClassificationResult, Evidence
@@ -18,6 +22,33 @@ def _cls(action, root_ids=(), ssl_ids=()):
         root=CategoryVerdict(confidence=0.8 if root_ids else 0.0, detected=bool(root_ids), evidence=root_ev),
         ssl=CategoryVerdict(confidence=0.8 if ssl_ids else 0.0, detected=bool(ssl_ids), evidence=ssl_ev),
     )
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_synthesized_sources_parse_as_valid_javascript():
+    # The synthesized bypasses are Frida JS strings. The other tests assert their
+    # SHAPE as substrings, but none prove they PARSE - a brace mismatch or invalid
+    # escape in any hook (this session added many) would be a real defect invisible
+    # to substring checks. When node is available, parse every representative combo
+    # (root-only, native-root, ssl, custom-TrustManager ssl, and a BOTH native-frida
+    # script that exercises evasion + native root envelope + build-props + native
+    # ssl + observer together) and fail loudly on a syntax error. Skipped where node
+    # is absent (the string-shape tests still run everywhere).
+    cases = {
+        "root_su": synthesize(_cls(Action.ROOT_ONLY, root_ids=["root_su_binary_paths"]), Action.ROOT_ONLY).source,
+        "root_native": synthesize(_cls(Action.ROOT_ONLY, root_ids=["native_su_binary_embedded", "native_jni_root_check", "native_build_props_probe"]), Action.ROOT_ONLY).source,
+        "ssl_okhttp": synthesize(_cls(Action.SSL_ONLY, ssl_ids=["okhttp_certificate_pinner"]), Action.SSL_ONLY).source,
+        "ssl_custom_tm": synthesize(_cls(Action.SSL_ONLY, ssl_ids=["custom_trustmanager_checkservertrusted"]), Action.SSL_ONLY).source,
+        "both_native_frida": synthesize(_cls(Action.BOTH, root_ids=["native_frida_detection", "native_su_binary_embedded"], ssl_ids=["native_ssl_pinning_verify"]), Action.BOTH).source,
+    }
+    for name, src in cases.items():
+        # new Function() parses without executing - safe for Frida-only code.
+        r = subprocess.run(
+            ["node", "-e", "new Function(process.argv[1])", src],
+            capture_output=True, text=True,
+        )
+        assert r.returncode == 0, f"JS syntax error in [{name}]:\n{r.stderr}"
+        assert not r.stderr.strip(), f"node warned on [{name}]:\n{r.stderr}"
 
 
 def test_synthesize_root_targeted_hook():

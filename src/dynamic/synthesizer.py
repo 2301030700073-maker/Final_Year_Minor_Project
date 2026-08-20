@@ -229,16 +229,18 @@ def _native_build_props_hiding() -> str:
     """Hide the Android emulator/test-keys build fingerprint from a NATIVE root
     check - the JNI counterpart to the Java Build.TAGS patch
     (root_build_tags_test_keys). A JNI root check reads ro.build.tags /
-    ro.build.type through libc's __system_property_get; on an emulator or
-    userdebug/eng build those read 'test-keys'/'userdebug', which the check
-    treats as rooted. This hook answers the ROOT-INDICATING read with the
-    production value instead ('release-keys'/'user') so the probe sees an
-    un-rooted build. It only ever rewrites the return for exactly those two
-    prop names - no other property read is touched, so app behavior is unchanged
-    except for the two signals a native build-tag root check keys on (ADR-0001).
-    Deterministic; try/catch so a missing __system_property_get export degrades
-    silently. Routed via native_build_props_probe, which fires only when the
-    build-props strings are embedded in native code (low-FP, ADR-0006)."""
+    ro.build.type / ro.build.fingerprint through libc's __system_property_get; on
+    an emulator or userdebug/eng build those read 'test-keys'/'userdebug', which
+    the check treats as rooted. This hook answers the ROOT-INDICATING reads with
+    the production value instead ('release-keys'/'user', and any 'test-keys' in
+    the fingerprint scrubbed to 'release-keys' - mirroring the Java recipe, which
+    also patches Build.FINGERPRINT). It only ever rewrites the return for exactly
+    these root-indicating prop reads - no other property read is touched, so app
+    behavior is unchanged except for the signals a native build-tag root check
+    keys on (ADR-0001). Deterministic; try/catch so a missing __system_property_get
+    export degrades silently. Routed via native_build_props_probe, which fires
+    only when the build-props strings are embedded in native code (low-FP,
+    ADR-0006)."""
     return (
         "// __system_property_get(name, value) returns the value length, or 0 if\n"
         "// absent. Spoof only the two props a native test-keys root check keys on.\n"
@@ -264,6 +266,28 @@ def _native_build_props_hiding() -> str:
         "}\n"
         "spoofProp('ro.build.tags', 'release-keys', 12);\n"
         "spoofProp('ro.build.type', 'user', 4);\n"
+        "// ro.build.fingerprint also embeds 'test-keys' on an emulator/userdebug\n"
+        "// build, but its value is device-specific - so scrub the token in place\n"
+        "// (read the real value, replace test-keys -> release-keys) rather than\n"
+        "// overriding it. Mirrors the Java recipe's Build.FINGERPRINT patch.\n"
+        "function scrubFingerprint() {\n"
+        "  try {\n"
+        "    var p = Module.findExportByName('libc.so', '__system_property_get');\n"
+        "    if (!p) return;\n"
+        "    Interceptor.attach(p, {\n"
+        "      onEnter: function (args) { try { this.isFp = args[0].readUtf8String() === 'ro.build.fingerprint'; } catch (e) { this.isFp = false; } this.buf = args[1]; },\n"
+        "      onLeave: function (ret) {\n"
+        "        if (this.isFp && ret.toInt32() > 0) {\n"
+        "          try {\n"
+        "            var s = this.buf.readUtf8String();\n"
+        "            if (s.indexOf('test-keys') !== -1) this.buf.writeUtf8String(s.replace(/test-keys/g, 'release-keys'));\n"
+        "          } catch (e) {}\n"
+        "        }\n"
+        "      }\n"
+        "    });\n"
+        "  } catch (e) { console.log('[synth] fingerprint prop scrub unavailable'); }\n"
+        "}\n"
+        "scrubFingerprint();\n"
     )
 
 

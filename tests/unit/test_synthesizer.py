@@ -396,6 +396,11 @@ def test_native_build_props_probe_routes_to_prop_hiding():
     assert "__system_property_get" in res.source
     assert "ro.build.tags" in res.source and "release-keys" in res.source
     assert "ro.build.type" in res.source and "'user'" in res.source
+    # ro.build.fingerprint is scrubbed in place (device-specific value, just the
+    # test-keys token replaced) - the native counterpart to Build.FINGERPRINT.
+    assert "scrubFingerprint" in res.source
+    assert "ro.build.fingerprint" in res.source
+    assert "test-keys" in res.source and "release-keys" in res.source
 
 
 def test_root_alias_su_alternate_routes_targeted():

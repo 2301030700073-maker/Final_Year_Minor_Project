@@ -133,6 +133,21 @@ def _canonical_target(target: str) -> str:
     return "AndroGoat" if target.lower() == "androgoat" else target
 
 
+# App-agnostic routing: when --target is omitted, the detected APK package name
+# resolves to the canonical augmentation target for the known reference apps
+# (whose package names are their real manifests - OWASP MASVS uncrackable1/2/3,
+# AndroGoat), so they keep their hand-authored scripts + success checks. Any
+# other package passes through unchanged and routes to the general synthesized-
+# bypass path. This is what lets an arbitrary APK run every phase with no
+# app-specific --target: known apps augment, unknown apps go general, all of
+# them go through the full pipeline.
+PACKAGE_TO_TARGET: dict[str, str] = {
+    "owasp.sat.agoat": "AndroGoat",
+    "owasp.mstg.uncrackable1": "uncrackable1",
+    "owasp.mstg.uncrackable2": "uncrackable2",
+    "owasp.mstg.uncrackable3": "uncrackable3",
+}
+
 def _git_commit_hash() -> str:
     """The analysis code's commit, made dirty-aware (RESID-7B). Stamping bare
     HEAD was a false precision: a report could print a commit even when the
@@ -518,16 +533,17 @@ def run(
     ),
     skip_dynamic: bool = typer.Option(False, "--skip-dynamic", help="Skip the dynamic analysis stage"),
     device_serial: Optional[str] = typer.Option(None, "--device", help="Specific device/emulator serial"),
-    target: str = typer.Option(
-        ..., "--target",
+    target: Optional[str] = typer.Option(
+        None, "--target",
         help=(
-            "Which target app this run is analyzing - selects the Frida bypass script and "
-            "success-check module. Required, no default: a real app silently analyzed under "
-            "uncrackable1's assumptions would load hooks for classes that don't exist in it, "
-            "producing a misleading correlation mismatch instead of an honest 'not attempted' "
-            "(a real bug this fixes). An unrecognized target (anything other than uncrackable1/2/3) "
-            "is fine and expected for real apps - the dynamic stage degrades gracefully to "
-            "'skipped, no bypass script available' rather than failing."
+            "Target app this run is analyzing - selects the Frida bypass script and "
+            "success-check module. Optional: when omitted, it is auto-derived from "
+            "the APK's detected package name (known reference apps resolve to their "
+            "hand-authored augmentation; any other app routes to the general "
+            "synthesized-bypass path). Every app goes through the full pipeline "
+            "regardless. An unrecognized target (anything other than uncrackable1/2/3 "
+            "or AndroGoat) is fine and expected for real apps - the dynamic stage "
+            "degrades gracefully to the synthesized bypass rather than failing."
         ),
     ),
 ):
@@ -570,7 +586,9 @@ def run(
     # (SUCCESS_CHECKS) below both agree on the same key regardless of casing
     # (uncrackable1/2/3 are lowercase; AndroGoat is mixed-case). The raw
     # `target` is still what the report shows - what the operator asked for.
-    target_canonical = _canonical_target(target)
+    # target_canonical is a provisional value when --target was omitted; it is
+    # finalized from the detected package right after ingest (below).
+    target_canonical = _canonical_target(target) if target else None
 
     # --- ingest (identification, not gated behind auth - see module docstring) ---
     # FR-1.3: re-running against an already-ingested APK references the existing
@@ -620,6 +638,18 @@ def run(
 
     apk_hash = ingest_result.evidence["hashes"]["sha256"]
     save_metadata(ANALYSIS_ROOT, apk_hash, ingest_result.evidence)
+
+    # App-agnostic target resolution. With --target omitted, the real package is
+    # now known from ingest - resolve the augmentation target from it so ANY apk
+    # runs the full pipeline with no app-specific input: known reference apps
+    # (by package) keep their hand-authored scripts + success checks, and every
+    # other app routes to the general synthesized-bypass path. All of them go
+    # through every phase. This is what makes the platform not app-specific in
+    # operation: you hand it an APK, it routes itself.
+    if target is None:
+        package_for_target = ingest_result.evidence["package"]["package_name"]
+        target = PACKAGE_TO_TARGET.get(package_for_target, package_for_target)
+        target_canonical = _canonical_target(target)
 
     # --- audit (FR-8.2/FR-3.3: before any actual analysis stage) ---
     audit_result = record_authorization(

@@ -5,7 +5,15 @@ from pathlib import Path
 import pytest
 import typer
 
-from cli import _apply_manifest_ssl_signal, _canonical_target, _git_commit_hash, _git_last_commit_touching, _load_thresholds, _wrap_stage
+from cli import (
+    PACKAGE_TO_TARGET,
+    _apply_manifest_ssl_signal,
+    _canonical_target,
+    _git_commit_hash,
+    _git_last_commit_touching,
+    _load_thresholds,
+    _wrap_stage,
+)
 from common import StageResult, StaticEvidence
 from static.manifest import ManifestInfo
 
@@ -391,3 +399,27 @@ def test_canonical_target_passes_unknown_target_through():
     # so the dynamic stage still degrades gracefully to "no bypass script" rather
     # than being coerced into a wrong key.
     assert _canonical_target("com.example.realapp") == "com.example.realapp"
+
+
+def test_package_to_target_maps_known_reference_packages():
+    # App-agnostic routing: with --target omitted, the detected package resolves
+    # to the canonical augmentation target so known reference apps keep their
+    # hand-authored scripts + success checks, while any other package passes
+    # through and runs the general synthesized path. Every app runs all phases.
+    assert PACKAGE_TO_TARGET["owasp.sat.agoat"] == "AndroGoat"
+    assert PACKAGE_TO_TARGET["owasp.mstg.uncrackable1"] == "uncrackable1"
+    assert PACKAGE_TO_TARGET["owasp.mstg.uncrackable2"] == "uncrackable2"
+    assert PACKAGE_TO_TARGET["owasp.mstg.uncrackable3"] == "uncrackable3"
+
+
+def test_package_to_target_maps_every_known_augmentation_target():
+    # The mapping must cover every target that has hand-authored scripts /
+    # success checks, so an omitted --target never silently drops a known app
+    # onto the general path. The union of the two known-target registries and
+    # the package map's values must agree.
+    from cli import SUCCESS_CHECKS
+    from dynamic import frida_runner
+
+    known = set(frida_runner.SCRIPTS_BY_TARGET_ACTION)
+    assert SUCCESS_CHECKS.keys() == known
+    assert set(PACKAGE_TO_TARGET.values()) == known

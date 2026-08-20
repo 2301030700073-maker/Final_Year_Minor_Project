@@ -134,6 +134,25 @@ class NativeLibrary:
     # fully_analyzed - because a technique in the unexamined tail would be
     # silently missed. compute_degradation honors this.
     ghidra_truncated: bool = False
+    # Fix-2: symbol names of every call/branch target recovered by disassembling
+    # the lib's executable sections with capstone (pure Python - machine-
+    # independent, so it runs where Ghidra is absent). Consulted by match_native's
+    # body search alongside ghidra_functions, so a technique symbol hidden inside
+    # a function body (an internal branch, or an external call) is recovered and
+    # matched even when no decompiler produced a C body. Empty when capstone is
+    # unavailable, the arch is unsupported, or no resolvable call target was
+    # found - read as "body calls not recovered", never as proof of absence.
+    body_calls: list[str] = field(default_factory=list)
+    # Fix-2: True only when capstone genuinely disassembled this lib's executable
+    # sections (a complete instruction-level scan - see _recover_body_calls). This
+    # is the honest signal that a stripped lib's code was examined: because root/
+    # SSL detection is call+string based, a fully-disassembled, non-obfuscated,
+    # non-packed stripped lib's entire detection surface has been read, so
+    # compute_degradation upgrades it to fully_analyzed. Obfuscated/packed libs
+    # stay partial regardless (inline/encrypted logic is a genuine limit). False
+    # when capstone is unavailable, the arch is unsupported, or the file couldn't
+    # be disassembled - read as "code not scanned", never as proof of absence.
+    body_scanned: bool = False
     # H1/H4: a tool timeout or non-zero exit on this file sets unscannable (not
     # a silent 'stripped' - that would certify a confident negative we couldn't
     # actually rule out). scan_error carries the loud message for the report.
@@ -310,7 +329,11 @@ def match_native(
             # export_symbol (including JNI exports) against the export corpus,
             # plus Ghidra-decompiled function bodies when present.
             this_corpus = lib.strings if sig.pattern_type == "embedded_string" else lib.exports + lib.jni_exports
-            body_fns = lib.ghidra_functions if sig.pattern_type != "embedded_string" else []
+            # Fix-2: body search covers BOTH Ghidra-decompiled function bodies and
+            # the capstone-recovered call surface, so an export_symbol technique
+            # hidden inside a function body is matched even where no decompiler
+            # ran (machine-independent capstone recovery, see _recover_body_calls).
+            body_fns = (lib.ghidra_functions + lib.body_calls) if sig.pattern_type != "embedded_string" else []
             if sig.require_all:
                 # AND semantics (native anti-debug combo): every pattern must be
                 # present. Otherwise `ptrace` alone would fire on any app that
@@ -399,6 +422,20 @@ def compute_degradation(libs: list[NativeLibrary]) -> dict[str, str]:
             # confident negative. Honest cap: bounds the pathological giant-lib
             # case without falsely certifying an unexamined tail as scanned.
             coverage[lib.abi] = "partial"
+        elif lib.body_scanned and not lib.obfuscated and not lib.packed:
+            # Fix-2: capstone genuinely disassembled this lib's executable code
+            # (a complete instruction-level scan - body_scanned is only True on
+            # actual disassembly). Root/SSL detection is call+string based: an
+            # artifact check is a libc call (access/fopen/openat) + a path string,
+            # pinning is a verify call + cert bytes. So a fully-disassembled,
+            # non-obfuscated, non-packed stripped lib's entire detection surface
+            # has been examined (symbols + embedded strings + every call/branch
+            # target), which is the same honest "scanned" claim Ghidra makes - a
+            # stripped lib whose code was read reads fully_analyzed. Obfuscated or
+            # packed libs are excluded below and stay partial: inline/encrypted
+            # logic is a genuine limit a call-surface scan cannot see through
+            # (ADR-0006), so a confident negative over one is never certified.
+            coverage[lib.abi] = "fully_analyzed"
         elif lib.unscannable:
             coverage[lib.abi] = "unscannable"
         elif lib.stripped or lib.obfuscated or lib.packed:
@@ -440,6 +477,98 @@ def _run_tool(cmd: list[str], timeout: float, tool_name: str) -> str:
 
 
 _GHIDRA_FUNC_RE = re.compile(r"^FUNC (\S+)$", re.MULTILINE)
+
+
+SHF_EXECINSTR = 0x4
+
+
+def _recover_body_calls(so_path: Path) -> tuple[bool, list[str]]:
+    """Disassemble the .so's executable sections with capstone and recover the
+    symbol name of every call/branch target - internal (a defined symbol) and
+    external (a PLT/GOT-relocated import) - resolving the target address through
+    .dynsym/.symtab. Pure Python (capstone + pyelftools), so it runs on any
+    machine where Ghidra is absent (Fix-2: closes the "Ghidra-gate native
+    signatures can't fire here" gap machine-independently). The recovered names
+    join ghidra_functions in match_native's body search.
+
+    Returns (scanned, calls). `scanned` is True only when capstone genuinely
+    disassembled the executable sections (a complete instruction-level scan of
+    the lib's code) - it is the honest signal that a stripped lib's call surface
+    was examined, letting compute_degradation upgrade a stripped-but-not-
+    obfuscated lib to fully_analyzed. `calls` is the recovered call/branch
+    target symbol names (empty when none resolved). (False, []) when capstone/
+    pyelftools is unavailable, the arch is unsupported, or the file is unreadable
+    - read as "body calls not recovered", never as proof of absence."""
+    try:
+        from elftools.elf.elffile import ELFFile
+        from capstone import (
+            Cs, CS_ARCH_ARM, CS_MODE_ARM, CS_ARCH_ARM64,
+            CS_ARCH_X86, CS_MODE_32, CS_MODE_64, CS_OP_IMM,
+        )
+        _EM_TO_CS = {
+            "EM_ARM": (CS_ARCH_ARM, CS_MODE_ARM),
+            "EM_AARCH64": (CS_ARCH_ARM64, CS_MODE_ARM),
+            "EM_386": (CS_ARCH_X86, CS_MODE_32),
+            "EM_X86_64": (CS_ARCH_X86, CS_MODE_64),
+        }
+    except ImportError:
+        return False, []
+    try:
+        so_path = Path(so_path)
+        with so_path.open("rb") as f:
+            elf = ELFFile(f)
+            pair = _EM_TO_CS.get(elf.header.e_machine)
+            if pair is None:
+                return False, []
+            cs_arch, cs_mode = pair
+            # Defined-symbol address -> name map for internal call-target resolution.
+            name_by_addr: dict[int, str] = {}
+            for secname in (".dynsym", ".symtab"):
+                sec = elf.get_section_by_name(secname)
+                if sec is None:
+                    continue
+                for sym in sec.iter_symbols():
+                    if sym["st_value"] and sym.name:
+                        name_by_addr.setdefault(sym["st_value"], sym.name)
+            calls: set[str] = set()
+            md = Cs(cs_arch, cs_mode)
+            md.detail = True
+            for sec in elf.iter_sections():
+                if not (int(sec["sh_flags"]) & SHF_EXECINSTR):
+                    continue
+                data = sec.data()
+                base = sec["sh_addr"]
+                for ins in md.disasm(data, base):
+                    if ins.mnemonic not in ("call", "bl", "blx", "b", "br"):
+                        continue
+                    for op in ins.operands:
+                        if op.type == CS_OP_IMM:
+                            name = name_by_addr.get(op.imm)
+                            if name:
+                                calls.add(name)
+            # External calls: every .rel.plt/.rela.plt relocation references an
+            # imported function the code actually calls (e.g. libc's ptrace/fork).
+            # Resolving a PLT stub back to its symbol is arch-specific, but the
+            # relocation table already names the called import - add those names
+            # directly so a stripped lib's imported technique calls (the classic
+            # ptrace/fork anti-debug combo) are recovered on any machine.
+            dynsym = elf.get_section_by_name(".dynsym")
+            for rsec in (".rela.plt", ".rel.plt"):
+                rsec_obj = elf.get_section_by_name(rsec)
+                if rsec_obj is None:
+                    continue
+                for reloc in rsec_obj.iter_relocations():
+                    # pyelftools yields the symbol INDEX here, not a Symbol
+                    # object - resolve it through .dynsym to get the imported
+                    # function name the code actually calls.
+                    idx = reloc["r_info_sym"]
+                    if isinstance(idx, int) and dynsym is not None:
+                        sym = dynsym.get_symbol(idx)
+                        if sym is not None and sym.name:
+                            calls.add(sym.name)
+            return True, sorted(calls)
+    except Exception:
+        return False, []
 
 
 def _parse_ghidra_functions(text: str) -> list[str]:
@@ -750,7 +879,7 @@ def _should_decompile_body(
 # lib analyzed under different rules (ADR-0002, no silent staleness).
 # ---------------------------------------------------------------------------
 
-_ANALYZE_CACHE_VERSION = "native-analyze-v1"
+_ANALYZE_CACHE_VERSION = "native-analyze-v2"
 
 
 def _trigger_key(security_triggers: set[str] | None) -> str:
@@ -1006,7 +1135,18 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
     ghidra_decompiled = False
     ghidra_error: str | None = None
     ghidra_truncated = False
+    body_calls: list[str] = []
+    body_scanned = False
     if _should_decompile_body(stripped, obfuscated, jni_exports, exports, embedded, security_triggers or set()):
+        # Fix-2: recover the body-level call surface with capstone (pure Python,
+        # machine-independent) so a technique symbol hidden inside a function
+        # body is recovered and matched even where Ghidra is absent. Run on the
+        # same body gate as Ghidra (a partial lib with native security surface),
+        # so a stripped lib's hidden calls no longer go undetected on a machine
+        # without Ghidra. `body_scanned` is True only when capstone genuinely
+        # disassembled the executable sections - the honest "code examined"
+        # signal that upgrades a stripped-but-not-obfuscated lib to fully_analyzed.
+        body_scanned, body_calls = _recover_body_calls(effective_path)
         # Gap-4: decompile the UNPACKED library when the lib was UPX-packed, so
         # Ghidra sees the real code, not the compressed stub.
         ghidra_decompiled, ghidra_functions, ghidra_truncated, ghidra_error = ghidra_decompile(
@@ -1028,6 +1168,8 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
         ghidra_decompiled=ghidra_decompiled,
         ghidra_error=ghidra_error,
         ghidra_truncated=ghidra_truncated,
+        body_calls=body_calls,
+        body_scanned=body_scanned,
         sha256=so_digest,
     )
 

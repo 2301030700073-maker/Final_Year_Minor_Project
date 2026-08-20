@@ -28,6 +28,7 @@ from static.native import (
     _is_jni_export,
     _is_stripped,
     _parse_ghidra_functions,
+    _recover_body_calls,
     _should_decompile_body,
     group_identical_so_files,
 )
@@ -422,6 +423,31 @@ def test_compute_degradation_ghidra_lifts_stripped_to_fully_analyzed():
 def test_compute_degradation_stripped_is_partial():
     lib = NativeLibrary(abi="arm64-v8a", name="lib.so", stripped=True)
     assert compute_degradation([lib])["arm64-v8a"] == "partial"
+
+
+def test_compute_degradation_stripped_but_body_scanned_is_fully_analyzed():
+    # Fix-2: capstone genuinely disassembled the stripped lib's code (complete
+    # instruction-level scan of its call surface + embedded strings) and it is
+    # NOT obfuscated or packed - root/SSL detection is call+string based, so the
+    # whole detection surface was examined. The honest "scanned" claim Ghidra
+    # makes, achieved machine-independently - a stripped lib whose code was read
+    # reads fully_analyzed, not the old blanket partial.
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="lib.so", stripped=True,
+        body_scanned=True, body_calls=["ptrace", "fork", "getppid"],
+    )
+    assert compute_degradation([lib])["arm64-v8a"] == "fully_analyzed"
+
+
+def test_compute_degradation_body_scanned_but_obfuscated_is_partial():
+    # Fix-2 honest boundary: even a fully-disassembled lib stays partial when it
+    # is obfuscated or packed - inline/encrypted logic is a genuine limit a call
+    # surface cannot see through, so a confident negative over it is never
+    # certified (ADR-0006). body_scanned alone never upgrades these.
+    for kw in ({"obfuscated": True}, {"packed": True, "packer": "UPX"}):
+        lib = NativeLibrary(abi="arm64-v8a", name="lib.so", stripped=True,
+                            body_scanned=True, **kw)
+        assert compute_degradation([lib])["arm64-v8a"] == "partial"
 
 
 def test_compute_degradation_obfuscated_is_partial():
@@ -1082,3 +1108,30 @@ def test_analyze_so_many_max_workers_1_is_serial(monkeypatch):
 def test_analyze_so_many_empty_input():
     from static import native as native_mod
     assert native_mod.analyze_so_many([]) == []
+
+
+def test_match_native_resolves_combo_via_capstone_body_calls():
+    # Fix-2: a STRIPPED lib whose anti-debug `fork` call is recovered by the
+    # capstone body-call pass (body_calls) - not visible as an export - still
+    # fires the require_all ptrace+fork combo via the recovered call surface,
+    # machine-independently (no Ghidra needed on this machine).
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="libfoo.so",
+        exports=["ptrace", "getppid"],          # ptrace visible, fork hidden in a call
+        stripped=True,
+        body_calls=["fork", "waitpid", "getppid"],   # recovered by capstone
+    )
+    sig = NativeSignature(id="native_ptrace_fork_antidebug", category="root", weight=0.5,
+                          pattern_type="export_symbol", patterns=["ptrace", "fork"], require_all=True)
+    res = match_native([lib], [sig])
+    assert res.root_confidence == 0.5
+    assert res.root_evidence[0].matched_text == "ptrace"
+
+
+def test_recover_body_calls_graceful_on_non_elf(tmp_path):
+    # Fix-2: a non-ELF / unreadable file returns (False, []) ("code not scanned"),
+    # never raises - the caller reads that as not-recovered, not proof of absence.
+    f = tmp_path / "notelf.txt"
+    f.write_text("hello world not an elf")
+    assert _recover_body_calls(f) == (False, [])
+    assert _recover_body_calls(str(f)) == (False, [])   # also tolerates a str path

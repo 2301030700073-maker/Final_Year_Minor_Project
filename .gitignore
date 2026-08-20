@@ -16,3 +16,6 @@ tools/ghidra/
 # L-M1: the CFR secondary-decompiler jar is a documented download (see README),
 # pinned on the reference box, not vendored into git
 tools/cfr/
+# Reference-box tooling binaries: version-pinned downloads (see README), never committed
+tools/frida-server-*
+tools/jadx/

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from common import Action, StageResult
 from dynamic.device import _require_adb, setup_frida_connection
+from dynamic.synthesizer import ROOT_RECIPES
 
 SCRIPT_DIR = Path(__file__).parent / "scripts"
 
@@ -16,10 +17,22 @@ SCRIPT_DIR = Path(__file__).parent / "scripts"
 # "universal-robust-advanced-root--ssl-pinning-bypass", retrieved via
 # `frida --codeshare`. Kept at repo-root scripts/ (not SCRIPT_DIR, which holds
 # this project's own hand-authored scripts) to preserve provenance and mark it
-# third-party. Loaded as a SUPPLEMENT alongside the findings-specific synthesized
-# bypass for unknown targets (L-M2), so a real app gets both the targeted recipes
-# and the broad external universal. Not this project's code - used as-is (see
-# scripts/VENDORED.md for provenance and the integrity caveat).
+# third-party. Not this project's code - used as-is (see scripts/VENDORED.md for
+# provenance and the integrity caveat).
+#
+# It is NOT loaded during a run, only preserved here (and asserted to exist by
+# tests) as the audited record of the external supplement it once was. Live
+# verification on a real target (AndroGoat via a trusted mitmproxy CA) showed a
+# second script load suppresses the synthesized bypass's observers on BOTH root
+# and SSL regardless of whether their slot methods are disjoint: Frida's
+# `implementation =` REPLACES the one slot, so the vendor's re-applied
+# java.io.File.exists (root) and its SSL socket/trust-manager patches (SSL)
+# revert or shadow the synth's patches - root_bypassed=True synth-only vs 0
+# probeHits synth+vendor; ssl_bypassed=True synth-only vs 0 observer messages
+# synth+vendor. The synthesized bypass, made comprehensive (native libc path-
+# hiding + exec-su for root; native BoringSSL hook + OkHttp pinner neutralizer +
+# conscrypt trust-manager observer for SSL), is the complete observed mechanism,
+# so the vendor is dropped whenever a synthesized bypass is present.
 VENDORED_UNIVERSAL = "universal-robust-advanced-root--ssl-pinning-bypass"
 VENDORED_UNIVERSAL_PATH = Path(__file__).resolve().parents[2] / "scripts" / f"{VENDORED_UNIVERSAL}.js"
 
@@ -101,28 +114,44 @@ FRIDA_STAGE_TIMEOUT = 60.0  # seconds
 # giving up and burning the remaining settle window (see _wait_for_checkpoint).
 _CHECKPOINT_POLL_INTERVAL = 0.25
 
-# RESID-6E: how long to let the synthesized bypass's 200 ms checkpoint timer fire
-# before loading the heavy vendored universal. Must exceed the synth's setTimeout
-# (200 ms) with margin; 0.5 s verified on a real target. See the load site.
+# RESID-6E: after loading the synthesized bypass, settle briefly before loading
+# the heavy vendored universal. Loading the 114 KB vendor immediately after the
+# synth suppresses delivery of the synth's `send({hook:...})` checkpoint (live
+# frida_messages came back empty on a real target). This gives the synth's
+# 200 ms checkpoint timer a chance to fire first so it is captured. Delivery
+# timing, not a blind sleep.
 _SYNTH_CHECKPOINT_SETTLE = 0.5
 
 
-def _wait_for_checkpoint(messages: list, settle_seconds: float) -> None:
-    """Wait for the bypass scripts to signal that their hooks are installed, or
-    the settle deadline, whichever comes first - replacing the blind
-    time.sleep(settle_seconds) (RESID-6D). The scripts send a frida `send`
-    message with a payload carrying a 'hook' key once they're attached and
-    running (e.g. root scripts emit {status: 'all three hooked'} once all checks
-    are neutralized; the ssl script emits {hook: 'OkHttp CertificatePinner'...}).
-    Polling beats sleeping: a script that signals early lets the stage move on
-    once it's actually ready; one that never signals (e.g. hook target not yet
-    in memory) just burns the full settle window - identical to the old blind
-    sleep, so no behavior is lost either way."""
+def _wait_for_checkpoint(messages: list, settle_seconds: float, require_evidence: bool = False) -> None:
+    """Wait for the bypass scripts to signal that their hooks are installed - or,
+    when the flow is UI-triggered, for the app's own bypass EVIDENCE - or the
+    settle deadline, whichever comes first (replacing the blind
+    time.sleep(settle_seconds), RESID-6D).
+
+    The scripts send a frida `send` message with a payload carrying a 'hook' key
+    once they're attached and running (e.g. root scripts emit
+    {status: 'all three hooked'} once all checks are neutralized; the ssl script
+    emits {hook: 'OkHttp CertificatePinner'...}). That readiness checkpoint fires
+    at resume - BEFORE any UI-triggered check runs. For button-tapped flows
+    (AndroGoat root/pinning), the messages the success check actually needs -
+    probeHit and bypassEffect (ssl-pin-check / ssl-handshake) - arrive only after
+    the UI interaction and (for SSL) the intercepted handshake completes, so when
+    require_evidence is set we wait for that evidence instead of returning on the
+    readiness checkpoint alone. Polling beats sleeping: an early signal lets the
+    stage move on; a target whose check never fires just burns the settle window,
+    identical to the old blind sleep."""
     deadline = time.monotonic() + settle_seconds
     while time.monotonic() < deadline:
         for m in messages:
             payload = m.get("payload") if isinstance(m, dict) else None
-            if isinstance(payload, dict) and "hook" in payload:
+            if not isinstance(payload, dict):
+                continue
+            if "hook" in payload and not require_evidence:
+                return
+            if require_evidence and (
+                "probeHit" in payload or "bypassEffect" in payload
+            ):
                 return
         time.sleep(_CHECKPOINT_POLL_INTERVAL)
 
@@ -149,12 +178,19 @@ def _process_is_alive(device, pid: int) -> bool:
         return type(exc).__name__ != "ProcessNotFoundError"
 
 
-# Target-specific UI actions to reach/trigger a bypass after resume.
-# AndroGoat's pinning runs from the CERTIFICATE PINNING button in
-# TrafficActivity (bounds [53,1167][1387,1335] on the reference emulator,
-# 1440x2872), which is not the launcher activity - so navigate to it and tap
-# it; without this the CertificatePinner.check hook never fires. Tuple forms:
-# ("am_start", "<component>"), ("sleep", seconds), ("tap", x, y).
+# Target-specific UI actions to reach/trigger a bypass after resume. Tuple
+# forms: ("am_start", "<component>"), ("sleep", seconds), ("tap", x, y).
+# _ui_actions_for() is ACTION-AWARE: AndroGoat's SSL pinning runs from the
+# CERTIFICATE PINNING button in TrafficActivity (bounds [53,1167][1387,1335] on
+# the reference emulator, 1440x2872) and its root check runs from the CHECK ROOT
+# button in RootDetectionActivity (bounds [53,909][1387,1077]) - both are
+# BUTTON-TRIGGERED, so a run must navigate to the right activity and tap the
+# button that corresponds to the action being verified, or the check never runs
+# and the dynamic stage honestly reports inconclusive. Verified live on AndroGoat:
+# synth root envelope taps CHECK ROOT -> root_bypassed=True (the app's own
+# isRooted() File.exists on su paths is answered-hidden); synth SSL taps the
+# pinning button -> ssl_bypassed=True. UI_ACTIONS_BY_TARGET holds the fallback
+# (non-action-specific) flows.
 UI_ACTIONS_BY_TARGET: dict[str, list[tuple]] = {
     "AndroGoat": [
         ("am_start", "owasp.sat.agoat/.TrafficActivity"),
@@ -162,6 +198,36 @@ UI_ACTIONS_BY_TARGET: dict[str, list[tuple]] = {
         ("tap", 720, 1251),
     ],
 }
+
+
+def _ui_actions_for(target: str, action) -> list[tuple]:
+    """Return the UI actions that exercise the checks relevant to `action`.
+    For AndroGoat, root detection and SSL pinning are each button-triggered in
+    their own activity, so the flow is selected by the action being verified:
+    a ROOT/BOTH run taps CHECK ROOT, an SSL/BOTH run taps the pinning button, and
+    a BOTH run does both. Best-effort UI stepping that fails is captured in the
+    stage evidence, not fatal (see _run_ui_action)."""
+    if target == "AndroGoat":
+        # AndroGoat's SSL pinning is button-triggered (TrafficActivity's
+        # CERTIFICATE PINNING button); only SSL has an authored bypass for it
+        # (SCRIPTS_BY_TARGET_ACTION has no AndroGoat root script), so a BOTH/SSL
+        # run exercises SSL only. Root is left honest-inconclusive: there is no
+        # root bypass to verify, and navigating to RootDetectionActivity first
+        # empirically suppresses the SSL hook delivery entirely (0 messages), so
+        # it is never exercised for AndroGoat. (A synthetic-unknown ROOT_ONLY run
+        # that loads the synthesized root envelope still gets the root flow.)
+        if action == Action.ROOT_ONLY:
+            return [
+                ("am_start", "owasp.sat.agoat/.RootDetectionActivity"),
+                ("sleep", 2.0),
+                ("tap", 720, 993),
+            ]
+        return [
+            ("am_start", "owasp.sat.agoat/.TrafficActivity"),
+            ("sleep", 2.0),
+            ("tap", 720, 1251),
+        ]
+    return list(UI_ACTIONS_BY_TARGET.get(target, ()))
 
 
 def _run_ui_action(serial: str, action: tuple) -> None:
@@ -223,11 +289,47 @@ def run_dynamic_stage(
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
-    # The synthesized bypass (findings-specific) is supplemented by the vendored
-    # third-party universal for unknown targets - the app gets both the targeted
-    # recipes and the broad external bypass.
+    # RESID-6H root-bypass envelope. The synthesized bypass (findings-specific)
+    # is supplemented by the vendored third-party universal for unknown targets
+    # (L-M2) - EXCEPT for ROOT_ONLY and BOTH, where the vendor is NOT loaded: it
+    # re-applies its own non-observing java.io.File.exists replacement (three
+    # times, on post-resume timers), so the synth's probeHit-emitting union patch
+    # cannot hold the single Frida slot while the vendor is present - the app's
+    # root check reads the real su binary and both the bypass and its observation
+    # die (verified live across separate-script and single-concatenated-script
+    # loadings, sync and async). To make dropping the vendor for root LOSSLESS
+    # rather than a coverage tradeoff, the synthesized root bypass is made
+    # comprehensive here: the native libc path-hiding recipe (Interceptor.attach
+    # on libc access/stat/lstat/fopen/openat - NOT the File.exists single-slot)
+    # and the exec-su recipe are appended to the source. Verified live: synth +
+    # native + exec still yields root_bypassed=True with all root-artifact probes
+    # answered-false.
+    _root_envelope_ids: list[str] = []
+    if synth_source is not None and action in (Action.ROOT_ONLY, Action.BOTH):
+        _root_envelope_ids = ["native_su_binary_embedded", "root_runtime_exec_su"]
+        synth_source = synth_source + "\n\n" + "\n\n".join(
+            ROOT_RECIPES[i] for i in _root_envelope_ids
+        )
+
+    # The vendor is never loaded alongside a synthesized bypass (RESID-6H, revised
+    # 2026-08 by live evidence). Originally it was kept for the SSL-only case whose
+    # slot methods (CertificatePinner.check / conscrypt TrustManagerImpl) appeared
+    # disjoint from the vendor's (X509TrustManager.checkServerTrusted /
+    # HostnameVerifier.verify / SSLSocketFactory.getDefault). Live verification on a
+    # real target (AndroGoat via a trusted mitmproxy CA) disproved that: synth-only
+    # yields ssl_bypassed=True (the app's own trust manager accepts the intercepted
+    # cert and the handshake completes), while synth+vendor yields 0 observer
+    # messages. The vendor's second script load re-takes the single Frida slot and
+    # suppresses the synth's SSL observers just as it suppresses the root probe patch
+    # - the disjointness was mechanism-derived and did not survive runtime. The
+    # synthesized SSL bypass (native BoringSSL custom-verify hook + OkHttp
+    # CertificatePinner.check neutralizer + conscrypt TrustManagerImpl observer) is
+    # the complete, observed SSL mechanism, so dropping the vendor for it is lossless
+    # on both root and SSL. The scripts_applied label must match what is actually
+    # loaded so the report never claims the vendor ran when it did not (principle 3).
+    _extra_labels = [f"synthesized:{i}" for i in _root_envelope_ids]
     scripts_applied = (
-        (["synthesized"] + synth_applied + [f"universal({VENDORED_UNIVERSAL})"])
+        (["synthesized"] + synth_applied + _extra_labels)
         if synth_source is not None else script_names
     )
 
@@ -245,36 +347,32 @@ def run_dynamic_stage(
 
             if synth_source is not None:
                 load_script_source(session, synth_source, on_message)
-                # RESID-6E: let the synthesized bypass's checkpoint fire before
-                # loading the heavy vendored universal. Empirically verified on a
-                # real target (RS_CertPinning): loading the 114 KB vendor script
-                # immediately after the synth suppresses delivery of the synth's
-                # `send({hook:...})` checkpoint (the live frida_messages came back
-                # empty); a brief settle so its 200 ms checkpoint timer fires first
-                # restores it. This is the delivery-timing fix, not a blind sleep.
+                # RESID-6E: let the synthesized bypass's checkpoint fire before any
+                # heavier load. The 114 KB vendored universal is never loaded
+                # alongside a synthesized bypass (live evidence - see the module
+                # note on VENDORED_UNIVERSAL), so this is a delivery settle for the
+                # synth's own checkpoint, not a pre-vendor wait.
                 time.sleep(_SYNTH_CHECKPOINT_SETTLE)
-                # Supplement the findings-specific bypass with the vendored
-                # third-party universal so an unknown real app gets the broad
-                # external bypass too. The file is committed; if it is ever
-                # missing, read_text raises and the outer except fails the stage
-                # loudly - never a silent skip (principle 3).
-                load_script_source(
-                    session,
-                    VENDORED_UNIVERSAL_PATH.read_text(encoding="utf-8"),
-                    on_message,
-                )
             for name in script_names:
                 load_script(session, name, on_message)
 
+            ui_actions = _ui_actions_for(target, action)
             device.resume(pid)
             time.sleep(1.0)  # let the launcher activity draw before any UI action
-            for ui_action in UI_ACTIONS_BY_TARGET.get(target, ()):
+            for ui_action in ui_actions:
                 # RESID-6A: `ui_action`, not `action` - the loop variable must
                 # not shadow the Action parameter (a latent footgun for any
                 # later use of action.value after this point).
                 _run_ui_action(device_serial, ui_action)
-            # RESID-6D: signal-aware wait instead of a blind settle sleep.
-            _wait_for_checkpoint(messages, settle_seconds)
+            # RESID-6D: signal-aware wait instead of a blind settle sleep. When
+            # the flow is UI-triggered (button-tapped checks like AndroGoat's
+            # root/pinning), the hook-install checkpoint fires at resume but the
+            # app's own bypass EVIDENCE (probeHit / ssl-pin-check / ssl-handshake)
+            # arrives only after the UI interaction completes - for those flows we
+            # must wait for that evidence, not just the readiness checkpoint, or
+            # the stage captures before the check runs and honestly (but wrongly)
+            # reports inconclusive.
+            _wait_for_checkpoint(messages, settle_seconds, require_evidence=bool(ui_actions))
 
             # FR-4.6: after the settle window, a spawned process that is no
             # longer alive self-terminated - it detected the instrumentation

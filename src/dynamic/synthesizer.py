@@ -32,34 +32,73 @@ from common import Action, ClassificationResult
 # versioned hand-authored code, and composition is pure.
 
 
-def _file_exists_patch(paths: list[str]) -> str:
-    """Patch java.io.File.exists to report false for root-artifact paths."""
-    lit = json.dumps(paths)
-    return (
-        "Java.perform(function () {\n"
-        "  var File = Java.use('java.io.File');\n"
-        f"  var paths = {lit};\n"
-        "  File.exists.implementation = function () {\n"
-        "    var p = this.getAbsolutePath();\n"
-        "    for (var i = 0; i < paths.length; i++) {\n"
-        "      if (p === paths[i] || p.indexOf(paths[i] + '/') === 0) return false;\n"
-        "    }\n"
-        "    return this.exists();\n"
-        "  };\n"
-        "});"
-    )
-
-
-# Root-artifact paths shared across the file/hook recipes. Mirrors the union the
-# Java File.exists patches already use, so a native probe of the same artifacts
-# is hidden too - one source for the path list, no drift between layers.
+# Root-artifact paths shared across ALL root file/native hooks. This is the FULL
+# union of every root-artifact path any root signature names, so a single
+# File.exists / libc patch hides them all. Sharing one superset matters because
+# Frida's `implementation =` REPLACES the single method slot: when several root
+# recipes each install a File.exists patch, only the LAST one's path list is
+# active. If each patch only hid its own subset, a path an earlier patch covered
+# would go unhidden (e.g. UC1's /system/bin/su check with su_management_apps
+# installed last), so the app's check would detect root and no probeHit would
+# fire. Every File.exists patch hides this same superset, so the last-wins
+# composition never loses a path and any hidden root probe is observed.
 _ROOT_ARTIFACT_PATHS = [
-    "/system/bin/su", "/system/xbin/su", "/sbin/su",
+    "/system/bin/su", "/system/xbin/su", "/sbin/su", "/sbin/.magisk", "/sbin/busybox",
     "/system/app/Superuser.apk", "/system/app/SuperSU.apk", "/system/app/Magisk.apk",
+    "/system/app/LuckyPatcher.apk", "/system/priv-app/LuckyPatcher.apk",
+    "/data/app/lucky.patcher",
     "/data/adb/magisk", "/data/adb/ksu", "/data/adb/kernelsu", "/data/adb/ap",
-    "/data/apatch", "/system/xbin/busybox", "/system/bin/busybox",
-    "/data/adb/lspd", "/data/adb/modules/lsposed",
+    "/data/adb/apd", "/data/apatch", "/data/adb/denylist", "/data/adb/post-fs-data.d",
+    "/data/adb/modules/zygisk", "/data/adb/zygisk",
+    "/system/xbin/busybox", "/system/bin/busybox", "/system/xbin/daemonsu",
+    "/system/etc/init.d/99SuperSUDaemon", "/system/bin/.ext/.su",
+    "/system/etc/.has_su_daemon", "/system/etc/.installed_su_daemon",
+    "/dev/com.koushikdutta.superuser.daemon",
+    "/data/adb/lspd", "/data/adb/modules/lsposed", "/data/adb/lsposed",
 ]
+
+
+def _file_exists_patch(paths: list[str] | None = None) -> str:
+    """Patch java.io.File.exists to report false for ANY root-artifact path and
+    emit a probeHit so the app's own root-check being defeated is observed.
+
+    The `paths` argument is retained for recipe-source readability but the hook
+    hides the shared `_ROOT_ARTIFACT_PATHS` superset - see that constant for why:
+    with several root recipes each installing a File.exists patch, Frida replaces
+    the slot, so hiding the same superset in every patch means the last one
+    installed still hides every root artifact (no lost paths, no root check that
+    slips through, and every hidden probe is observed)."""
+    lit = json.dumps(_ROOT_ARTIFACT_PATHS)
+    # RESID-6G: apply the patch with Java.performNow (synchronous, on the frida
+    # injection thread) instead of Java.perform (queued async onto the app's main
+    # thread). A root check like UC1's runs in onCreate immediately after resume,
+    # and a Java.perform callback - whether from the synth or the vendored
+    # universal - applies post-resume and can be interleaved AFTER the app's own
+    # onCreate probe, so the check reads a real su binary and the probe is never
+    # observed. Java.performNow applies the File.exists replacement while the
+    # spawned process is still paused (before resume), so the patch is active
+    # before onCreate's root check runs and every root-artifact probe is both
+    # hidden-by-union and observed (probeHit). Falls back to Java.perform when
+    # performNow throws (thread not attached to the VM on a normal attach).
+    return (
+        "(function () {\n"
+        "  var patch = function () {\n"
+        "    var File = Java.use('java.io.File');\n"
+        f"    var paths = {lit};\n"
+        "    File.exists.implementation = function () {\n"
+        "      var p = this.getAbsolutePath();\n"
+        "      for (var i = 0; i < paths.length; i++) {\n"
+        "        if (p === paths[i] || p.indexOf(paths[i] + '/') === 0) {\n"
+        "          send({probeHit: 'root', path: p});\n"
+        "          return false;\n"
+        "        }\n"
+        "      }\n"
+        "      return this.exists();\n"
+        "    };\n"
+        "  };\n"
+        "  try { Java.performNow(patch); } catch (e) { Java.perform(patch); }\n"
+        "})();"
+    )
 
 
 def _native_root_path_hiding(paths: list[str]) -> str:
@@ -89,8 +128,17 @@ def _native_root_path_hiding(paths: list[str]) -> str:
         "    var a = Module.findExportByName('libc.so', fn);\n"
         "    if (!a) return;\n"
         "    Interceptor.attach(a, {\n"
-        "      onEnter: function (args) { this.hide = isRootPath(args[pathArg]); },\n"
-        "      onLeave: function (ret) { if (this.hide) ret.replace(ptr(failRet)); }\n"
+        "      onEnter: function (args) {\n"
+        "        var p = args[pathArg];\n"
+        "        this.hide = isRootPath(p);\n"
+        "        this.hp = p;\n"
+        "      },\n"
+        "      onLeave: function (ret) {\n"
+        "        if (this.hide) {\n"
+        "          try { send({probeHit: 'root', path: this.hp.readUtf8String()}); } catch (e) {}\n"
+        "          ret.replace(ptr(failRet));\n"
+        "        }\n"
+        "      }\n"
         "    });\n"
         "  } catch (e) { console.log('[synth] no ' + fn + ' in libc.so'); }\n"
         "}\n"
@@ -183,6 +231,97 @@ def _native_ssl_pin_bypass() -> str:
     )
 
 
+def _ssl_effect_observer() -> str:
+    """Observe real TLS behavior through the neutralized stack - behavioral-effect
+    evidence for an unknown target (stronger than 'hooks attached').
+
+    Two signals, combined by the TechnologyHooksEngagedCheck:
+    * `ssl-pin-check` - the app's OWN Java pin-check (okhttp CertificatePinner.check
+      or conscrypt TrustManagerImpl.checkServerTrusted) was invoked and returned
+      WITHOUT throwing. Because the SSL recipes neutralize those entry points, a
+      check that returns normally means the app's pin logic accepted the cert - the
+      pin was defeated for that path. (If no neutralizer is installed, the real
+      check would throw on mismatch and no pin-check fires - the honest gate.)
+    * `ssl-handshake` - a TLS handshake completed through the stack.
+
+    When BOTH are observed the app's pin logic demonstrably ran and accepted a
+    connection it would otherwise reject - that is the deterministic confirmation
+    that the SSL bypass worked for that connection (the app's own observable
+    behavior, not a fabricated pass). Either signal alone stays effect evidence.
+    Guarded try/catch over every class hook so a missing class degrades silently.
+    This is the strongest honest unknown-target SSL signal short of a target
+    SuccessCheck (ADR-0006): it is only ever promoted to confirmed when the app's
+    own pin-check path demonstrably accepted."""
+    return (
+        # Observe the app's own Java pin-check running without rejecting. These
+        # hooks run AFTER the SSL recipes (the observer is appended last), so
+        # `this.check`/`this.checkServerTrusted` is the recipe's neutralized impl
+        # and returns normally -> pin-check fires; a real check would throw.
+        "try {\n"
+        "  Java.perform(function () {\n"
+        "    var CP = Java.use('okhttp3.CertificatePinner');\n"
+        "    var _wrap_check = function () {\n"
+        "      var r = this.check.apply(this, arguments);\n"
+        "      send({bypassEffect: 'ssl-pin-check'});\n"
+        "      return r;\n"
+        "    };\n"
+        "    CP.check.overload('java.lang.String', 'java.util.List').implementation = _wrap_check;\n"
+        "  });\n"
+        "} catch (e) {}\n"
+        "try {\n"
+        "  Java.perform(function () {\n"
+        "    var CP = Java.use('okhttp3.CertificatePinner');\n"
+        "    var _wrap_check = function () {\n"
+        "      var r = this.check.apply(this, arguments);\n"
+        "      send({bypassEffect: 'ssl-pin-check'});\n"
+        "      return r;\n"
+        "    };\n"
+        "    CP.check.overload('java.lang.String', '[Ljava.security.cert.Certificate;').implementation = _wrap_check;\n"
+        "  });\n"
+        "} catch (e) {}\n"
+        "try {\n"
+        "  Java.perform(function () {\n"
+        "    var TMI = Java.use('com.android.org.conscrypt.TrustManagerImpl');\n"
+        "    var _wrap_cst = function () {\n"
+        "      var r = this.checkServerTrusted.apply(this, arguments);\n"
+        "      send({bypassEffect: 'ssl-pin-check'});\n"
+        "      return r;\n"
+        "    };\n"
+        "    TMI.checkServerTrusted.overload('[Ljava.security.cert.X509Certificate;', 'java.lang.String').implementation = _wrap_cst;\n"
+        "  });\n"
+        "} catch (e) {}\n"
+        "try {\n"
+        "  Java.perform(function () {\n"
+        "    var TMI = Java.use('com.android.org.conscrypt.TrustManagerImpl');\n"
+        "    var _wrap_cst = function () {\n"
+        "      var r = this.checkServerTrusted.apply(this, arguments);\n"
+        "      send({bypassEffect: 'ssl-pin-check'});\n"
+        "      return r;\n"
+        "    };\n"
+        "    TMI.checkServerTrusted.overload('[Ljava.security.cert.X509Certificate;', 'java.lang.String', 'java.lang.String').implementation = _wrap_cst;\n"
+        "  });\n"
+        "} catch (e) {}\n"
+        "try {\n"
+        "  Java.perform(function () {\n"
+        "    var CE = Java.use('com.android.org.conscrypt.ConscryptEngineSocket');\n"
+        "    CE.startHandshake.implementation = function () {\n"
+        "      this.startHandshake();\n"
+        "      send({bypassEffect: 'ssl-handshake'});\n"
+        "    };\n"
+        "  });\n"
+        "} catch (e) {}\n"
+        "try {\n"
+        "  Java.perform(function () {\n"
+        "    var SS = Java.use('javax.net.ssl.SSLSocket');\n"
+        "    SS.startHandshake.implementation = function () {\n"
+        "      this.startHandshake();\n"
+        "      send({bypassEffect: 'ssl-handshake'});\n"
+        "    };\n"
+        "  });\n"
+        "} catch (e) {}\n"
+    )
+
+
 ROOT_RECIPES: dict[str, str] = {
     "root_su_binary_paths": _file_exists_patch(
         ["/system/bin/su", "/system/xbin/su", "/sbin/su", "/system/app/Superuser.apk"]
@@ -214,6 +353,7 @@ ROOT_RECIPES: dict[str, str] = {
         "  Runtime.exec.overload('java.lang.String').implementation = function (cmd) {\n"
         "    if (cmd === 'su' || cmd.indexOf('su ') === 0) {\n"
         "      console.log('[synth] blocked su exec: ' + cmd);\n"
+        "      send({probeHit: 'root', path: cmd});\n"
         "      return null;\n"
         "    }\n"
         "    return this.exec(cmd);\n"
@@ -467,6 +607,18 @@ for _sid in ("sha1_pin_hash_literal", "spki_sha256_pin", "expect_certificate_pin
 ALL_ROOT_TECHNIQUES = set(ROOT_RECIPES)
 ALL_SSL_TECHNIQUES = set(SSL_RECIPES)
 
+# Fix-5 (predefined script is a supplement, not capability-matched): the vendored
+# third-party universal (ssecurityy's universal-robust-advanced-root--ssl-pinning-
+# bypass, loaded by frida_runner for unknown targets) covers these detection
+# categories broadly with native hooks. A finding whose category is in this set is
+# deterministically matched to that predefined script - it IS the no-AI bypass for
+# the technique, independent of any hand-authored recipe. The synthesized recipes
+# are the exact-match layer on top; this table documents the predefined-script
+# match so the report can state it explicitly rather than treating the vendored
+# script as an unexplained supplement. String match on category, no registry.
+PREDEFINED_SCRIPT_NAME = "universal-robust-advanced-root--ssl-pinning-bypass"
+PREDEFINED_SCRIPT_COVERS = {"root", "ssl"}
+
 UNIVERSAL_ROOT = _file_exists_patch(
     ["/system/bin/su", "/system/xbin/su", "/sbin/su",
      "/system/app/Superuser.apk", "/data/adb/magisk", "/data/adb/ksu"]
@@ -482,8 +634,18 @@ UNIVERSAL_SSL = (
     "    CP.check.overload('java.lang.String', 'java.security.cert.Certificate').implementation = function () {};\n"
     "    CP.check.overload('java.lang.String', 'java.util.List').implementation = function () {};\n"
     "  } catch (e) {}\n"
-    "});"
-)
+    "});\n"
+    "\n"
+    # Fix-4 (BoringSSL/Xamarin not statically auto-triggered): the Java-side
+    # universal is now ALWAYS supplemented by the native BoringSSL/OpenSSL-family
+    # unpinning bypass and the SSL effect observer. Production apps strip/rename
+    # the custom-verify symbols, so no native *signature* can fire on them - but
+    # the bypass itself is idempotent (try/catch per module/symbol, a no-op when
+    # the export is absent), so appending it to the SSL universal gives ANY app
+    # with an SSL action a native unpinning attempt without needing a firing
+    # signature. Deterministic and honest (an attempt, not a claim); the observer
+    # reports a handshake that actually completes post-bypass.
+) + _native_ssl_pin_bypass() + "\n\n" + _ssl_effect_observer()
 
 
 @dataclass
@@ -496,6 +658,12 @@ class SynthesisResult:
     root_hook_count: int = 0
     ssl_hook_count: int = 0
     universal_categories: list[str] = field(default_factory=list)
+    # Fix-5: the predefined third-party scripts this bypass is deterministically
+    # matched to, by detected category (e.g. ["universal-robust-advanced-root--ssl-pinning-bypass"]
+    # for an SSL action, because PREDEFINED_SCRIPT_COVERS contains "ssl"). This is
+    # the no-AI predefined-script match for a finding whose technique the hand-
+    # authored recipe catalog does not cover exactly.
+    predefined_matched: list[str] = field(default_factory=list)
 
 
 def _matched_ids(evidence) -> list[str]:
@@ -589,6 +757,22 @@ def synthesize(classification: ClassificationResult, action: Action) -> Synthesi
     # though the bypass ran (RS_CertPinning exposed this).
     checkpoint_ids = list(applied) + [f"universal:{c}" for c in universal]
     source = _join_script(all_hooks, checkpoint_ids)
+    # The effect observer (pin-check + handshake behavioral evidence) is embedded
+    # in UNIVERSAL_SSL, so a fully-covered targeted SSL bypass needs it appended
+    # explicitly - without it, a targeted-only SSL run would emit no SSL effect
+    # signal and the confirmation logic (ssl-pin-check + ssl-handshake) would
+    # never fire. Only when UNIVERSAL_SSL is absent (avoid a double append).
+    if ssl_hooks and UNIVERSAL_SSL not in ssl_hooks:
+        source = source + "\n\n" + _ssl_effect_observer()
+
+    # Fix-5: the predefined script matched to this bypass, by detected category.
+    # A technique the hand-authored catalog does not cover exactly is still
+    # bypassed without AI by the predefined universal for its category.
+    predefined_matched = sorted({
+        PREDEFINED_SCRIPT_NAME
+        for cat in (("root",) if wants_root else ()) + (("ssl",) if wants_ssl else ())
+        if cat in PREDEFINED_SCRIPT_COVERS
+    })
 
     return SynthesisResult(
         source=source,
@@ -597,4 +781,5 @@ def synthesize(classification: ClassificationResult, action: Action) -> Synthesi
         root_hook_count=len(root_hooks),
         ssl_hook_count=len(ssl_hooks),
         universal_categories=universal,
+        predefined_matched=predefined_matched,
     )

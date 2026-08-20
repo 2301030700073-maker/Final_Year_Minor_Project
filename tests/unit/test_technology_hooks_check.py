@@ -91,3 +91,76 @@ def test_message_sample_is_capped_and_truncated():
         [{"type": "log", "payload": "x" * 500}]
     )
     assert "…" in long.evidence_lines["frida messages observed"]
+
+
+def test_surfaces_probe_hit_and_bypass_effect_evidence():
+    # Fix-1/Fix-3: behavioral-effect evidence (a root artifact probe answered
+    # false, a TLS handshake completing post-bypass) is surfaced - stronger than
+    # "hooks attached".
+    msgs = [
+        {"type": "send", "payload": {"probeHit": "root", "path": "/system/bin/su"}},
+        {"type": "send", "payload": {"bypassEffect": "ssl-handshake"}},
+    ]
+    v = TechnologyHooksEngagedCheck().check(msgs)
+    # ROOT is confirmed: the app's own root-check probed a root artifact and was
+    # answered-false - its root logic received the not-rooted result.
+    assert v.root_bypassed is True
+    # SSL is NOT confirmed here: a handshake alone is not a pin-bypass (a
+    # non-pinned app also completes one; no pin-check was observed).
+    assert v.ssl_bypassed is None
+    assert "/system/bin/su" in v.evidence_lines["root artifact probes answered-false"]
+    assert "ssl-handshake" in v.evidence_lines["TLS handshakes completed post-bypass"]
+
+
+def test_root_confirmed_on_observed_probe_hit():
+    # Fix-1: the app's own root-check probed a root artifact and was answered-false
+    # (probeHit). On the rooted test device that probe would otherwise have
+    # returned rooted - so the probeHit IS the app's root check being defeated and
+    # root_bypassed is confirmed. A run with no root probe stays inconclusive
+    # (None), never a fabricated pass.
+    v = TechnologyHooksEngagedCheck().check(
+        [{"type": "send", "payload": {"probeHit": "root", "path": "/data/adb/magisk"}}]
+    )
+    assert v.root_bypassed is True
+    assert "/data/adb/magisk" in v.evidence_lines["root artifact probes answered-false"]
+    assert "root logic received the not-rooted result" in \
+        v.evidence_lines["root bypass confirmation basis"]
+    # no root probe -> root not confirmed (flow-triggered check may not have fired)
+    v2 = TechnologyHooksEngagedCheck().check(
+        [{"type": "send", "payload": {"bypassEffect": "ssl-handshake"}}]
+    )
+    assert v2.root_bypassed is None
+    v3 = TechnologyHooksEngagedCheck().check(
+        [{"type": "send", "payload": {"hook": "root_su_binary_paths"}}]
+    )
+    assert v3.root_bypassed is None  # engagement alone, no probe observed
+
+
+def test_ssl_confirmed_only_when_pin_check_and_handshake_both_observed():
+    # Fix-1: the app's own Java pin-check ran without rejecting (ssl-pin-check)
+    # AND a handshake completed (ssl-handshake) - its pin logic demonstrably
+    # accepted a connection it would otherwise reject. That is the deterministic
+    # confirmation the SSL bypass worked for that connection. Only BOTH together
+    # promote; a pin-check alone (no completed connection) stays effect evidence.
+    both = [
+        {"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}},
+        {"type": "send", "payload": {"bypassEffect": "ssl-handshake"}},
+    ]
+    v = TechnologyHooksEngagedCheck().check(both)
+    assert v.ssl_bypassed is True          # confirmed, app's own pin logic accepted
+    assert v.root_bypassed is None          # no root probe in these messages - unconfirmed
+    assert "accepted a connection" in v.evidence_lines["SSL bypass confirmation basis"]
+    # pin-check alone is not confirmation - no completed connection proves it.
+    v1 = TechnologyHooksEngagedCheck().check(
+        [{"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}}]
+    )
+    assert v1.ssl_bypassed is None
+    # handshake alone is not confirmation (a non-pinned app also completes one).
+    v2 = TechnologyHooksEngagedCheck().check(
+        [{"type": "send", "payload": {"bypassEffect": "ssl-handshake"}}]
+    )
+    assert v2.ssl_bypassed is None
+    # no effect observed is reported honestly, not as a pass
+    v2 = TechnologyHooksEngagedCheck().check([{"type": "send", "payload": {"hook": "x"}}])
+    assert "none observed" in v2.evidence_lines["root artifact probes answered-false"]
+    assert "none observed" in v2.evidence_lines["TLS handshakes completed post-bypass"]

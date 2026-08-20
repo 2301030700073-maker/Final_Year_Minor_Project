@@ -96,7 +96,7 @@ def test_ui_action_loop_runs_target_actions_in_order(monkeypatch):
     )
     monkeypatch.setattr(
         "dynamic.frida_runner._wait_for_checkpoint",
-        lambda messages, seconds: None,
+        lambda messages, seconds, require_evidence=False: None,
     )
 
     result = frida_runner.run_dynamic_stage(
@@ -145,6 +145,42 @@ def test_wait_for_checkpoint_burns_full_window_without_signal(monkeypatch):
     assert clock["now"] >= 2.0
 
 
+def test_wait_for_checkpoint_requires_evidence_when_ui_driven(monkeypatch):
+    # UI-triggered flows (AndroGoat root/pinning): the hook-install checkpoint
+    # fires at resume but the app's bypass EVIDENCE arrives only after the tap.
+    # require_evidence=True must NOT return on a hook-only message - it must keep
+    # polling until probeHit/bypassEffect appears (or the window burns).
+    clock = {"now": 0.0}
+    sleeps = []
+
+    def fake_sleep(s):
+        sleeps.append(s)
+        clock["now"] += s
+
+    monkeypatch.setattr("dynamic.frida_runner.time.sleep", fake_sleep)
+    monkeypatch.setattr("dynamic.frida_runner.time.monotonic", lambda: clock["now"])
+
+    # Only a hook checkpoint present: with require_evidence, we must NOT return.
+    hook_only = [{"type": "send", "payload": {"hook": "okhttp_certificate_pinner"}}]
+    frida_runner._wait_for_checkpoint(
+        list(hook_only), settle_seconds=2.0, require_evidence=True,
+    )
+    assert clock["now"] >= 2.0  # burned the full window - hook alone isn't enough
+
+
+def test_wait_for_checkpoint_evidence_arrives_early(monkeypatch):
+    # With the app's bypass evidence present, require_evidence returns immediately.
+    sleeps = []
+    monkeypatch.setattr("dynamic.frida_runner.time.sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr("dynamic.frida_runner.time.monotonic", lambda: 0.0)
+    msgs = [
+        {"type": "send", "payload": {"hook": "okhttp_certificate_pinner"}},
+        {"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}},
+    ]
+    frida_runner._wait_for_checkpoint(msgs, settle_seconds=5, require_evidence=True)
+    assert sleeps == []  # evidence present -> never sleeps
+
+
 # ---------------------------------------------------------------------------
 # FR-4.6: self-termination detection (pure logic)
 # ---------------------------------------------------------------------------
@@ -189,3 +225,35 @@ def test_process_is_alive_is_conservative():
     # a transient frida/device error is NOT evidence of self-termination, so it
     # must be treated as alive rather than false-flagging a healthy target.
     assert _process_is_alive(_FakeTransientErrorDevice(), 1) is True
+
+
+def test_ui_actions_for_is_action_aware():
+    # AndroGoat's root detection is button-triggered in RootDetectionActivity and
+    # SSL pinning in TrafficActivity. But AndroGoat has NO authored root bypass
+    # (SCRIPTS_BY_TARGET_ACTION), so exercising the root check can't confirm
+    # anything - it only risks suppressing SSL delivery (navigating there first
+    # empirically killed the pinning hook: BOTH ran 0 messages). So root is left
+    # honest-inconclusive and only the dimension with an actual bypass (SSL) is
+    # exercised: an SSL/BOTH run taps the pinning button; a ROOT_ONLY run (the
+    # synthetic-unknown path that loads the synth root envelope) taps CHECK ROOT.
+    agoat_root = ("am_start", "owasp.sat.agoat/.RootDetectionActivity")
+    agoat_ssl = ("am_start", "owasp.sat.agoat/.TrafficActivity")
+
+    ssl_actions = frida_runner._ui_actions_for("AndroGoat", Action.SSL_ONLY)
+    assert ssl_actions[0] == agoat_ssl and ssl_actions[-1] == ("tap", 720, 1251)
+    assert ("tap", 720, 993) not in ssl_actions  # no root tap for SSL-only
+
+    root_actions = frida_runner._ui_actions_for("AndroGoat", Action.ROOT_ONLY)
+    assert root_actions[0] == agoat_root and root_actions[-1] == ("tap", 720, 993)
+    assert ("tap", 720, 1251) not in root_actions  # no pinning tap for root-only
+
+    # BOTH: AndroGoat has no root bypass, so exercising root is pointless and
+    # harmful - a BOTH run must exercise SSL only (identical to SSL_ONLY) so the
+    # pinning confirmation is NOT suppressed by a root-first navigation.
+    both_actions = frida_runner._ui_actions_for("AndroGoat", Action.BOTH)
+    assert both_actions == ssl_actions
+    assert ("tap", 720, 993) not in both_actions  # root not exercised for BOTH
+    assert both_actions[-1] == ("tap", 720, 1251)  # pinning still exercised
+
+    # Unknown targets fall back to the static UI_ACTIONS_BY_TARGET (empty list).
+    assert frida_runner._ui_actions_for("UnCrackable1", Action.BOTH) == []

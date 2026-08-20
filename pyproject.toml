@@ -13,6 +13,7 @@ dependencies = [
     "androguard>=4.1.4",
     "pyelftools>=0.33",
     "pyaxmlparser>=0.3.31",
+    "capstone>=5.0.9",
 ]
 
 [dependency-groups]

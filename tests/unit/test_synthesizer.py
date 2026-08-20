@@ -172,6 +172,22 @@ def test_rn_ssl_pinning_routes_to_certificate_pinner():
     assert "okhttp3.CertificatePinner" in res.source
 
 
+def test_targeted_ssl_bypass_carries_pin_check_and_handshake_observers():
+    # Fix-1: a fully-covered targeted SSL bypass has NO UNIVERSAL_SSL (no embedded
+    # observer), so the synthesizer must append the effect observer - otherwise
+    # the SSL-confirmation signals (ssl-pin-check + ssl-handshake) would never
+    # fire and an unknown app's confirmed SSL bypass could not be reported. The
+    # observer's pin-check hooks must be present on the CertificatePinner path
+    # that the targeted recipe itself neutralizes.
+    res = synthesize(
+        _cls(Action.SSL_ONLY, ssl_ids=["okhttp_certificate_pinner"]), Action.SSL_ONLY
+    )
+    assert res.strategy == "targeted"
+    assert "ssl-pin-check" in res.source
+    assert "ssl-handshake" in res.source
+    assert "CertificatePinner" in res.source
+
+
 def test_cronet_verifier_routes_to_native_verify():
     # Cronet is BoringSSL in libcronet.so - the native module-family verify bypass
     # is its deterministic handle.
@@ -316,3 +332,44 @@ def test_synthesize_emits_hook_checkpoints_for_applied_hooks():
                             ssl_ids=["okhttp_certificate_pinner"]), Action.BOTH)
     assert 'send({hook: "okhttp_certificate_pinner"})' in res2.source
     assert 'send({hook: "root_su_binary_paths"})' in res2.source
+
+
+# --- Fix-1 / Fix-3 / Fix-4 / Fix-5: behavioral effect, native-universal SSL,
+#     and predefined-script capability matching (no AI) ------------------------
+
+
+def test_universal_ssl_includes_native_unpinning_and_effect_observer():
+    # Fix-4: the SSL universal now ALWAYS attempts native BoringSSL-family
+    # unpinning and observes a completed handshake - so an app that pins natively
+    # (BoringSSL, no firing signature) still gets a native unpinning attempt and
+    # observable effect evidence, without AI. Deterministic: the native bypass
+    # no-ops when the symbol is absent, so this never over-claims.
+    res = synthesize(_cls(Action.SSL_ONLY), Action.SSL_ONLY)
+    assert "SSL_CTX_set_verify" in res.source
+    assert "SSL_CTX_set_custom_verify" in res.source   # BoringSSL custom-verify path
+    assert "bypassEffect" in res.source
+    assert "ssl-handshake" in res.source
+
+
+def test_root_recipes_emit_probe_hit_effect_evidence():
+    # Fix-3: when the app actually probes a hidden root artifact, the hook emits
+    # probeHit evidence - converting an unreachable/flow-triggered root check into
+    # observable effect evidence WHEN the flow reaches it, on any app.
+    res = synthesize(
+        _cls(Action.ROOT_ONLY, root_ids=["native_su_binary_embedded"]), Action.ROOT_ONLY
+    )
+    assert "probeHit" in res.source
+    assert "bypassEffect" not in res.source          # root evidence, not ssl
+    res2 = synthesize(_cls(Action.ROOT_ONLY, root_ids=["root_su_binary_paths"]), Action.ROOT_ONLY)
+    assert "probeHit" in res2.source
+
+
+def test_predefined_script_match_reported_by_category():
+    # Fix-5: a bypass action is deterministically matched to the predefined
+    # universal for its detected categories - the no-AI predefined-script match.
+    r = synthesize(_cls(Action.SSL_ONLY), Action.SSL_ONLY)
+    assert r.predefined_matched == ["universal-robust-advanced-root--ssl-pinning-bypass"]
+    b = synthesize(_cls(Action.BOTH), Action.BOTH)
+    assert b.predefined_matched == ["universal-robust-advanced-root--ssl-pinning-bypass"]  # dedup
+    n = synthesize(_cls(Action.NEITHER), Action.NEITHER)
+    assert n.predefined_matched == []

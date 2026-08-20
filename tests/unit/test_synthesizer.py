@@ -108,6 +108,26 @@ def test_synthesize_prepends_evasion_for_native_anti_instrumentation():
     assert "gum-js-loop" in res.source
 
 
+def test_evasion_scrubs_maps_raw_reads_not_just_line_readers():
+    # The most common native anti-Frida check raw-READs /proc/self/maps (open +
+    # read) and scans for the injected agent - which bypasses the getline/fgets
+    # line-reader hooks. The evasion base must also track maps fds/FILE*s opened
+    # on /proc/self/maps and scrub the same Frida-only tokens from read/fread, so
+    # a Dex2C scanner cannot see the agent and kill the bypass.
+    res = synthesize(_cls(Action.ROOT_ONLY, root_ids=["native_frida_detection"]), Action.ROOT_ONLY)
+    assert "evasion" in res.applied_hooks
+    src = res.source
+    assert "blankTokens" in src
+    assert "MAPS_FDS" in src
+    assert "isMapsPath" in src
+    assert "'/proc'" in src and "'/maps'" in src
+    # raw-read scrub hooks wired
+    assert "findExportByName('libc.so', 'read')" in src
+    assert "findExportByName('libc.so', 'fread')" in src
+    # scrub only ever overwrites the Frida-only tokens with '.' (46), never app state
+    assert "arr[i + j] = 46" in src
+
+
 def test_synthesize_no_evasion_without_anti_instrumentation():
     # A benign app (no Frida/Substrate probe) must NOT get the evasion base.
     res = synthesize(_cls(Action.ROOT_ONLY, root_ids=["root_su_binary_paths"]), Action.ROOT_ONLY)

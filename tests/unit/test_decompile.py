@@ -90,9 +90,25 @@ def test_decompile_tolerates_partial_jadx_output_when_real_files_were_written(tm
             stdout.write("decompiling class 1563 of 2000...\n")
             stdout.write("java.lang.OutOfMemoryError: Java heap space")
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
-        apktool_dir = Path(cmd[4])
-        apktool_dir.mkdir(parents=True, exist_ok=True)
-        (apktool_dir / "AndroidManifest.xml").write_text("<manifest/>")
+        # A jadx crash triggers the CFR recovery command. It must not fall into
+        # the apktool branch: apktool is `d -f -o <dir> <apk>` (dir at cmd[4]),
+        # but CFR's `java -jar ... --outputdir <dir>` has the literal `--outputdir`
+        # flag at cmd[4] - taking it as a path would mkdir a stray ./--outputdir/
+        # at the repo root on every run. Guard on the tool name; derive the output
+        # dir from the real flag, as apktool's own argv does.
+        if cmd[0].endswith("apktool"):
+            apktool_dir = Path(cmd[cmd.index("-o") + 1])
+            apktool_dir.mkdir(parents=True, exist_ok=True)
+            (apktool_dir / "AndroidManifest.xml").write_text("<manifest/>")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        # d2j (dex2jar, `-f <apk> -o <jar>`) also flows here on a jadx crash and
+        # carries no --outputdir flag. Only CFR does - write the recovered class
+        # to its value; any other tool just reports success so the partial run
+        # continues instead of being misread as apktool or crashing.
+        if "--outputdir" in cmd:
+            cfr_dir = Path(cmd[cmd.index("--outputdir") + 1])
+            cfr_dir.mkdir(parents=True, exist_ok=True)
+            (cfr_dir / "Recovered.java").write_text("class Recovered {}")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
@@ -130,9 +146,25 @@ def test_large_no_dex_apk_is_decompiled_not_refused(tmp_path, monkeypatch):
             (jadx_dir / "BigClass.java").write_text("class BigClass {}")
             stdout.write("java.lang.OutOfMemoryError: Java heap space")
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
-        apktool_dir = Path(cmd[4])
-        apktool_dir.mkdir(parents=True, exist_ok=True)
-        (apktool_dir / "AndroidManifest.xml").write_text("<manifest/>")
+        # apktool-only branch (guarded): a jadx crash's CFR recovery command also
+        # flows through here and must not be misread as apktool - apktool is
+        # `d -f -o <dir> <apk>`, so derive the output dir from the -o flag rather
+        # than a fixed index (cmd[4] of the CFR `java -jar ... --outputdir <dir>`
+        # is the literal `--outputdir` flag, which would write a stray
+        # ./--outputdir/ at the repo root).
+        if cmd[0].endswith("apktool"):
+            apktool_dir = Path(cmd[cmd.index("-o") + 1])
+            apktool_dir.mkdir(parents=True, exist_ok=True)
+            (apktool_dir / "AndroidManifest.xml").write_text("<manifest/>")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        # d2j (dex2jar, `-f <apk> -o <jar>`) also flows here on a jadx crash and
+        # carries no --outputdir flag. Only CFR does - write the recovered class
+        # to its value; any other tool just reports success so the partial run
+        # continues instead of being misread as apktool or crashing.
+        if "--outputdir" in cmd:
+            cfr_dir = Path(cmd[cmd.index("--outputdir") + 1])
+            cfr_dir.mkdir(parents=True, exist_ok=True)
+            (cfr_dir / "Recovered.java").write_text("class Recovered {}")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
@@ -163,13 +195,27 @@ def test_decompile_smali_fallback_rescues_jadx_zero_output_to_partial(tmp_path, 
         if Path(cmd[0]).name == "jadx":
             stdout.write("jadx crash")
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
-        apktool_dir = Path(cmd[cmd.index("-o") + 1])
-        apktool_dir.mkdir(parents=True, exist_ok=True)  # real apktool creates it
-        (apktool_dir / "AndroidManifest.xml").write_text("<manifest/>")
-        (apktool_dir / "smali").mkdir(parents=True, exist_ok=True)
-        (apktool_dir / "smali" / "RootCheck.smali").write_text(
-            ".method public static isRooted()Z\n    const/4 v0, 0x1\n.end method\n"
-        )
+        # apktool-only branch (guarded): the CFR recovery command that follows a
+        # jadx crash carries `--outputdir` (not `-o`), so it must not be parsed
+        # as apktool - the -o lookup would raise, and taking --outputdir as a
+        # path would write a stray ./--outputdir/ at the repo root.
+        if Path(cmd[0]).name == "apktool":
+            apktool_dir = Path(cmd[cmd.index("-o") + 1])
+            apktool_dir.mkdir(parents=True, exist_ok=True)  # real apktool creates it
+            (apktool_dir / "AndroidManifest.xml").write_text("<manifest/>")
+            (apktool_dir / "smali").mkdir(parents=True, exist_ok=True)
+            (apktool_dir / "smali" / "RootCheck.smali").write_text(
+                ".method public static isRooted()Z\n    const/4 v0, 0x1\n.end method\n"
+            )
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        # d2j (dex2jar, `-f <apk> -o <jar>`) also flows here on a jadx crash and
+        # carries no --outputdir flag. Only CFR does - write the recovered class
+        # to its value; any other tool just reports success so the partial run
+        # continues instead of being misread as apktool or crashing.
+        if "--outputdir" in cmd:
+            cfr_dir = Path(cmd[cmd.index("--outputdir") + 1])
+            cfr_dir.mkdir(parents=True, exist_ok=True)
+            (cfr_dir / "Recovered.java").write_text("class Recovered {}")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr("static.decompile.subprocess.run", fake_run)

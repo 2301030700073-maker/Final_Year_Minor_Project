@@ -325,8 +325,17 @@ def run_dynamic_stage(
     # collide on that slot - there is no single-slot conflict. The BOTH UI flow
     # exercises both checks (SSL tap first, then CHECK ROOT), and the success
     # check confirms root from the envelope's probeHit.
+    #
+    # Structural, not name-gated: any target whose bypass is a HAND-AUTHORED
+    # script (synth_source is None) rather than the synthesized source gets the
+    # native root envelope appended when the action needs root. The synthesized
+    # path already appends the envelope to synth_source above, so this covers the
+    # hand-authored path only - AndroGoat today, any future real-world target with
+    # a hand-authored script and a root check tomorrow. Root confirmation is the
+    # synthesized native envelope's probeHit, which requires the app's root check
+    # to actually run (see _root_expected below).
     _supplement_root = (
-        target == "AndroGoat"
+        synth_source is None
         and action in (Action.ROOT_ONLY, Action.BOTH)
         and bool(synthesized and synthesized.get("source"))
     )
@@ -365,6 +374,20 @@ def run_dynamic_stage(
     # spawns, one per dimension (see _run_two_spawns). ROOT_ONLY stays single-spawn
     # (it only exercises the root check, which a single spawn already confirms).
     _two_spawn = _supplement_root and action == Action.BOTH
+
+    # Root evidence is expected whenever the native root envelope is loaded for a
+    # root-needing action: the hand-authored path (via _supplement_root) or the
+    # synthesized path (envelope appended to synth_source above). The single-spawn
+    # wait below must then require root evidence (probeHit) rather than returning
+    # on the first SSL hook-install checkpoint - otherwise a real-world app whose
+    # root check fires after the SSL hooks are reported would be honestly-but-
+    # wrongly reported root-inconclusive, because the wait returned before the
+    # app's root check ran. This is the "all real world apps" counterpart of the
+    # AndroGoat UI-triggered root check: the envelope only confirms root if we let
+    # the app's root check actually fire and report the probeHit.
+    _root_expected = action in (Action.ROOT_ONLY, Action.BOTH) and (
+        _supplement_root or synth_source is not None
+    )
 
     outcome: dict = {}
 
@@ -480,7 +503,10 @@ def run_dynamic_stage(
             # must wait for that evidence, not just the readiness checkpoint, or
             # the stage captures before the check runs and honestly (but wrongly)
             # reports inconclusive.
-            _wait_for_checkpoint(messages, settle_seconds, require_evidence=bool(ui_actions))
+            _wait_for_checkpoint(
+                messages, settle_seconds,
+                require_evidence=bool(ui_actions) or _root_expected,
+            )
 
             # FR-4.6: after the settle window, a spawned process that is no
             # longer alive self-terminated - it detected the instrumentation

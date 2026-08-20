@@ -180,6 +180,69 @@ def test_both_androgoat_runs_two_spawns_one_per_dimension(monkeypatch):
     assert "synthesized:root_runtime_exec_su" in result.evidence["scripts_applied"]
 
 
+def _run_with_captured_require_evidence(monkeypatch, action, target, synthesized):
+    """Drive run_dynamic_stage and capture the require_evidence it passes to
+    _wait_for_checkpoint for the single-spawn path."""
+    captured = {}
+
+    class _FakeDevice:
+        def spawn(self, pkg):
+            return 1234
+
+        def resume(self, pid):
+            return None
+
+    monkeypatch.setattr(
+        "dynamic.frida_runner.attach",
+        lambda serial, pkg: (_FakeDevice(), object(), 1234),
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner.load_script",
+        lambda session, name, on_message=None: None,
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner.load_script_source",
+        lambda session, src, on_message=None: None,
+    )
+    monkeypatch.setattr("dynamic.frida_runner._run_ui_action", lambda serial, a: None)
+    monkeypatch.setattr("dynamic.frida_runner.time.sleep", lambda s: None)
+
+    def fake_wait(messages, seconds, require_evidence=False):
+        captured["require_evidence"] = require_evidence
+
+    monkeypatch.setattr(
+        "dynamic.frida_runner._wait_for_checkpoint", fake_wait,
+    )
+    frida_runner.run_dynamic_stage(
+        "emulator-5554", "com.example.app", action, target=target,
+        synthesized=synthesized,
+    )
+    return captured.get("require_evidence")
+
+
+def test_unknown_root_run_requires_root_evidence(monkeypatch):
+    # The synthesized path appends the native root envelope for a ROOT_ONLY run.
+    # The wait must require root evidence (probeHit) so a real-world app's root
+    # check - which fires on its own schedule, after the SSL hooks report in - is
+    # not missed because the wait returned early on the first hook-install
+    # checkpoint. This is the "all real world apps" version of the AndroGoat
+    # UI-triggered root check: the envelope only confirms root if we let the
+    # app's root check actually run and report the probeHit.
+    assert _run_with_captured_require_evidence(
+        monkeypatch, Action.ROOT_ONLY, "some_real_app",
+        {"source": "x", "applied_hooks": []},
+    ) is True
+
+
+def test_unknown_ssl_run_does_not_wait_for_root_evidence(monkeypatch):
+    # SSL_ONLY loads no root envelope, so it must not hold the stage open for
+    # root evidence - it waits only on its UI/checkpoint signal.
+    assert _run_with_captured_require_evidence(
+        monkeypatch, Action.SSL_ONLY, "some_real_app",
+        {"source": "x", "applied_hooks": []},
+    ) is False
+
+
 def test_wait_for_checkpoint_returns_early_on_hook_signal(monkeypatch):
     # RESID-6D: as soon as a bypass script signals its hooks are in (a send
     # payload carrying a 'hook' key), the settle wait returns - no blind sleep.

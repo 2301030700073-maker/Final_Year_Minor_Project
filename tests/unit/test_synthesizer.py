@@ -116,12 +116,17 @@ def test_synthesize_no_evasion_without_anti_instrumentation():
 
 
 def test_native_recipe_enumerates_ssl_modules_not_just_libssl():
-    # Native unpinning must cover the BoringSSL/OpenSSL family (Cronet, Conscrypt),
-    # not a hardcoded libssl.so - gRPC-over-Cronet pinning would otherwise be missed.
+    # Native unpinning must cover the BoringSSL/OpenSSL family wherever it lives,
+    # not a hardcoded module-name list. The bypass scans EVERY loaded .so for the
+    # verify symbols, so gRPC-over-Cronet (libcronet), Flutter dart:io
+    # (libflutter), or a renamed vendored BoringSSL are all covered regardless of
+    # which module hosts the app's TLS stack - gRPC/Cronet pinning is never missed.
     res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["native_ssl_pinning_verify"]), Action.SSL_ONLY)
     assert "Process.enumerateModules" in res.source
-    assert "libcronet.so" in res.source
-    assert "libconscrypt_jni.so" in res.source
+    assert ".so" in res.source
+    assert "SSL_CTX_set_verify" in res.source
+    assert "SSL_CTX_set_cert_verify_callback" in res.source
+    assert "SSL_CTX_set_custom_verify" in res.source
 
 
 def test_conscrypt_recipe_fires_for_its_signature_id():
@@ -189,11 +194,30 @@ def test_targeted_ssl_bypass_carries_pin_check_and_handshake_observers():
 
 
 def test_cronet_verifier_routes_to_native_verify():
-    # Cronet is BoringSSL in libcronet.so - the native module-family verify bypass
-    # is its deterministic handle.
+    # Cronet is BoringSSL in libcronet.so - the native symbol-scan verify bypass
+    # is its deterministic handle (scans all modules, so libcronet is covered
+    # wherever it is loaded).
     res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["cronet_cert_verifier"]), Action.SSL_ONLY)
     assert "Process.enumerateModules" in res.source
-    assert "libcronet.so" in res.source
+    assert "SSL_CTX_set_verify" in res.source
+
+
+def test_native_bypass_is_symbol_driven_not_name_list_gated():
+    # A Flutter (libflutter.so) or Unity (libunity.so) app has NO Java SSL stack
+    # and bundles BoringSSL under a name no fixed list could exhaust. The bypass
+    # must be driven by the exported verify symbols across ALL loaded modules, not
+    # gated on a hardcoded module-name list that a renamed/unknown host would
+    # slip past - so a real app's BoringSSL is covered no matter which .so hosts it.
+    res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["native_ssl_pinning_verify"]), Action.SSL_ONLY)
+    assert "MODULES = " not in res.source  # no name-list gate
+    assert "Process.enumerateModules()" in res.source  # scan every loaded module
+    assert "findExportByName(mn, SYMS[k][0])" in res.source  # hook by symbol, per module
+    # the family the symbol-scan covers, documented so the coverage intent is explicit
+    assert "libflutter" in res.source
+    assert "libunity" in res.source
+    for sym in ["SSL_CTX_set_verify", "SSL_CTX_set_cert_verify_callback",
+                "SSL_CTX_set_custom_verify", "SSL_set_custom_verify"]:
+        assert sym in res.source, sym
 
 
 def test_native_ssl_bypass_emits_custom_verify_hooks():

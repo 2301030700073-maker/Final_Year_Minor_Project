@@ -196,37 +196,40 @@ def _evasion_base() -> str:
 
 def _native_ssl_pin_bypass() -> str:
     """Native SSL unpinning across the BoringSSL/OpenSSL family - not just
-    libssl.so. Real apps ship BoringSSL inside libcronet.so (gRPC/HTTP3) and
-    libconscrypt_jni.so (Conscrypt, Android's default provider), so a libssl-only
-    hook misses them. Enumerate loaded modules and patch the verify entrypoints
-    (SSL_CTX_set_verify -> 0 / accept; SSL_CTX_set_cert_verify_callback ->
-    accept-all) in any of the family. Also neutralizes the modern BoringSSL
-    custom-verify API (SSL_CTX_set_custom_verify / SSL_set_custom_verify) used by
-    Conscrypt/Cronet/Flutter to pin - each returns 1 (accept) so the custom
-    verifier is never installed and the pin check is skipped. Deterministic;
-    try/catch so an absent module/symbol degrades silently."""
+    libssl.so. Real apps ship BoringSSL inside libcronet.so (gRPC/HTTP3),
+    libconscrypt_jni.so (Conscrypt, Android's default provider), and - for
+    Flutter/Unity apps - inside libflutter.so / libunity.so (no Java SSL stack at
+    all), so a libssl-only hook misses them. Rather than a fixed module-name list
+    that a renamed or unexpected host would skip, scan every loaded .so and patch
+    whichever export the verify entrypoints (SSL_CTX_set_verify -> 0 / accept;
+    SSL_CTX_set_cert_verify_callback -> accept-all) in any module of the family.
+    Also neutralizes the modern BoringSSL custom-verify API (SSL_CTX_set_custom_
+    verify / SSL_set_custom_verify) used by Conscrypt/Cronet/Flutter to pin - each
+    returns 1 (accept) so the custom verifier is never installed and the pin check
+    is skipped. Deterministic; try/catch so an absent module/symbol degrades
+    silently."""
     return (
-        "var MODULES = ['libssl.so', 'libcronet.so', 'libconscrypt_jni.so', "
-        "'libboringssl.so', 'libssl_openssl.so'];\n"
-        "var names = Process.enumerateModules().map(function (m) { return m.name; });\n"
-        "for (var i = 0; i < MODULES.length; i++) {\n"
-        "  if (names.indexOf(MODULES[i]) === -1) continue;\n"
-        "  try {\n"
-        "    var sv = Module.findExportByName(MODULES[i], 'SSL_CTX_set_verify');\n"
-        "    if (sv) Interceptor.replace(sv, new NativeCallback(function (ctx, mode) { return 0; }, 'int', ['pointer', 'int']));\n"
-        "  } catch (e) { console.log('[synth] no SSL_CTX_set_verify in ' + MODULES[i]); }\n"
-        "  try {\n"
-        "    var cv = Module.findExportByName(MODULES[i], 'SSL_CTX_set_cert_verify_callback');\n"
-        "    if (cv) Interceptor.replace(cv, new NativeCallback(function (ctx, cb, a) { return 1; }, 'int', ['pointer', 'pointer', 'pointer']));\n"
-        "  } catch (e) { console.log('[synth] no cert_verify_callback in ' + MODULES[i]); }\n"
-        "  try {\n"
-        "    var cus = Module.findExportByName(MODULES[i], 'SSL_CTX_set_custom_verify');\n"
-        "    if (cus) Interceptor.replace(cus, new NativeCallback(function (ctx, mode, cb) { return 1; }, 'int', ['pointer', 'int', 'pointer']));\n"
-        "  } catch (e) { console.log('[synth] no SSL_CTX_set_custom_verify in ' + MODULES[i]); }\n"
-        "  try {\n"
-        "    var cus2 = Module.findExportByName(MODULES[i], 'SSL_set_custom_verify');\n"
-        "    if (cus2) Interceptor.replace(cus2, new NativeCallback(function (ssl, mode, cb) { return 1; }, 'int', ['pointer', 'int', 'pointer']));\n"
-        "  } catch (e) { console.log('[synth] no SSL_set_custom_verify in ' + MODULES[i]); }\n"
+        "// Hook BoringSSL/OpenSSL verify-control wherever it lives - not a fixed\n"
+        "// module-name list, so any loaded .so that exports these symbols (libssl,\n"
+        "// libcronet, libconscrypt_jni, libboringssl, libflutter, libunity, or a\n"
+        "// renamed/vendored BoringSSL) is covered no matter which module hosts the\n"
+        "// app's TLS stack (app-agnostic).\n"
+        "var SYMS = [\n"
+        "  ['SSL_CTX_set_verify', function (ctx, mode) { return 0; }, ['pointer', 'int']],\n"
+        "  ['SSL_CTX_set_cert_verify_callback', function (ctx, cb, a) { return 1; }, ['pointer', 'pointer', 'pointer']],\n"
+        "  ['SSL_CTX_set_custom_verify', function (ctx, mode, cb) { return 1; }, ['pointer', 'int', 'pointer']],\n"
+        "  ['SSL_set_custom_verify', function (ssl, mode, cb) { return 1; }, ['pointer', 'int', 'pointer']]\n"
+        "];\n"
+        "var mods = Process.enumerateModules();\n"
+        "for (var i = 0; i < mods.length; i++) {\n"
+        "  var mn = mods[i].name;\n"
+        "  if (mn.indexOf('.so') === -1) continue;\n"
+        "  for (var k = 0; k < SYMS.length; k++) {\n"
+        "    try {\n"
+        "      var p = Module.findExportByName(mn, SYMS[k][0]);\n"
+        "      if (p) Interceptor.replace(p, new NativeCallback(SYMS[k][1], 'int', SYMS[k][2]));\n"
+        "    } catch (e) { console.log('[synth] no ' + SYMS[k][0] + ' in ' + mn); }\n"
+        "  }\n"
         "}\n"
     )
 

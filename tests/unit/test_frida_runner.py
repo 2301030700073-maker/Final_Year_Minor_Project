@@ -113,6 +113,73 @@ def test_ui_action_loop_runs_target_actions_in_order(monkeypatch):
     ]
 
 
+def test_both_androgoat_runs_two_spawns_one_per_dimension(monkeypatch):
+    # AndroGoat's two button-triggered checks (SSL pinning in TrafficActivity,
+    # root in RootDetectionActivity) are mutually exclusive in a single
+    # navigation, so a BOTH run must spawn once per dimension rather than drive a
+    # combined sequence. This pins the split: two attach() calls, the first
+    # exercising the SSL sequence (with the SSL script + native root envelope
+    # loaded), the second exercising the root sequence (envelope only). Messages
+    # from both accumulate into one stage evidence so the success check sees both
+    # the pin-hook firing and the root probeHit.
+    class _FakeDevice:
+        def __init__(self):
+            self.pid = 1000
+
+        def spawn(self, pkg):
+            return self.pid
+
+        def resume(self, pid):
+            return None
+
+    device_a, device_b = _FakeDevice(), _FakeDevice()
+    attach_calls = []
+    loaded_src = []
+    ui_calls = []
+
+    def fake_attach(serial, pkg):
+        attach_calls.append(pkg)
+        dev = device_a if len(attach_calls) == 1 else device_b
+        return dev, object(), dev.pid
+
+    monkeypatch.setattr("dynamic.frida_runner.attach", fake_attach)
+    monkeypatch.setattr(
+        "dynamic.frida_runner.load_script_source",
+        lambda session, src, on_message=None: loaded_src.append(src),
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner._run_ui_action",
+        lambda serial, action: ui_calls.append(action),
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner._wait_for_checkpoint",
+        lambda messages, seconds, require_evidence=False: None,
+    )
+
+    result = frida_runner.run_dynamic_stage(
+        "emulator-5554", "owasp.sat.agoat", Action.BOTH, target="AndroGoat",
+        synthesized={"source": "root", "applied_hooks": []},
+    )
+
+    assert result.status == "success"
+    # two spawns: SSL dimension first, root dimension second
+    assert attach_calls == ["owasp.sat.agoat", "owasp.sat.agoat"]
+    # SSL spawn loads the hand-authored SSL script + native envelope as one source;
+    # root spawn loads just the envelope. Both carry the envelope markers.
+    assert "CertificatePinner" in loaded_src[0]
+    assert "Interceptor" in loaded_src[0] and "probeHit" in loaded_src[0]
+    assert "Interceptor" in loaded_src[1] and "probeHit" in loaded_src[1]
+    # UI: SSL dimension (pinning tap) first, root dimension (CHECK ROOT) second
+    assert [a[1] for a in ui_calls if a[0] == "am_start"] == [
+        "owasp.sat.agoat/.TrafficActivity",
+        "owasp.sat.agoat/.RootDetectionActivity",
+    ]
+    assert ui_calls[-1] == ("tap", 720, 993)
+    assert ("tap", 720, 1251) in ui_calls
+    assert "synthesized:native_su_binary_embedded" in result.evidence["scripts_applied"]
+    assert "synthesized:root_runtime_exec_su" in result.evidence["scripts_applied"]
+
+
 def test_wait_for_checkpoint_returns_early_on_hook_signal(monkeypatch):
     # RESID-6D: as soon as a bypass script signals its hooks are in (a send
     # payload carrying a 'hook' key), the settle wait returns - no blind sleep.
@@ -229,13 +296,14 @@ def test_process_is_alive_is_conservative():
 
 def test_ui_actions_for_is_action_aware():
     # AndroGoat's root detection is button-triggered in RootDetectionActivity and
-    # SSL pinning in TrafficActivity. But AndroGoat has NO authored root bypass
-    # (SCRIPTS_BY_TARGET_ACTION), so exercising the root check can't confirm
-    # anything - it only risks suppressing SSL delivery (navigating there first
-    # empirically killed the pinning hook: BOTH ran 0 messages). So root is left
-    # honest-inconclusive and only the dimension with an actual bypass (SSL) is
-    # exercised: an SSL/BOTH run taps the pinning button; a ROOT_ONLY run (the
-    # synthetic-unknown path that loads the synth root envelope) taps CHECK ROOT.
+    # SSL pinning in TrafficActivity. _ui_actions_for returns a SINGLE dimension's
+    # sequence. A BOTH run is NOT driven by a combined sequence here: the two
+    # checks are mutually exclusive in one navigation (whichever runs second in
+    # the same process never fires - live-verified), so the dynamic stage splits
+    # BOTH into two fresh spawns, one per dimension (see run_dynamic_stage /
+    # _run_two_spawns), each driven by its own single-dimension sequence. Root
+    # confirmation comes from the synthesized native root envelope's probeHit,
+    # SSL from the pin-hook firing.
     agoat_root = ("am_start", "owasp.sat.agoat/.RootDetectionActivity")
     agoat_ssl = ("am_start", "owasp.sat.agoat/.TrafficActivity")
 
@@ -246,14 +314,6 @@ def test_ui_actions_for_is_action_aware():
     root_actions = frida_runner._ui_actions_for("AndroGoat", Action.ROOT_ONLY)
     assert root_actions[0] == agoat_root and root_actions[-1] == ("tap", 720, 993)
     assert ("tap", 720, 1251) not in root_actions  # no pinning tap for root-only
-
-    # BOTH: AndroGoat has no root bypass, so exercising root is pointless and
-    # harmful - a BOTH run must exercise SSL only (identical to SSL_ONLY) so the
-    # pinning confirmation is NOT suppressed by a root-first navigation.
-    both_actions = frida_runner._ui_actions_for("AndroGoat", Action.BOTH)
-    assert both_actions == ssl_actions
-    assert ("tap", 720, 993) not in both_actions  # root not exercised for BOTH
-    assert both_actions[-1] == ("tap", 720, 1251)  # pinning still exercised
 
     # Unknown targets fall back to the static UI_ACTIONS_BY_TARGET (empty list).
     assert frida_runner._ui_actions_for("UnCrackable1", Action.BOTH) == []

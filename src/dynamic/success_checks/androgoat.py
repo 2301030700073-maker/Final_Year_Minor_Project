@@ -45,11 +45,28 @@ def _pin_hook_fired(frida_log: str) -> bool:
     return False
 
 
+def _root_probe_hit(frida_log: str) -> bool:
+    """A root-artifact probe answered-false is the app's own root check being
+    defeated - the root counterpart of the pin-hook firing. The synthesized
+    native root envelope (loaded alongside the SSL script for an AndroGoat
+    BOTH/ROOT run) emits `{probeHit: 'root', path: <su path>}` when it hides a
+    libc access/stat/exec probe, so a line carrying both confirms the root check
+    was exercised AND answered-hidden. On the rooted test device that probe would
+    otherwise return rooted, so the probeHit IS the check being defeated - the
+    same root-confirmation rule the technology-level check applies to unknown
+    targets."""
+    for line in frida_log.splitlines():
+        if "probeHit" in line and "root" in line:
+            return True
+    return False
+
+
 class AndroGoatSuccessCheck:
     def check(self, logcat_output: str, frida_log: str) -> VerificationResult:
         combined = f"{logcat_output}\n{frida_log}"
 
         pin_hook_fired = _pin_hook_fired(frida_log)
+        root_probe_hit = _root_probe_hit(frida_log)
         response_received = RESPONSE_LOG_TAG in combined
 
         evidence_lines: dict[str, str] = {}
@@ -62,6 +79,11 @@ class AndroGoatSuccessCheck:
                 "CertificatePinner.check hook firing not confirmed - cannot "
                 "confirm the SSL bypass took effect"
             )
+        if root_probe_hit:
+            evidence_lines["root_probe_hit"] = (
+                "app's root check probed a root artifact and was answered-hidden "
+                "(probeHit) - root bypass confirmed"
+            )
         if response_received:
             evidence_lines["response_received"] = (
                 "doPinning logged an HTTP response (Log.v 'Response') - the "
@@ -69,7 +91,12 @@ class AndroGoatSuccessCheck:
             )
 
         return VerificationResult(
-            root_bypassed=None,  # root not attempted for an SSL-only run
+            # Root is confirmed when the app's own root check probed a root
+            # artifact and was answered-hidden (probeHit from the synthesized
+            # native root envelope). Not confirmed stays None (inconclusive), not
+            # False - matching the technology check and RESID-6F, so it is never
+            # blended with a confirmed failure in correlation.
+            root_bypassed=True if root_probe_hit else None,
             # RESID-6F: not confirmed is None (inconclusive), not False (a
             # definitive failure) - the pin hook not firing means "could not
             # verify", which must not be blended with a confirmed failure in

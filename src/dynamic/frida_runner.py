@@ -204,18 +204,21 @@ def _ui_actions_for(target: str, action) -> list[tuple]:
     """Return the UI actions that exercise the checks relevant to `action`.
     For AndroGoat, root detection and SSL pinning are each button-triggered in
     their own activity, so the flow is selected by the action being verified:
-    a ROOT/BOTH run taps CHECK ROOT, an SSL/BOTH run taps the pinning button, and
-    a BOTH run does both. Best-effort UI stepping that fails is captured in the
-    stage evidence, not fatal (see _run_ui_action)."""
+    a ROOT_ONLY run taps CHECK ROOT, an SSL_ONLY run taps the pinning button.
+    A BOTH run does NOT use a combined sequence here - the two checks are
+    mutually exclusive in a single navigation (live-verified: whichever runs
+    second never fires in the same process), so the dynamic stage splits BOTH
+    into two fresh spawns, one per dimension (see run_dynamic_stage /
+    _run_two_spawns) and drives each with its single-dimension sequence.
+    Best-effort UI stepping that fails is captured in the stage evidence, not
+    fatal (see _run_ui_action)."""
     if target == "AndroGoat":
-        # AndroGoat's SSL pinning is button-triggered (TrafficActivity's
-        # CERTIFICATE PINNING button); only SSL has an authored bypass for it
-        # (SCRIPTS_BY_TARGET_ACTION has no AndroGoat root script), so a BOTH/SSL
-        # run exercises SSL only. Root is left honest-inconclusive: there is no
-        # root bypass to verify, and navigating to RootDetectionActivity first
-        # empirically suppresses the SSL hook delivery entirely (0 messages), so
-        # it is never exercised for AndroGoat. (A synthetic-unknown ROOT_ONLY run
-        # that loads the synthesized root envelope still gets the root flow.)
+        # AndroGoat's SSL pinning runs from the CERTIFICATE PINNING button in
+        # TrafficActivity; its root check from the CHECK ROOT button in
+        # RootDetectionActivity - both button-triggered, so a run must tap the
+        # button for each check it means to verify. The hand-authored SSL script
+        # is supplemented by the synthesized native root envelope for a
+        # ROOT/BOTH run (see run_dynamic_stage).
         if action == Action.ROOT_ONLY:
             return [
                 ("am_start", "owasp.sat.agoat/.RootDetectionActivity"),
@@ -304,12 +307,29 @@ def run_dynamic_stage(
     # and the exec-su recipe are appended to the source. Verified live: synth +
     # native + exec still yields root_bypassed=True with all root-artifact probes
     # answered-false.
-    _root_envelope_ids: list[str] = []
+    _root_envelope_ids = ["native_su_binary_embedded", "root_runtime_exec_su"]
+    _root_envelope_src = "\n\n".join(ROOT_RECIPES[i] for i in _root_envelope_ids)
     if synth_source is not None and action in (Action.ROOT_ONLY, Action.BOTH):
-        _root_envelope_ids = ["native_su_binary_embedded", "root_runtime_exec_su"]
-        synth_source = synth_source + "\n\n" + "\n\n".join(
-            ROOT_RECIPES[i] for i in _root_envelope_ids
-        )
+        synth_source = synth_source + "\n\n" + _root_envelope_src
+
+    # AndroGoat's hand-authored script covers SSL only (SCRIPTS_BY_TARGET_ACTION
+    # has no root script for it), yet its root check IS genuinely bypassable: the
+    # synthesized native root envelope (libc access/stat/open path-hiding +
+    # exec-su) answers isRooted()'s File.exists/exec probes as hidden
+    # (live-verified root_bypassed=True). It just was never loaded or exercised,
+    # so root stayed honest-inconclusive-by-absence rather than confirmed. When a
+    # synthesized bypass is available and the action needs root, supplement the
+    # hand-authored SSL script with the NATIVE envelope as ONE load: it is
+    # Interceptor-on-libc, disjoint from the Java CertificatePinner.check slot
+    # the SSL script patches, so - unlike the synth SSL observer, which WOULD
+    # collide on that slot - there is no single-slot conflict. The BOTH UI flow
+    # exercises both checks (SSL tap first, then CHECK ROOT), and the success
+    # check confirms root from the envelope's probeHit.
+    _supplement_root = (
+        target == "AndroGoat"
+        and action in (Action.ROOT_ONLY, Action.BOTH)
+        and bool(synthesized and synthesized.get("source"))
+    )
 
     # The vendor is never loaded alongside a synthesized bypass (RESID-6H, revised
     # 2026-08 by live evidence). Originally it was kept for the SSL-only case whose
@@ -328,18 +348,95 @@ def run_dynamic_stage(
     # on both root and SSL. The scripts_applied label must match what is actually
     # loaded so the report never claims the vendor ran when it did not (principle 3).
     _extra_labels = [f"synthesized:{i}" for i in _root_envelope_ids]
-    scripts_applied = (
-        (["synthesized"] + synth_applied + _extra_labels)
-        if synth_source is not None else script_names
-    )
+    if _supplement_root:
+        scripts_applied = list(script_names) + _extra_labels
+    else:
+        scripts_applied = (
+            (["synthesized"] + synth_applied + _extra_labels)
+            if synth_source is not None else script_names
+        )
+
+    # AndroGoat BOTH: the two button-triggered checks (SSL pinning in
+    # TrafficActivity, root in RootDetectionActivity) are mutually exclusive in a
+    # single navigation - live-verified (dumpsys + message capture) that whichever
+    # runs second in the same process never fires: SSL-first loses the root
+    # probeHit, root-first loses the SSL pin hook. There is no honest single-spawn
+    # UI sequence that confirms both, so a BOTH run is split into two fresh
+    # spawns, one per dimension (see _run_two_spawns). ROOT_ONLY stays single-spawn
+    # (it only exercises the root check, which a single spawn already confirms).
+    _two_spawn = _supplement_root and action == Action.BOTH
 
     outcome: dict = {}
+
+    def _run_two_spawns() -> None:
+        """AndroGoat BOTH: confirm root AND ssl via two fresh spawns.
+
+        Each spawn loads the synthesized native root envelope - Interceptor on
+        libc access/stat/lstat/fopen/openat, disjoint from the SSL script's Java
+        CertificatePinner.check slot - so there is no single-slot conflict. The
+        SSL spawn loads the hand-authored SSL script plus the envelope and
+        exercises the pinning check; the root spawn loads just the envelope and
+        exercises CHECK ROOT. Messages from both accumulate into the shared stage
+        evidence, so AndroGoatSuccessCheck sees the pin-hook firing (ssl) AND the
+        root probeHit (root) - both genuinely confirmed, neither inferred."""
+        def on_message(message, data):
+            messages.append(message)
+
+        # Phase A - SSL: a fresh spawn exercising the pinning check.
+        ssl_device, ssl_session, ssl_pid = attach(device_serial, package_name)
+        ssl_src = (SCRIPT_DIR / script_names[0]).read_text(encoding="utf-8") \
+            + "\n\n" + _root_envelope_src
+        load_script_source(ssl_session, ssl_src, on_message)
+        ssl_device.resume(ssl_pid)
+        time.sleep(1.0)  # let the launcher activity draw before any UI action
+        for ui_action in _ui_actions_for(target, Action.SSL_ONLY):
+            _run_ui_action(device_serial, ui_action)
+        _wait_for_checkpoint(messages, settle_seconds, require_evidence=True)
+
+        # Phase B - root: a fresh spawn exercising the root check.
+        root_device, root_session, root_pid = attach(device_serial, package_name)
+        load_script_source(root_session, _root_envelope_src, on_message)
+        root_device.resume(root_pid)
+        time.sleep(1.0)
+        for ui_action in _ui_actions_for(target, Action.ROOT_ONLY):
+            _run_ui_action(device_serial, ui_action)
+        _wait_for_checkpoint(messages, settle_seconds, require_evidence=True)
+
+        # FR-4.6: a spawned process gone after the settle window self-terminated.
+        if classify_self_termination(_process_is_alive(root_device, root_pid)):
+            outcome["result"] = StageResult(
+                stage="dynamic", status="failed",
+                evidence={
+                    "app_self_terminated": True,
+                    "reason": (
+                        "target app self-terminated after resume - detected the "
+                        "instrumentation (Frida/root) and exited before dynamic "
+                        "verification could confirm a bypass"
+                    ),
+                    "scripts_applied": scripts_applied, "pid": root_pid,
+                    "frida_messages": messages, "target": target,
+                },
+                error="app self-terminated due to detected instrumentation (FR-4.6)",
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
+            return
+
+        outcome["result"] = StageResult(
+            stage="dynamic", status="success",
+            evidence={"scripts_applied": scripts_applied, "pid": root_pid, "frida_messages": messages, "target": target},
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
 
     def _run_frida() -> None:
         """All the blocking Frida work, run under FRIDA_STAGE_TIMEOUT (RESID-6B).
         A genuinely hung spawn/attach/load/resume must fail the stage loudly,
         not hang the whole pipeline forever."""
         try:
+            if _two_spawn:
+                # AndroGoat BOTH: root and ssl each need their own fresh spawn
+                # (mutually exclusive button-triggered checks in one navigation).
+                _run_two_spawns()
+                return
             device, session, pid = attach(device_serial, package_name)
 
             def on_message(message, data):
@@ -354,7 +451,18 @@ def run_dynamic_stage(
                 # synth's own checkpoint, not a pre-vendor wait.
                 time.sleep(_SYNTH_CHECKPOINT_SETTLE)
             for name in script_names:
-                load_script(session, name, on_message)
+                if _supplement_root:
+                    # AndroGoat: the hand-authored SSL script plus the synthesized
+                    # native root envelope, loaded as ONE script. The native
+                    # envelope is disjoint from the SSL script's Java
+                    # CertificatePinner.check slot, so a single load patches both
+                    # without a slot conflict.
+                    src = (SCRIPT_DIR / name).read_text(encoding="utf-8")
+                    load_script_source(
+                        session, src + "\n\n" + _root_envelope_src, on_message,
+                    )
+                else:
+                    load_script(session, name, on_message)
 
             ui_actions = _ui_actions_for(target, action)
             device.resume(pid)

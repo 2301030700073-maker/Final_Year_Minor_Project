@@ -271,10 +271,13 @@ def _evasion_base() -> str:
     """Hide the Frida agent from a self-protecting app's anti-instrumentation
     probes (Dex2C-2026 anti-Frida evasion, L-M2). At the libc level, blank any
     line read (getline/fgets) that carries a Frida artifact token, and hide the
-    default agent port from /proc/net/tcp reads. The tokens ('frida',
-    'gum-js-loop', 'linjector', 're.frida.server', 'frida-server',
-    'frida-gadget') are Frida-specific - no benign line contains them - so
-    blanking by token is safe without tracking the FILE*. Every hook is
+    default agent port from /proc/net/tcp reads. Native scanners that raw-READ
+    (open+read, not getline/fgets) /proc/self/maps (injected-agent scan) or
+    /proc/net/tcp (port scan) are covered too: the fds/FILE*s opened on those
+    proc files are tracked and the same Frida-only tokens (including the port
+    tokens ':27042'/':69A2') are byte-scrubbed from read/fread on them. The
+    tokens are Frida-specific - no benign content contains them - so blanking by
+    token is safe without knowing the file semantics. Every hook is
     try/catch-guarded so a missing symbol degrades silently; it only ever hides
     Frida evidence, never changes the app's own behavior (ADR-0001)."""
     return (
@@ -317,9 +320,12 @@ def _evasion_base() -> str:
         "// Scrubbing is safe: the tokens never appear in benign maps content (ADR-0001).\n"
         "var MAPS_FDS = {};\n"
         "var MAPS_STREAMS = {};\n"
-        "function isMapsPath(p) {\n"
+        "function isTrackedProcPath(p) {\n"
         "  if (!p) return false;\n"
-        "  return p.indexOf('/proc') !== -1 && p.indexOf('/maps') !== -1;\n"
+        "  if (p.indexOf('/proc') === -1) return false;\n"
+        "  // /proc/self/maps (injected-agent scan) and /proc/net/tcp (default-port\n"
+        "  // scan) - the two proc files a native anti-Frida check raw-reads.\n"
+        "  return p.indexOf('/maps') !== -1 || p.indexOf('/net/tcp') !== -1;\n"
         "}\n"
         "function blankTokens(buf, len) {\n"
         "  try {\n"
@@ -336,7 +342,7 @@ def _evasion_base() -> str:
         "  } catch (e) {}\n"
         "}\n"
         "function trackOpen(path, fd, streams) {\n"
-        "  try { if (isMapsPath(path)) streams[fd] = true; } catch (e) {}\n"
+        "  try { if (isTrackedProcPath(path)) streams[fd] = true; } catch (e) {}\n"
         "}\n"
         "try {\n"
         "  var _o = Module.findExportByName('libc.so', 'open');\n"

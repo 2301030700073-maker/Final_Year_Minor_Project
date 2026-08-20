@@ -119,13 +119,24 @@ def test_evasion_scrubs_maps_raw_reads_not_just_line_readers():
     src = res.source
     assert "blankTokens" in src
     assert "MAPS_FDS" in src
-    assert "isMapsPath" in src
+    assert "isTrackedProcPath" in src
     assert "'/proc'" in src and "'/maps'" in src
     # raw-read scrub hooks wired
     assert "findExportByName('libc.so', 'read')" in src
     assert "findExportByName('libc.so', 'fread')" in src
     # scrub only ever overwrites the Frida-only tokens with '.' (46), never app state
     assert "arr[i + j] = 46" in src
+
+
+def test_evasion_tracks_net_tcp_raw_reads_for_port_scan():
+    # A native anti-Frida check also raw-READs /proc/net/tcp to find the default
+    # agent port - line-based reads were already covered by getline/fgets, but a
+    # raw open+read was not, so a port-scan detector could see :27042/:69A2. The
+    # same tracked-fd scrub must include /proc/net/tcp (blankTokens already blanks
+    # the port tokens).
+    res = synthesize(_cls(Action.ROOT_ONLY, root_ids=["native_frida_detection"]), Action.ROOT_ONLY)
+    assert "'/net/tcp'" in res.source
+    assert "':27042'" in res.source and "':69A2'" in res.source
 
 
 def test_synthesize_no_evasion_without_anti_instrumentation():

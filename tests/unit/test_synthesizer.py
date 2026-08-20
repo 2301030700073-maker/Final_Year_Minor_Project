@@ -50,10 +50,11 @@ def test_synthesize_both_root_and_ssl():
 
 
 def test_synthesize_unmapped_technique_falls_back_to_universal():
-    # A detected technique with no dedicated hook (e.g. native root detection)
-    # must still produce a real attempt via the category's universal base - the
-    # core L-M2 generalization: never a silent skip.
-    res = synthesize(_cls(Action.ROOT_ONLY, root_ids=["native_su_binary_embedded"]), Action.ROOT_ONLY)
+    # A detected technique with no dedicated hook (e.g. Riru - no clean single
+    # hook, unlike native_su_binary_embedded which now routes to the native
+    # path-hiding recipe) must still produce a real attempt via the category's
+    # universal base - the core L-M2 generalization: never a silent skip.
+    res = synthesize(_cls(Action.ROOT_ONLY, root_ids=["riru_framework"]), Action.ROOT_ONLY)
     assert res.strategy == "universal"
     assert res.universal_categories == ["root"]
     assert res.root_hook_count == 1
@@ -177,6 +178,46 @@ def test_cronet_verifier_routes_to_native_verify():
     res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["cronet_cert_verifier"]), Action.SSL_ONLY)
     assert "Process.enumerateModules" in res.source
     assert "libcronet.so" in res.source
+
+
+def test_boringssl_custom_verify_routes_to_native_bypass():
+    # The modern BoringSSL custom-verify API (Conscrypt/Cronet/Flutter pinning) is
+    # a dedicated native SSL technique - it must route to the extended native
+    # bypass (which now neutralizes both custom-verify entrypoints), not universal.
+    res = synthesize(
+        _cls(Action.SSL_ONLY, ssl_ids=["native_boringssl_custom_verify"]), Action.SSL_ONLY
+    )
+    assert res.strategy == "targeted"
+    assert "native_boringssl_custom_verify" in res.applied_hooks
+    assert "SSL_CTX_set_custom_verify" in res.source
+    assert "SSL_set_custom_verify" in res.source
+
+
+def test_xamarin_mono_runtime_routes_to_native_bypass():
+    # Xamarin/Mono bundles BoringSSL; the runtime signature routes to the proven
+    # native bypass (user-confirmed "detect + route to proven handles"), not a
+    # fabricated Mono-only hook. Assert it lands on the extended bypass.
+    res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["xamarin_mono_runtime"]), Action.SSL_ONLY)
+    assert res.strategy == "targeted"
+    assert "xamarin_mono_runtime" in res.applied_hooks
+    assert "SSL_CTX_set_custom_verify" in res.source
+    assert "Process.enumerateModules" in res.source
+
+
+def test_native_root_path_hiding_fires_for_native_su_embedded():
+    # native_su_binary_embedded now routes to the libc path-hiding recipe (was the
+    # one native root gap - previously it fell to universal). It must hide root
+    # artifacts from native access/stat/open/fopen probes.
+    res = synthesize(
+        _cls(Action.ROOT_ONLY, root_ids=["native_su_binary_embedded"]), Action.ROOT_ONLY
+    )
+    assert res.strategy == "targeted"
+    assert "native_su_binary_embedded" in res.applied_hooks
+    assert "libc.so" in res.source
+    assert "Interceptor" in res.source
+    assert "access" in res.source
+    assert "/system/bin/su" in res.source
+    assert "openat" in res.source
 
 
 def test_root_alias_su_alternate_routes_targeted():

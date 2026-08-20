@@ -50,6 +50,59 @@ def _file_exists_patch(paths: list[str]) -> str:
     )
 
 
+# Root-artifact paths shared across the file/hook recipes. Mirrors the union the
+# Java File.exists patches already use, so a native probe of the same artifacts
+# is hidden too - one source for the path list, no drift between layers.
+_ROOT_ARTIFACT_PATHS = [
+    "/system/bin/su", "/system/xbin/su", "/sbin/su",
+    "/system/app/Superuser.apk", "/system/app/SuperSU.apk", "/system/app/Magisk.apk",
+    "/data/adb/magisk", "/data/adb/ksu", "/data/adb/kernelsu", "/data/adb/ap",
+    "/data/apatch", "/system/xbin/busybox", "/system/bin/busybox",
+    "/data/adb/lspd", "/data/adb/modules/lsposed",
+]
+
+
+def _native_root_path_hiding(paths: list[str]) -> str:
+    """Hide root artifacts from a native root check that probes them through
+    libc (access/stat/lstat/open/openat/fopen) - the JNI equivalent of the Java
+    File.exists patch (L-M2, no native root recipe existed). When the path
+    argument matches a root artifact, the call returns failure (ENOENT, or NULL
+    for fopen) so the native probe believes the artifact is absent. Deterministic;
+    try/catch per symbol so a missing libc export degrades silently. Routed via
+    native_su_binary_embedded, which already fires only when root paths are
+    embedded in native code (low false-positive, ADR-0006)."""
+    lit = json.dumps(paths)
+    return (
+        "var ROOT_PATHS = " + lit + ";\n"
+        "function isRootPath(p) {\n"
+        "  if (!p) return false;\n"
+        "  try {\n"
+        "    var s = p.readUtf8String();\n"
+        "    for (var i = 0; i < ROOT_PATHS.length; i++) {\n"
+        "      if (s === ROOT_PATHS[i] || s.indexOf(ROOT_PATHS[i] + '/') === 0) return true;\n"
+        "    }\n"
+        "  } catch (e) {}\n"
+        "  return false;\n"
+        "}\n"
+        "function hidePathProbe(fn, pathArg, failRet) {\n"
+        "  try {\n"
+        "    var a = Module.findExportByName('libc.so', fn);\n"
+        "    if (!a) return;\n"
+        "    Interceptor.attach(a, {\n"
+        "      onEnter: function (args) { this.hide = isRootPath(args[pathArg]); },\n"
+        "      onLeave: function (ret) { if (this.hide) ret.replace(ptr(failRet)); }\n"
+        "    });\n"
+        "  } catch (e) { console.log('[synth] no ' + fn + ' in libc.so'); }\n"
+        "}\n"
+        "hidePathProbe('access', 0, -1);\n"
+        "hidePathProbe('stat', 0, -1);\n"
+        "hidePathProbe('lstat', 0, -1);\n"
+        "hidePathProbe('open', 0, -1);\n"
+        "hidePathProbe('openat', 1, -1);\n"
+        "hidePathProbe('fopen', 0, 0);\n"
+    )
+
+
 def _evasion_base() -> str:
     """Hide the Frida agent from a self-protecting app's anti-instrumentation
     probes (Dex2C-2026 anti-Frida evasion, L-M2). At the libc level, blank any
@@ -99,8 +152,11 @@ def _native_ssl_pin_bypass() -> str:
     libconscrypt_jni.so (Conscrypt, Android's default provider), so a libssl-only
     hook misses them. Enumerate loaded modules and patch the verify entrypoints
     (SSL_CTX_set_verify -> 0 / accept; SSL_CTX_set_cert_verify_callback ->
-    accept-all) in any of the family. Deterministic; try/catch so an absent
-    module/symbol degrades silently."""
+    accept-all) in any of the family. Also neutralizes the modern BoringSSL
+    custom-verify API (SSL_CTX_set_custom_verify / SSL_set_custom_verify) used by
+    Conscrypt/Cronet/Flutter to pin - each returns 1 (accept) so the custom
+    verifier is never installed and the pin check is skipped. Deterministic;
+    try/catch so an absent module/symbol degrades silently."""
     return (
         "var MODULES = ['libssl.so', 'libcronet.so', 'libconscrypt_jni.so', "
         "'libboringssl.so', 'libssl_openssl.so'];\n"
@@ -115,6 +171,14 @@ def _native_ssl_pin_bypass() -> str:
         "    var cv = Module.findExportByName(MODULES[i], 'SSL_CTX_set_cert_verify_callback');\n"
         "    if (cv) Interceptor.replace(cv, new NativeCallback(function (ctx, cb, a) { return 1; }, 'int', ['pointer', 'pointer', 'pointer']));\n"
         "  } catch (e) { console.log('[synth] no cert_verify_callback in ' + MODULES[i]); }\n"
+        "  try {\n"
+        "    var cus = Module.findExportByName(MODULES[i], 'SSL_CTX_set_custom_verify');\n"
+        "    if (cus) Interceptor.replace(cus, new NativeCallback(function (ctx, mode, cb) { return 1; }, 'int', ['pointer', 'int', 'pointer']));\n"
+        "  } catch (e) { console.log('[synth] no SSL_CTX_set_custom_verify in ' + MODULES[i]); }\n"
+        "  try {\n"
+        "    var cus2 = Module.findExportByName(MODULES[i], 'SSL_set_custom_verify');\n"
+        "    if (cus2) Interceptor.replace(cus2, new NativeCallback(function (ssl, mode, cb) { return 1; }, 'int', ['pointer', 'int', 'pointer']));\n"
+        "  } catch (e) { console.log('[synth] no SSL_set_custom_verify in ' + MODULES[i]); }\n"
         "}\n"
     )
 
@@ -184,6 +248,12 @@ ROOT_RECIPES: dict[str, str] = {
     "lucky_patcher_root_tool": _file_exists_patch(
         ["/system/app/LuckyPatcher.apk", "/system/priv-app/LuckyPatcher.apk", "/data/app/lucky.patcher"]
     ),
+    # Native root path-hiding (was the one native root gap - zero native root
+    # recipes before this): when the app embeds root-artifact paths in native
+    # code (native_su_binary_embedded fires, low-FP), hide them from libc
+    # access/stat/open/fopen probes so a JNI root check believes the artifact is
+    # absent - the native counterpart to the Java File.exists patch above.
+    "native_su_binary_embedded": _native_root_path_hiding(_ROOT_ARTIFACT_PATHS),
 }
 
 SSL_RECIPES: dict[str, str] = {
@@ -307,6 +377,13 @@ SSL_RECIPES: dict[str, str] = {
     # A native cert-verify callback (SSL_CTX_set_cert_verify_callback) is exactly
     # what _native_ssl_pin_bypass neutralizes (accept-all) - route it there.
     "native_ssl_custom_verify_callback": _native_ssl_pin_bypass(),
+    # The modern BoringSSL custom-verify API (SSL_CTX_set_custom_verify /
+    # SSL_set_custom_verify) is neutralized by the extended native bypass too.
+    "native_boringssl_custom_verify": _native_ssl_pin_bypass(),
+    # Xamarin/Mono bundles BoringSSL; most of its TLS is handled natively, outside
+    # the Java trust-manager the universal hooks. Routing the runtime signature to
+    # the native bypass is the proven handle (user-confirmed), not a Mono-only hook.
+    "xamarin_mono_runtime": _native_ssl_pin_bypass(),
 }
 
 # Signatures that are alternate spellings of the same SSL-control technique

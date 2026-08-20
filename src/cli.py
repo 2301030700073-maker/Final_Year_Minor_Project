@@ -1148,7 +1148,16 @@ def run(
         # fails confusingly downstream (NFR-1). verify_installed was dead code;
         # this is where it belongs.
         device.install_apk(serial, apk)
-        if not device.verify_installed(serial, package_name):
+        install_ok = device.verify_installed(serial, package_name)
+        if not install_ok:
+            # FR-4.2 / GAP-2: an arbitrary real-world app that fails to install
+            # (ABI mismatch, signature, minSdk, storage) must NOT _halt and
+            # discard the already-complete static analysis - exactly the report-
+            # losing bug GAP-2 fixed for frida crashes, still present on the
+            # install path. Record the failed dynamic stage and continue to the
+            # static report, surfacing the failure loudly there and exiting
+            # non-zero after the report is written. correlation stays None ->
+            # "not attempted", never a fake pass.
             dynamic_stage = StageResult(
                 stage="dynamic", status="failed",
                 evidence={
@@ -1164,23 +1173,25 @@ def run(
             )
             stage_results.append(dynamic_stage)
             _print_stage(dynamic_stage)
-            _halt(stage_results)
-        # Passed as synthesized to run_dynamic_stage, which only consumes it when
-        # there's no target-specific script (unknown target / real app) - hand-
-        # authored scripts for known targets take precedence. `synth` was computed
-        # above, before the device gate, so it exists even when no device deploys.
-        dynamic_stage = frida_runner.run_dynamic_stage(
-            serial, package_name, classification.action, target=target_canonical,
-            synthesized={"source": synth.source, "applied_hooks": synth.applied_hooks},
-        )
-        stage_results.append(dynamic_stage)
-        _print_stage(dynamic_stage)
-        if dynamic_stage.status == "failed":
-            # GAP-2: produce the static report instead of discarding it. The
-            # failure is already in stage_results (shown in the report) and is
-            # surfaced loudly after the report is written. correlation stays None
-            # -> reported as "not attempted", never a fake pass.
             dynamic_failed = True
+        else:
+            # Passed as synthesized to run_dynamic_stage, which only consumes it
+            # when there's no target-specific script (unknown target / real app) -
+            # hand-authored scripts for known targets take precedence. `synth` was
+            # computed above, before the device gate, so it exists even when no
+            # device deploys.
+            dynamic_stage = frida_runner.run_dynamic_stage(
+                serial, package_name, classification.action, target=target_canonical,
+                synthesized={"source": synth.source, "applied_hooks": synth.applied_hooks},
+            )
+            stage_results.append(dynamic_stage)
+            _print_stage(dynamic_stage)
+            if dynamic_stage.status == "failed":
+                # GAP-2: produce the static report instead of discarding it. The
+                # failure is already in stage_results (shown in the report) and is
+                # surfaced loudly after the report is written. correlation stays None
+                # -> reported as "not attempted", never a fake pass.
+                dynamic_failed = True
         if dynamic_stage.status == "success":
             device.clear_logcat(serial)
             logcat_output = device.capture_logcat(serial)

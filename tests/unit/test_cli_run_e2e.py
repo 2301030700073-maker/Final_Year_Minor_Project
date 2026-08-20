@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import typer
 
 import cli
 from common import StageResult
@@ -124,3 +125,50 @@ def test_run_skips_dynamic_and_writes_coverage_bounded_report(run_setup, monkeyp
     # both root and ssl are coverage-limited and the confidence must render with
     # the upper-bound annotation - not a bare point estimate (ADR-0006).
     assert "upper bound" in text
+
+
+def test_install_failure_preserves_static_report_and_exits_nonzero(run_setup, monkeypatch):
+    # FR-4.2 / GAP-2 on the install path: an arbitrary real-world app that fails
+    # to install (ABI/signature/minSdk/storage) used to _halt and discard the
+    # already-complete static analysis. It must instead record the failed dynamic
+    # stage, STILL write the full static report (with dynamic=failed and
+    # correlation=not_attempted surfaced), then exit non-zero - so no consumer
+    # mistakes it for a verified run and no good static work is lost.
+    from dynamic import device as device_mod
+
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: False)
+    # synthetic bypass is computed before the device gate - keep it real/simple
+    monkeypatch.setattr(
+        cli, "synthesize",
+        lambda classification, action: SimpleNamespace(source="root", applied_hooks=[]),
+    )
+
+    captured = []
+    original_print = cli.console.print
+    cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
+    try:
+        with pytest.raises(typer.Exit) as ei:
+            cli.run(
+                apk=run_setup / "fixture.apk",
+                justification="ACADEMIC_TRAINING_TARGET",
+                skip_dynamic=False,
+                device_serial=None,
+                target="uncrackable1",
+            )
+    finally:
+        cli.console.print = original_print
+
+    assert ei.value.exit_code == 1  # dynamic-failed run must exit non-zero
+    reports_dir = run_setup / "reports"
+    report_files = sorted(reports_dir.rglob("*.md"))
+    assert report_files, "install failure must NOT discard the static report"
+    text = report_files[0].read_text(encoding="utf-8")
+    # dynamic failure surfaced in the report's Stage Results row (via the stage
+    # error field, which carries the FR-4.2 install-verify marker)
+    assert "FR-4.2: APK install not verified" in text
+    # the static detection work is still present in the preserved report
+    assert "Root-detection" in text
+    # the loud post-report failure was surfaced, not a silent swallow
+    assert any("Dynamic stage FAILED" in c for c in captured)

@@ -103,16 +103,18 @@ def _file_exists_patch(paths: list[str] | None = None) -> str:
 
 def _native_root_path_hiding(paths: list[str]) -> str:
     """Hide root artifacts from a native root check that probes them through
-    libc (access/stat/lstat/statx/open/openat/fopen) - the JNI equivalent of the
-    Java File.exists patch (L-M2, no native root recipe existed). When the path
-    argument matches a root artifact, the call returns failure (ENOENT, or NULL
-    for fopen) so the native probe believes the artifact is absent. statx is the
-    modern libc stat primitive a real-world native root check is as likely to use
-    as stat/lstat, so it is covered too (path is arg 1, like openat). Deterministic;
-    try/catch per symbol so a missing libc export (e.g. statx on an older device)
-    degrades silently. Routed via native_su_binary_embedded, which already fires
-    only when root paths are embedded in native code (low false-positive,
-    ADR-0006)."""
+    libc (access/stat/lstat/statx/open/openat/fopen/faccessat) - the JNI
+    equivalent of the Java File.exists patch (L-M2, no native root recipe
+    existed). When the path argument matches a root artifact, the call returns
+    failure (ENOENT, or NULL for fopen) so the native probe believes the
+    artifact is absent. The modern/alternate libc primitives a real-world native
+    root check is as likely to use as the plain forms are covered too: statx
+    (modern stat, path arg 1), openat (path arg 1), and faccessat (the *at
+    variant of access, path arg 1) - each is a distinct export a probe could
+    call. Deterministic; try/catch per symbol so a missing libc export (e.g.
+    statx on an older device) degrades silently. Routed via
+    native_su_binary_embedded, which already fires only when root paths are
+    embedded in native code (low false-positive, ADR-0006)."""
     lit = json.dumps(paths)
     return (
         "var ROOT_PATHS = " + lit + ";\n"
@@ -151,7 +153,50 @@ def _native_root_path_hiding(paths: list[str]) -> str:
         "hidePathProbe('statx', 1, -1);\n"
         "hidePathProbe('open', 0, -1);\n"
         "hidePathProbe('openat', 1, -1);\n"
+        "hidePathProbe('faccessat', 1, -1);\n"
         "hidePathProbe('fopen', 0, 0);\n"
+    )
+
+
+def _native_build_props_hiding() -> str:
+    """Hide the Android emulator/test-keys build fingerprint from a NATIVE root
+    check - the JNI counterpart to the Java Build.TAGS patch
+    (root_build_tags_test_keys). A JNI root check reads ro.build.tags /
+    ro.build.type through libc's __system_property_get; on an emulator or
+    userdebug/eng build those read 'test-keys'/'userdebug', which the check
+    treats as rooted. This hook answers the ROOT-INDICATING read with the
+    production value instead ('release-keys'/'user') so the probe sees an
+    un-rooted build. It only ever rewrites the return for exactly those two
+    prop names - no other property read is touched, so app behavior is unchanged
+    except for the two signals a native build-tag root check keys on (ADR-0001).
+    Deterministic; try/catch so a missing __system_property_get export degrades
+    silently. Routed via native_build_props_probe, which fires only when the
+    build-props strings are embedded in native code (low-FP, ADR-0006)."""
+    return (
+        "// __system_property_get(name, value) returns the value length, or 0 if\n"
+        "// absent. Spoof only the two props a native test-keys root check keys on.\n"
+        "function spoofProp(name, value, len) {\n"
+        "  try {\n"
+        "    var p = Module.findExportByName('libc.so', '__system_property_get');\n"
+        "    if (!p) return;\n"
+        "    Interceptor.attach(p, {\n"
+        "      onEnter: function (args) {\n"
+        "        this.spoof = false;\n"
+        "        try {\n"
+        "          if (args[0].readUtf8String() === name) {\n"
+        "            args[1].writeUtf8String(value);\n"
+        "            this.spoof = true;\n"
+        "          }\n"
+        "        } catch (e) {}\n"
+        "      },\n"
+        "      onLeave: function (ret) {\n"
+        "        if (this.spoof) ret.replace(ptr(len));\n"
+        "      }\n"
+        "    });\n"
+        "  } catch (e) { console.log('[synth] ' + name + ' prop hook unavailable'); }\n"
+        "}\n"
+        "spoofProp('ro.build.tags', 'release-keys', 12);\n"
+        "spoofProp('ro.build.type', 'user', 4);\n"
     )
 
 
@@ -426,6 +471,11 @@ ROOT_RECIPES: dict[str, str] = {
     # access/stat/open/fopen probes so a JNI root check believes the artifact is
     # absent - the native counterpart to the Java File.exists patch above.
     "native_su_binary_embedded": _native_root_path_hiding(_ROOT_ARTIFACT_PATHS),
+    # Native build-props root check (was a native blind spot - the Java
+    # Build.TAGS patch has no native counterpart). When the app embeds
+    # ro.build.tags / ro.build.type in native code (native_build_props_probe
+    # fires, low-FP), answer the root-indicating read with the production value.
+    "native_build_props_probe": _native_build_props_hiding(),
 }
 
 SSL_RECIPES: dict[str, str] = {

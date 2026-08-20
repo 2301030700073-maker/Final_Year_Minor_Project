@@ -281,6 +281,35 @@ def test_native_root_path_hiding_covers_statx():
     assert "hidePathProbe('statx', 1, -1)" in res.source
 
 
+def test_native_root_path_hiding_covers_faccessat():
+    # A real-world native root check can probe a root artifact through faccessat -
+    # the *at variant of access - rather than access itself. The envelope must
+    # intercept it too (path is arg 1, like openat/statx), or an app using it
+    # would never produce the probeHit that confirms root - a silent native-root
+    # blind spot. Pure observation of a root-artifact path; never a false positive.
+    res = synthesize(
+        _cls(Action.ROOT_ONLY, root_ids=["native_su_binary_embedded"]), Action.ROOT_ONLY
+    )
+    assert "hidePathProbe('faccessat', 1, -1)" in res.source
+
+
+def test_native_build_props_probe_routes_to_prop_hiding():
+    # A native (JNI) test-keys root check reads ro.build.tags / ro.build.type via
+    # libc __system_property_get. Previously only the Java Build.TAGS patch
+    # existed, so a native build-props check was a silent blind spot. The signature
+    # native_build_props_probe must route to _native_build_props_hiding and spoof
+    # exactly the two root-indicating prop reads with the production value - and
+    # nothing else.
+    res = synthesize(
+        _cls(Action.ROOT_ONLY, root_ids=["native_build_props_probe"]), Action.ROOT_ONLY
+    )
+    assert res.strategy == "targeted"
+    assert "native_build_props_probe" in res.applied_hooks
+    assert "__system_property_get" in res.source
+    assert "ro.build.tags" in res.source and "release-keys" in res.source
+    assert "ro.build.type" in res.source and "'user'" in res.source
+
+
 def test_root_alias_su_alternate_routes_targeted():
     # su_alternate_binary_paths is the same artifact check under another name; it
     # must route to the targeted su-path patch, not the category universal.

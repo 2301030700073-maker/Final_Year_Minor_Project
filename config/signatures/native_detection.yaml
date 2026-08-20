@@ -35,6 +35,20 @@
   # ptrace AND fork (require_all) stops the false positive on the many apps
   # that import libc's ptrace for a benign reason (ADR-0006).
 
+- id: native_build_props_probe
+  category: root
+  weight: 0.4
+  pattern_type: embedded_string
+  # A native test-keys root check embeds the build-props names it reads through
+  # libc __system_property_get. These strings are > the strings-layer min length
+  # (4) so they ARE reachable. Matching is exact list membership; firing only when
+  # the literal is embedded in native code (a root-check signal, not a read of an
+  # arbitrary prop). Routed to _native_build_props_hiding, which answers only the
+  # root-indicating prop reads with the production value (ADR-0006).
+  patterns:
+    - "ro.build.tags"
+    - "ro.build.type"
+
 - id: native_su_binary_embedded
   category: root
   weight: 0.4

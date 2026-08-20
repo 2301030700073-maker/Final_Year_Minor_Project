@@ -192,6 +192,39 @@ def test_native_su_binary_embedded_exact_membership_and_reachability():
     assert len(result.root_evidence) == 1
 
 
+def test_native_build_props_probe_exact_membership_and_reachability():
+    # native_build_props_probe: a native test-keys root check embeds the build-props
+    # names it reads through libc __system_property_get. Same exact-membership +
+    # reachability guarantees as native_su_binary_embedded: the names must be > the
+    # strings-layer min length (4) so they are reachable, and matching is exact list
+    # membership, so a benign embedded prop name (e.g. a substring like "ro.build")
+    # never FP-matches a signature that keys on the full literal.
+    repo = Path(__file__).resolve().parents[2]
+    sig = next(
+        s for s in load_native_signatures(repo / "config/signatures/native_detection.yaml")
+        if s.id == "native_build_props_probe"
+    )
+    assert sig.category == "root"
+    assert "ro.build.tags" in sig.patterns
+    assert "ro.build.type" in sig.patterns
+    assert all(len(p) > 4 for p in sig.patterns)   # reachable via strings min-len 4
+
+    # exact membership: a lib embedding only a shorter/partial prop string -> no match.
+    benign = NativeLibrary(
+        abi="arm64-v8a", name="libnative.so",
+        strings=["ro.build.display.id", "ro.hardware", "hello"],
+    )
+    result = match_native([benign], [sig])
+    assert result.root_confidence == 0.0
+    assert result.root_evidence == []
+
+    # reachable real signal: a lib embedding the exact ro.build.tags literal -> matches.
+    rooting = NativeLibrary(abi="arm64-v8a", name="libcheck.so", strings=["ro.build.tags"])
+    result = match_native([rooting], [sig])
+    assert result.root_confidence == 0.4
+    assert len(result.root_evidence) == 1
+
+
 def test_native_frida_detection_exact_membership_and_not_benign():
     # native_frida_detection (2026, native anti-instrumentation). Same two
     # guarantees as native_su_binary_embedded:

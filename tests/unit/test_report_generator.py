@@ -247,7 +247,13 @@ def test_generate_report_limitations_section_present_and_specific(tmp_path):
     assert "## Limitations" in content
     assert "signature-based" in content.lower()
     assert "PropertyGuru" in content
-    assert "does not generalize to unseen apps" in content
+    # The deterministic synthesizer (L-M2) means dynamic bypass now attempts unseen
+    # apps rather than skipping - the limitation prose must say engagement is not
+    # confirmation, not that bypass doesn't generalize.
+    assert "attempts unseen apps" in content
+    assert "engagement is not confirmation" in content
+    assert "hooks engaged" in content
+    assert "does not generalize to unseen apps" not in content
 
 
 def test_generate_report_flags_partial_decompile_prominently(tmp_path):

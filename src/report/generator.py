@@ -234,7 +234,7 @@ This report is produced by a deterministic, signature-based pipeline (ADR-0001) 
 This run's decompilation completed successfully ({{ jadx_file_count }} source files) - static findings reflect a full scan of the decompiled output.
 {% endif %}
 
-**Dynamic bypass does not generalize to unseen apps.** Every bypass technique here is a hand-written Frida script targeting one target's exact class/method names, confirmed empirically three separate times (UnCrackable1/2/3). Static detection generalizes (the same signatures matched all three targets unchanged, and correctly returned NEITHER on an unrelated real app); dynamic bypass does not - closing that gap is the deterministic bypass synthesizer and AI-gated learner (ADR-0008 groups C/D, roadmap items 12-20), an explicit non-goal here (see the PRD).
+**Dynamic bypass attempts unseen apps, but engagement is not confirmation.** The three UnCrackable targets use a hand-authored Frida script. For any unknown real app with no such script, the deterministic bypass synthesizer composes a findings-specific Frida bypass from the same signatures that drove static detection (L-M2), supplemented by a vendored third-party universal - so a real app always gets a real attempt, never a silent "no script available" skip. That synthesized bypass is "hooks engaged" evidence, not a confirmed bypass: only a live target-specific success check (or interactive verification) can confirm the app's own root/SSL check was actually defeated. Engagement is reported as a distinct, lower tier and never blended into a dynamically-confirmed verdict (ADR-0006).
 
 **"Zero false positives" is not a claim this system makes.** Confidence is measured and reported, never asserted as unconditional (ADR-0006).
 """)

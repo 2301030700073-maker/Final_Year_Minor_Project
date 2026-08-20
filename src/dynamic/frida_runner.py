@@ -389,6 +389,20 @@ def run_dynamic_stage(
         _supplement_root or synth_source is not None
     )
 
+    # SSL evidence is expected whenever the action needs SSL (SSL_ONLY or BOTH
+    # means the deterministic classification detected SSL pinning and an SSL
+    # bypass is being loaded). The same early-return trap as root applies in
+    # reverse: an SSL_ONLY run of a real-world app would return from the wait on
+    # the hook-install checkpoint before the app's own TLS handshake fires, so
+    # the bypassEffect/ssl-handshake evidence - the only SSL-confirmation signal
+    # for the technology-level check - would be missed and SSL honestly-but-
+    # wrongly reported inconclusive. Requiring SSL evidence lets the app's real
+    # handshake reach the pin check and report it, exactly as _root_expected does
+    # for the root probeHit. This is the SSL half of the "all real world apps"
+    # fix: both dimensions of a real app's bypass are only confirmed if we let
+    # the app actually exercise them.
+    _ssl_expected = action in (Action.SSL_ONLY, Action.BOTH)
+
     outcome: dict = {}
 
     def _run_two_spawns() -> None:
@@ -505,7 +519,7 @@ def run_dynamic_stage(
             # reports inconclusive.
             _wait_for_checkpoint(
                 messages, settle_seconds,
-                require_evidence=bool(ui_actions) or _root_expected,
+                require_evidence=bool(ui_actions) or _root_expected or _ssl_expected,
             )
 
             # FR-4.6: after the settle window, a spawned process that is no

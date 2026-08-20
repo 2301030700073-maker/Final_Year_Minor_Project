@@ -234,13 +234,17 @@ def test_unknown_root_run_requires_root_evidence(monkeypatch):
     ) is True
 
 
-def test_unknown_ssl_run_does_not_wait_for_root_evidence(monkeypatch):
+def test_unknown_ssl_run_requires_ssl_evidence(monkeypatch):
     # SSL_ONLY loads no root envelope, so it must not hold the stage open for
-    # root evidence - it waits only on its UI/checkpoint signal.
+    # ROOT evidence - but it MUST require SSL evidence. Without it, the wait
+    # returns on the hook-install checkpoint before the app's own TLS handshake
+    # fires, and the bypassEffect/ssl-handshake - the only SSL-confirmation
+    # signal for the technology-level check - is missed (the SSL half of the
+    # "all real world apps" fix, symmetric to the root probeHit requirement).
     assert _run_with_captured_require_evidence(
         monkeypatch, Action.SSL_ONLY, "some_real_app",
         {"source": "x", "applied_hooks": []},
-    ) is False
+    ) is True
 
 
 def test_wait_for_checkpoint_returns_early_on_hook_signal(monkeypatch):

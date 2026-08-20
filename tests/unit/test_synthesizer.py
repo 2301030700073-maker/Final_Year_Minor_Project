@@ -193,6 +193,26 @@ def test_targeted_ssl_bypass_carries_pin_check_and_handshake_observers():
     assert "CertificatePinner" in res.source
 
 
+def test_ssl_observer_covers_custom_trustmanager_interface():
+    # A real app often ships its OWN X509TrustManager implementation with the pin
+    # check inside checkServerTrusted (banking/fintech), so the okhttp CertificatePinner
+    # and platform TrustManagerImpl observer hooks never fire. The generic SSL recipes
+    # neutralize javax.net.ssl.X509TrustManager.checkServerTrusted via the interface;
+    # the observer must hook the SAME interface so a custom TrustManager's neutralized
+    # check returning normally still lights ssl-pin-check - otherwise a custom-TrustManager
+    # bypass reports SSL unconfirmed even when it worked (a confirmation blind spot).
+    res = synthesize(
+        _cls(Action.SSL_ONLY, ssl_ids=["custom_trustmanager_checkservertrusted"]),
+        Action.SSL_ONLY,
+    )
+    assert res.strategy == "targeted"
+    assert "javax.net.ssl.X509TrustManager" in res.source
+    # the observer's interface wrapper calls through then emits the pin-check signal
+    assert "_wrap_xt" in res.source
+    assert "checkServerTrusted" in res.source
+    assert "ssl-pin-check" in res.source
+
+
 def test_cronet_verifier_routes_to_native_verify():
     # Cronet is BoringSSL in libcronet.so - the native symbol-scan verify bypass
     # is its deterministic handle (scans all modules, so libcronet is covered

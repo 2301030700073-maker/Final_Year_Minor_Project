@@ -1266,9 +1266,14 @@ def run(
                 # SuccessCheck, but each applied recipe hook emits a frida
                 # send({hook: <id>}) checkpoint once attached - so prove which
                 # technology-specific hooks ENGAGED in the live process. Honest,
-                # deterministic, non-app-specific: it records "machinery reached
-                # the app", NOT a bypass confirmation (root/ssl stay None,
-                # principle 2 / ADR-0006). Never a fake pass.
+                # deterministic, non-app-specific: this stage's status reflects
+                # "machinery reached the app". The same check ALSO computes a
+                # technology-level verification (root confirmed on a probeHit; ssl
+                # on pin-check + handshake) that is reported separately in Dynamic
+                # Verification - so an unknown app whose root check was genuinely
+                # defeated IS reported as root_bypassed=True, never understated to
+                # "not a bypass confirmation". Correlation is not attempted (no
+                # target-specific success check). Never a fake pass (ADR-0006).
                 tech_check = TechnologyHooksEngagedCheck()
                 verification = tech_check.check(
                     dynamic_stage.evidence.get("frida_messages", [])
@@ -1285,9 +1290,11 @@ def run(
                         "target": target,
                         "bypass_hooks_engaged": engaged,
                         "note": (
-                            "no target-specific success check; this is a technology-"
-                            "level hooks-engaged signal, NOT a bypass confirmation "
-                            "(correlation reported as not attempted)"
+                            "no target-specific success check; this stage reports "
+                            "technology-level hooks-engaged. The technology check "
+                            "also computes the root/ssl verification, reported "
+                            "separately in Dynamic Verification; correlation is "
+                            "not attempted"
                         ),
                     },
                 )

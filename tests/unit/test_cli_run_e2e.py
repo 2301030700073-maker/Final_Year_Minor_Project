@@ -277,3 +277,58 @@ def test_logcat_capture_failure_preserves_static_report_and_exits_nonzero(run_se
     assert "adb logcat buffer overrun" in text
     # the static detection work is still present in the preserved report
     assert "Root-detection" in text
+
+
+def test_unknown_app_root_probe_confirms_in_report(run_setup, monkeypatch):
+    # App-agnostic root confirmation for an UNKNOWN real target (no hand-authored
+    # success check): the technology-level check sees the app's own root-check
+    # probe being answered-false (probeHit) and confirms root_bypassed=True, which
+    # MUST reach the report as "Root bypassed: True" - not be understated to "not
+    # a bypass confirmation" by the unknown-target degrade path. A real app whose
+    # root check was genuinely defeated is confirmed, matching the known-target
+    # guarantee.
+    from dynamic import device as device_mod
+
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
+    monkeypatch.setattr(
+        cli, "synthesize",
+        lambda classification, action: SimpleNamespace(source="root", applied_hooks=[]),
+    )
+    # an unknown real app (propertyguru) whose synthesized bypass defeated its
+    # root check: the app's own root-check probed a root artifact, answered-false
+    monkeypatch.setattr(
+        "dynamic.frida_runner.run_dynamic_stage",
+        lambda *a, **kw: _ok(
+            "dynamic",
+            frida_messages=[
+                {"type": "send", "payload": {"probeHit": "root", "path": "/system/bin/su"}},
+                {"type": "send", "payload": {"hook": "root_su_binary_paths"}},
+            ],
+        ),
+    )
+    monkeypatch.setattr(device_mod, "clear_logcat", lambda serial: None)
+    monkeypatch.setattr(device_mod, "capture_logcat", lambda serial: "")
+
+    captured = []
+    original_print = cli.console.print
+    cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
+    try:
+        cli.run(
+            apk=run_setup / "fixture.apk",
+            justification="ACADEMIC_TRAINING_TARGET",
+            skip_dynamic=False,
+            device_serial=None,
+            target="propertyguru",  # unknown real target -> synthesized bypass + tech check
+        )
+    finally:
+        cli.console.print = original_print
+
+    reports_dir = run_setup / "reports"
+    report_files = sorted(reports_dir.rglob("*.md"))
+    assert report_files
+    text = report_files[0].read_text(encoding="utf-8")
+    # the app-agnostic root confirmation reached the report - NOT understated
+    assert "Root bypassed: True" in text
+    assert "Root-detection" in text

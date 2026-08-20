@@ -1208,8 +1208,27 @@ def run(
                 # -> reported as "not attempted", never a fake pass.
                 dynamic_failed = True
         if dynamic_stage.status == "success":
-            device.clear_logcat(serial)
-            logcat_output = device.capture_logcat(serial)
+            try:
+                device.clear_logcat(serial)
+                logcat_output = device.capture_logcat(serial)
+            except Exception as exc:
+                # GAP-2 on a device/logcat failure after a successful dynamic
+                # stage (adb disconnect, logcat buffer, device quirk): for a real
+                # app this must not discard the already-complete static report.
+                # Record a failed check, mark logcat unavailable, and continue to
+                # the report - the run still exits non-zero after it is written.
+                logcat_output = None
+                logcat_capture_failed = True
+                check_stage = StageResult(
+                    stage="success-check", status="failed",
+                    evidence={"reason": "logcat capture failed"},
+                    error=f"logcat capture after dynamic stage raised: {exc}",
+                )
+                stage_results.append(check_stage)
+                _print_stage(check_stage)
+                dynamic_failed = True
+            else:
+                logcat_capture_failed = False
             frida_log = "\n".join(str(m) for m in dynamic_stage.evidence.get("frida_messages", []))
             # F: SCRIPTS_BY_TARGET_ACTION and SUCCESS_CHECKS must stay in sync.
             # run_dynamic_stage degrades gracefully for unknown targets (returns a
@@ -1275,8 +1294,31 @@ def run(
                 stage_results.append(check_stage)
                 _print_stage(check_stage)
             else:
-                verification = success_check.check(logcat_output, frida_log)
-                correlation_result = correlation_module.correlate(classification, verification)
+                if logcat_capture_failed:
+                    # logcat was unavailable - the failed check stage was already
+                    # recorded above; running the target-specific check on empty
+                    # logcat would be misleading. Leave verification None (report
+                    # says "not verified") and correlation not attempted.
+                    verification = None
+                    correlation_result = None
+                else:
+                    try:
+                        verification = success_check.check(logcat_output, frida_log)
+                        correlation_result = correlation_module.correlate(classification, verification)
+                    except Exception as exc:
+                        # GAP-2 on an unexpected success-check exception for a
+                        # known target: preserve the static report, surface the
+                        # error, exit non-zero after the report is written.
+                        dynamic_failed = True
+                        verification = None
+                        correlation_result = None
+                        check_stage = StageResult(
+                            stage="success-check", status="failed",
+                            evidence={"reason": "unexpected success-check exception"},
+                            error=f"success check raised unexpectedly: {exc}",
+                        )
+                        stage_results.append(check_stage)
+                        _print_stage(check_stage)
 
     # dynamic_stage.evidence["reason"] already distinguishes "operator passed
     # --skip-dynamic" from "NEITHER classification - no bypass technique to

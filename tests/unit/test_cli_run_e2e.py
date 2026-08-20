@@ -223,3 +223,57 @@ def test_unexpected_dynamic_exception_preserves_static_report_and_exits_nonzero(
     assert "Root-detection" in text
     # the loud post-report failure was surfaced, not a silent swallow
     assert any("Dynamic stage FAILED" in c for c in captured)
+
+
+def test_logcat_capture_failure_preserves_static_report_and_exits_nonzero(run_setup, monkeypatch):
+    # GAP-2 on the success path: a real-world app's dynamic stage SUCCEEDS but the
+    # post-stage device call (logcat capture) raises - adb disconnect, logcat
+    # buffer, device quirk. That must not propagate out of cli.run and discard the
+    # already-complete static report: it must be recorded as a failed check, the
+    # full static report still written, and the run exit non-zero. Same guarantee
+    # as the install/unexpected-exception fixes, for the success-path device calls.
+    from dynamic import device as device_mod
+
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
+    monkeypatch.setattr(
+        cli, "synthesize",
+        lambda classification, action: SimpleNamespace(source="root", applied_hooks=[]),
+    )
+    # the dynamic stage succeeds (synthesized bypass ran)
+    monkeypatch.setattr(
+        "dynamic.frida_runner.run_dynamic_stage",
+        lambda *a, **kw: _ok("dynamic", frida_messages=[]),
+    )
+    # but the logcat capture glitches - a real device/adb failure
+    monkeypatch.setattr(
+        device_mod, "capture_logcat",
+        lambda serial: (_ for _ in ()).throw(RuntimeError("adb logcat buffer overrun")),
+    )
+    monkeypatch.setattr(device_mod, "clear_logcat", lambda serial: None)
+
+    captured = []
+    original_print = cli.console.print
+    cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
+    try:
+        with pytest.raises(typer.Exit) as ei:
+            cli.run(
+                apk=run_setup / "fixture.apk",
+                justification="ACADEMIC_TRAINING_TARGET",
+                skip_dynamic=False,
+                device_serial=None,
+                target="uncrackable1",
+            )
+    finally:
+        cli.console.print = original_print
+
+    assert ei.value.exit_code == 1  # failed check must exit non-zero
+    reports_dir = run_setup / "reports"
+    report_files = sorted(reports_dir.rglob("*.md"))
+    assert report_files, "a logcat-capture failure must NOT discard the static report"
+    text = report_files[0].read_text(encoding="utf-8")
+    # the logcat failure is surfaced in the report's Stage Results row
+    assert "adb logcat buffer overrun" in text
+    # the static detection work is still present in the preserved report
+    assert "Root-detection" in text

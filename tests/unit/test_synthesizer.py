@@ -363,6 +363,24 @@ def test_native_root_exec_blocking_covered_for_su_embedded():
     assert "isRootBin(nbasename(p))" in src
 
 
+def test_native_jni_root_check_routes_to_native_envelope():
+    # native_jni_root_check fires on an exported JNI checkRoot/isRooted symbol even
+    # when the .so does not embed su-path strings - so it previously fell to the
+    # Java-only universal root, leaving the native probing code unhidden. It must
+    # route to the same native envelope (libc path-hiding + exec-blocking) as
+    # native_su_binary_embedded, since a detected native JNI root check probes root
+    # artifacts somehow.
+    res = synthesize(
+        _cls(Action.ROOT_ONLY, root_ids=["native_jni_root_check"]), Action.ROOT_ONLY
+    )
+    assert res.strategy == "targeted"
+    assert "native_jni_root_check" in res.applied_hooks
+    src = res.source
+    assert "hidePathProbe('access'" in src or "hidePathProbe" in src
+    assert "'execve'" in src
+    assert "probeHit" in src
+
+
 def test_native_build_props_probe_routes_to_prop_hiding():
     # A native (JNI) test-keys root check reads ro.build.tags / ro.build.type via
     # libc __system_property_get. Previously only the Java Build.TAGS patch

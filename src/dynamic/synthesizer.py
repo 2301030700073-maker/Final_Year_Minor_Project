@@ -660,6 +660,17 @@ ROOT_RECIPES: dict[str, str] = {
     "native_su_binary_embedded": (
         _native_root_path_hiding(_ROOT_ARTIFACT_PATHS) + "\n\n" + _native_root_exec_blocking()
     ),
+    # native_jni_root_check fires when the app EXPORTS a JNI root check
+    # (checkRoot/isRooted) but its .so need not embed the su-path strings - so it
+    # was unmapped and fell to the Java-only universal root, leaving the native
+    # probing code unhidden. Any detected native JNI root check probes root
+    # artifacts somehow; give it the same native envelope (libc path-hiding +
+    # exec-blocking). Conservative: the hooks only fire on an actual root-artifact
+    # probe/exec, never on app behavior (ADR-0006). Build-props remains routed by
+    # its own signature when those strings are embedded.
+    "native_jni_root_check": (
+        _native_root_path_hiding(_ROOT_ARTIFACT_PATHS) + "\n\n" + _native_root_exec_blocking()
+    ),
     # Native build-props root check (was a native blind spot - the Java
     # Build.TAGS patch has no native counterpart). When the app embeds
     # ro.build.tags / ro.build.type in native code (native_build_props_probe

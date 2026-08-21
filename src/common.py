@@ -100,26 +100,41 @@ KNOWN_NATIVE_LIBS = frozenset({
 _NON_NS_SEGMENTS = ("sources", "resources", "smali")
 
 
+def _is_ns_marker(seg: str) -> bool:
+    """True for decompiler/apktool layout markers that are not package segments:
+    'sources', 'resources', 'smali', and the multi-dex 'smali_classes2',
+    'smali_classes3', ... output directories apktool produces. The smali_classesN
+    names are generated output dirs, not Java packages, so they must not become
+    namespace segments (a real Jerboa root match under smali_classes2/coil/util/
+    would otherwise derive as 'smali_classes2.coil.util' and never match a vendor
+    prefix, mis-attributing bundled-SDK code as app-owned)."""
+    if seg in _NON_NS_SEGMENTS:
+        return True
+    return seg.startswith("smali_classes") and seg[len("smali_classes"):].isdigit()
+
+
 def derive_namespace(file: str) -> str | None:
     """Turn a decompiled file path into its dotted package namespace.
 
     Handles BOTH jadx layouts: classic 'sources/<pkg>/...' and modern
     'classes-<hash>-<ver>/sources/<pkg>/...'. The package namespace starts after
     the sources/resources/smali marker; anything before it (the classes-* prefix,
-    the marker itself) is decompiler layout, not package. A segment is a class/
-    resource *file* iff it contains a '.' (the extension); a dotless segment is a
-    package directory. Returns None when no namespace can be derived.
+    the marker itself, and apktool's smali_classes2..N output dirs) is decompiler
+    layout, not package. A segment is a class/resource *file* iff it contains a
+    '.' (the extension); a dotless segment is a package directory. Returns None
+    when no namespace can be derived.
 
     'classes-7c8ed94a0b1d-1.5.6/sources/com/google/android/gms/common/net/zza.java'
       -> 'com.google.android.gms.common.net'
     'sources/sg/vantagepoint/a/c.java' -> 'sg.vantagepoint.a'
+    'smali_classes2/coil/util/-SvgUtils.smali' -> 'coil.util'
     """
     if not file:
         return None
     segs = file.split("/")
     start = 0
     for i, seg in enumerate(segs):
-        if seg in _NON_NS_SEGMENTS:
+        if _is_ns_marker(seg):
             start = i + 1
             break
     ns_segs = []

@@ -38,6 +38,22 @@ def test_derive_namespace_keeps_uppercase_package_segment():
     assert attribution.is_known_third_party(ns) is True
 
 
+def test_derive_namespace_strips_smali_classes_output_dirs():
+    # apktool's multi-dex output uses smali_classes2..N as *layout* dirs, not
+    # package segments. A root match under smali_classes2/coil/util/ must derive
+    # to 'coil.util' (a recognized vendor) so bundled-SDK evidence is not
+    # mis-attributed as app-owned (real Jerboa case: smali_classes2.coil.util was
+    # never a vendor prefix, so all_third_party stayed False).
+    ns = attribution.derive_namespace("smali_classes2/coil/util/-SvgUtils.smali")
+    assert ns == "coil.util"
+    assert attribution.is_known_third_party(ns) is True
+    # single-dex smali/ and higher smali_classes3/ are stripped too
+    assert attribution.derive_namespace("smali/coil/util/SvgUtils.smali") == "coil.util"
+    assert attribution.derive_namespace("smali_classes3/coil/util/SvgUtils.smali") == "coil.util"
+    # a real package segment that merely resembles the marker is not stripped
+    assert attribution.derive_namespace("sources/coilclasses/util/A.java") == "coilclasses.util"
+
+
 def test_known_third_party_vendors():
     assert attribution.is_known_third_party("io.sentry.android.core") is True
     assert attribution.is_known_third_party("com.google.android.gms.ads") is True

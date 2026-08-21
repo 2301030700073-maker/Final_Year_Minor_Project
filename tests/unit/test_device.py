@@ -1,5 +1,6 @@
 import contextlib
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -335,12 +336,15 @@ def test_ensure_frida_server_noops_when_root_server_already_running(monkeypatch)
             return subprocess.CompletedProcess(cmd, 0, stdout="already running as root\n", stderr="")
         if cmd[-2] == "ps" and cmd[-1] == "-A":
             return subprocess.CompletedProcess(cmd, 0, stdout="root 1234 frida-server\n", stderr="")
+        if cmd[-1] == "--version":
+            return subprocess.CompletedProcess(cmd, 0, stdout="16.7.19\n", stderr="")
         raise AssertionError(f"ls/start must NOT run: {cmd}")
     monkeypatch.setattr(subprocess, "run", fake_run)
     _ensure_frida_server("adb", "emulator-5554")
-    assert len(calls) == 2  # adb root + ps probe only, no ls/start
+    assert len(calls) == 3  # adb root + ps probe + version probe only, no ls/start
     assert calls[0][-1] == "root"
     assert calls[1][-2:] == ["ps", "-A"]
+    assert calls[2][-1] == "--version"
 
 
 def test_ensure_frida_server_restarts_shell_run_server_as_root(monkeypatch):
@@ -387,6 +391,62 @@ def test_ensure_frida_server_starts_when_present_but_not_running(monkeypatch):
     assert seq["n"] == 4  # root + ps + ls + start all ran
 
 
+def test_ensure_frida_server_autopushes_local_copy_when_missing(monkeypatch, tmp_path):
+    # _ensure_frida_server: when the binary is missing on the device, the stage
+    # provisions its own prerequisite by pushing the local tools/ copy, then
+    # starts it - instead of failing and demanding a manual push. The device
+    # must never be left without frida-server, and nothing is fabricated.
+    from dynamic import device as dev
+    local = tmp_path / "frida-server-16.7.19-x86_64"
+    local.write_bytes(b"frida-binary")
+    monkeypatch.setattr(dev, "_FRIDA_SERVER_LOCAL", local)
+    seq = {"n": 0, "pushed": False}
+    def fake_run(cmd, **kw):
+        seq["n"] += 1
+        n = seq["n"]
+        if n == 1:  # adb root
+            return subprocess.CompletedProcess(cmd, 0, stdout="restarting adbd as root\n", stderr="")
+        if n == 2:  # ps -A - no frida-server running
+            return subprocess.CompletedProcess(cmd, 0, stdout="  PID 1 init\n", stderr="")
+        if n == 3:  # ls - MISSING on device
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="No such file")
+        if n == 4:  # rm -f stale
+            assert "rm" in cmd
+            return subprocess.CompletedProcess(cmd, 0)
+        if n == 5:  # push the local copy
+            assert "push" in cmd
+            assert str(local) in cmd
+            seq["pushed"] = True
+            return subprocess.CompletedProcess(cmd, 0)
+        if n == 6:  # chmod 755
+            assert "chmod" in cmd
+            return subprocess.CompletedProcess(cmd, 0)
+        return subprocess.CompletedProcess(cmd, 0)  # nohup start
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    dev._ensure_frida_server("adb", "emulator-5554")
+    assert seq["pushed"] is True  # the local copy was auto-pushed
+    assert seq["n"] == 7  # root + ps + ls + rm + push + chmod + start
+
+
+def test_ensure_frida_server_fails_loudly_when_local_copy_missing(monkeypatch, tmp_path):
+    # NFR-7: if neither the device nor the local tools/ copy has frida-server,
+    # fail loudly with the restore hint - never fabricate the binary.
+    from dynamic import device as dev
+    missing = tmp_path / "no-such-server"
+    monkeypatch.setattr(dev, "_FRIDA_SERVER_LOCAL", missing)
+    def fake_run(cmd, **kw):
+        if cmd[-1] == "root":
+            return subprocess.CompletedProcess(cmd, 0, stdout="restarting adbd as root\n", stderr="")
+        if cmd[-2] == "ps" and cmd[-1] == "-A":
+            return subprocess.CompletedProcess(cmd, 0, stdout="  PID 1 init\n", stderr="")
+        if "ls" in cmd:  # device missing too (ls <server_path> -> last token is the path)
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="No such file")
+        raise AssertionError(f"must not push: {cmd}")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="restore"):
+        dev._ensure_frida_server("adb", "emulator-5554")
+
+
 def test_ensure_frida_server_fails_loudly_when_adb_root_fails(monkeypatch):
     # _ensure_frida_server: a non-rootable device (adb root fails) is surfaced
     # loudly with the actionable hint, not deferred to the cryptic
@@ -401,19 +461,6 @@ def test_ensure_frida_server_fails_loudly_when_adb_root_fails(monkeypatch):
         _ensure_frida_server("adb", "emulator-5554")
 
 
-def test_ensure_frida_server_fails_loudly_when_binary_missing(monkeypatch):
-    # _ensure_frida_server: a MISSING binary fails loudly with the exact
-    # push/run commands, never a silent hang (principle 3). Had zero coverage.
-    from dynamic.device import _ensure_frida_server
-    def fake_run(cmd, **kw):
-        if cmd[-1] == "root":
-            return subprocess.CompletedProcess(cmd, 0, stdout="restarting adbd as root\n", stderr="")
-        if cmd[-2:] == ["ps", "-A"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="ls: not found")
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    with pytest.raises(RuntimeError, match="frida-server binary not found"):
-        _ensure_frida_server("adb", "emulator-5554")
 
 
 def test_setup_frida_connection_native_path_delegates_to_get_device(monkeypatch):
@@ -454,3 +501,229 @@ def test_setup_frida_connection_wsl_path_uses_relay(monkeypatch):
     got = setup_frida_connection("emulator-5554")
     assert got is fake_device
     assert verified["n"] == 1  # connection verified, not silently accepted
+
+
+# ---------------------------------------------------------------------------
+# mitmproxy capture helpers (set_http_proxy / clear_http_proxy / adb_reverse /
+# _subject_hash_old / push_system_ca / create_mitm_ca) - wrapper-contract tests
+# ---------------------------------------------------------------------------
+
+
+def test_set_http_proxy_issues_exact_settings_command(monkeypatch):
+    monkeypatch.setattr(device, "_require_adb", lambda: "adb")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    device.set_http_proxy("emulator-5554", "127.0.0.1", 8080)
+    assert calls[0][:4] == ["adb", "-s", "emulator-5554", "shell"]
+    assert calls[0][4:] == ["settings", "put", "global", "http_proxy", "127.0.0.1:8080"]
+
+
+def test_clear_http_proxy_issues_exact_settings_delete_command(monkeypatch):
+    monkeypatch.setattr(device, "_require_adb", lambda: "adb")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    device.clear_http_proxy("emulator-5554")
+    assert calls[0][4:] == ["settings", "delete", "global", "http_proxy"]
+
+
+def test_adb_reverse_add_and_remove_command_shapes(monkeypatch):
+    monkeypatch.setattr(device, "_require_adb", lambda: "adb")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    device.adb_reverse("emulator-5554", 8080, 8080, add=True)
+    device.adb_reverse("emulator-5554", 8080, 8080, add=False)
+    assert calls[0][3:] == ["reverse", "tcp:8080", "tcp:8080"]
+    assert calls[1][3:] == ["reverse", "--remove", "tcp:8080"]
+
+
+def test_subject_hash_old_returns_first_token(monkeypatch):
+    # _subject_hash_old parses `openssl x509 -subject_hash_old` first stdout
+    # token - the authoritative Android system-cert filename component.
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        ["openssl"], 0, stdout="1a2b3c4d\n", stderr=""))
+    assert device._subject_hash_old(Path("/fake/cert.pem")) == "1a2b3c4d"
+
+
+def test_subject_hash_old_raises_when_openssl_produces_no_hash(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        ["openssl"], 0, stdout="", stderr=""))
+    with pytest.raises(RuntimeError, match="no subject hash"):
+        device._subject_hash_old(Path("/fake/cert.pem"))
+
+
+def test_push_system_ca_issues_push_root_bindmount_cp_chmod_and_returns_system_path(monkeypatch):
+    monkeypatch.setattr(device, "_require_adb", lambda: "adb")
+    monkeypatch.setattr(device, "_subject_hash_old", lambda cert_path: "1a2b3c4d")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    got = device.push_system_ca("emulator-5554", Path("/tmp/cert.pem"))
+    assert got == "/system/etc/security/cacerts/1a2b3c4d.0"
+    # Exact order: wait-for-device, push (with retry), then adb root, then a
+    # single bind-mount shell command that makes the read-only system store
+    # writable (no remount, no reboot), then the cp + chmod into the mounted store.
+    assert calls[0][3:] == ["wait-for-device"]
+    assert calls[1][3:] == ["push", "/tmp/cert.pem", "/data/local/tmp/1a2b3c4d.0"]
+    assert calls[2][3:] == ["root"]
+    assert calls[3][0] == "adb"
+    assert calls[3][3] == "shell"
+    assert "mount --bind /data/local/tmp/cacerts /system/etc/security/cacerts" in calls[3][4]
+    assert calls[4][4:] == ["cp", "/data/local/tmp/1a2b3c4d.0", "/system/etc/security/cacerts/1a2b3c4d.0"]
+    assert calls[5][4:] == ["chmod", "644", "/system/etc/security/cacerts/1a2b3c4d.0"]
+
+
+def test_push_system_ca_fails_loudly_when_bind_mount_setup_fails(monkeypatch):
+    # The system CA store is on a baked read-only partition; push_system_ca
+    # makes it writable via a bind mount of a writable /data/local/tmp staging
+    # dir. If that mount fails (e.g. build not rootable), it must raise loudly
+    # with the hint (NFR-7), never silently leave the CA uninstalled.
+    monkeypatch.setattr(device, "_require_adb", lambda: "adb")
+    monkeypatch.setattr(device, "_subject_hash_old", lambda cert_path: "1a2b3c4d")
+    state = {"mount": False, "cp": 0}
+
+    def fake_run(cmd, **kwargs):
+        text = " ".join(cmd)
+        if "mount --bind" in text:
+            state["mount"] = True
+            raise subprocess.CalledProcessError(
+                returncode=1, cmd=cmd, stderr="operation not permitted")
+        if "shell cp" in text or text.endswith("cp"):
+            state["cp"] += 1
+            raise subprocess.CalledProcessError(returncode=1, cmd=cmd, stderr="read-only file system")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(subprocess.CalledProcessError, match="mount"):
+        device.push_system_ca("emulator-5554", Path("/tmp/cert.pem"))
+    assert state["mount"] is True  # the read-only fixup was attempted
+    assert state["cp"] == 0  # the cp never runs if the mount failed
+
+
+def test_create_mitm_ca_builds_bundle_and_removes_key(tmp_path, monkeypatch):
+    # create_mitm_ca: openssl generates key.pem + cert; the CA is deterministic
+    # because mitmdump is pointed at this same confdir (self-consistent CA, no
+    # silent device/confdir mismatch). Test fakes the openssl subprocess and
+    # pre-seeds the two output files it would have written, then asserts the
+    # bundle is key+cert and key.pem is removed.
+    confdir = tmp_path / "mitm-conf"
+    confdir.mkdir(parents=True)
+
+    def fake_run(cmd, **kwargs):
+        # Fake openssl writing its two outputs.
+        (confdir / "key.pem").write_bytes(b"KEY")
+        (confdir / "mitmproxy-ca-cert.pem").write_bytes(b"CERT")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    cert = device.create_mitm_ca(confdir)
+    assert cert == confdir / "mitmproxy-ca-cert.pem"
+    assert (confdir / "mitmproxy-ca.pem").read_bytes() == b"KEYCERT"
+    assert not (confdir / "key.pem").exists()
+
+
+def test_create_mitm_ca_reuses_existing_ca_without_running_openssl(tmp_path, monkeypatch):
+    # Get-or-create: a confdir that already has the bundle + cert must be reused,
+    # NOT regenerated - regenerating every run would make a long-lived mitmdump
+    # (which loads its CA once at startup) serve a stale CA while the device is
+    # given a fresh one, a silent decryption mismatch. No subprocess.run here.
+    confdir = tmp_path / "mitm-conf"
+    confdir.mkdir(parents=True)
+    (confdir / "mitmproxy-ca.pem").write_bytes(b"BUNDLE")
+    (confdir / "mitmproxy-ca-cert.pem").write_bytes(b"CERT")
+
+    def fake_run(cmd, **kwargs):  # must never fire
+        raise AssertionError("create_mitm_ca regenerated an existing CA")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    cert = device.create_mitm_ca(confdir)
+    assert cert == confdir / "mitmproxy-ca-cert.pem"
+    assert (confdir / "mitmproxy-ca.pem").read_bytes() == b"BUNDLE"
+
+
+def test_create_mitm_ca_raises_loudly_when_openssl_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        ["openssl"], 1, stderr="bad params"))
+    with pytest.raises(RuntimeError, match="failed to generate"):
+        device.create_mitm_ca(tmp_path / "mitm-conf")
+
+
+def _frida_server_fake_run(version_stdout, *, root_line=True, binary_present=True):
+    """Build a subprocess.run fake that simulates the adb calls inside
+    _ensure_frida_server. `version_stdout` is what `frida-server --version`
+    prints on the device; root_line controls whether ps reports a root server."""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if "root" in cmd and "shell" not in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="restarting adbd as root\n")
+        if cmd[-2:] == ["shell", "ps", "-A"] or ("ps" in cmd and "-A" in cmd):
+            body = "root   frida-server\n" if root_line else "shell  frida-server\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=body)
+        if "--version" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout=version_stdout)
+        if "pkill" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="")
+        if "ls" in cmd:
+            rc = 0 if binary_present else 1
+            return subprocess.CompletedProcess(cmd, rc, stdout="frida-server\n")
+        if "rm" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="")
+        if "push" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="1 file pushed\n")
+        if "chmod" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="")
+        if "nohup" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="")
+
+    return fake_run, calls
+
+
+def test_ensure_frida_server_returns_when_root_server_version_matches(monkeypatch):
+    # A root frida-server already running at the venv-matching major.minor must
+    # be left alone - no re-push, no restart. This is the happy path that was
+    # being broken by the wrong-version server.
+    fake_run, calls = _frida_server_fake_run(device._frida_venv_version() + ".9\n")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    device._ensure_frida_server("adb", "emulator-5554")
+
+    assert not any("push" in c for c in calls)
+    assert not any("nohup" in c for c in calls)
+
+
+def test_ensure_frida_server_reprovisions_on_version_mismatch(monkeypatch):
+    # A root server running the WRONG major.minor (here 17.16 vs venv 16.7)
+    # must be killed and the pinned tools/ binary re-pushed+restarted. Without
+    # this, the mismatched server sails through and fails later at
+    # enumerate_processes with "ensure that major versions match".
+    fake_run, calls = _frida_server_fake_run("17.16.4\n")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    device._ensure_frida_server("adb", "emulator-5554")
+
+    assert any("pkill" in c for c in calls)
+    assert any("push" in c for c in calls)
+    assert any("nohup" in c for c in calls)
+    # ...even though the binary is already present (present.returncode == 0).
+    assert any("ls" in c for c in calls)

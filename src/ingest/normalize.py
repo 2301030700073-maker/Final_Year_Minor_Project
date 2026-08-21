@@ -29,21 +29,12 @@ import hashlib
 import zipfile
 from pathlib import Path
 
+from common import sha256_bytes, sha256_file
+
 # AAB dex can sit under base/dex/ (split dex) or base/root/; both are base/
 # prefixed. AAB native libs live at base/lib/<abi>/*.so.
 _AAB_MANIFEST = "base/manifest/AndroidManifest.xml"
 
-
-def _sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _sha256_split_dir(directory: Path) -> str:
@@ -53,7 +44,7 @@ def _sha256_split_dir(directory: Path) -> str:
     for p in sorted(directory.iterdir()):
         if p.suffix.lower() == ".apk":
             h.update(p.name.encode("utf-8"))
-            h.update(_sha256_file(p).encode("utf-8"))
+            h.update(sha256_file(p).encode("utf-8"))
     return h.hexdigest()
 
 
@@ -113,7 +104,7 @@ def normalize_input(path: Path, out_dir: Path) -> Path:
 def normalize_aab(aab: Path, out_dir: Path) -> Path:
     """Synthesize a root-level APK from an Android App Bundle's base/ entries."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_apk = out_dir / f"{_sha256_file(aab)}-aab.apk"
+    out_apk = out_dir / f"{sha256_file(aab)}-aab.apk"
     with zipfile.ZipFile(aab) as zin, zipfile.ZipFile(out_apk, "w", zipfile.ZIP_DEFLATED) as zout:
         if _AAB_MANIFEST not in zin.namelist():
             raise ValueError(f"{aab} has no {_AAB_MANIFEST} - not a valid AAB")
@@ -167,7 +158,7 @@ def normalize_split_set(directory: Path, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_apk = out_dir / f"{_sha256_split_dir(directory)}-splits.apk"
     # deterministic renumber: order identical dex by content hash
-    dex_blobs.sort(key=_sha256_bytes)
+    dex_blobs.sort(key=sha256_bytes)
     with zipfile.ZipFile(out_apk, "w", zipfile.ZIP_DEFLATED) as zout:
         for i, blob in enumerate(dex_blobs, 1):
             zout.writestr("classes.dex" if i == 1 else f"classes{i}.dex", blob)

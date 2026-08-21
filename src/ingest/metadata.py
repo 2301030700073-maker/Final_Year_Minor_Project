@@ -5,14 +5,13 @@ from __future__ import annotations
 import functools
 import hashlib
 import re
-import shutil
 import subprocess
 import time
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from common import StageResult
+from common import StageResult, elapsed_ms, require_tool
 
 
 class ToolError(RuntimeError):
@@ -84,16 +83,6 @@ def file_size(apk_path: Path) -> int:
     return Path(apk_path).stat().st_size
 
 
-def _require_tool(name: str) -> str:
-    path = shutil.which(name)
-    if path is None:
-        raise RuntimeError(
-            f"required tool '{name}' not found on PATH - this stage only runs on "
-            "the reference WSL2 environment with the Android toolchain installed"
-        )
-    return path
-
-
 def _assert_zip_magic(apk_path: Path) -> None:
     """Fail fast before hashing/tool runs (NEW-C): a real APK is a zip and
     begins with the PK\x03\x04 local-file-header magic. Anything else burns
@@ -121,7 +110,7 @@ def _assert_zip_magic(apk_path: Path) -> None:
 
 
 def _run_tool(name: str, error_cls: type, args: list[str], timeout: int = 30) -> str:
-    tool = _require_tool(name)
+    tool = require_tool(name)
     try:
         result = subprocess.run(
             [tool, *args], capture_output=True, text=True, check=True, timeout=timeout,
@@ -161,7 +150,7 @@ def tool_versions() -> dict[str, str]:
         ("apktool", "--version"),
     ):
         try:
-            tool = _require_tool(name)
+            tool = require_tool(name)
             result = subprocess.run([tool, flag], capture_output=True, text=True, timeout=30)
             line = (result.stdout or result.stderr).strip().splitlines()
             versions[name] = line[0] if line else "unknown"
@@ -267,7 +256,7 @@ def ingest(
             return StageResult(
                 stage="ingest", status="failed", evidence={},
                 error=f"APK not found: {apk_path}",
-                duration_ms=int((time.monotonic() - start) * 1000),
+                duration_ms=elapsed_ms(start),
             )
 
         # NEW-C: reject non-APKs before spending time hashing or running tools.
@@ -298,7 +287,7 @@ def ingest(
                 evidence["tool_versions"] = reuse_metadata.get("tool_versions")
                 return StageResult(
                     stage="ingest", status="success", evidence=evidence,
-                    duration_ms=int((time.monotonic() - start) * 1000),
+                    duration_ms=elapsed_ms(start),
                 )
         package_metadata = parse_aapt2_output(run_aapt2_dump(apk_path))
         evidence["package"] = package_metadata.__dict__
@@ -309,14 +298,14 @@ def ingest(
             return StageResult(
                 stage="ingest", status="failed", evidence=evidence,
                 error="could not extract package name from aapt2 badging",
-                duration_ms=int((time.monotonic() - start) * 1000),
+                duration_ms=elapsed_ms(start),
             )
         evidence["signer"] = parse_signer_info(run_apksigner_verify(apk_path)).__dict__
         evidence["tool_versions"] = tool_versions()  # NEW-B: reproducibility
 
         return StageResult(
             stage="ingest", status="success", evidence=evidence,
-            duration_ms=int((time.monotonic() - start) * 1000),
+            duration_ms=elapsed_ms(start),
         )
     except ToolError as exc:
         # NEW-G: keep the named error type at the boundary (Aapt2Error /
@@ -326,10 +315,10 @@ def ingest(
         return StageResult(
             stage="ingest", status="failed", evidence=evidence,
             error=f"{type(exc).__name__}: {exc}",
-            duration_ms=int((time.monotonic() - start) * 1000),
+            duration_ms=elapsed_ms(start),
         )
     except Exception as exc:
         return StageResult(
             stage="ingest", status="failed", evidence=evidence, error=str(exc),
-            duration_ms=int((time.monotonic() - start) * 1000),
+            duration_ms=elapsed_ms(start),
         )

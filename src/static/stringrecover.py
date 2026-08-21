@@ -58,7 +58,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from common import Evidence
+from common import Evidence, read_text_ignore
 from static.obfuscation import _is_pure_numeric_literal, _split_array_items
 from static.signatures import _line_matches
 
@@ -275,9 +275,8 @@ def recover_hidden_strings(java_files: list[Path], min_len: int = 2) -> list[Rec
     seen: set[str] = set()
     found: list[RecoveredString] = []
     for p in java_files:
-        try:
-            text = p.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
+        text = read_text_ignore(p)
+        if text is None:
             continue
         for value, name, slice_ in recover_from_text(text):
             if len(value) < min_len or value in seen:

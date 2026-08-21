@@ -14,6 +14,13 @@ _FRIDA_RELAY_PORT = 27043
 _ADB_FORWARD_PORT = 27044
 _RELAY_PROC: subprocess.Popen | None = None
 
+# frida-server: the local copy (checked into tools/) is auto-pushed to the
+# device by _ensure_frida_server when the device is missing it, so the dynamic
+# stage provisions its own prerequisite instead of requiring a manual push.
+_FRIDA_SERVER_DEVICE = "/data/local/tmp/frida-server"
+_FRIDA_SERVER_LOCAL = (Path(__file__).resolve().parents[2]
+                       / "tools" / "frida-server-16.7.19-x86_64")
+
 
 # ---------------------------------------------------------------------------
 # WSL detection helpers
@@ -205,6 +212,32 @@ def _find_windows_user(users_dir: Path = WINDOWS_USERS_DIR) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _frida_venv_version() -> str:
+    """Return the venv's ``frida`` major.minor (e.g. ``"16.7"``).
+
+    The on-device frida-server must match this exactly: Frida refuses to talk
+    to a server of a different major.minor (``ProtocolError: ensure that major
+    versions match``), and a wrong-version server that is already running
+    would otherwise sail through ``_ensure_frida_server``'s root check and only
+    fail later at ``enumerate_processes`` with a cryptic error."""
+    return ".".join(frida.__version__.split(".")[:2])
+
+
+def _device_frida_server_version(adb: str, serial: str, server_path: str) -> str | None:
+    """Return the running on-device frida-server's major.minor, or None if it
+    cannot be read. ``frida-server --version`` prints and exits without binding
+    the port, so it is safe to call even while a server is running."""
+    result = subprocess.run(
+        [adb, "-s", serial, "shell", server_path, "--version"],
+        capture_output=True, text=True, timeout=20,
+    )
+    if result.returncode != 0:
+        return None
+    version = (result.stdout or "").strip()
+    parts = version.split(".")
+    return ".".join(parts[:2]) if len(parts) >= 2 else (version or None)
+
+
 def _ensure_frida_server(adb: str, serial: str) -> None:
     """Ensure frida-server is running AS ROOT on the device before connecting.
 
@@ -226,7 +259,7 @@ def _ensure_frida_server(adb: str, serial: str) -> None:
     silently-hanging dynamic stage, so it is started here if the binary is
     present, or fails loudly with the exact push/run commands if it is missing.
     Never hang silently (principle 3)."""
-    server_path = "/data/local/tmp/frida-server"
+    server_path = _FRIDA_SERVER_DEVICE
 
     # 1. adbd must be root for frida-server to inject across processes. adb root
     # is idempotent: it either restarts adbd as root or reports it is already
@@ -252,7 +285,9 @@ def _ensure_frida_server(adb: str, serial: str) -> None:
         capture_output=True, text=True, timeout=20,
     )
     root_server_running = False
-    for line in (running.stdout + running.stderr).splitlines():
+    # adb can leave stdout/stderr None on some invocations; treat absent as "".
+    ps_output = (running.stdout or "") + (running.stderr or "")
+    for line in ps_output.splitlines():
         if "frida-server" in line:
             tokens = line.split()
             if tokens and tokens[0] == "root":
@@ -262,22 +297,45 @@ def _ensure_frida_server(adb: str, serial: str) -> None:
                     [adb, "-s", serial, "shell", "pkill", "-f", "frida-server"],
                     capture_output=True, text=True, timeout=20,
                 )
+
+    # 2b. A running root server must also match the venv's frida major.minor.
+    #     Frida won't talk to a mismatched server, and it would only fail later
+    #     at enumerate_processes with "ensure that major versions match". If the
+    #     version is wrong (or unreadable), tear it down and re-provision from
+    #     the pinned tools/ copy below instead of returning optimistically.
+    reprovision = False
     if root_server_running:
+        if _device_frida_server_version(adb, serial, server_path) != _frida_venv_version():
+            subprocess.run(
+                [adb, "-s", serial, "shell", "pkill", "-f", "frida-server"],
+                capture_output=True, text=True, timeout=20,
+            )
+            root_server_running = False
+            reprovision = True
+    if root_server_running and not reprovision:
         return
 
-    # 3. Binary present? If not, fail loudly with the exact push/run commands.
+    # 3. Binary present? If not, auto-push it from the repo's tools/ copy - the
+    #    dynamic stage provisions its own prerequisite. Fail loudly only if the
+    #    local copy is also missing (can't fabricate the binary; principle 3).
     present = subprocess.run(
         [adb, "-s", serial, "shell", "ls", server_path],
         capture_output=True, text=True, timeout=20,
     )
-    if present.returncode != 0:
-        raise RuntimeError(
-            "frida-server binary not found on device at "
-            f"{server_path}. Push it first:\n"
-            f"  adb root\n  adb push tools/frida-server-16.7.19-x86_64 {server_path}\n"
-            f"  adb shell chmod 755 {server_path}\n"
-            "then re-run (or pass --skip-dynamic to skip this stage)."
-        )
+    if present.returncode != 0 or reprovision:
+        if not _FRIDA_SERVER_LOCAL.exists():
+            raise RuntimeError(
+                f"frida-server not on device at {server_path} and the local "
+                f"copy at {_FRIDA_SERVER_LOCAL} is missing - restore "
+                "tools/frida-server-16.7.19-x86_64 (or pass --skip-dynamic)."
+            )
+        for cmd in (
+            [adb, "-s", serial, "shell", "rm", "-f", server_path],
+            [adb, "-s", serial, "push", str(_FRIDA_SERVER_LOCAL), server_path],
+            [adb, "-s", serial, "shell", "chmod", "755", server_path],
+        ):
+            subprocess.run(cmd, capture_output=True, text=True,
+                           check=True, timeout=120)
 
     # 4. Start it. adbd is now root, so the nohup'd server runs as root.
     subprocess.run(
@@ -412,3 +470,178 @@ def capture_logcat(serial: str, timeout_seconds: int = 15) -> str:
         capture_output=True, text=True, check=True, timeout=timeout_seconds,
     )
     return result.stdout
+
+
+# ---------------------------------------------------------------------------
+# mitmproxy capture helpers (NFR-7: fail loudly, never silent no-op)
+# ---------------------------------------------------------------------------
+
+
+def set_http_proxy(serial: str, host: str, port: int) -> None:
+    """Route the device's HTTP(S) traffic through a proxy at host:port.
+
+    Uses the global settings proxy so every app on the device honors it (the
+    mitmproxy capture stage relies on this). Fails loudly if adb rejects the
+    command (NFR-7)."""
+    adb = _require_adb()
+    subprocess.run(
+        [adb, "-s", serial, "shell", "settings", "put", "global",
+         "http_proxy", f"{host}:{port}"],
+        capture_output=True, text=True, check=True, timeout=15,
+    )
+
+
+def clear_http_proxy(serial: str) -> None:
+    """Remove the device proxy set by set_http_proxy. Best-effort: the adb
+    command is exit-0 whether or not a proxy was set, so a failure here signals
+    a real adb problem and is surfaced loudly (NFR-7), never swallowed."""
+    adb = _require_adb()
+    subprocess.run(
+        [adb, "-s", serial, "shell", "settings", "delete", "global", "http_proxy"],
+        capture_output=True, text=True, check=True, timeout=15,
+    )
+
+
+def adb_reverse(serial: str, device_port: int, host_port: int, add: bool = True) -> None:
+    """Forward device localhost:<device_port> to host localhost:<host_port>
+    (add) or remove an existing reverse (add=False).
+
+    On native Linux this lets a device proxy at 127.0.0.1:<device_port> reach a
+    mitmdump listening on the host's localhost:<host_port>. The reverse listener
+    target is the adb-server host, so on WSL2 that is the Windows host - the
+    same transport constraint the Frida relay already encodes (device.py:62-176)."""
+    adb = _require_adb()
+    cmd = [adb, "-s", serial, "reverse"]
+    if not add:
+        cmd += ["--remove", f"tcp:{device_port}"]
+    else:
+        cmd += [f"tcp:{device_port}", f"tcp:{host_port}"]
+    subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=15)
+
+
+def _subject_hash_old(cert_path: Path) -> str:
+    """Android system-cert store names certs by their subject hash (`openssl
+    x509 -subject_hash_old`). This is the authoritative name; computing it wrong
+    means the CA is silently not trusted, so a failure here raises loudly."""
+    result = subprocess.run(
+        ["openssl", "x509", "-inform", "PEM", "-subject_hash_old", "-in", str(cert_path)],
+        capture_output=True, text=True, check=True, timeout=15,
+    )
+    first = result.stdout.split()[0] if result.stdout.split() else ""
+    if not first:
+        raise RuntimeError(
+            f"openssl produced no subject hash for {cert_path} - cannot install the "
+            "mitmproxy CA as a system cert"
+        )
+    return first
+
+
+def push_system_ca(serial: str, cert_path: Path) -> str:
+    """Install a CA cert into the device's system trust store (rooted adbd).
+
+    Android 7+ ignores user certs for most apps, so the CA must go into
+    /system/etc/security/cacerts/ as <subject_hash_old>.0 to be trusted by apps
+    using the default trust store. The system partition is baked read-only on
+    system-as-root builds (emulator included), and remount needs a reboot that
+    this environment cannot take. So the writable copy is installed via a bind
+    mount instead: a writable /data/local/tmp/cacerts staging dir (pre-seeded
+    with the stock system CAs) is mounted over /system/etc/security/cacerts.
+    That makes the store writable with no remount and no reboot. adb root is
+    required (bind mounts are privileged); it restarts adbd idempotently and
+    runs before any reverse/proxy is set, so no established tunnel is dropped.
+    Any failure raises loudly with the actionable hint (NFR-7). Returns the
+    system path."""
+    adb = _require_adb()
+    hash_name = _subject_hash_old(cert_path)
+    local_tmp = f"/data/local/tmp/{hash_name}.0"
+    system_path = f"/system/etc/security/cacerts/{hash_name}.0"
+    # adb root (below) restarts adbd, so a device that was just re-rooted by a
+    # prior run can be mid-restart here. Wait for it to come back and retry the
+    # push a couple of times rather than surfacing a transient adbd-away error.
+    subprocess.run(
+        [adb, "-s", serial, "wait-for-device"],
+        capture_output=True, text=True, check=True, timeout=30,
+    )
+    _push_retry = None
+    for _ in range(3):
+        try:
+            subprocess.run(
+                [adb, "-s", serial, "push", str(cert_path), local_tmp],
+                capture_output=True, text=True, check=True, timeout=30,
+            )
+            _push_retry = None
+            break
+        except subprocess.CalledProcessError as _err:
+            _push_retry = _err
+            time.sleep(1.0)
+    if _push_retry is not None:
+        raise _push_retry
+    try:
+        subprocess.run(
+            [adb, "-s", serial, "root"],
+            capture_output=True, text=True, check=True, timeout=15,
+        )
+    except subprocess.CalledProcessError:
+        pass  # already root, or the build is not rootable - the bind-mount decides
+    # Make the system CA store writable via a bind mount (no remount, no
+    # reboot - system-as-root cannot be remounted in place). The setup is
+    # idempotent: a bind mount persists until reboot, and if it is already
+    # active (a prior run) the store and the staging dir are the same inode, so
+    # re-copying would copy the store into itself. Guard on /proc/mounts so the
+    # copy+mount only run when the store is not yet a mount point. One shell
+    # command chains the whole setup so a read-only failure surfaces loudly.
+    bind_setup = (
+        "mkdir -p /data/local/tmp/cacerts && "
+        "(grep -qs ' /system/etc/security/cacerts ' /proc/mounts && echo already-mounted) || "
+        "(cp -a /system/etc/security/cacerts/. /data/local/tmp/cacerts/ && "
+        " mount --bind /data/local/tmp/cacerts /system/etc/security/cacerts)"
+    )
+    subprocess.run(
+        [adb, "-s", serial, "shell", bind_setup],
+        capture_output=True, text=True, check=True, timeout=20,
+    )
+    subprocess.run(
+        [adb, "-s", serial, "shell", "cp", local_tmp, system_path],
+        capture_output=True, text=True, check=True, timeout=20,
+    )
+    subprocess.run(
+        [adb, "-s", serial, "shell", "chmod", "644", system_path],
+        capture_output=True, text=True, check=True, timeout=20,
+    )
+    return system_path
+
+
+
+def create_mitm_ca(confdir: Path) -> Path:
+    """Get-or-create the mitmproxy CA in `confdir` and return the cert path.
+
+    mitmdump uses whatever CA it finds in its confdir (falling back to a fresh
+    ~/.mitmproxy one only when confdir has none). Generating our own CA into a
+    known confdir -- and pointing mitmdump at that confdir -- is the ONLY
+    self-consistent way to capture: the device trusts exactly the CA mitmdump
+    serves. Generating a cert here while mitmdump served its own ~/.mitmproxy CA
+    would be a silent mismatch (device trusts a cert never presented -> decrypt
+    silently fails), which is a principle-3 violation. So this is fully
+    deterministic: openssl creates the key+cert bundle mitmdump expects
+    (mitmproxy-ca.pem) and the cert-only PEM to install on the device, both into
+    confdir. Fails loudly on generation failure (NFR-7)."""
+    confdir.mkdir(parents=True, exist_ok=True)
+    bundle = confdir / "mitmproxy-ca.pem"
+    cert = confdir / "mitmproxy-ca-cert.pem"
+    if bundle.exists() and cert.exists():
+        return cert
+    key_tmp = confdir / "key.pem"
+    result = subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+         "-days", "365", "-subj", "/CN=mitmproxy-capture-local",
+         "-keyout", str(key_tmp), "-out", str(cert)],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"failed to generate a mitmproxy CA via openssl: {result.stderr.strip()}"
+        )
+    # mitmdump's confdir expects the private key + cert in one file.
+    bundle.write_bytes(key_tmp.read_bytes() + cert.read_bytes())
+    key_tmp.unlink()
+    return cert

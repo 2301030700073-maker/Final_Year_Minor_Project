@@ -26,6 +26,7 @@ the coverage downgrade.
 """
 
 from __future__ import annotations
+from common import read_text_ignore
 
 import re
 from pathlib import Path
@@ -75,9 +76,8 @@ def find_webview_js(java_files) -> tuple[list[str], bool]:
     has_remote_js = False
     for f in java_files:
         path = Path(f)
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
+        text = read_text_ignore(path)
+        if text is None:
             # Unreadable source (perm/race) - skip rather than abort. Same idiom
             # as find_dynamic_loading.
             continue

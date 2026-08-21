@@ -1529,3 +1529,90 @@ def test_scan_skips_third_party_file_matching_pass(tmp_path):
     assert ev.scanned_file_count == 1
     assert ev.root_evidence == []      # the third-party hit was excluded
     assert ev.unreadable_file_count == 0
+
+
+def test_2026_corpus_broadening_additions_loaded():
+    # 2026 broadening: resetprop/Magisk-hide + rw-system + hardware key
+    # attestation (root); Cash-App Paraphrase + Ktor + dart:io SecurityContext
+    # (ssl). Pin the new ids and require their representative marker so the
+    # corpus can't silently regress to pre-2026 coverage. The native addition
+    # is validated by test_native.py's own load of native_detection.yaml.
+    root_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")}
+    for sig_id, marker in {
+        "root_resetprop_magisk": "resetprop",
+        "rw_system_mount_check": "/proc/mounts",
+        "hardware_key_attestation": "android:attest",
+    }.items():
+        assert sig_id in root_sigs, f"missing root sig {sig_id}"
+        assert marker in root_sigs[sig_id].patterns, (sig_id, marker)
+
+    ssl_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")}
+    for sig_id, marker in {
+        "pin_cash_paraphrase": "app.cash.paraphrase",
+        "ktor_tls_pinning": "io.ktor.client.engine",
+        "flutter_dart_io_securitycontext": "badCertificateCallback",
+    }.items():
+        assert sig_id in ssl_sigs, f"missing ssl sig {sig_id}"
+        assert marker in ssl_sigs[sig_id].patterns, (sig_id, marker)
+
+
+def test_2026_corpus_broadening_round2_additions_loaded():
+    # Round 2: TrustKit/NSC edge, Apollo/GraphQL+OkHttp, emulator markets,
+    # overlayfs root, PKIX custom-CA, and native Magisk-init/mount hide layers.
+    root_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")}
+    for sig_id, marker in {
+        "emulator_market_artifacts": "com.genymotion",
+        "overlayfs_system": "overlayfs",
+    }.items():
+        assert sig_id in root_sigs, f"missing root sig {sig_id}"
+        assert marker in root_sigs[sig_id].patterns, (sig_id, marker)
+
+    ssl_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")}
+    for sig_id, marker in {
+        "trustkit_android_api": "TrustKitBuilder",
+        "nsc_debug_overrides": "debug-overrides",
+        "apollo_graphql_okhttp": "com.apollographql.apollo.ApolloClient",
+        "custom_pkix_trust_anchor": "setTrustAnchors",
+    }.items():
+        assert sig_id in ssl_sigs, f"missing ssl sig {sig_id}"
+        assert marker in ssl_sigs[sig_id].patterns, (sig_id, marker)
+
+
+def test_2026_corpus_broadening_round3_webgrounded_additions_loaded():
+    # Round 3 (web-grounded): daemon-socket + zygisk-maps + SELinux-policy probes,
+    # root-SDK frameworks (root), TrustKit runtime validator (ssl). Native analog
+    # validated by test_native.py's load.
+    root_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")}
+    for sig_id, marker in {
+        "magisk_daemon_socket_scan": "@magisk_service",
+        "zygisk_process_maps_scan": "/proc/self/maps",
+        "selinux_policy_probe_magisk_ksu": "ksu_file:s0",
+        "rootguard_flutter_shield_framework": "flutter_shield",
+    }.items():
+        assert sig_id in root_sigs, f"missing root sig {sig_id}"
+        assert marker in root_sigs[sig_id].patterns, (sig_id, marker)
+
+    ssl_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")}
+    assert "trustkit_tsession_pinning_validator" in ssl_sigs
+    assert "TSKPinningValidator" in ssl_sigs["trustkit_tsession_pinning_validator"].patterns
+
+
+def test_2026_corpus_broadening_round4_additions_loaded():
+    # Round 4 (web-grounded): Play Integrity remediation (root; the Standard
+    # flow itself is already covered by play_integrity_standard_attestation, so
+    # only the genuinely-new remediation-dialog markers were added), modern RN
+    # pinning ecosystem + OkHttp wiring (ssl).
+    root_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")}
+    for sig_id, marker in {
+        "play_integrity_remediation_dialog": "GET_STRONG_INTEGRITY",
+    }.items():
+        assert sig_id in root_sigs, f"missing root sig {sig_id}"
+        assert marker in root_sigs[sig_id].patterns, (sig_id, marker)
+
+    ssl_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")}
+    for sig_id, marker in {
+        "rn_ssl_pinning_ecosystem": "react-native-ssl-pinning-guard",
+        "rn_okhttp_client_factory_pinning": "NetworkingModule",
+    }.items():
+        assert sig_id in ssl_sigs, f"missing ssl sig {sig_id}"
+        assert marker in ssl_sigs[sig_id].patterns, (sig_id, marker)

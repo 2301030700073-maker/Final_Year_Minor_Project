@@ -148,3 +148,52 @@
 # shipping app, and scoring it would over-claim detection. They live in the
 # boundary-2 native indicator layer (static/indicators.py) instead, surfacing the
 # app as coverage-limited rather than a confident negative (ADR-0006).
+
+# --- 2026 corpus broadening ---
+# Magisk/KernelSU hide-layer artifacts surface natively when app code inspects or
+# fights the hide layer; resetprop/magiskpolicy and the /data/adb daemon paths
+# are strong embedded-string signals.
+- id: native_root_hide_artifacts
+  category: root
+  weight: 0.4
+  pattern_type: embedded_string
+  patterns:
+    # /data/adb/magisk and /data/adb/ksu deliberately omitted - native_su_binary_embedded
+    # already matches both, so repeating them here would double-weight one path.
+    - "resetprop"
+    - "magiskpolicy"
+    - "ksud"
+
+# Magisk init / Zygisk injection artifacts surfacing natively in app .so strings -
+# the app inspects or is built aware of the systemless root hook layer.
+- id: native_magisk_init_injection
+  category: root
+  weight: 0.4
+  pattern_type: embedded_string
+  patterns:
+    - "magiskinit"
+    - "zygisk"
+    - "init.magisk.rc"
+    - "libzygisk.so"
+
+# Native /proc/mounts parsing for overlayfs/rw-system - the native analog of the
+# java overlayfs_system signature.
+- id: native_proc_mounts_check
+  category: root
+  weight: 0.4
+  pattern_type: embedded_string
+  patterns:
+    - "/proc/self/mounts"
+    - "/proc/mounts"
+    - "overlayfs"
+
+# Native Magisk-daemon socket scan - the native analog of the java
+# magisk_daemon_socket_scan, common in hardened native detectors.
+- id: native_daemon_socket_scan
+  category: root
+  weight: 0.4
+  pattern_type: embedded_string
+  patterns:
+    - "@magisk_service"
+    - "/proc/net/unix"
+    - "@ksu_"

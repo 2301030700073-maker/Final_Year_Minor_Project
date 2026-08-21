@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
+from common import gate_all_third_party
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -99,17 +101,13 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
     # Gate the all_third_party qualifier on detected in the persisted
     # classification_json itself (ADR-0010) - not just the denormalized column -
     # so a non-detected category can never carry the flag in JSON/report either.
-    # Storage stays ignorant of report/attribution, so this is a plain dict copy.
+    # Shared gate lives in common (storage stays ignorant of report/).
     _ra = classification.get("root_attribution")
     if _ra is not None:
-        classification["root_attribution"] = {
-            **_ra, "all_third_party": bool(_ra.get("all_third_party")) and bool(root.get("detected"))
-        }
+        classification["root_attribution"] = gate_all_third_party(_ra, bool(root.get("detected")))
     _sa = classification.get("ssl_attribution")
     if _sa is not None:
-        classification["ssl_attribution"] = {
-            **_sa, "all_third_party": bool(_sa.get("all_third_party")) and bool(ssl.get("detected"))
-        }
+        classification["ssl_attribution"] = gate_all_third_party(_sa, bool(ssl.get("detected")))
     # Safe-.get() views only - verification/correlation themselves stay
     # None (not coerced to {}) for what actually gets persisted below, so
     # "dynamic stage skipped" round-trips as a real NULL, not an empty dict.

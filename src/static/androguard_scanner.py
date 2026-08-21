@@ -36,11 +36,10 @@ a signature is still NOT evidence of absence of the technique.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from pathlib import Path
 
-from common import Evidence, is_known_third_party
+from common import Evidence, atomic_json_write, is_known_third_party, is_under_package, load_json_cache, sha256_file
 
 
 def _class_namespace(class_name: str) -> str | None:
@@ -56,7 +55,7 @@ def _class_namespace(class_name: str) -> str | None:
 def _app_owned(ns: str, app_package: str | None) -> bool:
     """A class is app-owned when it sits under the APK's own package tree (even
     if that package shares a vendor prefix - Bug B), or is not a known vendor."""
-    if app_package and (ns == app_package or ns.startswith(app_package + ".")):
+    if is_under_package(ns, app_package):
         return True
     return not is_known_third_party(ns)
 
@@ -127,39 +126,19 @@ _DEX_STRING_CACHE_VERSION = "dex-string-v1"
 
 
 def _load_string_cache(cache_dir: Path, apk_sha256: str) -> dict | None:
-    entry = cache_dir / f"{apk_sha256}.json"
-    if not entry.is_file():
+    data = load_json_cache(cache_dir, apk_sha256)
+    if data is None or data.get("version") != _DEX_STRING_CACHE_VERSION:
         return None
-    try:
-        data = json.loads(entry.read_text(encoding="utf-8"))
-        if data.get("version") != _DEX_STRING_CACHE_VERSION:
-            return None
-        payload = data["payload"]
-        payload["app_strings"] = set(payload["app_strings"])  # stored as a list, restored to a set
-        return payload
-    except Exception:
-        return None
+    payload = data["payload"]
+    payload["app_strings"] = set(payload["app_strings"])  # stored as a list, restored to a set
+    return payload
 
 
 def _save_string_cache(cache_dir: Path, apk_sha256: str, payload: dict) -> None:
-    """Persist the string payload via tmp + atomic replace so a crash mid-write
-    can never leave a partial entry that later reads as valid (a corrupt cache
+    """Persist the string payload via the shared atomic write (a corrupt cache
     is a miss, never a wrong result)."""
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    tmp = cache_dir / f"{apk_sha256}.json.tmp"
-    tmp.write_text(
-        json.dumps({"version": _DEX_STRING_CACHE_VERSION, "payload": payload}, sort_keys=True),
-        encoding="utf-8",
-    )
-    tmp.replace(cache_dir / f"{apk_sha256}.json")
+    atomic_json_write(cache_dir, apk_sha256, {"version": _DEX_STRING_CACHE_VERSION, "payload": payload})
 
-
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _extract_strings(apk_path: Path) -> tuple[str | None, set[str]]:
@@ -190,7 +169,7 @@ def scan_dex_strings(apk_path: Path, signatures: list, cache_dir: Path | None = 
     from static.signatures import _line_matches  # reuse the exact same matcher
 
     if cache_dir is not None:
-        apk_sha = _sha256_file(apk_path)
+        apk_sha = sha256_file(apk_path)
         cached = _load_string_cache(cache_dir, apk_sha)
         if cached is not None:
             app_package = cached.get("app_package")

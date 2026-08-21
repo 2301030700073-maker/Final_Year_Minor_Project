@@ -15,6 +15,7 @@ TN.
 """
 
 from __future__ import annotations
+from common import read_text_ignore
 
 import re
 from pathlib import Path
@@ -34,9 +35,8 @@ def _class_simple_names(java_files: list[Path]) -> list[str]:
     corpus => [] (the caller decides how an empty corpus reads, not here)."""
     names: list[str] = []
     for p in java_files:
-        try:
-            text = p.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
+        text = read_text_ignore(p)
+        if text is None:
             continue
         # Match a top-level `public/class|interface|enum <Name>` - take the
         # identifier that follows the class keyword on the same line. This is a
@@ -208,9 +208,8 @@ def _has_string_encryption(text: str) -> bool:
 def _any_string_encryption(java_files: list[Path]) -> bool:
     """True when any decompiled .java shows the string-encryption fingerprint."""
     for p in java_files:
-        try:
-            text = p.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
+        text = read_text_ignore(p)
+        if text is None:
             continue
         if _has_string_encryption(text):
             return True

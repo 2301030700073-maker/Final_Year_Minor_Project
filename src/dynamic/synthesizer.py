@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from common import Action, ClassificationResult
+from common import Action, CATEGORIES, ClassificationResult
 
 # --- deterministic recipe catalog --------------------------------------------
 # Each entry maps a detected technique (the signature_id the static engine can
@@ -922,7 +922,7 @@ ALL_SSL_TECHNIQUES = set(SSL_RECIPES)
 # match so the report can state it explicitly rather than treating the vendored
 # script as an unexplained supplement. String match on category, no registry.
 PREDEFINED_SCRIPT_NAME = "universal-robust-advanced-root--ssl-pinning-bypass"
-PREDEFINED_SCRIPT_COVERS = {"root", "ssl"}
+PREDEFINED_SCRIPT_COVERS = set(CATEGORIES)
 
 UNIVERSAL_ROOT = _file_exists_patch(
     ["/system/bin/su", "/system/xbin/su", "/sbin/su",

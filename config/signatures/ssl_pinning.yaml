@@ -502,3 +502,129 @@
     - "com.gs.rnsslpinning"
     - "react-native-ssl-pinning"
   evidence_type: bytecode_string
+
+# --- 2026 corpus broadening: modern (AI/developer-built) pinning mechanisms ---
+# Cash App Paraphrase - a modern certificate-pinning library (fintech/2021+).
+# The unique package marker is the reliable signal.
+- id: pin_cash_paraphrase
+  category: ssl
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "app.cash.paraphrase"
+  evidence_type: bytecode_string
+
+# Ktor client TLS config - modern Kotlin/Compose apps pin via io.ktor.client
+# engine/TLS config. Only the io.ktor.client namespace markers are used (tight,
+# avoids the generic "trustManager"/"ServerConfig" false positives).
+- id: ktor_tls_pinning
+  category: ssl
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "io.ktor.client.engine"
+    - "io.ktor.client.plugins"
+  evidence_type: bytecode_string
+
+# dart:io HttpClient - Flutter apps doing custom cert validation/pinning override
+# badCertificateCallback / setTrustedCertificates. These two are dart:io-specific
+# (no Java analog), so they are tight markers.
+- id: flutter_dart_io_securitycontext
+  category: ssl
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "badCertificateCallback"
+    - "setTrustedCertificates"
+  evidence_type: bytecode_string
+
+# TrustKit Android programmatic API - distinct from the basic TrustKit marker.
+# Apps that pin via TrustKit's builder/network-security-config init are the
+# modern (developer-built) path.
+- id: trustkit_android_api
+  category: ssl
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "TrustKitBuilder"
+    - "initializeWithNetworkSecurityConfiguration"
+    - "TrustKit.getInstance"
+  evidence_type: bytecode_string
+
+# network_security_config XML edge cases: debug-overrides + base-config +
+# cleartextTrafficPermitted govern which traffic is pinned/cleartext. Their
+# presence alongside a NSC is a pinning-shaping signal the pinset sigs miss.
+- id: nsc_debug_overrides
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "debug-overrides"
+    - "cleartextTrafficPermitted"
+    - "base-config"
+  evidence_type: bytecode_string
+
+# Apollo GraphQL clients route through OkHttp; an app that configures a custom
+# OkHttp client on ApolloClient is the site where pinning is applied. Flags
+# GraphQL-over-OkHttp apps for pinning scrutiny.
+- id: apollo_graphql_okhttp
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "com.apollographql.apollo.ApolloClient"
+    - "ApolloClient.builder"
+    - "okHttpClient"
+  evidence_type: bytecode_string
+
+# Custom PKIX trust anchor: an app that builds a CertPathValidator over its own
+# TrustAnchor is pinning by custom CA - a real mechanism the cert-factory and
+# NSC sigs don't cover.
+- id: custom_pkix_trust_anchor
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "PKIXBuilderParameters"
+    - "setTrustAnchors"
+    - "CertPathValidator"
+  evidence_type: bytecode_string
+
+# TrustKit's runtime validator classes - distinct from the builder/init marker.
+# TSession / TSKPinningValidator are the enforcement point a hardened app drives.
+- id: trustkit_tsession_pinning_validator
+  category: ssl
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "com.trustkit.TSession"
+    - "TSKPinningValidator"
+    - "TSKPinningValidatorResult"
+  evidence_type: bytecode_string
+
+# Modern React Native pinning libraries (New-Architecture era): react-native-ssl-
+# pinning-guard / -manager / -public-key-pinning and @bam.tech/app-security. The
+# RN pinning pattern these share is what rn_ssl_pinning_library predates.
+- id: rn_ssl_pinning_ecosystem
+  category: ssl
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "react-native-ssl-pinning-guard"
+    - "react-native-ssl-manager"
+    - "react-native-ssl-public-key-pinning"
+    - "@bam.tech"
+    - "initializeSslPinning"
+  evidence_type: bytecode_string
+
+# RN wiring point: how an app pins RN's HTTP stack - OkHttpClientFactory /
+# CustomClientBuilder on NetworkingModule. Present wherever RN pinning is wired.
+- id: rn_okhttp_client_factory_pinning
+  category: ssl
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "NetworkingModule"
+    - "CustomClientBuilder"
+    - "OkHttpClientFactory"
+  evidence_type: bytecode_string

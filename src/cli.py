@@ -42,6 +42,8 @@ from calibration.report import compute_calibration_report
 from dataclasses import asdict
 
 from common import (
+    elapsed_ms,
+    CATEGORIES,
     Action,
     CategoryVerdict,
     ClassificationResult,
@@ -315,6 +317,26 @@ def _merge_native_evidence(static_evidence, native_evidence) -> None:
     static_evidence.unattributed_indicators.update(native_evidence.unattributed_indicators)
 
 
+def _route_evidence(static_evidence, sig_id, category, weight, ev, already) -> bool:
+    """Apply one deduped evidence item to its category bucket (root/ssl): add its
+    weight to the category confidence (capped at 1.0) and append the evidence.
+    Shared by the dex and JS merge loops so both route and dedup identically.
+    Returns True when the item was newly added; False when already present (by
+    signature_id) or its category is neither root nor ssl."""
+    if sig_id in already:
+        return False
+    if category == "root":
+        static_evidence.root_confidence = min(1.0, static_evidence.root_confidence + weight)
+        static_evidence.root_evidence.append(ev)
+    elif category == "ssl":
+        static_evidence.ssl_confidence = min(1.0, static_evidence.ssl_confidence + weight)
+        static_evidence.ssl_evidence.append(ev)
+    else:
+        return False
+    already.add(sig_id)
+    return True
+
+
 def _merge_dex_evidence(static_evidence, dex_evidence, signatures, app_package) -> int:
     """Merge androguard DEX matches into StaticEvidence, deduped per-signature so
     a signature the java/smali scan already matched is NOT double-counted. Only
@@ -327,20 +349,9 @@ def _merge_dex_evidence(static_evidence, dex_evidence, signatures, app_package) 
     already |= {e.signature_id for e in static_evidence.ssl_evidence}
     added = 0
     for ev in dex_evidence:
-        if ev.signature_id in already:
-            continue
-        w = weight.get(ev.signature_id, 0.0)
-        c = cat.get(ev.signature_id)
-        if c == "root":
-            static_evidence.root_confidence = min(1.0, static_evidence.root_confidence + w)
-            static_evidence.root_evidence.append(ev)
-        elif c == "ssl":
-            static_evidence.ssl_confidence = min(1.0, static_evidence.ssl_confidence + w)
-            static_evidence.ssl_evidence.append(ev)
-        else:
-            continue
-        already.add(ev.signature_id)
-        added += 1
+        if _route_evidence(static_evidence, ev.signature_id, cat.get(ev.signature_id),
+                           weight.get(ev.signature_id, 0.0), ev, already):
+            added += 1
     return added
 
 
@@ -353,14 +364,12 @@ def _merge_js_evidence(static_evidence, js_matches) -> int:
     binary JS bundle's string table - deterministic evidence (the literal is really
     present in the app) at a modest fixed weight, because we recover string
     constants, not full JS control flow (the surface stays `partial`). Deduped per
-    signature_id across bundles and routed by category exactly like
-    _merge_dex_evidence. Returns the number of new signatures added."""
+    signature_id across bundles and routed by category like _merge_dex_evidence.
+    Returns the number of new signatures added."""
     already = {e.signature_id for e in static_evidence.root_evidence}
     already |= {e.signature_id for e in static_evidence.ssl_evidence}
     added = 0
     for sig_id, category, matched_text, bundle_file in js_matches:
-        if sig_id in already:
-            continue
         ev = Evidence(
             signature_id=sig_id,
             file=bundle_file,
@@ -368,16 +377,8 @@ def _merge_js_evidence(static_evidence, js_matches) -> int:
             matched_text=matched_text[:200],
             verification_state="deterministic_matched",
         )
-        if category == "root":
-            static_evidence.root_confidence = min(1.0, static_evidence.root_confidence + _JS_EVIDENCE_WEIGHT)
-            static_evidence.root_evidence.append(ev)
-        elif category == "ssl":
-            static_evidence.ssl_confidence = min(1.0, static_evidence.ssl_confidence + _JS_EVIDENCE_WEIGHT)
-            static_evidence.ssl_evidence.append(ev)
-        else:
-            continue
-        already.add(sig_id)
-        added += 1
+        if _route_evidence(static_evidence, sig_id, category, _JS_EVIDENCE_WEIGHT, ev, already):
+            added += 1
     return added
 
 
@@ -463,9 +464,9 @@ def _wrap_stage(stage_name: str, fn, *args, **kwargs):
     start = time.monotonic()
     try:
         raw_result = fn(*args, **kwargs)
-        return StageResult(stage=stage_name, status="success", evidence={}, duration_ms=int((time.monotonic() - start) * 1000)), raw_result
+        return StageResult(stage=stage_name, status="success", evidence={}, duration_ms=elapsed_ms(start)), raw_result
     except Exception as exc:
-        return StageResult(stage=stage_name, status="failed", evidence={}, error=str(exc), duration_ms=int((time.monotonic() - start) * 1000)), None
+        return StageResult(stage=stage_name, status="failed", evidence={}, error=str(exc), duration_ms=elapsed_ms(start)), None
 
 
 def _halt(stage_results: list[StageResult]) -> None:
@@ -1564,7 +1565,7 @@ def _calibration_table(report) -> tuple[list[str], list[list[str]]]:
         "Tier 2 F1", "n", "Excl no-GT", "Excl partial",
     ]
     rows: list[list[str]] = []
-    for category in ("root", "ssl"):
+    for category in CATEGORIES:
         t1, t2 = report.tier1[category], report.tier2[category]
         rows.append([
             category,
@@ -1616,7 +1617,7 @@ def calibration_report(
     # detected verdict from a partial decompile isn't trustworthy either way,
     # so partial-decompile observations are dropped from Tier 2. When that
     # leaves a category with no TP/FP/FN to measure against, say so explicitly.
-    for category in ("root", "ssl"):
+    for category in CATEGORIES:
         excluded = report.excluded_partial_decompile.get(category, 0)
         if report.tier2[category].precision.rate is None and excluded:
             console.print(

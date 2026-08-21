@@ -46,7 +46,13 @@ vendor allowlist. Deterministic and unit-testable anywhere.
 
 import os
 
-from common import KNOWN_NATIVE_LIBS, derive_namespace, is_known_third_party
+from common import (
+    KNOWN_NATIVE_LIBS,
+    derive_namespace,
+    gate_all_third_party,
+    is_known_third_party,
+    is_under_package,
+)
 
 
 def vendor_namespace(ns: str) -> str:
@@ -54,17 +60,6 @@ def vendor_namespace(ns: str) -> str:
     label - 'io.sentry.android.core.internal.util' -> 'io.sentry'."""
     parts = ns.split(".")
     return ".".join(parts[:2])
-
-
-def _under_app_package(ns: str | None, app_package: str) -> bool:
-    """True when a namespace sits under the app's OWN package subtree.
-
-    Bug-B parity with the androguard scanner: an app's own package can share a
-    vendor prefix (the real InsecureBankv2 is com.android.insecurebankv2; a
-    banking app can be com.google.mybankapp). A class under the app's own
-    package is the app's code even when its prefix matches a recognized vendor,
-    so it must be app-owned, never asserted third-party."""
-    return bool(app_package and ns and (ns == app_package or ns.startswith(app_package + ".")))
 
 
 def _is_native_lib(file: str) -> bool:
@@ -128,18 +123,6 @@ def _native_vendor(file: str) -> str | None:
     app's own native code - never asserted third-party)."""
     base = os.path.basename(file).lower()
     return base if base in KNOWN_NATIVE_LIBS else None
-
-
-def gate_all_third_party(attr: dict | None, detected: bool) -> dict | None:
-    """Null the all_third_party qualifier when the category is not detected
-    (ADR-0010): the flag annotates a DETECTED verdict, and a non-detected run
-    must never carry it or a consumer would infer a detection that doesn't
-    exist. The evidence counts (app_owned/third_party/vendors) are kept - they
-    describe the evidence and are still true - only the all_third_party flag is
-    gated. Returns the (possibly modified) dict unchanged when None."""
-    if not attr:
-        return attr
-    return {**attr, "all_third_party": bool(attr.get("all_third_party")) and bool(detected)}
 
 
 def attribute_root_evidence(app_package: str, evidence: list) -> dict | None:
@@ -208,7 +191,7 @@ def attribute_root_evidence(app_package: str, evidence: list) -> dict | None:
         #    vendor prefix (Bug B). Guarded next so an app whose package is
         #    com.google.mybankapp is never asserted a bundled SDK.
         ns = derive_namespace(file)
-        if _under_app_package(ns, app_package):
+        if is_under_package(ns, app_package):
             app_owned += 1
             continue
         # 3. A recognized vendor namespace is third-party.

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from report import attribution
+from common import is_under_package
 
 
 @dataclass
@@ -315,14 +316,14 @@ def test_under_app_package_recognizes_own_subtree():
     # The Bug-B parity guard: a class under the app's OWN package is the app's
     # code even when it shares a vendor prefix, so it must be app-owned - never
     # asserted third-party. Exact match and subtree both qualify.
-    assert attribution._under_app_package("com.google.mybankapp", "com.google.mybankapp") is True
-    assert attribution._under_app_package("com.google.mybankapp.x", "com.google.mybankapp") is True
+    assert is_under_package("com.google.mybankapp", "com.google.mybankapp") is True
+    assert is_under_package("com.google.mybankapp.x", "com.google.mybankapp") is True
     # a sibling under the same vendor prefix but NOT under the app's package is
     # not app-owned (the app is com.google.mybankapp, not com.google.*)
-    assert attribution._under_app_package("com.google.other", "com.google.mybankapp") is False
-    assert attribution._under_app_package("com.android.systemui", "com.android.insecurebankv2") is False
-    assert attribution._under_app_package(None, "com.example.app") is False
-    assert attribution._under_app_package("com.example.app", None) is False
+    assert is_under_package("com.google.other", "com.google.mybankapp") is False
+    assert is_under_package("com.android.systemui", "com.android.insecurebankv2") is False
+    assert is_under_package(None, "com.example.app") is False
+    assert is_under_package("com.example.app", None) is False
 
 
 def test_is_native_lib_detects_so_paths():

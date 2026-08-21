@@ -7,7 +7,7 @@ import threading
 import time
 from pathlib import Path
 
-from common import Action, StageResult
+from common import Action, StageResult, elapsed_ms
 from dynamic.device import _require_adb, setup_frida_connection
 from dynamic.synthesizer import ROOT_RECIPES
 
@@ -156,6 +156,31 @@ def _wait_for_checkpoint(messages: list, settle_seconds: float, require_evidence
         time.sleep(_CHECKPOINT_POLL_INTERVAL)
 
 
+def _self_terminated_result(
+    pid: int, messages: list, scripts_applied: list, target: str, start: float
+) -> StageResult:
+    """The FR-4.6 outcome: a spawned process that exited after the settle window
+    self-terminated because it detected the instrumentation (Frida/root). Shared
+    by the two-spawn and single-spawn paths so the reason stays word-for-word
+    identical and the outcome is a first-class logged failure, never a silent
+    success or an unexplained crash."""
+    return StageResult(
+        stage="dynamic", status="failed",
+        evidence={
+            "app_self_terminated": True,
+            "reason": (
+                "target app self-terminated after resume - detected the "
+                "instrumentation (Frida/root) and exited before dynamic "
+                "verification could confirm a bypass"
+            ),
+            "scripts_applied": scripts_applied, "pid": pid,
+            "frida_messages": messages, "target": target,
+        },
+        error="app self-terminated due to detected instrumentation (FR-4.6)",
+        duration_ms=elapsed_ms(start),
+    )
+
+
 def classify_self_termination(process_alive: bool) -> bool:
     """FR-4.6: after the bypass scripts have run and the settle window elapsed,
     a spawned process that is no longer alive self-terminated - it detected the
@@ -265,7 +290,7 @@ def run_dynamic_stage(
         return StageResult(
             stage="dynamic", status="skipped",
             evidence={"reason": "NEITHER classification - no bypass technique to apply"},
-            duration_ms=int((time.monotonic() - start) * 1000),
+            duration_ms=elapsed_ms(start),
         )
 
     script_names = SCRIPTS_BY_TARGET_ACTION.get(target, {}).get(action)
@@ -289,7 +314,7 @@ def run_dynamic_stage(
                         f"(action {action.value}) - not dynamically verified"
                     )
                 },
-                duration_ms=int((time.monotonic() - start) * 1000),
+                duration_ms=elapsed_ms(start),
             )
 
     # RESID-6H root-bypass envelope. The synthesized bypass (findings-specific)
@@ -419,49 +444,44 @@ def run_dynamic_stage(
         def on_message(message, data):
             messages.append(message)
 
+        def _run_one_spawn(script_src: str | None, ui_kind: Action,
+                           messages: list, settle_seconds: float):
+            """One fresh spawn driving a single dimension - attach, load the
+            combined source, resume, let the launcher draw, run the button-
+            triggered UI actions for `ui_kind`, then wait for the checkpoint.
+            Shared by both phases of the two-spawn flow so Phase A and Phase B
+            cannot drift. Returns (device, pid) for the caller's outcome."""
+            device, session, pid = attach(device_serial, package_name)
+            if script_src is not None:
+                load_script_source(session, script_src, on_message)
+            device.resume(pid)
+            time.sleep(1.0)  # let the launcher activity draw before any UI action
+            for ui_action in _ui_actions_for(target, ui_kind):
+                _run_ui_action(device_serial, ui_action)
+            _wait_for_checkpoint(messages, settle_seconds, require_evidence=True)
+            return device, pid
+
         # Phase A - SSL: a fresh spawn exercising the pinning check.
-        ssl_device, ssl_session, ssl_pid = attach(device_serial, package_name)
-        ssl_src = (SCRIPT_DIR / script_names[0]).read_text(encoding="utf-8") \
-            + "\n\n" + _root_envelope_src
-        load_script_source(ssl_session, ssl_src, on_message)
-        ssl_device.resume(ssl_pid)
-        time.sleep(1.0)  # let the launcher activity draw before any UI action
-        for ui_action in _ui_actions_for(target, Action.SSL_ONLY):
-            _run_ui_action(device_serial, ui_action)
-        _wait_for_checkpoint(messages, settle_seconds, require_evidence=True)
+        _run_one_spawn(
+            (SCRIPT_DIR / script_names[0]).read_text(encoding="utf-8")
+            + "\n\n" + _root_envelope_src,
+            Action.SSL_ONLY, messages, settle_seconds,
+        )
 
         # Phase B - root: a fresh spawn exercising the root check.
-        root_device, root_session, root_pid = attach(device_serial, package_name)
-        load_script_source(root_session, _root_envelope_src, on_message)
-        root_device.resume(root_pid)
-        time.sleep(1.0)
-        for ui_action in _ui_actions_for(target, Action.ROOT_ONLY):
-            _run_ui_action(device_serial, ui_action)
-        _wait_for_checkpoint(messages, settle_seconds, require_evidence=True)
+        root_device, root_pid = _run_one_spawn(
+            _root_envelope_src, Action.ROOT_ONLY, messages, settle_seconds,
+        )
 
         # FR-4.6: a spawned process gone after the settle window self-terminated.
         if classify_self_termination(_process_is_alive(root_device, root_pid)):
-            outcome["result"] = StageResult(
-                stage="dynamic", status="failed",
-                evidence={
-                    "app_self_terminated": True,
-                    "reason": (
-                        "target app self-terminated after resume - detected the "
-                        "instrumentation (Frida/root) and exited before dynamic "
-                        "verification could confirm a bypass"
-                    ),
-                    "scripts_applied": scripts_applied, "pid": root_pid,
-                    "frida_messages": messages, "target": target,
-                },
-                error="app self-terminated due to detected instrumentation (FR-4.6)",
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
+            outcome["result"] = _self_terminated_result(root_pid, messages, scripts_applied, target, start)
             return
 
         outcome["result"] = StageResult(
             stage="dynamic", status="success",
             evidence={"scripts_applied": scripts_applied, "pid": root_pid, "frida_messages": messages, "target": target},
-            duration_ms=int((time.monotonic() - start) * 1000),
+            duration_ms=elapsed_ms(start),
         )
 
     def _run_frida() -> None:
@@ -528,21 +548,7 @@ def run_dynamic_stage(
             # as a first-class, logged outcome with an explicit reason instead
             # of silently reporting a generic success or an unexplained crash.
             if classify_self_termination(_process_is_alive(device, pid)):
-                outcome["result"] = StageResult(
-                    stage="dynamic", status="failed",
-                    evidence={
-                        "app_self_terminated": True,
-                        "reason": (
-                            "target app self-terminated after resume - detected the "
-                            "instrumentation (Frida/root) and exited before dynamic "
-                            "verification could confirm a bypass"
-                        ),
-                        "scripts_applied": scripts_applied, "pid": pid,
-                        "frida_messages": messages, "target": target,
-                    },
-                    error="app self-terminated due to detected instrumentation (FR-4.6)",
-                    duration_ms=int((time.monotonic() - start) * 1000),
-                )
+                outcome["result"] = _self_terminated_result(pid, messages, scripts_applied, target, start)
                 return
 
             # Real-time UI-responsiveness: the app is alive (self-termination
@@ -574,13 +580,13 @@ def run_dynamic_stage(
                     "app_still_running": True,
                     "ui_liveness": ui_liveness,
                 },
-                duration_ms=int((time.monotonic() - start) * 1000),
+                duration_ms=elapsed_ms(start),
             )
         except Exception as exc:
             outcome["result"] = StageResult(
                 stage="dynamic", status="failed",
                 evidence={"frida_messages": messages}, error=str(exc),
-                duration_ms=int((time.monotonic() - start) * 1000),
+                duration_ms=elapsed_ms(start),
             )
 
     worker = threading.Thread(target=_run_frida, daemon=True)
@@ -593,6 +599,6 @@ def run_dynamic_stage(
             stage="dynamic", status="failed",
             evidence={"frida_messages": messages},
             error=f"frida stage exceeded {FRIDA_STAGE_TIMEOUT:.0f}s hard timeout - hung spawn/attach/load/resume",
-            duration_ms=int((time.monotonic() - start) * 1000),
+            duration_ms=elapsed_ms(start),
         )
     return outcome["result"]

@@ -600,3 +600,133 @@
     - "ro.build.type"
     - "ro.product.cpu.abi"
   evidence_type: bytecode_string
+
+# --- 2026 corpus broadening: modern (AI/developer-built) anti-root mechanisms ---
+# resetprop (Magisk's property daemon) spoofs build props to defeat test-keys
+# detection; magiskpolicy is its policy tool. Their names in app bytecode are a
+# real signal the app engages with Magisk's hide layer.
+- id: root_resetprop_magisk
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "resetprop"
+    - "magiskpolicy"
+  evidence_type: bytecode_string
+
+# A remounted rw /system is a classic post-root indicator; modern apps parse
+# /proc/mounts / mount output for it.
+- id: rw_system_mount_check
+  category: root
+  weight: 0.2
+  pattern_type: regex
+  patterns:
+    - "/proc/mounts"
+    - "SystemMount"
+    - "isSystemRW"
+  evidence_type: bytecode_string
+
+# Hardware-backed key attestation - the 2026 canonical anti-root/anti-emulator
+# mechanism (Play Integrity strong verdict + KeyStore attestation). The
+# android:attest certificate-chain alias and SecurityLevel are unique markers.
+- id: hardware_key_attestation
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "AttestationApplicationId"
+    - "SecurityLevel.STRONGBOX"
+    - "android:attest"
+  evidence_type: bytecode_string
+
+# Non-goldfish emulator markets: BlueStacks/Nox/Genymotion ship distinctive
+# package names an app can query; `ranchu` is the QEMU device model. Classic
+# anti-emulator markers complementing the goldfish Build.HARDWARE signature.
+- id: emulator_market_artifacts
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "com.genymotion"
+    - "com.bluestacks"
+    - "com.bignox"
+    - "ranchu"
+  evidence_type: bytecode_string
+
+# Modern systemless root/GSI (Magisk, Android 10+) use an overlayfs mount to make
+# /system appear modified; apps detect it via overlayfs props/mount markers.
+- id: overlayfs_system
+  category: root
+  weight: 0.2
+  pattern_type: string_literal
+  patterns:
+    - "overlayfs"
+    - "ro.overlayfs"
+  evidence_type: bytecode_string
+
+# Magisk/KernelSU daemon abstract-socket scan: reads /proc/net/unix looking for
+# @magisk_service / @ksu_ / @zygisk_service. Survives filesystem hiding - a
+# real 2026 runtime vector (Flutter Shield vector #9, Advanced Root Checker).
+- id: magisk_daemon_socket_scan
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "@magisk_service"
+    - "@ksu_"
+    - "/proc/net/unix"
+    - "@zygisk_service"
+  evidence_type: bytecode_string
+
+# Zygisk process-maps scan: /proc/self/maps for zygisk / libzygisk.so refs.
+- id: zygisk_process_maps_scan
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "/proc/self/maps"
+    - "zygisk"
+    - "libzygisk.so"
+  evidence_type: bytecode_string
+
+# SELinux kernel-policy probe (DirtySepolicy / Duck Detector, the 2026 frontier):
+# an app_zygote process asks the SELinux kernel whether injected rules exist for
+# magisk:s0 / ksu_file:s0 / lsposed_file:s0. No userspace hiding can lie to it.
+- id: selinux_policy_probe_magisk_ksu
+  category: root
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "magisk:s0"
+    - "ksu_file:s0"
+    - "lsposed_file:s0"
+    - "u:r:app_zygote"
+    - "DuckDetector"
+  evidence_type: bytecode_string
+
+# Bundled root-detection SDK frameworks: Flutter Shield / RootGuard / Advanced
+# Root Checker. An app that ships one of these is a "root detection present"
+# finding in itself (a structured, cross-layer detector).
+- id: rootguard_flutter_shield_framework
+  category: root
+  weight: 0.4
+  pattern_type: string_literal
+  patterns:
+    - "flutter_shield"
+    - "cordova-plugin-rootguard"
+  evidence_type: bytecode_string
+
+# Play Integrity Standard flow (2024+/1.5+): the app calls StandardIntegrityManager
+# -> StandardIntegrityTokenProvider -> PrepareIntegrityTokenRequest. Distinct from
+# the classic MEETS_* verdict-token sigs.
+# Play Integrity remediation-dialog API (1.5+): showDialog GET_STRONG_INTEGRITY /
+# GET_INTEGRITY type codes and standard-request error constants.
+- id: play_integrity_remediation_dialog
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "GET_STRONG_INTEGRITY"
+    - "INTEGRITY_TOKEN_PROVIDER_INVALID"
+    - "CLIENT_TRANSIENT_ERROR"
+  evidence_type: bytecode_string

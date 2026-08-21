@@ -1022,21 +1022,21 @@ def test_attrdict_attribute_access():
 
 
 def test_root_attribution_prefers_classification_field():
-    # _root_attribution: the pipeline-attached field is the single source of
+    # _category_attribution(side): the pipeline-attached field is the single source of
     # truth (so report and classification_json agree); the metadata-package
     # fallback exists only for direct generate_report() callers. The prefer
     # branch had no direct coverage - the attached value must win over any
     # recomputation.
     from dataclasses import replace
     from common import CategoryVerdict, ClassificationResult, Action
-    from report.generator import _root_attribution
+    from report.generator import _category_attribution
     cls = ClassificationResult(
         action=Action.ROOT_ONLY,
         root=CategoryVerdict(confidence=0.8, detected=True, evidence=[]),
         ssl=CategoryVerdict(confidence=0.0, detected=False, evidence=[]),
     )
     cls = replace(cls, root_attribution={"label": "app_owned", "counts": {"root_su_binary_paths": 1}})
-    got = _root_attribution({"package": {"package_name": "com.example.app"}}, cls)
+    got = _category_attribution({"package": {"package_name": "com.example.app"}}, cls, "root")
     assert got == {"label": "app_owned", "counts": {"root_su_binary_paths": 1}}
 
 
@@ -1044,14 +1044,14 @@ def test_ssl_attribution_prefers_classification_field():
     # Mirror for SSL: the attached ssl_attribution field wins over recomputation.
     from dataclasses import replace
     from common import CategoryVerdict, ClassificationResult, Action
-    from report.generator import _ssl_attribution
+    from report.generator import _category_attribution
     cls = ClassificationResult(
         action=Action.SSL_ONLY,
         root=CategoryVerdict(confidence=0.0, detected=False, evidence=[]),
         ssl=CategoryVerdict(confidence=0.8, detected=True, evidence=[]),
     )
     cls = replace(cls, ssl_attribution={"label": "bundled_sdk"})
-    assert _ssl_attribution({"package": {"package_name": "com.example.app"}}, cls) == {"label": "bundled_sdk"}
+    assert _category_attribution({"package": {"package_name": "com.example.app"}}, cls, "ssl") == {"label": "bundled_sdk"}
 
 
 def test_root_attribution_fallback_computes_when_field_unset():
@@ -1062,14 +1062,14 @@ def test_root_attribution_fallback_computes_when_field_unset():
     # zero direct coverage (only the prefer branch was tested).
     from types import SimpleNamespace
     from common import CategoryVerdict, ClassificationResult, Action
-    from report.generator import _root_attribution
+    from report.generator import _category_attribution
 
     empty = ClassificationResult(
         action=Action.ROOT_ONLY,
         root=CategoryVerdict(confidence=0.8, detected=True, evidence=[]),
         ssl=CategoryVerdict(confidence=0.0, detected=False, evidence=[]),
     )
-    assert _root_attribution({"package": {"package_name": "com.example.app"}}, empty) is None
+    assert _category_attribution({"package": {"package_name": "com.example.app"}}, empty, "root") is None
 
     owned = ClassificationResult(
         action=Action.ROOT_ONLY,
@@ -1078,7 +1078,7 @@ def test_root_attribution_fallback_computes_when_field_unset():
         ]),
         ssl=CategoryVerdict(confidence=0.0, detected=False, evidence=[]),
     )
-    got = _root_attribution({"package": {"package_name": "com.example.app"}}, owned)
+    got = _category_attribution({"package": {"package_name": "com.example.app"}}, owned, "root")
     assert got is not None
     assert got["app_package"] == "com.example.app"
 

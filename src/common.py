@@ -5,6 +5,124 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal, Protocol
+from pathlib import Path
+
+import hashlib
+import json
+import shutil
+import time
+import yaml
+
+
+def sha256_file(path: Path) -> str:
+    """Streamed SHA-256 of a file - canonical identity for dedup / output naming."""
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def elapsed_ms(start: float) -> int:
+    """Milliseconds since a `time.monotonic()` start timestamp - the shared
+    `duration_ms` idiom for StageResult, so every stage computes it identically."""
+    return int((time.monotonic() - start) * 1000)
+
+
+def atomic_json_write(cache_dir: Path, key: str, document: dict) -> None:
+    """Write `document` to <cache_dir>/<key>.json via tmp + atomic replace, so a
+    crash mid-write can never leave a partial entry that later reads as valid
+    (a corrupt cache is a miss, never a wrong result). Shared by the androguard
+    and native .so disk caches so the atomic-write discipline stays identical."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    tmp = cache_dir / f"{key}.json.tmp"
+    tmp.write_text(json.dumps(document, sort_keys=True), encoding="utf-8")
+    tmp.replace(cache_dir / f"{key}.json")
+
+
+def load_json_cache(cache_dir: Path, key: str) -> dict | None:
+    """Read <cache_dir>/<key>.json, returning the parsed dict or None on any miss
+    or unreadable/corrupt entry - a cache miss is a miss, never a wrong answer.
+    The caller validates its own version/trigger fields and constructs its
+    payload from the dict. Shared by the androguard and native .so disk caches."""
+    entry = cache_dir / f"{key}.json"
+    if not entry.is_file():
+        return None
+    try:
+        return json.loads(entry.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def require_tool(name: str) -> str:
+    """Resolve a required tool on PATH, failing loudly if absent (CLAUDE.md: the
+    deterministic core must never silently no-op when a toolchain binary is
+    missing). Shared by the ingest/decompile/native stages."""
+    path = shutil.which(name)
+    if path is None:
+        raise RuntimeError(
+            f"required tool '{name}' not found on PATH - this stage only runs on "
+            "the reference WSL2 environment with the Android toolchain installed"
+        )
+    return path
+
+
+def read_text_ignore(path: Path) -> str | None:
+    """Read a text file, returning None on OSError (unreadable/missing) instead
+    of raising - the shared 'skip unreadable candidate' idiom for scanning loops
+    over decompiled files. A file that cannot be read is skipped, never silently
+    treated as empty or fatal."""
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+
+
+def gate_all_third_party(attr: dict | None, detected: bool) -> dict | None:
+    """Null the all_third_party qualifier when the category is not detected
+    (ADR-0010): the flag annotates a DETECTED verdict, and a non-detected run
+    must never carry it or a consumer would infer a detection that doesn't
+    exist. The evidence counts (app_owned/third_party/vendors) are kept - they
+    describe the evidence and are still true - only the all_third_party flag is
+    gated. Shared by report attribution and storage persistence (storage stays
+    ignorant of report/). Returns the dict unchanged when None/falsy."""
+    if not attr:
+        return attr
+    return {**attr, "all_third_party": bool(attr.get("all_third_party")) and bool(detected)}
+
+
+def is_under_package(ns: str | None, app_package: str) -> bool:
+    """True when a namespace sits under an app's OWN package subtree.
+
+    Shared by the androguard scanner and report attribution so both agree on the
+    Bug-B rule: an app's own package can share a vendor prefix (a banking app can
+    be com.google.mybankapp), so a class under the app's own package is the
+    app's code even when its prefix matches a recognized vendor - never asserted
+    third-party."""
+    return bool(app_package and ns and (ns == app_package or ns.startswith(app_package + ".")))
+
+
+CATEGORIES = ("root", "ssl")
+
+
+def load_yaml_entries(path: Path, validate, ctor):
+    """Load a hand-authored YAML list of signature entries, validating each and
+    constructing the typed object. Shared by the Java, native, and packer
+    signature loaders - they differ only in the validator fn and dataclass."""
+    with open(path, "r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or []
+    entries = []
+    for entry in raw:
+        validate(entry, path)
+        entries.append(ctor(**entry))
+    return entries
+
+
+
 
 # --- Third-party namespace taxonomy (shared by static scan exclusion and report
 # attribution so both agree on what counts as a bundled SDK). Only namespaces

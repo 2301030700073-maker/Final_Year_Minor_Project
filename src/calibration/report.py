@@ -19,6 +19,8 @@ from calibration.types import Category, GroundTruthEntry, RunRow
 from static.coverage import category_is_confident_negative
 from static.decision_engine import DEFAULT_THRESHOLD
 
+from common import CATEGORIES
+
 
 def _category_is_confident_negative(run: RunRow, category: str) -> bool:
     """F2/G-A: a NEITHER is a confident negative only when every governing
@@ -32,7 +34,6 @@ def _category_is_confident_negative(run: RunRow, category: str) -> bool:
         return False  # no coverage -> surfaces unscannable -> not a confident negative
     return category_is_confident_negative(category, run.coverage)
 
-CATEGORIES: tuple[Category, ...] = ("root", "ssl")
 DEFAULT_BUCKET_EDGES = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
 

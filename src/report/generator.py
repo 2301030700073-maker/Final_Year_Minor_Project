@@ -57,31 +57,24 @@ TEMPLATE = Template("""\
 {% endif %}
 {% endif %}
 
+{% macro category_section(cat, classification, attr, coverage, heading, noun, vendor_note) -%}
+### {{ heading }}
+- Confidence: {{ confidence_bound(cat, classification[cat], coverage) }} -> {{ "DETECTED" if classification[cat].detected else "Inconclusive" }}{% if attr and attr.all_third_party and classification[cat].detected %} (**bundled SDK only** - none of these {{ noun }} matches are in the app's own package){% endif %}
+{% for e in classification[cat].evidence -%}
+- `{{ e.signature_id }}` at {{ e.file }}:{{ e.line_or_offset }} - `{{ e.matched_text }}`
+{% endfor %}
+{% if attr and attr.all_third_party and classification[cat].detected -%}
+> **Attribution:** all {{ attr.third_party }} {{ noun }} matches are in bundled third-party libraries ({{ attr.vendors | join(', ') }}), none in the app's own package (`{{ attr.app_package }}`) - {{ vendor_note }}
+{% elif attr and attr.mixed -%}
+> **Attribution:** {{ noun }} matches split across the app's own package ({{ attr.app_owned }}) and bundled third-party libraries ({{ attr.third_party }}: {{ attr.vendors | join(', ') }}).
+{% endif %}
+{% endmacro -%}
 ## Classification
 
 **Decision:** {{ classification.action.value }} (root threshold {{ classification.root_threshold }}, ssl threshold {{ classification.ssl_threshold }}){% if decompile_completeness == "partial" %} - **CAUTION: based on a PARTIAL decompile ({{ jadx_file_count }} files, jadx exit {{ jadx_exit_code }}) - see Limitations**{% endif %}{% if classification.unknown_uncovered %} - **Coverage-limited (unknown, not absent): {{ classification.unknown_uncovered | join(', ') }} - a NEITHER here is a lower bound, not a confident negative (governing surface not fully analyzed, or detection-shaped code matched no signature)**{% endif %}
 **Files scanned:** {{ classification.scanned_file_count }} (RESID-4C: a low count means this verdict is based on a small corpus - a NEITHER is not proof of absence){% if classification.unreadable_file_count %}{{ " " }}**CAUTION: {{ classification.unreadable_file_count }} candidate file(s) could not be read (OSError): {% for f in classification.unreadable_files %}`{{ f }}`{% if not loop.last %}, {% endif %}{% endfor %} - treat any NEITHER/Inconclusive verdict as degraded, not a full-scan clean.**{% endif %}
-
-### Root-detection
-- Confidence: {{ confidence_bound("root", classification.root, coverage) }} -> {{ "DETECTED" if classification.root.detected else "Inconclusive" }}{% if root_attribution and root_attribution.all_third_party and classification.root.detected %} (**bundled SDK only** - none of these root-detection matches are in the app's own package){% endif %}
-{% for e in classification.root.evidence -%}
-- `{{ e.signature_id }}` at {{ e.file }}:{{ e.line_or_offset }} - `{{ e.matched_text }}`
-{% endfor %}
-{% if root_attribution and root_attribution.all_third_party and classification.root.detected -%}
-> **Attribution:** all {{ root_attribution.third_party }} root-detection matches are in bundled third-party libraries ({{ root_attribution.vendors | join(', ') }}), none in the app's own package (`{{ root_attribution.app_package }}`) - consistent with SDK telemetry/fraud-detection root-checks, not necessarily the app's own anti-tampering logic.
-{% elif root_attribution and root_attribution.mixed -%}
-> **Attribution:** root-detection matches split across the app's own package ({{ root_attribution.app_owned }}) and bundled third-party libraries ({{ root_attribution.third_party }}: {{ root_attribution.vendors | join(', ') }}).
-{% endif %}
-### SSL-pinning
-- Confidence: {{ confidence_bound("ssl", classification.ssl, coverage) }} -> {{ "DETECTED" if classification.ssl.detected else "Inconclusive" }}{% if ssl_attribution and ssl_attribution.all_third_party and classification.ssl.detected %} (**bundled SDK only** - none of these SSL-pinning matches are in the app's own package){% endif %}
-{% for e in classification.ssl.evidence -%}
-- `{{ e.signature_id }}` at {{ e.file }}:{{ e.line_or_offset }} - `{{ e.matched_text }}`
-{% endfor %}
-{% if ssl_attribution and ssl_attribution.all_third_party and classification.ssl.detected -%}
-> **Attribution:** all {{ ssl_attribution.third_party }} SSL-pinning matches are in bundled third-party libraries ({{ ssl_attribution.vendors | join(', ') }}), none in the app's own package (`{{ ssl_attribution.app_package }}`) - consistent with bundled SDK pinning (e.g. OkHttp's CertificatePinner), not the app's own certificate-pinning logic.
-{% elif ssl_attribution and ssl_attribution.mixed -%}
-> **Attribution:** SSL-pinning matches split across the app's own package ({{ ssl_attribution.app_owned }}) and bundled third-party libraries ({{ ssl_attribution.third_party }}: {{ ssl_attribution.vendors | join(', ') }}).
-{% endif %}
+{{ category_section("root", classification, root_attribution, coverage, "Root-detection", "root-detection", "consistent with SDK telemetry/fraud-detection root-checks, not necessarily the app's own anti-tampering logic.") }}
+{{ category_section("ssl", classification, ssl_attribution, coverage, "SSL-pinning", "SSL-pinning", "consistent with bundled SDK pinning (e.g. OkHttp's CertificatePinner), not the app's own certificate-pinning logic.") }}
 {% if classification.evidence_capped_counts -%}
 > **Evidence truncated (RESID-4F cap):** {{ classification.evidence_capped_counts|length }} signature(s) matched more than the 50-row-per-signature display cap - the evidence rows above show the first 50 for each:{% for sig_id, total in classification.evidence_capped_counts.items() %} `{{ sig_id }}` matched {{ total }}x{% if not loop.last %},{% endif %}{% endfor %}.
 {% endif %}
@@ -339,8 +332,8 @@ def generate_report(
         correlation_skip_reason=correlation_skip_reason,
         correlation=correlation,
         stage_results=stage_results,
-        root_attribution=_root_attribution(metadata, classification),
-        ssl_attribution=_ssl_attribution(metadata, classification),
+        root_attribution=_category_attribution(metadata, classification, "root"),
+        ssl_attribution=_category_attribution(metadata, classification, "ssl"),
         **_decompile_summary(stage_results),
         **_capture_summary(stage_results),
         manifest=manifest,
@@ -360,29 +353,30 @@ def generate_report(
     return report_path
 
 
-def _root_attribution(metadata: dict, classification: ClassificationResult) -> dict | None:
-    """Classify root-detection evidence as app-owned vs bundled third-party, so
-    the report can say plainly when a DETECTED root verdict is entirely from
-    bundled SDKs (real PropertyGuru case) rather than the app's own logic.
-    Returns None when there's no root evidence to attribute. Prefers the
-    attribution the pipeline already attached to the classification object (so
-    the report and the persisted classification_json agree - single source of
-    truth); falls back to computing for direct generate_report() callers that
-    did not attach it."""
-    if classification.root_attribution is not None:
-        return classification.root_attribution
+def _category_attribution(
+    metadata: dict,
+    classification: ClassificationResult,
+    side: str,
+) -> dict | None:
+    """Classify one category's detection evidence (root or ssl) as app-owned vs
+    bundled third-party, so the report can say plainly when a DETECTED verdict is
+    entirely from bundled SDKs (real PropertyGuru case) rather than the app's own
+    logic - the same question for both (most real pinning is OkHttp's
+    CertificatePinner inside a bundled SDK). Returns None when there's no
+    evidence to attribute. Prefers the attribution the pipeline already attached
+    to the classification object (so the report and the persisted
+    classification_json agree - single source of truth); falls back to computing
+    for direct generate_report() callers that did not attach it."""
+    if side == "root":
+        if classification.root_attribution is not None:
+            return classification.root_attribution
+        evidence = classification.root.evidence
+    else:
+        if classification.ssl_attribution is not None:
+            return classification.ssl_attribution
+        evidence = classification.ssl.evidence
     package_name = (metadata.get("package") or {}).get("package_name", "")
-    return attribution_module.attribute_root_evidence(package_name, classification.root.evidence)
-
-
-def _ssl_attribution(metadata: dict, classification: ClassificationResult) -> dict | None:
-    """Attribution for SSL-pinning evidence - same question as root (most real
-    pinning is OkHttp's CertificatePinner inside a bundled SDK). Prefers the
-    attached machine field; falls back for direct generate_report() callers."""
-    if classification.ssl_attribution is not None:
-        return classification.ssl_attribution
-    package_name = (metadata.get("package") or {}).get("package_name", "")
-    return attribution_module.attribute_root_evidence(package_name, classification.ssl.evidence)
+    return attribution_module.attribute_root_evidence(package_name, evidence)
 
 
 def _decompile_summary(stage_results: list[StageResult]) -> dict:

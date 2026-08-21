@@ -40,6 +40,8 @@ from pathlib import Path
 
 import yaml
 
+from common import load_yaml_entries
+
 VALID_PACKER_SIGNAL_FIELDS = {"native_lib", "application", "asset"}
 
 
@@ -152,10 +154,4 @@ def _validate_packer_entry(entry: dict, path: Path) -> None:
 
 
 def load_packer_signatures(path: Path) -> list[PackerSignature]:
-    with open(path, "r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or []
-    sigs = []
-    for entry in raw:
-        _validate_packer_entry(entry, path)
-        sigs.append(PackerSignature(**entry))
-    return sigs
+    return load_yaml_entries(path, _validate_packer_entry, PackerSignature)

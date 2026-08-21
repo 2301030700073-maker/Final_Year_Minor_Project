@@ -195,14 +195,14 @@ def test_read_zip_entries_excludes_directories():
 
 
 def test_sha256_bytes_is_stable_and_hex(tmp_path):
-    # _sha256_bytes: the pure content hash that names the run dir. Must be a
+    # common.sha256_bytes: the pure content hash that names the run dir. Must be a
     # stable 64-char hex over the bytes, independent of path/name. Had zero
     # coverage.
-    from ingest.normalize import _sha256_bytes
-    h = _sha256_bytes(b"hello")
-    assert h == _sha256_bytes(b"hello")          # deterministic
+    from common import sha256_bytes
+    h = sha256_bytes(b"hello")
+    assert h == sha256_bytes(b"hello")          # deterministic
     assert len(h) == 64 and all(c in "0123456789abcdef" for c in h)
-    assert _sha256_bytes(b"hello") != _sha256_bytes(b"hellp")
+    assert sha256_bytes(b"hello") != sha256_bytes(b"hellp")
 
 
 def test_is_apk_zip_true_only_with_root_manifest(tmp_path):

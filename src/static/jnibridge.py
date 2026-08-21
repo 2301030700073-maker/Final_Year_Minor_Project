@@ -43,6 +43,7 @@ beyond reading .java files, every function fixture-testable anywhere (NFR).
 """
 
 from __future__ import annotations
+from common import read_text_ignore
 
 import re
 from dataclasses import dataclass
@@ -113,9 +114,8 @@ def extract_declared_natives(java_files: list[Path]) -> list[DeclaredNative]:
     seen: set[tuple[str, str]] = set()
     declared: list[DeclaredNative] = []
     for p in java_files:
-        try:
-            text = p.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
+        text = read_text_ignore(p)
+        if text is None:
             continue
         class_name = _class_fqn(p.name, text)
         for d in _declared_natives_in_text(text, class_name):

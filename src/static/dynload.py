@@ -15,6 +15,7 @@ for the boundary-4 unaccounted-loads signal, but for the java surface.
 """
 
 from __future__ import annotations
+from common import read_text_ignore
 
 import re
 from pathlib import Path
@@ -58,9 +59,8 @@ def find_dynamic_loading(java_files) -> list[str]:
     hits: list[str] = []
     for f in java_files:
         path = Path(f)
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
+        text = read_text_ignore(path)
+        if text is None:
             # Unreadable source (perm/race) - skip rather than abort. Same idiom
             # as find_external_native_loads.
             continue

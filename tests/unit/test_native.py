@@ -584,7 +584,7 @@ def test_analyze_so_returns_unscannable_on_tool_failure(tmp_path, monkeypatch):
     def fake_run(cmd, **kwargs):
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=60)
 
-    monkeypatch.setattr(native_mod, "_require_tool", fake_which)
+    monkeypatch.setattr(native_mod, "require_tool", fake_which)
     monkeypatch.setattr(native_mod.subprocess, "run", fake_run)
 
     lib = native_mod.analyze_so(so)
@@ -611,7 +611,7 @@ def test_analyze_so_marks_unscannable_on_nonzero_returncode(tmp_path, monkeypatc
     def fake_run(cmd, **kwargs):
         return FakeProc()
 
-    monkeypatch.setattr(native_mod, "_require_tool", fake_which)
+    monkeypatch.setattr(native_mod, "require_tool", fake_which)
     monkeypatch.setattr(native_mod.subprocess, "run", fake_run)
 
     lib = native_mod.analyze_so(so)
@@ -872,9 +872,9 @@ def test_group_identical_so_files_preserves_individual_digests(tmp_path):
     digest, paths = groups[0]
     assert len(paths) == 2
     # each member's own streamed digest equals the group key
-    from static.native import _sha256_file
+    from common import sha256_file
     for p in paths:
-        assert _sha256_file(p) == digest
+        assert sha256_file(p) == digest
 
 
 def test_group_identical_so_files_empty_and_singleton(tmp_path):
@@ -963,7 +963,7 @@ def test_analyze_so_ghidra_last_resort_recovers_tool_failure(tmp_path, monkeypat
     def fake_run(cmd, **kwargs):
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=60)  # symbol layer fails
 
-    monkeypatch.setattr(native_mod, "_require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(native_mod, "require_tool", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(native_mod.subprocess, "run", fake_run)
     monkeypatch.setattr(
         native_mod, "ghidra_decompile",
@@ -991,7 +991,7 @@ def test_analyze_so_ghidra_last_resort_falls_back_to_unscannable_when_ghidra_fai
     def fake_run(cmd, **kwargs):
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=60)
 
-    monkeypatch.setattr(native_mod, "_require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(native_mod, "require_tool", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(native_mod.subprocess, "run", fake_run)
     monkeypatch.setattr(
         native_mod, "ghidra_decompile",

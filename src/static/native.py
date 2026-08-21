@@ -20,18 +20,23 @@ from __future__ import annotations
 
 import concurrent.futures
 import hashlib
-import json
 import os
 import re
-import shutil
 import subprocess
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import yaml
 
-from common import KNOWN_NATIVE_LIBS, Evidence
+from common import CATEGORIES, KNOWN_NATIVE_LIBS, Evidence, atomic_json_write, load_json_cache, load_yaml_entries, sha256_file, require_tool, read_text_ignore
 from static.indicators import find_native_indicator_categories
+from static.signatures import (
+    _validate_bool_flag,
+    _validate_category,
+    _validate_pattern_type,
+    _validate_patterns_present,
+    _validate_weight,
+)
 from static.upx import is_upx_packed, unpack_upx
 
 VALID_NATIVE_PATTERN_TYPES = {"export_symbol", "embedded_string"}
@@ -79,7 +84,7 @@ class NativeToolError(RuntimeError):
     """A native tool failed on *this* library (timeout or non-zero exit) - the
     library is marked unscannable and the error surfaced, never silently
     misread as a clean empty parse (H4, principle 3). Distinct from a missing
-    tool, which _require_tool raises as a whole-stage failure."""
+    tool, which require_tool raises as a whole-stage failure."""
 
 
 @dataclass
@@ -453,15 +458,6 @@ def compute_degradation(libs: list[NativeLibrary]) -> dict[str, str]:
 
 # --- toolchain-gated (reference environment only) ----------------------------
 
-def _require_tool(name: str) -> str:
-    path = shutil.which(name)
-    if path is None:
-        raise RuntimeError(
-            f"required tool '{name}' not found on PATH - native analysis only runs "
-            "on the reference WSL2 environment with the Android toolchain installed"
-        )
-    return path
-
 
 def _run_tool(cmd: list[str], timeout: float, tool_name: str) -> str:
     """Run a tool, returning its stdout. Raises NativeToolError on timeout or
@@ -688,9 +684,8 @@ def find_external_native_loads(java_files: list) -> list[str]:
     may not cover."""
     targets: list[str] = []
     for p in java_files:
-        try:
-            text = p.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
+        text = read_text_ignore(p)
+        if text is None:
             continue
         for m in _LOAD_CALL.finditer(text):
             targets.append(m.group(2))
@@ -726,7 +721,7 @@ def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
     "unknown"), so a loaded-from-assets lib is examined rather than silently
     missed; callers gate which assets libs to analyze on actual System.load
     targets (find_external_native_loads) to avoid analyzing never-loaded assets."""
-    unzip = _require_tool("unzip")
+    unzip = require_tool("unzip")
     dest_root = Path(dest_root)
     dest_root.mkdir(parents=True, exist_ok=True)
     try:
@@ -894,29 +889,16 @@ def _load_analyze_cache(cache_dir: Path, so_hash: str, version: str, trigger_key
     """Return the cached NativeLibrary for this .so, or None on any miss/staleness.
     A corrupt or wrong-version entry is a miss - it is never treated as a valid
     lib (a partial write or old analysis must not silently certify a scan)."""
-    entry = cache_dir / f"{so_hash}.json"
-    if not entry.is_file():
+    data = load_json_cache(cache_dir, so_hash)
+    if data is None or data.get("version") != version or data.get("trigger_key") != trigger_key:
         return None
-    try:
-        data = json.loads(entry.read_text(encoding="utf-8"))
-        if data.get("version") != version or data.get("trigger_key") != trigger_key:
-            return None
-        return NativeLibrary(**data["lib"])
-    except Exception:
-        return None
+    return NativeLibrary(**data["lib"])
 
 
 def _save_analyze_cache(cache_dir: Path, so_hash: str, version: str, trigger_key: str, lib: NativeLibrary) -> None:
-    """Persist a NativeLibrary for this .so. Writes via tmp + atomic replace so a
-    crash mid-write can never leave a partial entry that later reads as a valid
-    lib (a corrupt cache is a miss, never a wrong result)."""
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    tmp = cache_dir / f"{so_hash}.json.tmp"
-    tmp.write_text(
-        json.dumps({"version": version, "trigger_key": trigger_key, "lib": asdict(lib)}),
-        encoding="utf-8",
-    )
-    tmp.replace(cache_dir / f"{so_hash}.json")
+    """Persist a NativeLibrary for this .so via the shared atomic write (a
+    corrupt cache is a miss, never a wrong result)."""
+    atomic_json_write(cache_dir, so_hash, {"version": version, "trigger_key": trigger_key, "lib": asdict(lib)})
 
 
 def analyze_so(so_path: Path, security_triggers: set[str] | None = None, cache_dir: Path | None = None) -> NativeLibrary:
@@ -931,7 +913,7 @@ def analyze_so(so_path: Path, security_triggers: set[str] | None = None, cache_d
     is unchanged - always a fresh analysis."""
     if cache_dir is None:
         return _analyze_so_uncached(so_path, security_triggers)
-    so_hash = _sha256_file(so_path)
+    so_hash = sha256_file(so_path)
     trigger_key = _trigger_key(security_triggers)
     cached = _load_analyze_cache(cache_dir, so_hash, _ANALYZE_CACHE_VERSION, trigger_key)
     if cached is not None:
@@ -989,9 +971,9 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
     function bodies decompiled even with NO Java_* export, recovering a
     technique hidden inside a body (e.g. the `fork` of the ptrace/fork
     anti-debug combo)."""
-    readelf = _require_tool("readelf")
-    nm = _require_tool("nm")
-    strings_tool = _require_tool("strings")
+    readelf = require_tool("readelf")
+    nm = require_tool("nm")
+    strings_tool = require_tool("strings")
 
     abi = so_path.parent.name if so_path.parent.name in KNOWN_ABIS else "unknown"
     name = so_path.name
@@ -999,7 +981,7 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
     # the UPX-fail and NativeToolError early returns) carries the identity of the
     # bytes actually analyzed - lets the Fix 3 dedup group clones by digest even
     # when the representative could not be fully read.
-    so_digest = _sha256_file(so_path)
+    so_digest = sha256_file(so_path)
 
     # Gap-4: UPX / native packing. A UPX-packed .so's symbols/strings read from
     # the compressed stub come back empty - reading it as clean would falsely
@@ -1174,14 +1156,6 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
     )
 
 
-def _sha256_file(path: Path) -> str:
-    """Streamed SHA-256 of a file - the identity key for the Fix 3 dedup group."""
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
 
 def group_identical_so_files(so_files: list[Path]) -> list[tuple[str, list[Path]]]:
     """Group extracted .so paths by byte-identical SHA-256, preserving order.
@@ -1197,7 +1171,7 @@ def group_identical_so_files(so_files: list[Path]) -> list[tuple[str, list[Path]
     by_digest: dict[str, list[Path]] = {}
     order: list[str] = []
     for so in so_files:
-        digest = _sha256_file(so)
+        digest = sha256_file(so)
         if digest not in by_digest:
             by_digest[digest] = []
             order.append(digest)
@@ -1219,41 +1193,17 @@ def _clone_lib_for_path(base: "NativeLibrary", so_path: Path) -> "NativeLibrary"
 
 def _validate_native_entry(entry: dict, path: Path) -> None:
     sig_id = entry.get("id", "<unnamed>")
-    if entry.get("category") not in {"root", "ssl"}:
-        raise ValueError(
-            f"{path}: native signature '{sig_id}' has invalid category "
-            f"{entry.get('category')!r} - must be one of ['root', 'ssl']"
-        )
-    weight = entry.get("weight")
-    if weight is None or not isinstance(weight, (int, float)) or not (0 <= weight <= 1):
-        raise ValueError(
-            f"{path}: native signature '{sig_id}' has invalid weight '{weight}' - must be in [0, 1]"
-        )
-    if entry.get("pattern_type") not in VALID_NATIVE_PATTERN_TYPES:
-        raise ValueError(
-            f"{path}: native signature '{sig_id}' has invalid pattern_type "
-            f"{entry.get('pattern_type')!r} - must be one of {sorted(VALID_NATIVE_PATTERN_TYPES)}"
-        )
-    if not entry.get("patterns"):
-        raise ValueError(f"{path}: native signature '{sig_id}' has no patterns")
+    _validate_category(entry, path, sig_id, CATEGORIES, label="native signature")
+    _validate_weight(entry, path, sig_id, label="native signature")
+    _validate_pattern_type(entry, path, sig_id, VALID_NATIVE_PATTERN_TYPES, label="native signature")
+    _validate_patterns_present(entry, path, sig_id, label="native signature")
     # require_all is an opt-in bool like the Java-side matching flags - a typo
     # ("true" as a string) must fail loudly at load, not silently change the
     # signature into a no-op or an OR.
-    ra = entry.get("require_all")
-    if ra is not None and not isinstance(ra, bool):
-        raise ValueError(
-            f"{path}: native signature '{sig_id}' has invalid require_all "
-            f"{ra!r} - must be a boolean"
-        )
+    _validate_bool_flag(entry, path, sig_id, "require_all", label="native signature")
 
 
 def load_native_signatures(path: Path) -> list[NativeSignature]:
-    with open(path, "r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or []
-    sigs = []
-    for entry in raw:
-        _validate_native_entry(entry, path)
-        sigs.append(NativeSignature(**entry))
-    return sigs
+    return load_yaml_entries(path, _validate_native_entry, NativeSignature)
 
 

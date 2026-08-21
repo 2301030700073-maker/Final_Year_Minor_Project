@@ -32,7 +32,7 @@ import time
 import zipfile
 from pathlib import Path
 
-from common import StageResult
+from common import StageResult, sha256_bytes, elapsed_ms, require_tool
 
 STATUS_SIDECAR_NAME = "decompile_status.json"
 
@@ -108,16 +108,6 @@ def apktool_timeout_for_size(size_bytes: int) -> int:
 
 
 
-def _require_tool(name: str) -> str:
-    path = shutil.which(name)
-    if path is None:
-        raise RuntimeError(
-            f"required tool '{name}' not found on PATH - this stage only runs on "
-            "the reference WSL2 environment with the Android toolchain installed"
-        )
-    return path
-
-
 def _find_jadx() -> str:
     """Prefer the repo-pinned jadx (tools/jadx/bin/jadx) over whatever is on PATH.
 
@@ -132,7 +122,7 @@ def _find_jadx() -> str:
     vendored = root / "tools" / "jadx" / "bin" / "jadx"
     if vendored.exists():
         return str(vendored)
-    return _require_tool("jadx")
+    return require_tool("jadx")
 
 
 def _tail(text: str, max_chars: int = 4000) -> str:
@@ -433,7 +423,7 @@ def _list_dex_entries(apk_path: Path) -> list[dict]:
                 data = z.read(name)
                 entries.append({
                     "name": name,
-                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "sha256": sha256_bytes(data),
                     "size": len(data),
                 })
     except (OSError, zipfile.BadZipFile, KeyError):
@@ -686,7 +676,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
             apk_size = 0
         dex_entries = _list_dex_entries(apk_path)
 
-        apktool = _require_tool("apktool")
+        apktool = require_tool("apktool")
 
         # L-M1 lazy decompile: when the APK is a zip holding classes*.dex, run
         # jadx once PER DEX - bounded memory, so a hung/OOM on one DEX no longer
@@ -783,7 +773,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                     "apktool --no-res smali fallback also produced nothing\n"
                     f"log: {jadx_log_text}\napktool: {apktool_fb_log}"
                 ),
-                duration_ms=int((time.monotonic() - start) * 1000),
+                duration_ms=elapsed_ms(start),
             )
 
         # L-M1 core: when jadx is partial (exit != 0 but wrote real .java - the
@@ -884,7 +874,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         # report via returncode (see _run_tool_logged).
         return StageResult(
             stage="decompile", status="failed", evidence={}, error=str(exc),
-            duration_ms=int((time.monotonic() - start) * 1000),
+            duration_ms=elapsed_ms(start),
         )
 
 
@@ -911,7 +901,7 @@ def _result(
             "recovered_from_hollow_cache": recovered_from_hollow_cache,
             "jadx_error_tail": jadx_error_tail,
         },
-        duration_ms=int((time.monotonic() - start) * 1000),
+        duration_ms=elapsed_ms(start),
     )
 
 

@@ -9,7 +9,7 @@ from static.decompile import (
     _enforce_cache_budget,
     _find_cfr_jar,
     _load_registry,
-    _require_tool,
+    require_tool,
     _run_secondary_fallback,
     _tail,
     _tail_file,
@@ -24,7 +24,7 @@ def test_decompile_surfaces_real_stderr_not_just_the_generic_exit_message(tmp_pa
     # non-zero exit status 1" - the actual jadx stderr (which would explain
     # WHY - OOM, a specific class it choked on, etc.) was captured by
     # subprocess.run and then silently discarded by str(exc).
-    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("static.decompile.require_tool", lambda name: f"/usr/bin/{name}")
 
     def fake_run(cmd, stdout, stderr, timeout):
         # Output now streams to the log file (D3) instead of being captured.
@@ -79,7 +79,7 @@ def test_decompile_tolerates_partial_jadx_output_when_real_files_were_written(tm
     # files (a full webkit package, a complete auth service, encryption
     # code) before crashing later in the DEX. Previously this was
     # indistinguishable from "wrote nothing" and discarded wholesale.
-    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("static.decompile.require_tool", lambda name: f"/usr/bin/{name}")
 
     def fake_run(cmd, stdout, stderr, timeout):
         if cmd[0].endswith("jadx"):
@@ -137,7 +137,7 @@ def test_large_no_dex_apk_is_decompiled_not_refused(tmp_path, monkeypatch):
         f.seek(101 * 1024 * 1024)  # sparse: reports >100MB, occupies ~0 bytes
         f.write(b"\x00")           # not a valid zip -> _list_dex_entries returns []
 
-    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("static.decompile.require_tool", lambda name: f"/usr/bin/{name}")
 
     def fake_run(cmd, stdout, stderr, timeout):
         if cmd[0].endswith("jadx"):
@@ -187,7 +187,7 @@ def test_decompile_smali_fallback_rescues_jadx_zero_output_to_partial(tmp_path, 
     # fast path must rescue it to an honestly-labeled PARTIAL (never complete -
     # jadx_file_count is 0, so the Java surface is unrecovered, ADR-0006) with the
     # smali tree exposed as a scannable apktool_output scan root.
-    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("static.decompile.require_tool", lambda name: f"/usr/bin/{name}")
 
     def fake_run(cmd, stdout, stderr, timeout):
         # jadx crashes (rc=1) and writes nothing; apktool --no-res succeeds and
@@ -237,7 +237,7 @@ def test_decompile_smali_fallback_still_hard_fails_when_apktool_also_empty(tmp_p
     # L-M1 honesty: the smali fast path only rescues a jadx-zero-output run when
     # apktool actually lands real output. If apktool ALSO writes nothing, this is
     # still a true hard failure (nothing scannable anywhere) - never a fake partial.
-    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("static.decompile.require_tool", lambda name: f"/usr/bin/{name}")
 
     def fake_run(cmd, stdout, stderr, timeout):
         stdout.write("immediate crash")
@@ -256,7 +256,7 @@ def test_decompile_total_failure_when_jadx_writes_zero_files(tmp_path, monkeypat
     # Same failure mode as before this change - jadx exits nonzero and
     # leaves nothing usable behind, so it's still a hard failure, not a
     # tolerated partial.
-    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("static.decompile.require_tool", lambda name: f"/usr/bin/{name}")
 
     def fake_run(cmd, stdout, stderr, timeout):
         stdout.write("immediate crash")
@@ -293,7 +293,7 @@ def test_decompile_redecompiles_stale_partial_cache(tmp_path, monkeypatch):
     # whole-APK path (no classes*.dex): the existing jadx files are reused as a
     # clean result on the re-decompile, so no toolchain is actually invoked -
     # but the stale partial sidecar must NOT be trusted as a cache hit.
-    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("static.decompile.require_tool", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr("static.decompile._list_dex_entries", lambda apk: [])
 
     result = decompile(tmp_path / "real.apk", tmp_path, "cachedpartial")
@@ -386,7 +386,7 @@ def test_decompile_detects_hollow_cache_and_recompiles_instead_of_trusting_it(tm
         "jadx_file_count": 27720, "jadx_error_tail": "OutOfMemoryError",
     }))
 
-    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("static.decompile.require_tool", lambda name: f"/usr/bin/{name}")
 
     def fake_run(cmd, stdout, stderr, timeout):
         if cmd[0].endswith("jadx"):
@@ -413,7 +413,7 @@ def test_decompile_detects_hollow_cache_and_recompiles_instead_of_trusting_it(tm
 def test_decompile_times_out_loudly_when_jadx_hangs(tmp_path, monkeypatch):
     # D1: a hung jadx must fail loudly with the timeout stated, not hang the
     # whole pipeline silently (NFR-1).
-    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("static.decompile.require_tool", lambda name: f"/usr/bin/{name}")
 
     def fake_run(cmd, stdout, stderr, timeout):
         raise subprocess.TimeoutExpired(cmd, timeout=timeout)
@@ -445,7 +445,7 @@ def test_decompile_reuses_valid_jadx_and_reruns_only_hollow_apktool(tmp_path, mo
         (apktool_dir / "AndroidManifest.xml").write_text("<manifest/>")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("static.decompile.require_tool", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr("static.decompile.subprocess.run", fake_run)
 
     result = decompile(tmp_path / "huge.apk", tmp_path, apk_hash)
@@ -456,9 +456,9 @@ def test_decompile_reuses_valid_jadx_and_reruns_only_hollow_apktool(tmp_path, mo
     assert result.evidence["apktool_exit_code"] == 0
 
 
-def test_require_tool_raises_loudly_when_missing():
+def testrequire_tool_raises_loudly_when_missing():
     with pytest.raises(RuntimeError, match="not found on PATH"):
-        _require_tool("definitely_not_a_real_tool_xyz")
+        require_tool("definitely_not_a_real_tool_xyz")
 
 
 def test_jadx_timeout_scales_by_apk_size():
@@ -687,7 +687,7 @@ def test_decompile_degrades_to_partial_when_apktool_writes_no_manifest(tmp_path,
     # binary manifest straight from the APK (parse_manifest_apk) instead. A TOTAL
     # failure (nothing from either tool) still hard-fails at the jadx-zero-files
     # gate - only the good-analysis case continues as partial (ADR-0006).
-    monkeypatch.setattr("static.decompile._require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("static.decompile.require_tool", lambda name: f"/usr/bin/{name}")
 
     def fake_run(cmd, stdout, stderr, timeout):
         if cmd[0].endswith("jadx"):

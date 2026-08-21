@@ -22,7 +22,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from common import StageResult
+from common import StageResult, elapsed_ms
 
 # Exact-match categories (no suffix allowed); AUTHORIZED_ENGAGEMENT: is the
 # only one that takes a suffix id (see validate_justification).
@@ -139,6 +139,36 @@ def _append_audit_record(audit_log_path: Path, record: dict) -> None:
     _last_hash_by_path[str(audit_log_path)] = record["record_hash"]
 
 
+def _append_outcome(
+    audit_log_path: Path,
+    record: dict,
+    start: float,
+) -> StageResult:
+    """Shared append-and-map tail for every record_* function (dedup): appends
+    the record to the hash-chained audit log and maps the outcome to a
+    StageResult (FR-8 consistency) - success with the record as evidence, or
+    failed when a corrupt log made the append impossible (LIM-D/RESID-2D),
+    never a raw traceback."""
+    try:
+        _append_audit_record(audit_log_path, record)
+    except ValueError as exc:
+        return StageResult(
+            stage="audit", status="failed", evidence={}, error=str(exc),
+            duration_ms=elapsed_ms(start),
+        )
+    return StageResult(
+        stage="audit", status="success", evidence=record,
+        duration_ms=elapsed_ms(start),
+    )
+
+
+def _invalid_justification_error(justification: str) -> str:
+    return (
+        f"invalid --justification '{justification}' - must be one of "
+        f"{', '.join(EXACT_JUSTIFICATIONS)} or {AUTHORIZED_ENGAGEMENT_PREFIX}<id>"
+    )
+
+
 def record_authorization(
     audit_log_path: Path,
     justification: str,
@@ -152,11 +182,8 @@ def record_authorization(
     if not validate_justification(justification):
         return StageResult(
             stage="audit", status="failed", evidence={},
-            error=(
-                f"invalid --justification '{justification}' - must be one of "
-                f"{', '.join(EXACT_JUSTIFICATIONS)} or {AUTHORIZED_ENGAGEMENT_PREFIX}<id>"
-            ),
-            duration_ms=int((time.monotonic() - start) * 1000),
+            error=_invalid_justification_error(justification),
+            duration_ms=elapsed_ms(start),
         )
 
     record = {
@@ -173,20 +200,7 @@ def record_authorization(
         # completion back to its authorization (semantic check on top of the
         # hash chain). Omitted when callers don't track a run id.
         record["run_id"] = run_id
-    try:
-        _append_audit_record(audit_log_path, record)
-    except ValueError as exc:
-        # LIM-D: a corrupt log (e.g. a malformed tail line) must fail this
-        # record loudly as a StageResult, not raise a raw traceback.
-        return StageResult(
-            stage="audit", status="failed", evidence={}, error=str(exc),
-            duration_ms=int((time.monotonic() - start) * 1000),
-        )
-
-    return StageResult(
-        stage="audit", status="success", evidence=record,
-        duration_ms=int((time.monotonic() - start) * 1000),
-    )
+    return _append_outcome(audit_log_path, record, start)
 
 
 def record_run_completion(
@@ -221,17 +235,7 @@ def record_run_completion(
         "stage_statuses": stage_statuses,
         "verification": verification,
     }
-    try:
-        _append_audit_record(audit_log_path, record)
-    except ValueError as exc:
-        return StageResult(
-            stage="audit", status="failed", evidence={}, error=str(exc),
-            duration_ms=int((time.monotonic() - start) * 1000),
-        )
-    return StageResult(
-        stage="audit", status="success", evidence=record,
-        duration_ms=int((time.monotonic() - start) * 1000),
-    )
+    return _append_outcome(audit_log_path, record, start)
 
 
 def record_ingest_failure(
@@ -267,19 +271,7 @@ def record_ingest_failure(
         "git_commit": git_commit,
         "error": error,
     }
-    try:
-        _append_audit_record(audit_log_path, record)
-    except ValueError as exc:
-        # RESID-2D: a corrupt log must not crash the ingest-failure path; report
-        # it as a failed StageResult instead.
-        return StageResult(
-            stage="audit", status="failed", evidence={}, error=str(exc),
-            duration_ms=int((time.monotonic() - start) * 1000),
-        )
-    return StageResult(
-        stage="audit", status="success", evidence=record,
-        duration_ms=int((time.monotonic() - start) * 1000),
-    )
+    return _append_outcome(audit_log_path, record, start)
 
 
 def record_classification(
@@ -315,17 +307,7 @@ def record_classification(
         "action": action,
         "classification": classification,
     }
-    try:
-        _append_audit_record(audit_log_path, record)
-    except ValueError as exc:
-        return StageResult(
-            stage="audit", status="failed", evidence={}, error=str(exc),
-            duration_ms=int((time.monotonic() - start) * 1000),
-        )
-    return StageResult(
-        stage="audit", status="success", evidence=record,
-        duration_ms=int((time.monotonic() - start) * 1000),
-    )
+    return _append_outcome(audit_log_path, record, start)
 
 
 def record_re_attribution(
@@ -355,11 +337,8 @@ def record_re_attribution(
     if not validate_justification(justification):
         return StageResult(
             stage="audit", status="failed", evidence={},
-            error=(
-                f"invalid --justification '{justification}' - must be one of "
-                f"{', '.join(EXACT_JUSTIFICATIONS)} or {AUTHORIZED_ENGAGEMENT_PREFIX}<id>"
-            ),
-            duration_ms=int((time.monotonic() - start) * 1000),
+            error=_invalid_justification_error(justification),
+            duration_ms=elapsed_ms(start),
         )
     record = {
         "event": "re_attributed",
@@ -374,17 +353,7 @@ def record_re_attribution(
         "affected_run_ids": affected_run_ids,
         "force": force,
     }
-    try:
-        _append_audit_record(audit_log_path, record)
-    except ValueError as exc:
-        return StageResult(
-            stage="audit", status="failed", evidence={}, error=str(exc),
-            duration_ms=int((time.monotonic() - start) * 1000),
-        )
-    return StageResult(
-        stage="audit", status="success", evidence=record,
-        duration_ms=int((time.monotonic() - start) * 1000),
-    )
+    return _append_outcome(audit_log_path, record, start)
 
 
 def verify_audit_log(audit_log_path: Path) -> dict:

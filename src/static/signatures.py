@@ -11,7 +11,14 @@ from pathlib import Path
 
 import yaml
 
-from common import Evidence, StaticEvidence, derive_namespace, is_known_third_party
+from common import (
+    CATEGORIES,
+    Evidence,
+    StaticEvidence,
+    derive_namespace,
+    is_known_third_party,
+    load_yaml_entries,
+)
 from static.deobfuscate import MappingTable, deobfuscate_source
 from static.indicators import find_indicator_categories
 
@@ -40,7 +47,7 @@ SCANNED_SUFFIXES = (
     ".html", ".htm",
 )
 
-VALID_CATEGORIES = {"root", "ssl"}
+VALID_CATEGORIES = set(CATEGORIES)
 VALID_PATTERN_TYPES = {"string_literal", "class_reference", "regex"}
 
 # RESID-4F: cap the number of recorded matches per signature. A signature like
@@ -79,6 +86,56 @@ class Signature:
     multiline: bool = False
 
 
+def _validate_category(entry: dict, path: Path, sig_id: str, valid, label: str = "signature") -> None:
+    """Reject a category outside the allowed set (shared by the Java and native
+    signature loaders). The category check is the critical one (4-2): scan()
+    guards on category=="root"/"ssl", so a mistyped value ("Root", "both")
+    matches neither branch - the signature is silently dead. Fail loudly at load
+    (ADR-0001/principle 3)."""
+    category = entry.get("category")
+    if category not in valid:
+        raise ValueError(
+            f"{path}: {label} '{sig_id}' has invalid category '{category}' - "
+            f"must be one of {sorted(valid)}"
+        )
+
+
+def _validate_weight(entry: dict, path: Path, sig_id: str, label: str = "signature") -> None:
+    """Reject a weight outside [0, 1] (shared). A bad weight would otherwise
+    silently mis-weight a match; fail loudly at load instead."""
+    weight = entry.get("weight")
+    if weight is None or not isinstance(weight, (int, float)) or not (0 <= weight <= 1):
+        raise ValueError(
+            f"{path}: {label} '{sig_id}' has invalid weight '{weight}' - must be a number in [0, 1]"
+        )
+
+
+def _validate_pattern_type(entry: dict, path: Path, sig_id: str, valid, label: str = "signature") -> None:
+    """Reject a pattern_type outside the loader's allowed set (shared)."""
+    pattern_type = entry.get("pattern_type")
+    if pattern_type not in valid:
+        raise ValueError(
+            f"{path}: {label} '{sig_id}' has invalid pattern_type '{pattern_type}' - "
+            f"must be one of {sorted(valid)}"
+        )
+
+
+def _validate_patterns_present(entry: dict, path: Path, sig_id: str, label: str = "signature") -> None:
+    """Reject a signature with no patterns (shared)."""
+    if not entry.get("patterns"):
+        raise ValueError(f"{path}: {label} '{sig_id}' has no patterns")
+
+
+def _validate_bool_flag(entry: dict, path: Path, sig_id: str, flag_name: str, label: str = "signature") -> None:
+    """Reject an opt-in flag written as a non-bool (e.g. the string "true") - a
+    typo must fail loudly at load, not truthy-silently change behavior (L-M9)."""
+    value = entry.get(flag_name)
+    if value is not None and not isinstance(value, bool):
+        raise ValueError(
+            f"{path}: {label} '{sig_id}' has invalid {flag_name} {value!r} - must be a boolean"
+        )
+
+
 def _validate_signature_entry(entry: dict, path: Path) -> None:
     """Reject a signature that would otherwise silently no-op or crash scan.
     The category check is the critical one (4-2): scan() guards on
@@ -86,35 +143,16 @@ def _validate_signature_entry(entry: dict, path: Path) -> None:
     matches neither branch - the signature is silently dead and detection is
     silently weaker. Fail loudly at load instead (ADR-0001/principle 3)."""
     sig_id = entry.get("id", "<unnamed>")
-    category = entry.get("category")
-    if category not in VALID_CATEGORIES:
-        raise ValueError(
-            f"{path}: signature '{sig_id}' has invalid category '{category}' - "
-            f"must be one of {sorted(VALID_CATEGORIES)}"
-        )
-    weight = entry.get("weight")
-    if weight is None or not isinstance(weight, (int, float)) or not (0 <= weight <= 1):
-        raise ValueError(
-            f"{path}: signature '{sig_id}' has invalid weight '{weight}' - must be a number in [0, 1]"
-        )
+    _validate_category(entry, path, sig_id, VALID_CATEGORIES)
+    _validate_weight(entry, path, sig_id)
     pattern_type = entry.get("pattern_type")
-    if pattern_type not in VALID_PATTERN_TYPES:
-        raise ValueError(
-            f"{path}: signature '{sig_id}' has invalid pattern_type '{pattern_type}' - "
-            f"must be one of {sorted(VALID_PATTERN_TYPES)}"
-        )
-    if not entry.get("patterns"):
-        raise ValueError(f"{path}: signature '{sig_id}' has no patterns")
+    _validate_pattern_type(entry, path, sig_id, VALID_PATTERN_TYPES)
+    _validate_patterns_present(entry, path, sig_id)
     # L-M9: the new opt-in flags must fail loudly on a typo (a string "true"
     # instead of a bool) exactly like the other hand-authored fields, instead
     # of truthy-silently changing detection behavior at scan time.
     for flag_name in ("case_sensitive", "multiline"):
-        value = entry.get(flag_name)
-        if value is not None and not isinstance(value, bool):
-            raise ValueError(
-                f"{path}: signature '{sig_id}' has invalid {flag_name} "
-                f"{value!r} - must be a boolean"
-            )
+        _validate_bool_flag(entry, path, sig_id, flag_name)
     # multiline only makes sense for regex: string_literal/class_reference
     # matching is defined per-line and has no cross-line mode, so allowing the
     # flag there would be a silent no-op. Reject at load instead (same rule as
@@ -140,13 +178,7 @@ def _validate_signature_entry(entry: dict, path: Path) -> None:
 
 
 def load_signatures(path: Path) -> list[Signature]:
-    with open(path, "r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or []
-    signatures = []
-    for entry in raw:
-        _validate_signature_entry(entry, path)
-        signatures.append(Signature(**entry))
-    return signatures
+    return load_yaml_entries(path, _validate_signature_entry, Signature)
 
 
 def _line_matches(line: str, signature: Signature) -> str | None:

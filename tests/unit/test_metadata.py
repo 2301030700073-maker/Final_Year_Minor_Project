@@ -12,19 +12,19 @@ from pathlib import Path
 from ingest.metadata import (
     Aapt2Error,
     ApksignerError,
-    _require_tool,
+    require_tool,
     run_aapt2_dump,
     run_apksigner_verify,
     tool_versions,
 )
 
 
-def test_require_tool_raises_when_missing(monkeypatch):
+def testrequire_tool_raises_when_missing(monkeypatch):
     # metadata.py:89-90: a required tool absent from PATH raises loudly (the
     # reference-env fail, never a silent empty result).
-    monkeypatch.setattr("ingest.metadata.shutil.which", lambda name: None)
+    monkeypatch.setattr("common.shutil.which", lambda name: None)
     try:
-        _require_tool("aapt2")
+        require_tool("aapt2")
         raise AssertionError("expected RuntimeError")
     except RuntimeError as e:
         assert "required tool" in str(e)
@@ -34,7 +34,7 @@ def test_run_tool_success_returns_stdout(monkeypatch):
     # metadata.py:126-129: the happy path returns subprocess stdout.
     class _Result:
         stdout = "out"
-    monkeypatch.setattr("ingest.metadata.shutil.which", lambda name: "aapt2")
+    monkeypatch.setattr("common.shutil.which", lambda name: "aapt2")
     monkeypatch.setattr("ingest.metadata.subprocess.run", lambda *a, **k: _Result())
     assert run_aapt2_dump(Path("x.apk")) == "out"
 
@@ -42,7 +42,7 @@ def test_run_tool_success_returns_stdout(monkeypatch):
 def test_run_tool_timeout_raises_tool_error(monkeypatch):
     # metadata.py:130-131: a timeout surfaces as the typed ToolError, not a bare
     # subprocess exception, with the honest cause chained.
-    monkeypatch.setattr("ingest.metadata.shutil.which", lambda name: "aapt2")
+    monkeypatch.setattr("common.shutil.which", lambda name: "aapt2")
     def _boom(*a, **k):
         raise subprocess.TimeoutExpired("aapt2", 30)
     monkeypatch.setattr("ingest.metadata.subprocess.run", _boom)
@@ -56,7 +56,7 @@ def test_run_tool_timeout_raises_tool_error(monkeypatch):
 def test_run_tool_called_process_error_surfaces_stderr(monkeypatch):
     # metadata.py:132-135: a nonzero exit is wrapped, keeping the first stderr
     # line (bounded to 200 chars) as the actionable detail.
-    monkeypatch.setattr("ingest.metadata.shutil.which", lambda name: "apksigner")
+    monkeypatch.setattr("common.shutil.which", lambda name: "apksigner")
     def _boom(*a, **k):
         raise subprocess.CalledProcessError(1, ["apksigner"], stderr="boom")
     monkeypatch.setattr("ingest.metadata.subprocess.run", _boom)
@@ -69,8 +69,8 @@ def test_run_tool_called_process_error_surfaces_stderr(monkeypatch):
 
 def test_tool_versions_degrades_to_unknown_when_tool_missing(monkeypatch):
     # metadata.py:164-169: a missing optional tool degrades to "unknown" (never
-    # fails ingest), and a _require_tool RuntimeError is swallowed the same way.
-    monkeypatch.setattr("ingest.metadata.shutil.which", lambda name: None)
+    # fails ingest), and a require_tool RuntimeError is swallowed the same way.
+    monkeypatch.setattr("common.shutil.which", lambda name: None)
     tool_versions.cache_clear()
     try:
         v = tool_versions()
@@ -100,7 +100,7 @@ def test_ingest_full_tool_path_extracts_package(tmp_path, monkeypatch):
 
     class _Result:
         stdout = "package: name='com.example' versionCode='1' versionName='1.0'\n"
-    monkeypatch.setattr("ingest.metadata.shutil.which", lambda name: "aapt2")
+    monkeypatch.setattr("common.shutil.which", lambda name: "aapt2")
     monkeypatch.setattr("ingest.metadata.subprocess.run", lambda *a, **k: _Result())
 
     res = ingest(apk)
@@ -120,7 +120,7 @@ def test_ingest_missing_package_name_fails_loudly(tmp_path, monkeypatch):
 
     class _Result:
         stdout = "no package line here\n"
-    monkeypatch.setattr("ingest.metadata.shutil.which", lambda name: "aapt2")
+    monkeypatch.setattr("common.shutil.which", lambda name: "aapt2")
     monkeypatch.setattr("ingest.metadata.subprocess.run", lambda *a, **k: _Result())
 
     res = ingest(apk)

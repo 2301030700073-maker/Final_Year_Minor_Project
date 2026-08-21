@@ -47,9 +47,7 @@ TEMPLATE = Template("""\
 **Package:** {{ manifest.package_name or "unknown" }}
 **Allow backup:** {{ "yes" if manifest.allow_backup else ("no" if manifest.allow_backup is false else "unset") }}
 **Cleartext permitted (effective):** {{ "yes" if manifest.cleartext_permitted else ("no" if manifest.cleartext_permitted is false else "unset (platform default)") }}
-{% if manifest.permissions -%}
-**Permissions ({{ manifest.permissions | length }}):** {{ manifest.permissions | join(", ") }}
-{% endif -%}
+**Permissions{% if manifest.permissions %} ({{ manifest.permissions | length }}){% endif %}:** {{ manifest.permissions | join(", ") if manifest.permissions else "none" }}
 {% set _exported = manifest.exported_components | selectattr("exported") | list -%}
 {% if _exported -%}
 **Exported components ({{ _exported | length }}):** {% for c in _exported %}`{{ c.type }}: {{ c.name }}`{% if not loop.last %}, {% endif %}{% endfor %}
@@ -238,6 +236,27 @@ runtime (Frida, Phase 5+) view can confirm the surrounding logic.
 {% for s in stage_results -%}
 | {{ s.stage }} | {{ s.status }}{% if s.stage == "dynamic" and s.status == "success" and (verification is none or (verification.root_bypassed is none and verification.ssl_bypassed is none)) %} (machinery ran; bypass not confirmed){% endif %} | {{ s.duration_ms }} | {{ s.error or "" }} |
 {% endfor %}
+{% if capture_present -%}
+## Captured Traffic
+
+{% if capture_flows -%}
+Real decrypted HTTPS flows observed while the app ran through the mitmproxy capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`). This is the live proof that SSL-pinning was actually defeated - the app sent plaintext (proxy-decrypted) requests the device accepted:
+
+| Host | Method | Path | Status |
+|---|---|---|---|
+{% for f in capture_flows -%}
+| {{ f.host }} | {{ f.method }} | {{ f.path }} | {{ f.status }} |
+{% endfor %}
+
+Raw flow file: `{{ capture_flows_path }}`
+{% else -%}
+{% if manifest and "android.permission.INTERNET" not in (manifest.permissions or []) -%}
+No traffic was captured. The app declares **no `android.permission.INTERNET` permission**, so it cannot open a network socket — the empty capture is expected regardless of proxy state (capture stage reason: {{ capture_reason or "reason not recorded" }}). The capture stage is honest: a failed capture is reported here, never a fabricated flow list.
+{% else -%}
+No traffic was captured ({{ capture_reason or "reason not recorded" }}). The capture stage is honest: a failed capture is reported here, never a fabricated flow list.
+{% endif -%}
+{% endif %}
+{% endif %}
 ## Limitations
 
 This report is produced by a deterministic, signature-based pipeline (ADR-0001) - no AI/LLM component decides whether root-detection or SSL-pinning is present (ADR-0003).
@@ -302,6 +321,7 @@ def generate_report(
         root_attribution=_root_attribution(metadata, classification),
         ssl_attribution=_ssl_attribution(metadata, classification),
         **_decompile_summary(stage_results),
+        **_capture_summary(stage_results),
         manifest=manifest,
         coverage=coverage,
         obfuscation_level=obfuscation_level,
@@ -358,6 +378,31 @@ def _decompile_summary(stage_results: list[StageResult]) -> dict:
         "decompile_completeness": completeness,
         "jadx_exit_code": evidence.get("jadx_exit_code"),
         "jadx_file_count": evidence.get("jadx_file_count"),
+    }
+
+
+def _capture_summary(stage_results: list[StageResult]) -> dict:
+    """Pulled from the capture-traffic stage's own real evidence (never guessed) -
+    this feeds the Captured Traffic section. A zero-flow capture is reported as
+    `failed` downstream and surfaced here as a reason, never fabricated as flows."""
+    capture_stage = next((s for s in stage_results if s.stage == "capture-traffic"), None)
+    if capture_stage is None:
+        return {
+            "capture_present": False, "capture_reason": None,
+            "capture_flows": [], "capture_hosts": [],
+            "capture_flows_path": None, "capture_system_ca": None,
+            "capture_proxy": None,
+        }
+    evidence = capture_stage.evidence or {}
+    flows = evidence.get("flow_summary") or []
+    return {
+        "capture_present": True,
+        "capture_reason": evidence.get("reason"),
+        "capture_flows": flows,
+        "capture_hosts": evidence.get("hosts") or [],
+        "capture_flows_path": evidence.get("flows_path"),
+        "capture_system_ca": evidence.get("system_ca"),
+        "capture_proxy": evidence.get("proxy"),
     }
 
 

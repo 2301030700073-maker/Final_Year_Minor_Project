@@ -856,6 +856,48 @@ def test_generate_report_annotates_dynamic_success_with_unverified_bypass(tmp_pa
     assert "success (machinery ran" not in content2
 
 
+def test_generate_report_states_no_internet_as_capture_failure_cause(tmp_path):
+    # Report-completeness gap: a failed capture is only ever explained by the
+    # generic dual hypothesis, even when the cause is provable from the app's
+    # own manifest. An app with no android.permission.INTERNET cannot open a
+    # socket, so the empty capture is expected - the report must say so plainly
+    # instead of implying the proxy may be at fault. When INTERNET IS declared,
+    # keep the honest generic message (proxy state is then a live unknown).
+    from static.manifest import ManifestInfo
+    from common import StageResult
+
+    no_internet = ManifestInfo(debuggable=False, network_security_config=None)  # permissions defaults to []
+    failed = StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={"reason": "no flows captured", "proxy": "127.0.0.1:8081"},
+        duration_ms=0,
+    )
+
+    report_path = generate_report(
+        run_id="cap-no-int", apk_hash="cap01", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "cap01"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[failed], output_dir=tmp_path, manifest=no_internet,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "declares **no `android.permission.INTERNET` permission**" in content
+    assert "empty capture is expected regardless of proxy state" in content
+
+    with_internet = ManifestInfo(
+        debuggable=False, network_security_config=None,
+        permissions=["android.permission.INTERNET"],
+    )
+    report_path2 = generate_report(
+        run_id="cap-w-int", apk_hash="cap02", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "cap02"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[failed], output_dir=tmp_path, manifest=with_internet,
+    )
+    content2 = report_path2.read_text(encoding="utf-8")
+    assert "no `android.permission.INTERNET` permission" not in content2
+    assert "no traffic was captured" in content2.lower() or "No traffic was captured" in content2
+
+
 def test_generate_report_renders_git_commit(tmp_path):
     # RESID-7A: the report must show which version of the analysis code
     # produced it (reproducibility intent, ADR-0007) - like the toolchain
@@ -1116,9 +1158,10 @@ def test_generate_report_renders_permissions_section(tmp_path):
     assert "android.permission.CAMERA" in content
 
 
-def test_generate_report_omits_permissions_section_when_none(tmp_path):
-    # Negative gate: an app declaring no permissions must not render an empty
-    # "Permissions (0):" line - the section is absent, not vacuously present.
+def test_generate_report_renders_permissions_none_when_empty(tmp_path):
+    # A permission-less app must render an explicit "Permissions: none" - the
+    # reader must be able to distinguish "extraction returned empty" from
+    # "extraction skipped". It must NOT render a vacuous "Permissions (0):" count.
     from static.manifest import ManifestInfo
     manifest = ManifestInfo(debuggable=False, network_security_config=None)  # permissions defaults to []
 
@@ -1134,4 +1177,5 @@ def test_generate_report_omits_permissions_section_when_none(tmp_path):
     )
 
     content = report_path.read_text(encoding="utf-8")
-    assert "**Permissions" not in content
+    assert "**Permissions:** none" in content
+    assert "**Permissions (0):**" not in content

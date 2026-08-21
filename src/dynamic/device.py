@@ -206,20 +206,66 @@ def _find_windows_user(users_dir: Path = WINDOWS_USERS_DIR) -> str:
 
 
 def _ensure_frida_server(adb: str, serial: str) -> None:
-    """Ensure frida-server is running on the device before connecting.
+    """Ensure frida-server is running AS ROOT on the device before connecting.
 
-    A frida-server that is pushed but not started is the usual reason the dynamic
-    stage silently hangs: the relay forwards, no server answers, and
-    enumerate_processes() blocks with no timeout. Start it (as root) if the
-    binary is present, or fail loudly with the exact push/run commands if it is
-    missing - never hang silently (principle 3)."""
+    frida-server must run as root to attach to system_server and inject into
+    other apps. A frida-server started by a non-root adbd runs as 'shell' and
+    fails with the cryptic "unable to find process with name 'system_server'"
+    error. That is the single most common dynamic-stage failure, so root is
+    guaranteed here rather than assumed:
+
+      1. ``adb root`` makes adbd run as root (idempotent on rootable images;
+         fails loudly on non-rootable ones - a device that can't root can't do
+         system-wide bypass, so surface it now rather than as a cryptic Frida
+         error during attach).
+      2. If a frida-server is already running but NOT as root, kill it so the
+         restart below runs it as root.
+      3. If a root frida-server is already running, do nothing.
+
+    A server that is pushed but not started is the other usual cause of a
+    silently-hanging dynamic stage, so it is started here if the binary is
+    present, or fails loudly with the exact push/run commands if it is missing.
+    Never hang silently (principle 3)."""
     server_path = "/data/local/tmp/frida-server"
+
+    # 1. adbd must be root for frida-server to inject across processes. adb root
+    # is idempotent: it either restarts adbd as root or reports it is already
+    # root, both with exit 0. On a non-rootable image it fails loudly.
+    root = subprocess.run(
+        [adb, "-s", serial, "root"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if root.returncode != 0:
+        raise RuntimeError(
+            "'adb root' failed - frida-server needs a rooted adbd to attach to "
+            "system_server / inject into the target app (got: "
+            f"{(root.stderr or root.stdout).strip()}). Use a Google-APIs "
+            "(non-Play-Store) emulator image or a rooted device, or pass "
+            "--skip-dynamic."
+        )
+
+    # 2. Any already-running frida-server must be root; a shell-run one silently
+    #    fails to attach to system_server. Kill it so the restart below runs it
+    #    as root (adbd is now root, so a nohup'd restart is root).
     running = subprocess.run(
         [adb, "-s", serial, "shell", "ps", "-A"],
         capture_output=True, text=True, timeout=20,
     )
-    if "frida-server" in (running.stdout + running.stderr):
+    root_server_running = False
+    for line in (running.stdout + running.stderr).splitlines():
+        if "frida-server" in line:
+            tokens = line.split()
+            if tokens and tokens[0] == "root":
+                root_server_running = True
+            else:
+                subprocess.run(
+                    [adb, "-s", serial, "shell", "pkill", "-f", "frida-server"],
+                    capture_output=True, text=True, timeout=20,
+                )
+    if root_server_running:
         return
+
+    # 3. Binary present? If not, fail loudly with the exact push/run commands.
     present = subprocess.run(
         [adb, "-s", serial, "shell", "ls", server_path],
         capture_output=True, text=True, timeout=20,
@@ -232,6 +278,8 @@ def _ensure_frida_server(adb: str, serial: str) -> None:
             f"  adb shell chmod 755 {server_path}\n"
             "then re-run (or pass --skip-dynamic to skip this stage)."
         )
+
+    # 4. Start it. adbd is now root, so the nohup'd server runs as root.
     subprocess.run(
         [adb, "-s", serial, "shell", "nohup", server_path, ">/dev/null", "2>&1", "&"],
         capture_output=True, text=True, timeout=20,
@@ -316,12 +364,28 @@ def install_apk(serial: str, apk_path: Path) -> None:
 
 
 def clear_logcat(serial: str) -> None:
-    """Clear logcat buffer so the upcoming dynamic-stage capture reads only fresh entries."""
+    """Clear logcat buffer so the upcoming dynamic-stage capture reads only fresh entries.
+
+    ``adb logcat -c`` can transiently return exit 1 ("failed to clear log
+    buffer") under load right after a dynamic stage, when frida and the target
+    app are still churning the buffer. That is a flake, not a real failure, so
+    it is retried once; the clear is best-effort bookkeeping (a failed clear
+    just means the following capture may include some older lines, it does not
+    invalidate evidence). Only a clear that still fails after the retry is
+    surfaced loudly - a persistent failure here signals a genuine adb/logd
+    problem (principle 3)."""
     adb = _require_adb()
-    subprocess.run(
-        [adb, "-s", serial, "logcat", "-c"],
-        capture_output=True, text=True, check=True, timeout=10,
-    )
+    for attempt in range(2):
+        try:
+            subprocess.run(
+                [adb, "-s", serial, "logcat", "-c"],
+                capture_output=True, text=True, check=True, timeout=10,
+            )
+            return
+        except subprocess.CalledProcessError:
+            if attempt == 1:
+                raise
+            time.sleep(0.5)
 
 
 def verify_installed(serial: str, package_name: str) -> bool:

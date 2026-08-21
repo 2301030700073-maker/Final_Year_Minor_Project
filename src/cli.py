@@ -73,6 +73,8 @@ from static.coverage import (
     apply_unattributed_indicators,
     apply_unresolved_java,
     apply_unresolved_native,
+    dart_aot_coverage,
+    is_dart_aot_lib,
     confidence_bound,
     coverage_bound_line,
     js_surface_coverage,
@@ -1008,6 +1010,18 @@ def run(
     # (ADR-0006). Always set (fully_analyzed when no binary bundle), because `js` is
     # now a governing surface in coverage.py.
     coverage_map["js"] = js_surface_coverage(has_binary_bundle)
+    # Flutter/Dart-AOT: a release Flutter app compiles its Dart logic (the real
+    # root/SSL detection surface) into a native snapshot blob - libapp.so /
+    # dart.so - that native symbol/string/Ghidra tooling cannot analyze like a
+    # normal .so (no Java_* exports, no readable symbols). Its presence forces
+    # the native surface to partial so a native NEITHER over a Flutter app is
+    # never a confident negative (ADR-0006); the snapshot names flow to the
+    # report so the analyst sees exactly which lib bounds the verdict.
+    dart_aot_libs = (
+        sorted({lib.name for lib in native_evidence.libraries if is_dart_aot_lib(lib.name)})
+        if native_evidence is not None else []
+    )
+    coverage_map = dart_aot_coverage(coverage_map, bool(dart_aot_libs))
 
     # --- decision engine (per-category thresholds, 4-3) ---
     root_threshold, ssl_threshold = _load_thresholds()
@@ -1465,6 +1479,7 @@ def run(
         dynamic_loads=dynamic_loads or None,
         js_evidence=js_matches or None,
         webview_sites=webview_sites or None,
+        dart_aot_libs=dart_aot_libs or None,
     )
     # The report path is returned (not used) here - _finalize_run writes the .md
     # and prints it itself, so binding the return to a local was a dead assignment

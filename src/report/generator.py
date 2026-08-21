@@ -193,6 +193,26 @@ runtime (Frida, Phase 5+) view can confirm the surrounding logic.
 | `{{ sig_id }}` | `{{ matched_text }}` | `{{ bundle_file }}` |
 {% endfor %}
 {% endif %}
+{% if dart_aot_libs -%}
+### Dart AOT snapshot (Flutter) (coverage-limited)
+
+This is a Flutter app: its application logic is compiled ahead-of-time from Dart
+into a native snapshot (`{{ dart_aot_libs | join(", ") }}`). That snapshot is a
+packed Dart blob, not ordinary native code - it carries no readable `Java_*`
+exports or ELF symbols, so our native symbol/string/Ghidra tooling cannot analyze
+it for root/SSL detection the way it analyzes a normal `.so`. A Flutter app's
+*real* detection logic lives in this Dart snapshot, invisible to both the java
+(DEX) and native (symbol/string) surfaces. The `native` surface is forced to
+`partial` and a native/root/ssl NEITHER is **not** a confident negative
+(ADR-0006). Only a runtime (Frida, Phase 5+) view can confirm what the Dart code
+checks.
+
+| Dart AOT snapshot |
+|---|
+{% for d in dart_aot_libs -%}
+| `{{ d }}` |
+{% endfor %}
+{% endif %}
 ## Dynamic Verification
 
 - Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}attempted, bypass not verified (no target-specific success check){% endif %}{% endif %}
@@ -302,6 +322,7 @@ def generate_report(
     dynamic_loads: list | None = None,
     js_evidence: list | None = None,
     webview_sites: list | None = None,
+    dart_aot_libs: list | None = None,
 ) -> Path:
     output_dir = Path(output_dir) / apk_hash
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -332,6 +353,7 @@ def generate_report(
         dynamic_loads=dynamic_loads,
         js_evidence=js_evidence,
         webview_sites=webview_sites,
+        dart_aot_libs=dart_aot_libs,
         confidence_bound=confidence_bound,
     )
     report_path.write_text(content, encoding="utf-8")

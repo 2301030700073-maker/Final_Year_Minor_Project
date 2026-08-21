@@ -108,6 +108,40 @@ def per_surface_coverage(
     }
 
 
+# Dart AOT app snapshot (Flutter). A release Flutter APK compiles its Dart
+# application logic - the app's real root/SSL detection surface, which lives in
+# Dart, not Java - into a native snapshot blob. Unlike ordinary native code it
+# carries no readable Java_* exports or ELF symbols, so native symbol/string/
+# Ghidra tooling cannot analyze it. Its presence therefore bounds the native
+# surface (see dart_aot_coverage) the way a Hermes bundle bounds `js`.
+DART_AOT_LIBS = frozenset({"libapp.so", "dart.so"})
+
+
+def is_dart_aot_lib(name: str | None) -> bool:
+    """True for a Dart AOT snapshot basename: `libapp.so` (standard Flutter
+    release name) or `dart.so`. These hold the app's Dart-compiled detection
+    logic as a packed blob - a genuine unexamined native surface."""
+    return bool(name) and name in DART_AOT_LIBS
+
+
+def dart_aot_coverage(
+    coverage: dict[str, Coverage],
+    has_dart_aot: bool,
+) -> dict[str, Coverage]:
+    """Downgrade the native surface to `partial` when the app ships a Dart AOT
+    snapshot (a Flutter app). The snapshot holds the app's real root/SSL logic,
+    compiled to a blob our native tooling cannot analyze the way it analyzes a
+    normal `.so` (no Java_* exports, no readable symbols). A native NEITHER over
+    a Dart-AOT-bearing app must never certify as a confident negative (ADR-0006).
+    Pure: returns a new dict, only ever downgrades fully_analyzed -> partial
+    (never upgrades), so it is additive and safe alongside apply_coverage_bound."""
+    if not has_dart_aot:
+        return coverage
+    if coverage.get("native") == "fully_analyzed":
+        return {**coverage, "native": "partial"}
+    return coverage
+
+
 def js_surface_coverage(has_binary_bundle: bool) -> Coverage:
     """Real-world gap A1: a Hermes/bytecode JS bundle (React Native release
     `assets/index.android.bundle`, `.hbc`) is binary, so the text engine skips it

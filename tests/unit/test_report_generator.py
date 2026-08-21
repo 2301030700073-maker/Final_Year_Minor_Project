@@ -482,6 +482,36 @@ def test_generate_report_js_partial_coverage_gets_its_own_callout(tmp_path):
     assert "binary Hermes/bytecode bundle" in content
 
 
+def test_generate_report_renders_dart_aot_snapshot_block_when_present(tmp_path):
+    # A Flutter app's real detection logic lives in a Dart AOT snapshot (libapp.so)
+    # that native tooling cannot analyze - the report must call it out and show the
+    # snapshot lib(s), like the Hermes/WebView coverage-limited sections.
+    report_path = generate_report(
+        run_id="dart-aot", apk_hash="drt001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "drt001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        coverage={"java": "fully_analyzed", "native": "partial", "manifest": "fully_analyzed", "js": "fully_analyzed"},
+        stage_results=[], output_dir=tmp_path,
+        dart_aot_libs=["libapp.so"],
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Dart AOT snapshot (Flutter) (coverage-limited)" in content
+    assert "| `libapp.so` |" in content
+    assert "not ordinary native code" in content
+
+
+def test_generate_report_omits_dart_aot_block_when_absent(tmp_path):
+    report_path = generate_report(
+        run_id="dart-none", apk_hash="drt002", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "drt002"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        coverage={"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed"},
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Dart AOT snapshot (Flutter)" not in content
+
+
 def test_generate_report_js_fully_analyzed_no_callout(tmp_path):
     report_path = generate_report(
         run_id="js-full", apk_hash="jsf001", timestamp="2026-08-20T12:00:00",

@@ -8,6 +8,8 @@ from static.coverage import (
     apply_unresolved_java,
     apply_unresolved_native,
     category_is_confident_negative,
+    dart_aot_coverage,
+    is_dart_aot_lib,
     confidence_bound,
     coverage_bound_line,
     java_coverage,
@@ -116,6 +118,39 @@ def test_js_surface_coverage_degrades_only_on_binary_bundle():
     # partial so a NEITHER is never a confident negative over bundle-hidden logic.
     assert js_surface_coverage(False) == "fully_analyzed"
     assert js_surface_coverage(True) == "partial"
+
+
+def test_is_dart_aot_lib_recognizes_flutter_snapshots():
+    # A release Flutter APK compiles its Dart logic into libapp.so (or dart.so) -
+    # a packed blob native tooling cannot analyze like a normal .so.
+    assert is_dart_aot_lib("libapp.so") is True
+    assert is_dart_aot_lib("dart.so") is True
+    # The Flutter engine itself and ordinary native libs are NOT the app's Dart
+    # snapshot; a plain basename edge is False, never misclassified.
+    assert is_dart_aot_lib("libflutter.so") is False
+    assert is_dart_aot_lib("libtiff.so") is False
+    assert is_dart_aot_lib(None) is False
+
+
+def test_dart_aot_coverage_downgrades_native_only_when_snapshot_present():
+    # With no Dart AOT snapshot the native surface is untouched (additive, safe).
+    cov = {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed"}
+    assert dart_aot_coverage(cov, False) == cov
+    # A Dart snapshot is a genuine unexamined native surface -> native partial so
+    # a native NEITHER is never a confident negative (ADR-0006).
+    assert dart_aot_coverage(cov, True)["native"] == "partial"
+    assert dart_aot_coverage(cov, True)["java"] == "fully_analyzed"
+    # Idempotent / downgrade-only: never upgrades a partial to fully_analyzed.
+    cov_partial = {**cov, "native": "partial"}
+    assert dart_aot_coverage(cov_partial, True) == cov_partial
+
+
+def test_dart_aot_gates_confident_negative():
+    # root/ssl both govern on `native`, so a Dart-AOT-bearing app (native partial)
+    # can never certify a confident negative even when java is fully_analyzed.
+    cov_dart = {"java": "fully_analyzed", "native": "partial", "manifest": "fully_analyzed", "js": "fully_analyzed"}
+    assert not category_is_confident_negative("root", cov_dart)
+    assert not category_is_confident_negative("ssl", cov_dart)
 
 
 def test_js_governing_surface_gates_confident_negative():

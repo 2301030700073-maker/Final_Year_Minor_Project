@@ -68,6 +68,7 @@ def test_synthesized_sources_parse_as_valid_javascript():
         "ssl_okhttp": synthesize(_cls(Action.SSL_ONLY, ssl_ids=["okhttp_certificate_pinner"]), Action.SSL_ONLY).source,
         "ssl_custom_tm": synthesize(_cls(Action.SSL_ONLY, ssl_ids=["custom_trustmanager_checkservertrusted"]), Action.SSL_ONLY).source,
         "both_native_frida": synthesize(_cls(Action.BOTH, root_ids=["native_frida_detection", "native_su_binary_embedded"], ssl_ids=["native_ssl_pinning_verify"]), Action.BOTH).source,
+        "root_emulator": synthesize(_cls(Action.ROOT_ONLY, root_ids=["emulator_detection"]), Action.ROOT_ONLY).source,
     }
     for name, src in cases.items():
         # new Function() parses without executing - safe for Frida-only code.
@@ -86,6 +87,24 @@ def test_synthesize_root_targeted_hook():
     assert res.applied_hooks == ["root_su_binary_paths"]
     assert "/system/bin/su" in res.source
     assert "Java.perform" in res.source
+
+
+def test_synthesize_emulator_detection_neutralized():
+    # The app's anti-emulator check (Build.HARDWARE/PRODUCT/... compared against
+    # sdk_gphone/ranchu/goldfish) is a verified cause of real apps stalling on
+    # splash - which then blocks every SSL handshake. It must be neutralized by
+    # the synthesized bypass, not silently left unmapped to the universal
+    # fallback.
+    res = synthesize(
+        _cls(Action.ROOT_ONLY, root_ids=["emulator_detection", "emulator_market_artifacts"]),
+        Action.ROOT_ONLY,
+    )
+    assert res.applied_hooks == ["emulator_detection", "emulator_market_artifacts"]
+    src = res.source
+    assert "Build[f].value = scrub(v)" in src
+    assert "sdk_gphone" in src and "ranchu" in src
+    # Only scrubs when the marker is present - never rewrites a real device's values.
+    assert "if (typeof v === 'string' && /sdk_gphone|goldfish|ranchu/.test(v))" in src
 
 
 def test_synthesize_ssl_targeted_hook():

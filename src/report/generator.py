@@ -214,6 +214,9 @@ checks.
 {% for key, value in verification.evidence_lines.items() -%}
 - {{ key }}: `{{ value }}`
 {% endfor %}
+{% if handshake_capture_note -%}
+- TLS handshakes (capture proxy): `{{ handshake_capture_note }}`
+{% endif %}
 {% endif %}
 ## Static vs. Dynamic Correlation
 
@@ -253,7 +256,11 @@ checks.
 ## Captured Traffic
 
 {% if capture_flows -%}
+{% if verification and verification.ssl_bypassed is true -%}
 Real decrypted HTTPS flows observed while the app ran through the mitmproxy capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`). This is the live proof that SSL-pinning was actually defeated - the app sent plaintext (proxy-decrypted) requests the device accepted:
+{% else -%}
+The app accepted proxy-decrypted HTTPS flows through the capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`) - SSL pinning was not enforced on the hosts below. This is partial evidence, not full confirmation: the app's own pin-check was not confirmed in this run ({{ 'inconclusive' if verification and verification.ssl_bypassed is none else 'not verified' }}), so a pinned endpoint that never spoke during the run is not ruled out.
+{% endif %}
 
 | Host | Method | Path | Status |
 |---|---|---|---|
@@ -335,7 +342,8 @@ def generate_report(
         root_attribution=_category_attribution(metadata, classification, "root"),
         ssl_attribution=_category_attribution(metadata, classification, "ssl"),
         **_decompile_summary(stage_results),
-        **_capture_summary(stage_results),
+        **(_capture := _capture_summary(stage_results)),
+        handshake_capture_note=_handshake_capture_note(verification, _capture),
         manifest=manifest,
         coverage=coverage,
         obfuscation_level=obfuscation_level,
@@ -420,6 +428,40 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
         "capture_system_ca": evidence.get("system_ca"),
         "capture_proxy": evidence.get("proxy"),
     }
+
+
+def _handshake_capture_note(verification, capture_summary: dict) -> str | None:
+    """Reconcile the observer-only "TLS handshakes" line against the capture
+    proxy. The success-check's line reports ONLY the Frida SSL observer's view,
+    so an unknown real app whose handshake happens at a layer the observer does
+    not wrap reads "no TLS handshake reached during the run" - which flatly
+    contradicts the Captured Traffic section, because every decrypted flow
+    REQUIRED a completed TLS handshake through the CA. Credit the proxy evidence
+    without promoting SSL (a handshake alone is not a pin-check, ADR-0006)."""
+    if verification is None:
+        return None
+    hs = verification.evidence_lines.get("TLS handshakes completed post-bypass", "")
+    if "none observed (no TLS handshake reached during the run)" not in hs:
+        return None
+    flows = capture_summary.get("capture_flows") or []
+    if not flows:
+        return None
+    # flow_summary rows are dicts (the capture stage's own shape); the report
+    # template reads f.host via Jinja's dict fallback, so a Python getattr here
+    # must be dict-aware too - getattr(dict, 'host') is always None and would
+    # silently blank the host list.
+    def _flow_host(f) -> str:
+        return (f.get("host") if isinstance(f, dict) else getattr(f, "host", None)) or ""
+
+    hosts = sorted({_flow_host(f) for f in flows if _flow_host(f)})
+    if not hosts:
+        hosts = capture_summary.get("capture_hosts") or []
+    preview = ", ".join(hosts[:5]) + ("..." if len(hosts) > 5 else "")
+    return (
+        f"{len(flows)} flow(s) decrypted by the capture proxy, which requires "
+        f"completed TLS handshakes through the CA (hosts: {preview}) - the Frida "
+        f"SSL observer recorded none, so SSL is not promoted on this basis alone"
+    )
 
 
 CALIBRATION_TEMPLATE = Template("""\

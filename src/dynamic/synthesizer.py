@@ -655,6 +655,32 @@ ROOT_RECIPES: dict[str, str] = {
         "  Build.FINGERPRINT.value = Build.FINGERPRINT.value.replace(/test-keys/g, 'release-keys');\n"
         "});"
     ),
+    # Anti-emulator stall: the app compares Build.HARDWARE/PRODUCT/DEVICE/BOARD/
+    # MODEL/FINGERPRINT/MANUFACTURER against emulator-only values (sdk_gphone,
+    # goldfish, ranchu) and stalls/behaves defensively when it sees them - this
+    # WSL2 emulator is exactly those values, which is the verified cause of the
+    # PropertyGuru splash-stall that blocked every SSL handshake. Rewrite those
+    # fields to production-looking values ONLY when an emulator marker is present
+    # (a real device never has one, so the scrub is a no-op there - ADR-0006).
+    # Same conservative conditional-replace discipline as the Build.TAGS/
+    # FINGERPRINT patch above.
+    "emulator_detection": (
+        "Java.perform(function () {\n"
+        "  var Build = Java.use('android.os.Build');\n"
+        "  function scrub(v) {\n"
+        "    return v\n"
+        "      .replace(/sdk_gphone/g, 'taro')\n"
+        "      .replace(/goldfish/g, 'redfin')\n"
+        "      .replace(/ranchu/g, 'redfin');\n"
+        "  }\n"
+        "  ['HARDWARE','PRODUCT','DEVICE','BOARD','MODEL','FINGERPRINT','MANUFACTURER'].forEach(function (f) {\n"
+        "    try {\n"
+        "      var v = Build[f].value;\n"
+        "      if (typeof v === 'string' && /sdk_gphone|goldfish|ranchu/.test(v)) Build[f].value = scrub(v);\n"
+        "    } catch (e) {}\n"
+        "  });\n"
+        "});"
+    ),
     "rootbeer_framework": (
         "Java.perform(function () {\n"
         "  try {\n"
@@ -850,6 +876,7 @@ ROOT_RECIPES["root_cloaking_detection"] = ROOT_RECIPES["root_runtime_exec_su"]
 # A build.prop probe (ro.build.tags / ro.build.type) is the same test-keys check
 # the build-tags hook already neutralizes - route it there.
 ROOT_RECIPES["build_props_probe"] = ROOT_RECIPES["root_build_tags_test_keys"]
+ROOT_RECIPES["emulator_market_artifacts"] = ROOT_RECIPES["emulator_detection"]
 
 # --- Alternate spellings routed to existing proven neutralizers (SSL) ---------
 # Custom X509 key/trust managers and wrapper checkers (Netty FingerprintTMF,

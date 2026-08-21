@@ -1209,3 +1209,105 @@ def test_generate_report_renders_permissions_none_when_empty(tmp_path):
     content = report_path.read_text(encoding="utf-8")
     assert "**Permissions:** none" in content
     assert "**Permissions (0):**" not in content
+
+
+def _capture_stage(flows):
+    """A capture-traffic stage carrying real flow_summary evidence, so the
+    Captured Traffic section is exercised rather than skipped."""
+    return StageResult(
+        stage="capture-traffic", status="success", duration_ms=0,
+        evidence={
+            "flow_summary": flows,
+            "system_ca": "/system/etc/security/cacerts/062b6baf.0",
+            "proxy": "127.0.0.1:8081",
+        },
+    )
+
+
+class _Flow:
+    def __init__(self, host, method, path, status):
+        self.host, self.method, self.path, self.status = host, method, path, status
+
+
+def test_captured_traffic_strong_claim_only_when_ssl_confirmed(tmp_path):
+    # Report-correctness: the Captured Traffic section must not claim "live proof
+    # that SSL-pinning was actually defeated" whenever flows exist. A captured
+    # flow list is only full confirmation when the run actually confirmed the
+    # app's pin-check (ssl_bypassed is True). When the run is inconclusive (no
+    # TLS handshake / app never reached the pinned call), the section must say so
+    # plainly as partial evidence - otherwise the report contradicts its own
+    # "SSL bypassed: inconclusive" line.
+    flows = [_Flow("api.example.com", "GET", "/v1/data", 200)]
+
+    # Confirmed SSL -> strong claim is correct.
+    confirmed = generate_report(
+        run_id="cap-confirmed", apk_hash="cap001", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "cap001"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={}),
+        correlation=None,
+        stage_results=[_capture_stage(flows)], output_dir=tmp_path,
+    )
+    confirmed_text = confirmed.read_text(encoding="utf-8")
+    assert "live proof that SSL-pinning was actually defeated" in confirmed_text
+
+    # Inconclusive SSL -> must NOT overclaim, must say partial + name the reason.
+    inconclusive = generate_report(
+        run_id="cap-inconcl", apk_hash="cap002", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "cap002"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(root_bypassed=True, ssl_bypassed=None, evidence_lines={}),
+        correlation=None,
+        stage_results=[_capture_stage(flows)], output_dir=tmp_path,
+    )
+    inconclusive_text = inconclusive.read_text(encoding="utf-8")
+    assert "live proof that SSL-pinning was actually defeated" not in inconclusive_text
+    assert "This is partial evidence, not full confirmation" in inconclusive_text
+    assert "inconclusive" in inconclusive_text
+
+
+def test_handshake_line_reconciles_captured_flows(tmp_path):
+    # The success-check's "TLS handshakes completed post-bypass" line is purely
+    # Frida-observer based. When the observer saw none but the capture proxy
+    # decrypted real flows (which require completed handshakes), the report must
+    # not flatly claim "no TLS handshake reached during the run" - that
+    # contradicts its own Captured Traffic section. It must reconcile: credit the
+    # proxy evidence while keeping the conservative non-promotion (ADR-0006).
+    flows = [_Flow("api.example.com", "GET", "/v1/data", 200)]
+    inconclusive = generate_report(
+        run_id="cap-hs", apk_hash="cap003", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "cap003"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(
+            root_bypassed=True, ssl_bypassed=None,
+            evidence_lines={"TLS handshakes completed post-bypass":
+                            "none observed (no TLS handshake reached during the run)"},
+        ),
+        correlation=None,
+        stage_results=[_capture_stage(flows)], output_dir=tmp_path,
+    )
+    text = inconclusive.read_text(encoding="utf-8")
+    assert "TLS handshakes (capture proxy)" in text
+    assert "1 flow(s) decrypted by the capture proxy" in text
+    assert "requires completed TLS handshakes" in text
+    assert "SSL is not promoted on this basis alone" in text
+
+    # The real production shape is dict rows (the capture stage's flow_summary),
+    # not _Flow objects. The host list must derive from those dicts - a Python
+    # getattr(dict, 'host') is always None and would blank the "(hosts: ...)"
+    # preview. Pin that regression here.
+    dict_flows = [{"host": "api.propertyguru.com", "method": "GET", "path": "/v1/data", "status": 304}]
+    dict_note = generate_report(
+        run_id="cap-hs-dict", apk_hash="cap004", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "cap004"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(
+            root_bypassed=True, ssl_bypassed=None,
+            evidence_lines={"TLS handshakes completed post-bypass":
+                            "none observed (no TLS handshake reached during the run)"},
+        ),
+        correlation=None,
+        stage_results=[_capture_stage(dict_flows)], output_dir=tmp_path,
+    )
+    dict_text = dict_note.read_text(encoding="utf-8")
+    assert "hosts: api.propertyguru.com" in dict_text

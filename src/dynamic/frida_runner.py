@@ -122,8 +122,24 @@ _CHECKPOINT_POLL_INTERVAL = 0.25
 # timing, not a blind sleep.
 _SYNTH_CHECKPOINT_SETTLE = 0.5
 
+# Unknown real apps (no hand-authored script -> synthesized bypass) have no UI
+# tap that drives their root/SSL check the way AndroGoat/OWASP do: the app must
+# boot itself and reach a network call before SSL can be confirmed. The default
+# 5 s settle is too short for a heavy React Native app to leave its splash
+# screen and complete a TLS handshake, so an unknown-app run ends up
+# SSL=inconclusive with no handshake observed. Give real apps a bounded longer
+# window so the app has a real chance to reach its own check; known targets
+# (UI-triggered, fire in seconds) keep the short default. This is a delivery
+# window, never a proof - a genuinely stuck app still reports inconclusive.
+_UNKNOWN_TARGET_SETTLE_SECONDS = 25.0
 
-def _wait_for_checkpoint(messages: list, settle_seconds: float, require_evidence: bool = False) -> None:
+
+def _wait_for_checkpoint(
+    messages: list,
+    settle_seconds: float,
+    require_evidence: bool = False,
+    require_both_dimensions: bool = False,
+) -> None:
     """Wait for the bypass scripts to signal that their hooks are installed - or,
     when the flow is UI-triggered, for the app's own bypass EVIDENCE - or the
     settle deadline, whichever comes first (replacing the blind
@@ -140,8 +156,16 @@ def _wait_for_checkpoint(messages: list, settle_seconds: float, require_evidence
     require_evidence is set we wait for that evidence instead of returning on the
     readiness checkpoint alone. Polling beats sleeping: an early signal lets the
     stage move on; a target whose check never fires just burns the settle window,
-    identical to the old blind sleep."""
+    identical to the old blind sleep.
+
+    require_both_dimensions holds the wait until BOTH the root probeHit and the
+    SSL bypassEffect have reported - for a synthesized BOTH run the fast root
+    probeHit must not cut the SSL window short, or SSL is abandoned before the
+    app's own TLS handshake fires (which would defeat the longer settle window).
+    Ignored unless require_evidence is set; the two-spawn path (one dimension
+    per spawn) never sets it, so each spawn waits only for its own evidence."""
     deadline = time.monotonic() + settle_seconds
+    seen_root, seen_ssl = False, False
     while time.monotonic() < deadline:
         for m in messages:
             payload = m.get("payload") if isinstance(m, dict) else None
@@ -149,10 +173,16 @@ def _wait_for_checkpoint(messages: list, settle_seconds: float, require_evidence
                 continue
             if "hook" in payload and not require_evidence:
                 return
-            if require_evidence and (
-                "probeHit" in payload or "bypassEffect" in payload
-            ):
-                return
+            if require_evidence:
+                if "probeHit" in payload:
+                    seen_root = True
+                if "bypassEffect" in payload:
+                    seen_ssl = True
+                if require_both_dimensions:
+                    if seen_root and seen_ssl:
+                        return
+                elif "probeHit" in payload or "bypassEffect" in payload:
+                    return
         time.sleep(_CHECKPOINT_POLL_INTERVAL)
 
 
@@ -316,6 +346,13 @@ def run_dynamic_stage(
                 },
                 duration_ms=elapsed_ms(start),
             )
+
+    # Bounded longer settle for real apps (see _UNKNOWN_TARGET_SETTLE_SECONDS).
+    # `synth_source` is only set for a target with no hand-authored script, so
+    # the OWASP/AndroGoat targets (which have one) keep the short default and
+    # this cannot slow their runs.
+    if synth_source is not None and settle_seconds < _UNKNOWN_TARGET_SETTLE_SECONDS:
+        settle_seconds = _UNKNOWN_TARGET_SETTLE_SECONDS
 
     # RESID-6H root-bypass envelope. The synthesized bypass (findings-specific)
     # is supplemented by the vendored third-party universal for unknown targets
@@ -540,6 +577,7 @@ def run_dynamic_stage(
             _wait_for_checkpoint(
                 messages, settle_seconds,
                 require_evidence=bool(ui_actions) or _root_expected or _ssl_expected,
+                require_both_dimensions=_root_expected and _ssl_expected,
             )
 
             # FR-4.6: after the settle window, a spawned process that is no

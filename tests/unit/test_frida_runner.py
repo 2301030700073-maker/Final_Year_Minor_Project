@@ -96,7 +96,7 @@ def test_ui_action_loop_runs_target_actions_in_order(monkeypatch):
     )
     monkeypatch.setattr(
         "dynamic.frida_runner._wait_for_checkpoint",
-        lambda messages, seconds, require_evidence=False: None,
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
     )
 
     result = frida_runner.run_dynamic_stage(
@@ -153,7 +153,7 @@ def test_both_androgoat_runs_two_spawns_one_per_dimension(monkeypatch):
     )
     monkeypatch.setattr(
         "dynamic.frida_runner._wait_for_checkpoint",
-        lambda messages, seconds, require_evidence=False: None,
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
     )
 
     result = frida_runner.run_dynamic_stage(
@@ -207,7 +207,7 @@ def _run_with_captured_require_evidence(monkeypatch, action, target, synthesized
     monkeypatch.setattr("dynamic.frida_runner._run_ui_action", lambda serial, a: None)
     monkeypatch.setattr("dynamic.frida_runner.time.sleep", lambda s: None)
 
-    def fake_wait(messages, seconds, require_evidence=False):
+    def fake_wait(messages, seconds, require_evidence=False, require_both_dimensions=False):
         captured["require_evidence"] = require_evidence
 
     monkeypatch.setattr(
@@ -218,6 +218,81 @@ def _run_with_captured_require_evidence(monkeypatch, action, target, synthesized
         synthesized=synthesized,
     )
     return captured.get("require_evidence")
+
+
+def _run_with_captured_settle(monkeypatch, action, target, synthesized, settle_seconds=5):
+    """Drive run_dynamic_stage and capture the settle window it passes to
+    _wait_for_checkpoint for the single-spawn path."""
+    captured = {}
+
+    class _FakeDevice:
+        def spawn(self, pkg):
+            return 1234
+
+        def resume(self, pid):
+            return None
+
+    monkeypatch.setattr(
+        "dynamic.frida_runner.attach",
+        lambda serial, pkg: (_FakeDevice(), object(), 1234),
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner.load_script",
+        lambda session, name, on_message=None: None,
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner.load_script_source",
+        lambda session, src, on_message=None: None,
+    )
+    monkeypatch.setattr("dynamic.frida_runner._run_ui_action", lambda serial, a: None)
+    monkeypatch.setattr("dynamic.frida_runner.time.sleep", lambda s: None)
+
+    def fake_wait(messages, seconds, require_evidence=False, require_both_dimensions=False):
+        captured["seconds"] = seconds
+        captured["require_both_dimensions"] = require_both_dimensions
+
+    monkeypatch.setattr(
+        "dynamic.frida_runner._wait_for_checkpoint", fake_wait,
+    )
+    frida_runner.run_dynamic_stage(
+        "emulator-5554", "com.example.app", action, target=target,
+        synthesized=synthesized, settle_seconds=settle_seconds,
+    )
+    return captured
+
+
+def test_unknown_real_app_gets_bounded_longer_settle(monkeypatch):
+    # A real app with no hand-authored script (synthesized bypass) has no UI tap
+    # driving its SSL check - the app must boot itself and reach a TLS handshake.
+    # The default 5 s settle is too short for a heavy RN app to leave splash, so
+    # unknown apps must be granted the bounded longer window or the run ends up
+    # SSL=inconclusive with no handshake. This locks that the synthesized path
+    # actually receives the extended window.
+    captured = _run_with_captured_settle(
+        monkeypatch, Action.BOTH, "some_real_app",
+        {"source": "x", "applied_hooks": []},
+    )
+    seconds = captured["seconds"]
+    assert seconds == frida_runner._UNKNOWN_TARGET_SETTLE_SECONDS
+    assert seconds > 5  # genuinely longer than the known-target default
+    # A BOTH synthesized run must also require evidence from BOTH dimensions -
+    # the extended window is pointless if the fast root probeHit cuts it short.
+    assert captured["require_both_dimensions"] is True
+
+
+def test_known_target_keeps_short_default_settle(monkeypatch):
+    # The settle extension must NOT bleed into the OWASP/AndroGoat targets - they
+    # have a hand-authored script and a UI tap that drives the check within
+    # seconds, so giving them the long window would slow every validated run for
+    # nothing. `synth_source` stays None for a target with a script, so its settle
+    # must remain the passed-in default unchanged.
+    captured = _run_with_captured_settle(
+        monkeypatch, Action.ROOT_ONLY, "uncrackable1",
+        None, settle_seconds=5,
+    )
+    assert captured["seconds"] == 5
+    # single-dimension root run must NOT require both dimensions' evidence
+    assert captured["require_both_dimensions"] is False
 
 
 def test_unknown_root_run_requires_root_evidence(monkeypatch):
@@ -313,6 +388,44 @@ def test_wait_for_checkpoint_evidence_arrives_early(monkeypatch):
     ]
     frida_runner._wait_for_checkpoint(msgs, settle_seconds=5, require_evidence=True)
     assert sleeps == []  # evidence present -> never sleeps
+
+
+def test_wait_for_checkpoint_requires_both_dimensions_for_synthesized_both(monkeypatch):
+    # A synthesized BOTH run (single spawn, root envelope + SSL hooks) must hold
+    # the settle window until BOTH dimensions report evidence. The fast root
+    # probeHit must NOT cut the SSL wait short - otherwise SSL is abandoned
+    # before the app's own TLS handshake fires, defeating the longer settle
+    # window granted to unknown real apps (this is the verified correction to
+    # the settle fix: early root evidence was silently discarding the SSL half).
+    clock = {"now": 0.0}
+    sleeps = []
+
+    def fake_sleep(s):
+        sleeps.append(s)
+        clock["now"] += s
+
+    monkeypatch.setattr("dynamic.frida_runner.time.sleep", fake_sleep)
+    monkeypatch.setattr("dynamic.frida_runner.time.monotonic", lambda: clock["now"])
+
+    # Root probeHit present but no SSL bypassEffect: must keep waiting.
+    root_only = [{"type": "send", "payload": {"probeHit": "su"}}]
+    frida_runner._wait_for_checkpoint(
+        list(root_only), settle_seconds=2.0,
+        require_evidence=True, require_both_dimensions=True,
+    )
+    assert clock["now"] >= 2.0  # root alone is not enough - holds for SSL
+
+    # With BOTH root probeHit and SSL bypassEffect present, returns immediately.
+    clock["now"] = 0.0
+    both = [
+        {"type": "send", "payload": {"probeHit": "su"}},
+        {"type": "send", "payload": {"bypassEffect": "ssl-handshake"}},
+    ]
+    frida_runner._wait_for_checkpoint(
+        list(both), settle_seconds=2.0,
+        require_evidence=True, require_both_dimensions=True,
+    )
+    assert clock["now"] == 0.0  # both dimensions confirmed -> returns immediately
 
 
 # ---------------------------------------------------------------------------

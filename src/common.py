@@ -66,6 +66,7 @@ KNOWN_VENDOR_PREFIXES = (
     "io.socket",          # Socket.IO
     "retrofit2",          # Retrofit
     "com.github.bumptech.glide",  # Glide image loader
+    "coil",                       # Coil image loader
 )
 # Bundled NATIVE SDK libraries (boundary-4): a root/SSL check that matches
 # inside one of these .so files is a bundled-SDK signal, not the app's own

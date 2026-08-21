@@ -209,6 +209,10 @@ def test_broadened_vendor_prefixes_recognized():
     assert attribution.is_known_third_party("com.alibaba.sdk") is True
     assert attribution.is_known_third_party("org.telegram.messenger") is True
     assert attribution.is_known_third_party("retrofit2") is True
+    # Image loaders (Glide already recognized) - coil.util evidence is bundled
+    # third-party, so a root match there is a bundled-SDK signal, not the app's
+    # own code (real Jerboa case).
+    assert attribution.is_known_third_party("coil.util") is True
     # Still conservative: an unknown app namespace is NOT third-party.
     assert attribution.is_known_third_party("com.example.myapp") is False
 

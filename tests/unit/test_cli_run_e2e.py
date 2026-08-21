@@ -102,6 +102,7 @@ def test_run_skips_dynamic_and_writes_coverage_bounded_report(run_setup, monkeyp
             apk=run_setup / "fixture.apk",
             justification="ACADEMIC_TRAINING_TARGET",
             skip_dynamic=True,
+            capture_traffic=False,
             device_serial=None,
             target="uncrackable1",
         )
@@ -161,6 +162,7 @@ def test_install_failure_preserves_static_report_and_exits_nonzero(run_setup, mo
                 apk=run_setup / "fixture.apk",
                 justification="ACADEMIC_TRAINING_TARGET",
                 skip_dynamic=False,
+                capture_traffic=False,
                 device_serial=None,
                 target="uncrackable1",
             )
@@ -213,6 +215,7 @@ def test_unexpected_dynamic_exception_preserves_static_report_and_exits_nonzero(
                 apk=run_setup / "fixture.apk",
                 justification="ACADEMIC_TRAINING_TARGET",
                 skip_dynamic=False,
+                capture_traffic=False,
                 device_serial=None,
                 target="uncrackable1",
             )
@@ -269,6 +272,7 @@ def test_logcat_capture_failure_preserves_static_report_and_exits_nonzero(run_se
                 apk=run_setup / "fixture.apk",
                 justification="ACADEMIC_TRAINING_TARGET",
                 skip_dynamic=False,
+                capture_traffic=False,
                 device_serial=None,
                 target="uncrackable1",
             )
@@ -326,6 +330,7 @@ def test_unknown_app_root_probe_confirms_in_report(run_setup, monkeypatch):
             apk=run_setup / "fixture.apk",
             justification="ACADEMIC_TRAINING_TARGET",
             skip_dynamic=False,
+            capture_traffic=False,
             device_serial=None,
             target="propertyguru",  # unknown real target -> synthesized bypass + tech check
         )
@@ -339,6 +344,65 @@ def test_unknown_app_root_probe_confirms_in_report(run_setup, monkeypatch):
     # the app-agnostic root confirmation reached the report - NOT understated
     assert "Root bypassed: True" in text
     assert "Root-detection" in text
+
+
+def test_capture_failure_footer_does_not_claim_dynamic_was_not_attempted(run_setup, monkeypatch):
+    # The ROOT_ONLY case runs dynamic (machinery ran, bypass not confirmed) but
+    # the capture fails. The footer must NOT claim "dynamic verification is NOT
+    # attempted" - correlation=not_attempted means no *correlation* was evaluated,
+    # not that dynamic never ran. Say what actually happened.
+    from dynamic import device as device_mod
+    from common import StageResult
+
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
+    monkeypatch.setattr(
+        cli, "synthesize",
+        lambda classification, action: SimpleNamespace(source="root", applied_hooks=[]),
+    )
+    # dynamic ran but did not confirm (machinery ran; no probeHit)
+    monkeypatch.setattr(
+        "dynamic.frida_runner.run_dynamic_stage",
+        lambda *a, **kw: _ok(
+            "dynamic",
+            frida_messages=[{"type": "send", "payload": {"hook": "root_su_binary_paths"}}],
+        ),
+    )
+    monkeypatch.setattr(device_mod, "clear_logcat", lambda serial: None)
+    monkeypatch.setattr(device_mod, "capture_logcat", lambda serial: "")
+    # capture fails with no flows
+    monkeypatch.setattr(
+        "dynamic.mitmproxy_capture.run_capture_stage",
+        lambda *a, **kw: StageResult(
+            stage="capture-traffic", status="failed",
+            evidence={"reason": "no flows captured"}, error="no flows",
+        ),
+    )
+
+    captured = []
+    original_print = cli.console.print
+    cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
+    try:
+        with pytest.raises(typer.Exit) as ei:
+            cli.run(
+                apk=run_setup / "fixture.apk",
+                justification="ACADEMIC_TRAINING_TARGET",
+                skip_dynamic=False,
+                capture_traffic=True,
+                device_serial=None,
+                target="propertyguru",  # unknown real target -> synthesized bypass + tech check
+            )
+        assert ei.value.exit_code == 1
+    finally:
+        cli.console.print = original_print
+
+    footer = " ".join(captured)
+    assert "dynamic verification is NOT attempted" not in footer
+    assert "the dynamic bypass ran but was not confirmed, and no traffic was captured" in footer
+
+    reports_dir = run_setup / "reports"
+    assert sorted(reports_dir.rglob("*.md")), "a capture failure must NOT discard the static report"
 
 
 def test_run_composes_coverage_bound_before_unattributed_indicators(run_setup, monkeypatch):
@@ -369,6 +433,7 @@ def test_run_composes_coverage_bound_before_unattributed_indicators(run_setup, m
         apk=run_setup / "fixture.apk",
         justification="ACADEMIC_TRAINING_TARGET",
         skip_dynamic=True,
+        capture_traffic=False,
         device_serial=None,
         target="uncrackable1",
     )
@@ -406,6 +471,7 @@ def test_run_writes_full_audit_trail_in_order(run_setup, monkeypatch):
         apk=run_setup / "fixture.apk",
         justification="ACADEMIC_TRAINING_TARGET",
         skip_dynamic=True,
+        capture_traffic=False,
         device_serial=None,
         target="uncrackable1",
     )

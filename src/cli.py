@@ -54,6 +54,7 @@ from common import (
 from dynamic import correlation as correlation_module
 from dynamic import device
 from dynamic import frida_runner
+from dynamic import mitmproxy_capture
 from dynamic.synthesizer import synthesize
 from dynamic.success_checks.androgoat import AndroGoatSuccessCheck
 from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
@@ -535,6 +536,16 @@ def run(
         help="OWN_APP | CTF | AUTHORIZED_ENGAGEMENT:<id> | ACADEMIC_TRAINING_TARGET",
     ),
     skip_dynamic: bool = typer.Option(False, "--skip-dynamic", help="Skip the dynamic analysis stage"),
+    capture_traffic: bool = typer.Option(
+        False, "--capture-traffic",
+        help=(
+            "Opt-in mitmproxy capture stage: route the target app's traffic "
+            "through mitmdump, decrypt it, and record the captured flows in the "
+            "report as real SSL-bypass proof. Requires a rooted device and "
+            "mitmdump reachable from the adb-server host. Off by default so "
+            "normal runs never touch the device's proxy settings."
+        ),
+    ),
     device_serial: Optional[str] = typer.Option(None, "--device", help="Specific device/emulator serial"),
     target: Optional[str] = typer.Option(
         None, "--target",
@@ -1392,6 +1403,30 @@ def run(
                         stage_results.append(check_stage)
                         _print_stage(check_stage)
 
+    # --- mitmproxy capture stage (opt-in --capture-traffic) ---
+    # Real decrypted-traffic proof: route the app through mitmdump, decrypt its
+    # HTTPS, and record the flows. GAP-2-style: a capture failure writes the
+    # report anyway and exits non-zero after - it must never discard an
+    # already-complete static/dynamic result. It resolves its own device serial
+    # so it still works under --skip-dynamic.
+    capture_failed = False
+    if capture_traffic:
+        try:
+            capture_serial = serial if not skip_dynamic else device.discover_device(device_serial)
+            capture_stage = mitmproxy_capture.run_capture_stage(
+                capture_serial, package_name, ANALYSIS_ROOT / "captures",
+            )
+        except Exception as exc:
+            capture_stage = StageResult(
+                stage="capture-traffic", status="failed",
+                evidence={"reason": "unexpected capture-stage exception"},
+                error=f"capture stage raised unexpectedly: {exc}",
+            )
+        stage_results.append(capture_stage)
+        _print_stage(capture_stage)
+        if capture_stage.status == "failed":
+            capture_failed = True
+
     # dynamic_stage.evidence["reason"] already distinguishes "operator passed
     # --skip-dynamic" from "NEITHER classification - no bypass technique to
     # apply" (see frida_runner.run_dynamic_stage) - surfaced in the report
@@ -1468,16 +1503,32 @@ def run(
         ),
     )
 
-    if dynamic_failed:
+    if dynamic_failed or capture_failed:
         # GAP-2: the static analysis + report were still produced and audited;
-        # the run failed only at the dynamic stage. Surface that loudly - the
-        # report's Stage Results table already shows the failed dynamic stage and
+        # the run failed only at the dynamic/capture stage. Surface that loudly -
+        # the report's Stage Results table already shows the failed stage and
         # correlation is "not attempted" - and exit non-zero so no automated
         # consumer mistakes a dynamic-failed run for a fully verified one.
+        failures = []
+        if dynamic_failed:
+            failures.append(f"Dynamic stage FAILED ({dynamic_stage.error or 'see report'})")
+        if capture_failed:
+            failures.append(f"capture-traffic stage FAILED ({capture_stage.error or 'see report'})")
+        # The trailing note must not claim dynamic was never attempted when it
+        # ran. correlation=not_attempted means no *correlation* was evaluated (a
+        # dynamic run with no target-specific success check), not that dynamic did
+        # not run - the ROOT_ONLY case runs dynamic (as "machinery ran; bypass not
+        # confirmed") and only the capture fails. Say what actually happened.
+        if dynamic_stage.status == "skipped":
+            dynamic_note = "dynamic verification was not attempted (no bypass technique to apply)"
+        elif dynamic_failed:
+            dynamic_note = "the dynamic bypass ran but failed"
+        else:
+            dynamic_note = "the dynamic bypass ran but was not confirmed, and no traffic was captured"
         console.print(
-            f"[bold red]Dynamic stage FAILED ({dynamic_stage.error or 'see report'}) - "
-            f"static analysis and report were still produced; dynamic verification "
-            f"is NOT attempted for this run (correlation=not_attempted).[/bold red]"
+            f"[bold red]{', '.join(failures)} - "
+            f"static analysis and report were still produced; {dynamic_note} "
+            f"(correlation=not_attempted).[/bold red]"
         )
         raise typer.Exit(code=1)
 
@@ -1875,6 +1926,58 @@ def verify_audit_log_cmd(
             f"[yellow]Note: {len(result['uncompleted_runs'])} authorized run(s) "
             f"never completed: {', '.join(result['uncompleted_runs'])}[/yellow]"
         )
+
+
+@app.command("verify-device")
+def verify_device_cmd(
+    device_serial: str = typer.Option(
+        "emulator-5554", "--device",
+        help="Device/emulator serial to preflight before a dynamic scan",
+    ),
+) -> None:
+    """Preflight the device + Frida path before a dynamic scan.
+
+    One command replaces the manual adb/frida boot checks: confirms the device
+    is present, adbd is root, frida-server is running at the venv-matching
+    version (auto-provisioning or re-pushing the pinned tools/ binary if it is
+    missing or the wrong version), and Frida can connect through the WSL2 relay
+    and enumerate processes. Exits non-zero with the real reason on any failure
+    (principle 3 / NFR-7) - never a silent OK. This is the command the runbook's
+    "verify the Frida path" step should call instead of ``frida-ps -U``, which
+    cannot discover a TCP emulator from WSL2."""
+    console = Console()
+
+    # 1. Device present and online.
+    adb = device._require_adb()
+    devices_out = subprocess.run(
+        [adb, "devices"], capture_output=True, text=True, timeout=20,
+    ).stdout
+    present = any(
+        (line.split()[:2] == [device_serial, "device"])
+        for line in devices_out.splitlines()[1:]
+    )
+    if not present:
+        console.print(
+            f"[bold red]Device {device_serial} not online in `adb devices`:[/bold red]\n"
+            f"{devices_out.strip() or '(empty)'}\n"
+            "Boot the emulator on the Windows host and confirm it appears."
+        )
+        raise typer.Exit(code=1)
+    console.print(f"[green]device[/green] {device_serial} present")
+
+    # 2. Root + frida-server (auto version-check/re-provision) + WSL2 relay +
+    #    connect + enumerate. Any failure here surfaces the real reason.
+    try:
+        frida_dev = device.setup_frida_connection(device_serial)
+        count = len(frida_dev.enumerate_processes())
+    except Exception as exc:
+        console.print(f"[bold red]Frida connection failed:[/bold red] {exc}")
+        raise typer.Exit(code=1)
+
+    console.print(
+        f"[bold green]FRIDA_OK[/bold green] connected, {count} process(es) on "
+        f"{device_serial} - ready for a dynamic scan"
+    )
 
 
 if __name__ == "__main__":

@@ -61,7 +61,7 @@ TEMPLATE = Template("""\
 
 ## Classification
 
-**Decision:** {{ classification.action.value }} (root threshold {{ classification.root_threshold }}, ssl threshold {{ classification.ssl_threshold }}){% if decompile_completeness == "partial" %} - **CAUTION: based on a PARTIAL decompile ({{ jadx_file_count }} files, jadx exit {{ jadx_exit_code }}) - see Limitations**{% endif %}{% if classification.unknown_uncovered %} - **Coverage-limited (unknown, not absent): {{ classification.unknown_uncovered | join(', ') }} - a NEITHER here is a lower bound, not a confident negative (governing surface not fully analyzed)**{% endif %}
+**Decision:** {{ classification.action.value }} (root threshold {{ classification.root_threshold }}, ssl threshold {{ classification.ssl_threshold }}){% if decompile_completeness == "partial" %} - **CAUTION: based on a PARTIAL decompile ({{ jadx_file_count }} files, jadx exit {{ jadx_exit_code }}) - see Limitations**{% endif %}{% if classification.unknown_uncovered %} - **Coverage-limited (unknown, not absent): {{ classification.unknown_uncovered | join(', ') }} - a NEITHER here is a lower bound, not a confident negative (governing surface not fully analyzed, or detection-shaped code matched no signature)**{% endif %}
 **Files scanned:** {{ classification.scanned_file_count }} (RESID-4C: a low count means this verdict is based on a small corpus - a NEITHER is not proof of absence){% if classification.unreadable_file_count %}{{ " " }}**CAUTION: {{ classification.unreadable_file_count }} candidate file(s) could not be read (OSError): {% for f in classification.unreadable_files %}`{{ f }}`{% if not loop.last %}, {% endif %}{% endfor %} - treat any NEITHER/Inconclusive verdict as degraded, not a full-scan clean.**{% endif %}
 
 ### Root-detection
@@ -99,6 +99,9 @@ Per-surface bound of this scan - a `partial`/`unscannable` surface is a lower bo
 {% endfor %}
 {% if "native" in coverage and coverage["native"] == "unscannable" -%}
 > **Native:** unscannable means the APK had no scannable `.so` (or none at all) - a native NEITHER is not proof a native root/SSL check is absent.
+{% endif %}
+{% if coverage.get("js") == "partial" -%}
+> **JS:** partial means the app ships a binary Hermes/bytecode bundle whose control flow can't be read (React Native release bundle) - we recover only its string constants, so a js root/SSL NEITHER is not proof a root/SSL check in the bundle is absent. Mirrors the native callout above.
 {% endif %}
 {% if obfuscation_level == "heavy" -%}
 > **Heavy obfuscation:** the Java surface is `partial` even on a complete decompile - encrypted/unreachable strings mean a clean Java NEITHER is not proof of absence (N1/G-C).
@@ -204,10 +207,27 @@ runtime (Frida, Phase 5+) view can confirm the surrounding logic.
 ## Static vs. Dynamic Correlation
 
 {% if correlation -%}
-- Matches: {{ correlation.matches }}
+{# Verdict is tri-state, never the raw matches boolean. A static prediction
+   dynamic could not test (UNVERIFIED) keeps matches=False by design (RESID-6F),
+   but rendering "- Matches: False" would read as a static/dynamic DISAGREEMENT
+   that never happened - exactly the false conflict the third state was created
+   to avoid. So the headline names the actual state: conflict (MISMATCH),
+   inconclusive (UNVERIFIED), or agreement (MATCH). -#}
+{% if correlation.mismatches -%}
+- Verdict: MISMATCH (static and dynamic disagreed)
+{% elif correlation.unverified -%}
+- Verdict: UNVERIFIED (dynamic could not test the static prediction - inconclusive, not a disagreement)
+{% else -%}
+- Verdict: MATCH (static and dynamic agree)
+{% endif %}
 {% for m in correlation.mismatches -%}
 - MISMATCH: {{ m }}
 {% endfor %}
+{% for u in correlation.unverified -%}
+- UNVERIFIED: {{ u }}
+{% endfor %}
+{% elif correlation_skip_reason -%}
+- Not evaluated ({{ correlation_skip_reason }}).
 {% else -%}
 - Not evaluated (dynamic stage skipped).
 {% endif %}
@@ -222,7 +242,7 @@ runtime (Frida, Phase 5+) view can confirm the surrounding logic.
 
 This report is produced by a deterministic, signature-based pipeline (ADR-0001) - no AI/LLM component decides whether root-detection or SSL-pinning is present (ADR-0003).
 
-**Static detection is signature-based.** Root-detection and SSL-pinning are identified by matching decompiled sources/resources against a hand-authored, versioned signature set (`config/signatures/`). A technique matching no known pattern goes undetected and is silently absent from the confidence score - not flagged as "unknown." This is structural, not specific to this run.
+**Static detection is signature-based.** Root-detection and SSL-pinning are identified by matching decompiled sources/resources against a hand-authored, versioned signature set (`config/signatures/`). A detection-shaped indicator that matches no known pattern is not silently dropped: it is surfaced in the Decision line as **Coverage-limited (unknown, not absent)** and a NEITHER in that case is a lower bound, not a confident negative. The genuinely structural residual is only that a technique leaving no detection-shaped evidence at all (nothing for a signature to match) cannot be enumerated - we cannot list what we never see. This is structural, not specific to this run.
 
 **Decompilation is not guaranteed to succeed.** jadx has failed outright on some real-world APKs tested against this pipeline - F-Droid, Root Checker, and the Nexus Launcher system app all failed to decompile - and larger/heavily-obfuscated production apps typically only partial-decompile rather than failing cleanly (e.g. PropertyGuru, 151MB React Native, exits with status 1 after producing ~27,720 source files). The partial-output-tolerance path keeps whatever jadx did produce instead of discarding it, but a partial run is a lower bound, not a definitive scan. See `docs/execution_changes/phase-1-changes-and-lessons.md`.
 
@@ -251,6 +271,7 @@ def generate_report(
     stage_results: list[StageResult],
     output_dir: Path,
     dynamic_skip_reason: str | None = None,
+    correlation_skip_reason: str | None = None,
     manifest: ManifestInfo | None = None,
     git_commit: str | None = None,
     coverage: dict | None = None,
@@ -275,6 +296,7 @@ def generate_report(
         classification=classification,
         verification=verification,
         dynamic_skip_reason=dynamic_skip_reason,
+        correlation_skip_reason=correlation_skip_reason,
         correlation=correlation,
         stage_results=stage_results,
         root_attribution=_root_attribution(metadata, classification),

@@ -728,6 +728,35 @@ def test_scan_raises_loudly_on_regex_backtracking_budget(tmp_path, monkeypatch):
         scan(tmp_path, sigs)
 
 
+def test_scan_raises_loudly_on_multiline_regex_backtracking_budget(tmp_path, monkeypatch):
+    # signatures.py:452: the MULTILINE path's own ReDoS budget guard. The
+    # sibling test above zeroes the budget on a non-multiline signature, which
+    # fires the per-line guard (424) - the multiline whole-text guard was left
+    # uncovered. A multiline regex signature routes past the per-line loop (416)
+    # to the whole-text pass, where a zeroed budget must raise TimeoutError
+    # naming the multiline path specifically. Fail-loud (NFR-1), never silent.
+    import static.signatures as sig_mod
+    monkeypatch.setattr(sig_mod, "LINE_MATCH_BUDGET_SECONDS", 0.0)
+    (tmp_path / "Main.java").write_text("public class Main { void m() {} }\n")
+
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        "- id: slow_multi\n"
+        "  category: root\n"
+        "  weight: 0.5\n"
+        "  pattern_type: regex\n"
+        "  multiline: true\n"
+        "  patterns:\n"
+        "    - '.*'\n"
+        "  evidence_type: bytecode_string\n",
+        encoding="utf-8",
+    )
+    sigs = load_signatures(bad)
+
+    with pytest.raises(TimeoutError, match="multiline matching"):
+        scan(tmp_path, sigs)
+
+
 def test_root_runtime_exec_su_regex_is_linear():
     # ReDoS regression: the former 'Runtime\.getRuntime\(\)\.exec\(.*su.*\)'
     # backtracked quadratically on a long line of su tokens with no closing
@@ -1309,3 +1338,194 @@ def test_every_root_and_ssl_signature_has_a_signal():
             assert sig.patterns, f"{yaml_name} id '{sig.id}' has empty patterns"
             assert all(isinstance(p, str) and p.strip() for p in sig.patterns), \
                 f"{yaml_name} id '{sig.id}' has a blank pattern"
+
+
+def test_load_signatures_rejects_out_of_range_weight_loudly(tmp_path):
+    # A weight outside [0,1] would silently skew the decision engine's scoring.
+    (tmp_path / "bad.yaml").write_text(
+        "---\n"
+        "- id: w\n  category: root\n  weight: 5\n  pattern_type: string_literal\n"
+        "  patterns: [x]\n  evidence_type: bytecode_string\n"
+    )
+    with pytest.raises(ValueError, match="invalid weight"):
+        load_signatures(tmp_path / "bad.yaml")
+
+
+def test_load_signatures_rejects_unknown_pattern_type_loudly(tmp_path):
+    # A mistyped pattern_type would silently never match any source pattern.
+    (tmp_path / "bad.yaml").write_text(
+        "---\n"
+        "- id: p\n  category: root\n  weight: 0.5\n  pattern_type: bogus\n"
+        "  patterns: [x]\n  evidence_type: bytecode_string\n"
+    )
+    with pytest.raises(ValueError, match="invalid pattern_type"):
+        load_signatures(tmp_path / "bad.yaml")
+
+
+def test_load_signatures_rejects_missing_patterns_loudly(tmp_path):
+    # A signature with no patterns is dead - reject it rather than load a no-op.
+    (tmp_path / "bad.yaml").write_text(
+        "---\n"
+        "- id: n\n  category: root\n  weight: 0.5\n  pattern_type: string_literal\n"
+        "  evidence_type: bytecode_string\n"
+    )
+    with pytest.raises(ValueError, match="no patterns"):
+        load_signatures(tmp_path / "bad.yaml")
+
+
+def test_load_signatures_rejects_non_bool_flag_loudly(tmp_path):
+    # L-M9: a string "true" instead of a bool must fail loudly at load - not
+    # truthy-silently change detection behavior at scan time.
+    (tmp_path / "bad.yaml").write_text(
+        "---\n"
+        "- id: b\n  category: root\n  weight: 0.5\n  pattern_type: string_literal\n"
+        "  patterns: [x]\n  evidence_type: bytecode_string\n  case_sensitive: 'true'\n"
+    )
+    with pytest.raises(ValueError, match="must be a boolean"):
+        load_signatures(tmp_path / "bad.yaml")
+
+
+def test_collect_files_skips_original_and_non_scanned(tmp_path):
+    # _collect_files: walks a corpus returning (file, root) pairs, skipping any
+    # `original/` component (apktool's binary-resource archive - reading it would
+    # raise a guaranteed UnicodeDecodeError and surface a false degraded-scan
+    # signal, RESID-4G) and any non-scanned suffix. Had zero direct coverage.
+    from static.signatures import _collect_files
+    root = tmp_path / "jadx"
+    src = root / "sources" / "com" / "x"
+    src.mkdir(parents=True)
+    (src / "A.java").write_text("")
+    (src / "B.java").write_text("")
+    (src / "notes.txt").write_text("")
+    orig = root / "original"
+    orig.mkdir(parents=True)
+    (orig / "AndroidManifest.xml").write_text("binary")
+    (orig / "D.java").write_text("")
+
+    pairs = _collect_files([root])
+    paths = [p.relative_to(root).as_posix() for p, _ in pairs]
+    assert "sources/com/x/A.java" in paths
+    assert "sources/com/x/B.java" in paths
+    assert "notes.txt" not in paths
+    assert all("original" not in p for p in paths)  # never a source candidate
+
+
+def test_validate_signature_entry_accepts_wellformed(tmp_path):
+    # _validate_signature_entry: the load-time gate that rejects signatures
+    # which would otherwise silently no-op or crash scan. A well-formed entry
+    # must pass through untouched (ADR-0001/principle 3: fail loudly at load,
+    # never silently weaker). Had zero coverage.
+    from static.signatures import _validate_signature_entry
+    entry = {"id": "root_su_path", "category": "root", "weight": 0.7,
+             "pattern_type": "string_literal", "patterns": ["/system/bin/su"]}
+    _validate_signature_entry(entry, Path("sig.yaml"))  # no raise
+
+
+def test_validate_signature_entry_rejects_each_invalid_field(tmp_path):
+    from pathlib import Path
+    from static.signatures import _validate_signature_entry
+    p = Path("sig.yaml")
+    cases = [
+        ({**{"id": "x", "category": "root", "weight": 0.5, "pattern_type": "regex",
+             "patterns": ["su"]}, "category": "Root"}, "invalid category"),
+        ({**{"id": "x", "category": "root", "weight": 0.5, "pattern_type": "regex",
+             "patterns": ["su"]}, "weight": 1.5}, "invalid weight"),
+        ({**{"id": "x", "category": "root", "weight": 0.5, "pattern_type": "regex",
+             "patterns": ["su"]}, "weight": None}, "invalid weight"),
+        ({**{"id": "x", "category": "root", "weight": 0.5, "pattern_type": "regex",
+             "patterns": ["su"]}, "pattern_type": "magic"}, "invalid pattern_type"),
+        ({"id": "x", "category": "root", "weight": 0.5, "pattern_type": "regex",
+          "patterns": []}, "no patterns"),
+        ({"id": "x", "category": "root", "weight": 0.5, "pattern_type": "regex",
+          "patterns": ["su"], "case_sensitive": "true"}, "must be a boolean"),
+        ({"id": "x", "category": "root", "weight": 0.5, "pattern_type": "string_literal",
+          "patterns": ["su"], "multiline": True}, "multiline"),
+        ({"id": "x", "category": "root", "weight": 0.5, "pattern_type": "regex",
+          "patterns": ["(unclosed"]}, "invalid regex"),
+    ]
+    for entry, needle in cases:
+        with pytest.raises(ValueError, match=needle):
+            _validate_signature_entry(entry, p)
+
+
+def test_is_binary_detects_nul_and_degrades_on_unreadable(tmp_path):
+    # _is_binary: a NUL byte in the first chunk is the reliable binary signal -
+    # text (Java/XML/JS/JSON) never carries one, binary assets (Hermes bundles,
+    # .bin.properties) do. It gates skipping non-sources BEFORE a strict UTF-8
+    # read so they don't drown real decode failures in degradation noise
+    # (RESID-4G). An unreadable file is NOT silently 'binary' - it degrades to
+    # False so the read_text path surfaces it as the authoritative degradation.
+    # Had zero coverage.
+    from static.signatures import _is_binary
+
+    bin_f = tmp_path / "b.jsbundle"
+    bin_f.write_bytes(b"\x1c\x00\x00\x00\x00")  # NUL in first chunk
+    assert _is_binary(bin_f) is True
+
+    txt = tmp_path / "a.java"
+    txt.write_text("public class A { }\n", encoding="utf-8")
+    assert _is_binary(txt) is False
+
+    # NUL beyond the probe window does NOT count (keeps big text files safe)
+    big = tmp_path / "big.txt"
+    big.write_bytes(b"A" * 100000 + b"\x00")
+    assert _is_binary(big) is False
+
+    assert _is_binary(tmp_path / "missing.bin") is False  # OSError -> False
+
+
+def test_line_matches_unknown_pattern_type_raises_loudly():
+    # signatures.py:178-179: an unrecognized pattern_type must raise loudly
+    # (principle 3 - never silently no-op), never return None as if it had
+    # matched or missed. Real coverage proved the raise branch untested.
+    from static.signatures import Signature
+    sig = Signature(id="x", category="root", weight=0.5,
+                    pattern_type="bogus_pattern_type", patterns=["a"],
+                    evidence_type="source")
+    with pytest.raises(ValueError):
+        _line_matches("a", sig)
+
+
+def test_scan_skips_binary_suffix_file_before_text_read(tmp_path):
+    # signatures.py:301-302: a SCANNED_SUFFIX file that is actually binary (NUL
+    # in its probe window) is skipped BEFORE the strict UTF-8 read, so it is
+    # never mislabeled as degraded text (RESID-4G). It still counts as scanned.
+    from static.signatures import Signature, scan
+    (tmp_path / "bundle.properties").write_bytes(b"\x00\x00\x1f\xbc\x0c\x00" + b"payload")
+    (tmp_path / "A.java").write_text("public class A {}\n")
+    sig = Signature(id="s", category="root", weight=0.5, pattern_type="regex",
+                    patterns=["payload"], evidence_type="source")
+    ev = scan(tmp_path, [sig])
+    assert ev.scanned_file_count == 2      # both files were walked
+    assert ev.unreadable_file_count == 0   # the binary was skipped, not degraded
+
+
+def test_scan_latin1_fallback_for_properties_file(tmp_path):
+    # signatures.py:313-315: a .properties file with non-UTF-8 bytes is spec'd
+    # ISO-8859-1 (Properties.load default), so a strict-UTF-8 decode failure
+    # falls back to latin-1 instead of being counted degraded - and the decoded
+    # text still matches signatures. A non-.properties UTF-8 failure re-raises
+    # and IS counted degraded.
+    from static.signatures import Signature, scan
+    (tmp_path / "strings.properties").write_bytes(b"check=\xff" + b"/system/bin/su")
+    sig = Signature(id="su", category="root", weight=0.5, pattern_type="regex",
+                    patterns=["/system/bin/su"], evidence_type="source")
+    ev = scan(tmp_path, [sig])
+    assert any(e.signature_id == "su" for e in ev.root_evidence)
+    assert ev.unreadable_file_count == 0   # latin-1 read succeeded, not degraded
+
+
+def test_scan_skips_third_party_file_matching_pass(tmp_path):
+    # signatures.py:396-397: a bundled-SDK file (recognized vendor namespace)
+    # has its WHOLE matching pass skipped - the _record guard would discard
+    # every hit anyway, so scanning it is wasted work. Coverage still counts it.
+    from static.signatures import Signature, scan
+    gms = tmp_path / "com" / "google" / "android" / "gms"
+    gms.mkdir(parents=True)
+    (gms / "X.java").write_text('String p = "/system/bin/su";\n')
+    sig = Signature(id="su", category="root", weight=0.5, pattern_type="regex",
+                    patterns=["/system/bin/su"], evidence_type="source")
+    ev = scan(tmp_path, [sig])
+    assert ev.scanned_file_count == 1
+    assert ev.root_evidence == []      # the third-party hit was excluded
+    assert ev.unreadable_file_count == 0

@@ -342,10 +342,11 @@ def scan(
             # not from Paytm's code. Only *recognized* vendor namespaces are
             # excluded; the app's own package and any unidentifiable namespace
             # are always kept (conservative, matching report/attribution.py).
-            # derive_namespace is called once per file below; it is not inlined
-            # here so this hot path does no re-splitting per signature.
-            if _third_party_file:
-                return
+            # This exclusion is enforced by the caller's file-level
+            # `if _third_party_file: continue` below, so no SDK match ever
+            # reaches _record() (an in-function guard here would be dead code).
+            # derive_namespace is computed once per file above, not inlined here,
+            # so this hot path does no re-splitting per signature.
             matched_signatures.add(signature.id)
             matched_categories.add(signature.category)
             total_counts[signature.id] += 1

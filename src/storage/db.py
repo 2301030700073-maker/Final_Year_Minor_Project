@@ -125,6 +125,11 @@ class RunRecord(Base):
     classification_json: Mapped[dict] = mapped_column(JSON)
     verification_json: Mapped[dict | None] = mapped_column(JSON)  # None if dynamic stage skipped
     correlation_json: Mapped[dict | None] = mapped_column(JSON)
+    # Honest reason a report's correlation line is "Not evaluated" when dynamic
+    # RAN but no static/dynamic correlation was produced - distinct from
+    # dynamic_skip_reason (dynamic never ran). Persisted so a REGENERATED report
+    # renders the real reason instead of the false "dynamic stage skipped".
+    correlation_skip_reason: Mapped[str | None] = mapped_column(String)
     stage_results_json: Mapped[list] = mapped_column(JSON)
 
 

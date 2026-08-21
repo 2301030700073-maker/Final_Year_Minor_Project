@@ -96,3 +96,21 @@ def test_scan_uses_deobfuscated_view_to_match_renamed_code(tmp_path):
 
     ev_with = scan(tmp_path, [sig], mapping=parse_mapping(mapping_txt))
     assert "app_cert_activity" in {e.signature_id for e in ev_with.ssl_evidence}
+
+
+def test_deobfuscate_source_skips_empty_obfuscated_key(tmp_path):
+    # deobfuscate.py:115: a mapping entry with an EMPTY obfuscated name (which a
+    # malformed "orig -> " line can produce) must be skipped, not regex-applied.
+    # re.sub(r"\b\b", ...) with an empty pattern would match at every word
+    # boundary and corrupt the whole source - the guard prevents that. Real
+    # coverage proved this line untested.
+    from static.deobfuscate import MappingTable, deobfuscate_source
+
+    t = MappingTable(obfuscated_to_original={"": "Whatever", "a": "Main"})
+    src = "public class a { }"
+    out = deobfuscate_source(src, t)
+    # the empty key was SKIPPED (had it been applied, re.sub would have matched
+    # every word boundary and rewritten the whole source to "Whatever");
+    # the real non-empty key still restored its mapping.
+    assert "Whatever" not in out
+    assert "public class Main { }" in out

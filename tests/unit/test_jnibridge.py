@@ -153,3 +153,21 @@ def test_apply_unresolved_native_never_upgrades_worse_state():
     for worse in ("partial", "unscannable"):
         base = {"native": worse}
         assert apply_unresolved_native(base, True) == base
+
+
+def test_declared_natives_in_text_linewise():
+    # _declared_natives_in_text: one native method per declaration line, each
+    # attributed to class_name; a line carrying the word 'native' but no real
+    # declaration is skipped, never a crash. Had zero direct coverage.
+    from static.jnibridge import _declared_natives_in_text
+    text = (
+        "public native String encrypt(String s);\n"
+        "private static native void init()\n"
+        "// no native methods here\n"
+        "int x = 5;\n"
+    )
+    found = _declared_natives_in_text(text, "com.example.Crypto")
+    names = [d.method_name for d in found]
+    assert names == ["encrypt", "init"]
+    assert all(d.class_name == "com.example.Crypto" for d in found)
+    assert _declared_natives_in_text("no native anywhere", "X") == []

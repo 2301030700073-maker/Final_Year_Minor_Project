@@ -238,3 +238,78 @@ def test_match_recovered_strings_no_false_positive(tmp_path):
     from static.signatures import load_signatures
     root = load_signatures(Path(__file__).resolve().parents[2] / "config" / "signatures" / "root_detection.yaml")
     assert match_recovered_strings(rec, root) == []
+
+
+def test_fold_int_covers_unary_and_missing_operators():
+    # Real coverage: Sub/BitOr/BitXor/LShift and the whole UnaryOp family were
+    # unreached by the existing Add/Mult/BitAnd/RShift-heavy tests. All are pure
+    # reachable branches - a decryptor may fold any of these operators.
+    assert _fold_int("9-4") == 5        # ast.Sub
+    assert _fold_int("1|2") == 3        # ast.BitOr
+    assert _fold_int("1^3") == 2        # ast.BitXor
+    assert _fold_int("1<<3") == 8       # ast.LShift
+    assert _fold_int("-5") == -5        # ast.USub
+    assert _fold_int("+5") == 5         # ast.UAdd
+    assert _fold_int("~5") is None      # UInvert is not a supported unary op
+    assert _fold_int("-x") is None      # unary over a runtime variable -> None
+    assert _fold_int("(1") is None      # SyntaxError degrades to None, no crash
+    assert _fold_int("5 % 2") is None   # Mod is not a supported binary op
+    assert _fold_int("5 // 2") is None  # FloorDiv is not a supported binary op
+
+
+def test_recovered_string_slice_offset_label():
+    # stringrecover.py:96-97: the slice form of the `offset` label. A sliced
+    # ctor decode carries a (offset, length) slice, so the label must read
+    # `decryptor[name:off:ln]`, distinct from the whole-array form.
+    r = RecoveredString(value="su", file="A.java", name="secret", slice=(0, 2))
+    assert r.offset == "decryptor[secret:0:2]"
+    assert RecoveredString(value="su", file="A.java", name="secret").offset == "decryptor[secret]"
+
+
+def test_decode_empty_array_body_returns_empty(tmp_path):
+    # stringrecover.py:210: an empty array body (`int[] a = {}`) referenced by a
+    # ctor yields no items -> empty decode -> nothing emitted, no crash. Real
+    # coverage proved the empty-body branch untested.
+    from static.stringrecover import recover_from_text
+    assert recover_from_text("static int[] a = {};\nString s = new String(a);") == []
+
+
+def test_match_recovered_strings_dedupes_two_hits_one_signature(tmp_path):
+    # stringrecover.py:302-303: two recovered values matching the SAME signature
+    # -> the per-signature dedup drops the second (one Evidence per signature).
+    # The sibling dedup test deduped upstream to ONE recovered string, so it
+    # never reached this second-iteration branch; this does.
+    from static.signatures import Signature
+    from static.stringrecover import RecoveredString, match_recovered_strings
+    sig = Signature(id="su_path", category="root", weight=0.5,
+                    pattern_type="regex", patterns=["system.*su"],
+                    evidence_type="source")
+    rec = [
+        RecoveredString(value="/system/bin/su", file="A.java", name="a"),
+        RecoveredString(value="/system/xbin/su", file="B.java", name="b"),
+    ]
+    ev = match_recovered_strings(rec, [sig])
+    assert len(ev) == 1  # both matched 'su_path' but it is counted once
+    assert ev[0].signature_id == "su_path"
+
+
+def test_extract_tables_keeps_only_pure_numeric_tables():
+    # _extract_tables: sibling int[] literal tables usable as a subscript source
+    # (boundary #3). Only a PURE-numeric table is a known constant; an
+    # expression-built item makes the whole table non-resolvable and it is
+    # excluded - so _fold_int can only resolve a genuinely constant index.
+    # Had zero direct coverage.
+    from static.stringrecover import _extract_tables
+    text = (
+        "int[] T = {104, 101, 108};\n"
+        "int[] X = {104, (char)((k >> 10) & 31) + 96};\n"  # expression item -> excluded
+        "int[] H = {0x41, 0x42};"
+    )
+    tables = _extract_tables(text)
+    assert tables == {"T": [104, 101, 108], "H": [0x41, 0x42]}
+    assert "X" not in tables
+
+
+def test_extract_tables_empty_on_no_constant_table():
+    from static.stringrecover import _extract_tables
+    assert _extract_tables("no tables here") == {}

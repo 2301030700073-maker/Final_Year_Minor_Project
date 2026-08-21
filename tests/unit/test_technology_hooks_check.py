@@ -7,7 +7,10 @@ non-app-specific engagement signal. The core guarantee tested here: it NEVER
 fabricates a bypass confirmation (root/ssl stay None) - it only reports what the
 checkpoint messages actually show."""
 
-from dynamic.success_checks.technology import TechnologyHooksEngagedCheck
+from dynamic.success_checks.technology import (
+    TechnologyHooksEngagedCheck,
+    liveness_evidence_lines,
+)
 
 
 def test_reports_engaged_hooks_from_checkpoint_messages():
@@ -178,3 +181,96 @@ def test_ssl_confirmed_only_when_pin_check_and_handshake_both_observed():
     v2 = TechnologyHooksEngagedCheck().check([{"type": "send", "payload": {"hook": "x"}}])
     assert "none observed" in v2.evidence_lines["root artifact probes answered-false"]
     assert "none observed" in v2.evidence_lines["TLS handshakes completed post-bypass"]
+
+
+def test_app_still_running_surfaced_when_captured():
+    # FR-4.6 liveness: when the dynamic stage records the app survived the
+    # settle window, the report states it explicitly - a bypass claim is backed
+    # by "app still running", not left implied.
+    v = TechnologyHooksEngagedCheck().check(
+        [{"type": "send", "payload": {"hook": "okhttp_certificate_pinner"}}],
+        app_still_running=True,
+    )
+    assert v.evidence_lines["app still running after bypass"].startswith("True")
+
+
+def test_app_still_running_false_is_surfaced_not_claimed():
+    # If the app self-terminated (False), the report says so loudly and never
+    # lets a hooks-engaged signal read as a usable bypass.
+    v = TechnologyHooksEngagedCheck().check(
+        [{"type": "send", "payload": {"hook": "okhttp_certificate_pinner"}}],
+        app_still_running=False,
+    )
+    assert "False" in v.evidence_lines["app still running after bypass"]
+    assert "self-terminated" in v.evidence_lines["app still running after bypass"]
+
+
+def test_app_still_running_not_captured_is_honest():
+    # When liveness was not recorded, the report says so rather than guessing.
+    v = TechnologyHooksEngagedCheck().check([])
+    assert "not captured" in v.evidence_lines["app still running after bypass"]
+
+
+def test_tls_line_crossrefs_tls_block_signal():
+    """When the startup-TLS signal fired, 'no handshake reached' must not imply
+    no TLS activity - say handshakes were attempted but rejected on the trust
+    path (honest cross-reference, ADR-0006)."""
+    from common import VerificationResult
+    check = TechnologyHooksEngagedCheck()
+    r = check.check([], ui_liveness={"tls_blocked": True})
+    line = r.evidence_lines["TLS handshakes completed post-bypass"]
+    assert "attempted but rejected" in line.lower()
+
+
+def test_tls_line_plain_when_no_tls_block():
+    from common import VerificationResult
+    check = TechnologyHooksEngagedCheck()
+    r = check.check([], ui_liveness={"tls_blocked": False})
+    line = r.evidence_lines["TLS handshakes completed post-bypass"]
+    assert "none observed (no TLS handshake reached" in line
+
+
+def test_liveness_evidence_lines_renders_true_state():
+    """Shared helper: a healthy target's report states liveness + a real
+    UI-responsiveness summary, and 'not captured' when the tool was absent."""
+    r = liveness_evidence_lines(
+        True, {"activity_resumed": True, "window_focused": True,
+               "anr_detected": False, "clickable_nodes": 1, "screen_state": "interactive"}
+    )
+    assert "True" in r["app still running after bypass"]
+    assert any("UI responsiveness" in k for k in r)
+    r2 = liveness_evidence_lines(None, None)
+    assert "not captured" in r2["app still running after bypass"]
+    assert "not captured" in r2["App UI responsiveness (live, real device data)"]
+
+
+def test_ui_liveness_covers_uncommon_evidence_branches():
+    # technology.py:80, 94-95, 108, 114, 117: the _fmt non-bool fallthrough, the
+    # tls_blocked block-line quote (with >90-char truncation), the visible
+    # text-node count, the stuck-on-splash label, and the _errors surfacing -
+    # none exercised by the healthy-UI sibling test. All reachable, all pure.
+    from dynamic.success_checks.technology import _summarize_ui_liveness
+    s = _summarize_ui_liveness({
+        "window_focused": "some-state",       # non-None non-bool -> :{val} (80)
+        "tls_blocked": True,
+        "tls_block_lines": ["x" * 120],       # truncated quote (94-95)
+        "text_node_count": 12,                # visible text nodes (108)
+        "screen_state": "splash/loading",     # stuck-on-splash label (114)
+        "_errors": ["boom", "bang"],          # error surfacing (117)
+    })
+    assert "window focused:some-state" in s
+    assert "startup TLS blocked:yes" in s
+    assert "- " in s
+    assert ("x" * 120) not in s              # the >90-char line was truncated
+    assert "visible text nodes:12" in s
+    assert "did NOT advance" in s            # splash/loading not a usable-app claim
+    assert "boom" in s and "bang" in s
+
+
+def test_summarize_handles_untyped_payload():
+    # technology.py:140: a payload that is neither dict, str, nor None (an int)
+    # renders its type name honestly instead of crashing - and the non-dict
+    # message arm (125-126) is confirmed alongside.
+    from dynamic.success_checks.technology import _summarize
+    assert _summarize("raw log") == "malformed:str"
+    assert _summarize({"type": "error", "payload": 42}) == "error:int"

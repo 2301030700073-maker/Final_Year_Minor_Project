@@ -22,7 +22,7 @@ from static.decision_engine import DEFAULT_THRESHOLD
 
 def _category_is_confident_negative(run: RunRow, category: str) -> bool:
     """F2/G-A: a NEITHER is a confident negative only when every governing
-    surface (root->{java,native}, ssl->{java,native,manifest}) is fully_analyzed.
+    surface (root->{java,native,js}, ssl->{java,native,manifest,js}) is fully_analyzed.
     A run with NO coverage map (pre-coverage, or native.py not yet emitting
     states) scanned only Java - every other surface is effectively unscannable -
     so it cannot certify native/manifest clean. Its negative is NOT confident
@@ -209,8 +209,8 @@ def compute_calibration_report(
             # ADR-0008 (F2/G-A): the legacy decompile_completeness gate above is
             # the Java-only exclusion. Per-surface coverage (when present) gates
             # EVERY governing surface: a category's NEITHER is excluded if any of
-            # its governing surfaces (root->{java,native}, ssl->{java,native,
-            # manifest}) is partial/unscannable - so a root check hiding in a
+            # its governing surfaces (root->{java,native,js}, ssl->{java,native,
+            # manifest,js}) is partial/unscannable - so a root check hiding in a
             # stripped .so excludes the root negative even when Java is complete.
             # A run with no coverage field (pre-coverage, or native.py not yet
             # emitting states) scanned only Java, so all other governing surfaces

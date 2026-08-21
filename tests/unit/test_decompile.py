@@ -715,3 +715,180 @@ def test_decompile_degrades_to_partial_when_apktool_writes_no_manifest(tmp_path,
     # Both tools exited 0 (apktool "succeeded" yet wrote no manifest), so there
     # is no fabricated error tail - the honest record is completeness=partial.
     assert result.evidence["jadx_error_tail"] is None
+
+
+def test_build_error_tail_combines_failures_or_none():
+    # _build_error_tail: surfaces whichever of jadx/apktool failed; None when both
+    # succeeded (nothing to surface). Had zero direct coverage.
+    from static.decompile import _build_error_tail
+    assert _build_error_tail(0, "ok", 0, "ok") is None
+    assert _build_error_tail(1, "jlog", 0, "ok") == "jadx exited 1\njlog"
+    assert _build_error_tail(0, "ok", 2, "alog") == "apktool exited 2\nalog"
+    both = _build_error_tail(1, "jlog", 2, "alog")
+    assert "jadx exited 1\njlog" in both and "apktool exited 2\nalog" in both
+
+
+def test_count_java_files_counts_real_files_only(tmp_path):
+    # _count_java_files: real .java files on disk (nested included), non-.java
+    # files and directories excluded, missing dir -> 0. This is the ground truth
+    # for whether jadx left anything real for scan() to walk - not jadx's own
+    # progress-log text. Had zero direct coverage.
+    from static.decompile import _count_java_files
+    assert _count_java_files(tmp_path / "nonexistent") == 0
+    src = tmp_path / "sources" / "com" / "x"
+    src.mkdir(parents=True)
+    (src / "A.java").write_text("class A{}")
+    (src / "B.java").write_text("class B{}")
+    (src / "notes.txt").write_text("not java")
+    (src / "C.java").write_text("class C{}")
+    assert _count_java_files(tmp_path) == 3
+
+
+def test_has_real_cached_content_requires_both_real_content(tmp_path):
+    # _has_real_cached_content: a cache hit needs MORE than the directories
+    # existing - a hollow shell (dir present, contents gone) must NOT read as a
+    # hit, or static_scan() would walk an empty tree and report a NEITHER that
+    # is indistinguishable from a genuine 'nothing found'. Both a real .java
+    # under jadx_dir AND the apktool AndroidManifest.xml must be present.
+    # Had zero direct coverage.
+    from static.decompile import _has_real_cached_content
+    jadx, apktool = tmp_path / "jadx", tmp_path / "apktool"
+    jadx.mkdir(); apktool.mkdir()
+    (jadx / "A.java").write_text("class A{}")
+    (apktool / "AndroidManifest.xml").write_text("<manifest/>")
+    assert _has_real_cached_content(jadx, apktool) is True
+    # hollow jadx dir -> not a hit
+    empty = jadx / "empty"; empty.mkdir()
+    assert _has_real_cached_content(empty, apktool) is False
+    # jadx real but apktool manifest gone -> not a hit
+    (apktool / "AndroidManifest.xml").unlink()
+    assert _has_real_cached_content(jadx, apktool) is False
+
+
+def test_dir_size_sums_recursive_file_bytes(tmp_path):
+    from static.decompile import _dir_size
+    assert _dir_size(tmp_path / "missing") == 0
+    (tmp_path / "a.txt").write_text("aaaa")  # 4 bytes
+    sub = tmp_path / "sub"; sub.mkdir()
+    (sub / "b.txt").write_text("bbbbbb")     # 6 bytes
+    assert _dir_size(tmp_path) == 10
+
+
+def test_jadx_version_takes_first_line_and_degrades_to_unknown(monkeypatch):
+    # _jadx_version: the short jadx version token for the per-DEX cache key. A
+    # toolchain upgrade must invalidate cached decompiles; a probe failure must
+    # degrade to 'unknown' (the key becomes less specific, NEVER more wrong).
+    # Had zero coverage.
+    import subprocess as _sp
+    from static.decompile import _jadx_version
+
+    monkeypatch.setattr(_sp, "run", lambda *a, **k: _sp.CompletedProcess(
+        [], 0, stdout="jadx 1.5.6\nSome extra line\n", stderr=""))
+    assert _jadx_version("jadx") == "jadx 1.5.6"
+
+    # version may land on stderr (some wrappers) - still captured, first line
+    monkeypatch.setattr(_sp, "run", lambda *a, **k: _sp.CompletedProcess(
+        [], 0, stdout="", stderr="jadx 1.5.1\n"))
+    assert _jadx_version("jadx") == "jadx 1.5.1"
+
+    # any probe hiccup (missing binary, timeout, exception) -> 'unknown', never a crash
+    def boom(*a, **k):
+        raise FileNotFoundError("jadx missing")
+    monkeypatch.setattr(_sp, "run", boom)
+    assert _jadx_version("jadx") == "unknown"
+
+    # empty output -> 'unknown' too (nothing to key on, honest not-a-version)
+    monkeypatch.setattr(_sp, "run", lambda *a, **k: _sp.CompletedProcess(
+        [], 0, stdout="", stderr=""))
+    assert _jadx_version("jadx") == "unknown"
+
+
+def test_result_builder_marks_partial_and_counts_files(tmp_path):
+    # _result: the decompile StageResult builder. `partial` must be true exactly
+    # when completeness != 'complete', and a None jadx_file_count is derived by
+    # counting real .java files (never fabricated). Had zero coverage.
+    from pathlib import Path
+    from static.decompile import _result
+
+    # explicit count -> no file scanning needed, completeness drives `partial`
+    full = _result(0.0, Path("/jadx"), Path("/apktool"), cached=True,
+                   jadx_file_count=5)
+    assert full.evidence["partial"] is False
+    assert full.evidence["jadx_file_count"] == 5
+    assert full.evidence["cached"] is True
+    assert full.status == "success" and full.stage == "decompile"
+
+    partial = _result(0.0, Path("/jadx"), Path("/apktool"), cached=False,
+                      decompile_completeness="partial", jadx_file_count=2)
+    assert partial.evidence["partial"] is True
+    assert partial.evidence["jadx_error_tail"] is None
+
+    # None count -> derived by counting real .java files under jadx_dir
+    jadx_dir = tmp_path / "jadx"
+    (jadx_dir / "com").mkdir(parents=True)
+    (jadx_dir / "com" / "App.java").write_text("class App{}", encoding="utf-8")
+    (jadx_dir / "com" / "notes.txt").write_text("nope", encoding="utf-8")
+    counted = _result(0.0, jadx_dir, Path("/apktool"), cached=False, jadx_file_count=None)
+    assert counted.evidence["jadx_file_count"] == 1  # only the real .java
+
+
+def test_apktool_timeout_scales_with_size_and_caps():
+    # apktool_timeout_for_size: size-scaled decode timeout (LARGE-APP), the
+    # apktool counterpart of jadx_timeout_for_size. Small APKs fail a hung
+    # apktool fast (floor), large ones get proportional headroom, and a hard cap
+    # bounds the worst case. Had zero coverage.
+    from static.decompile import (
+        apktool_timeout_for_size,
+        APKTOOL_TIMEOUT_FLOOR, APKTOOL_TIMEOUT_CAP,
+    )
+    assert apktool_timeout_for_size(0) == APKTOOL_TIMEOUT_FLOOR  # tiny -> floor
+    # 10 MB: floor + 10*1.5 = 195 (scales linearly in the middle)
+    assert apktool_timeout_for_size(10 * 1024 * 1024) == APKTOOL_TIMEOUT_FLOOR + 15
+    # huge -> capped, never unbounded
+    assert apktool_timeout_for_size(5000 * 1024 * 1024) == APKTOOL_TIMEOUT_CAP
+    # monotonic non-decreasing in size
+    assert apktool_timeout_for_size(50 * 1024 * 1024) >= apktool_timeout_for_size(10 * 1024 * 1024)
+
+
+def test_run_tool_logged_streams_output_and_returns_rc(tmp_path, monkeypatch):
+    # _run_tool_logged (D3): runs one tool streaming combined stdout+stderr to the
+    # log file (never buffering megabytes in RAM) and returns (returncode, tail).
+    # The returncode must come from the real process, and the tail must carry the
+    # streamed content. Had zero coverage.
+    import subprocess as _sp
+    from static.decompile import _run_tool_logged
+
+    captured = {}
+    def fake_run(cmd, stdout, stderr, timeout):
+        captured["cmd"] = cmd
+        captured["timeout"] = timeout
+        captured["stderr"] = stderr
+        stdout.write("decompiling...\n")
+        stdout.write("java.lang.OutOfMemoryError\n")
+        return _sp.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(_sp, "run", fake_run)
+    log = tmp_path / "deep" / "jadx.log"
+    rc, tail = _run_tool_logged(["jadx", "-q"], log, 60, "jadx")
+
+    assert rc == 1                       # real process exit code, not fabricated
+    assert "OutOfMemoryError" in tail    # streamed content lands in the tail
+    assert captured["stderr"] == _sp.STDOUT  # combined stream
+    assert captured["timeout"] == 60
+    assert log.exists()
+
+
+def test_run_tool_logged_marks_timeout_and_returns_timer_rc(tmp_path, monkeypatch):
+    # _run_tool_logged (D1): a killed-by-timeout process is surfaced as the
+    # timeout sentinel returncode (not a silent 0), and the log records the kill.
+    import subprocess as _sp
+    from static.decompile import _run_tool_logged, _TIMEOUT_RC
+
+    def timeout_run(cmd, **kw):
+        raise _sp.TimeoutExpired(cmd, timeout=kw.get("timeout", 0))
+
+    monkeypatch.setattr(_sp, "run", timeout_run)
+    log = tmp_path / "jadx.log"
+    rc, tail = _run_tool_logged(["jadx", "-q"], log, 30, "jadx")
+    assert rc == _TIMEOUT_RC
+    assert "timed out after 30s" in tail

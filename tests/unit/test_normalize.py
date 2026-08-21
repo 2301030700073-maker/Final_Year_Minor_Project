@@ -127,3 +127,180 @@ def test_normalize_split_set_requires_some_apk(tmp_path):
         raise AssertionError("expected ValueError")
     except ValueError as e:
         assert "no .apk" in str(e)
+
+
+def test_is_aab_and_sorted_dex_entries():
+    # _is_aab: a .aab suffix is authoritative; otherwise a zip is an AAB only if
+    # it carries base/manifest/AndroidManifest.xml; a bad zip is never an AAB.
+    # _sorted_dex_entries: returns only base/classes*.dex, sorted. Pure zip
+    # handling - both had zero direct coverage.
+    import io
+    import zipfile
+    from pathlib import Path
+    from ingest.normalize import _is_aab, _sorted_dex_entries
+
+    # .aab suffix -> True regardless of contents
+    assert _is_aab(Path("pkg.aab")) is True
+    assert _is_aab(Path("pkg.apk")) is False
+
+    # a real zip missing the AAB manifest -> not an AAB
+    plain = io.BytesIO()
+    with zipfile.ZipFile(plain, "w") as z:
+        z.writestr("AndroidManifest.xml", "<manifest/>")
+    plain.seek(0)
+    tmp = Path("/tmp/_is_aab_plain.apk"); tmp.write_bytes(plain.getvalue())
+    assert _is_aab(tmp) is False
+
+    # a zip WITH the AAB manifest -> an AAB
+    aab = io.BytesIO()
+    with zipfile.ZipFile(aab, "w") as z:
+        z.writestr("base/manifest/AndroidManifest.xml", "<manifest/>")
+    aab.seek(0)
+    tmp2 = Path("/tmp/_is_aab_true.aab"); tmp2.write_bytes(aab.getvalue())
+    assert _is_aab(tmp2) is True
+
+    # garbage bytes -> not an AAB (no crash)
+    junk = Path("/tmp/_is_aab_junk.apk"); junk.write_bytes(b"\x00\x01garbage")
+    assert _is_aab(junk) is False
+
+    # sorted_dex_entries over an in-memory zip
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, "w") as z:
+        for n in ("base/classes2.dex", "base/classes.dex", "base/classes3.dex", "base/res/a", "other.dex"):
+            z.writestr(n, "x")
+    mem.seek(0)
+    with zipfile.ZipFile(mem) as z:
+        assert _sorted_dex_entries(z) == ["base/classes.dex", "base/classes2.dex", "base/classes3.dex"]
+
+
+def test_read_zip_entries_excludes_directories():
+    # _read_zip_entries: reads a zip to {name: bytes}, excluding directory
+    # entries (trailing '/'). Pure zip parsing - had zero direct coverage.
+    import io
+    import zipfile
+    from pathlib import Path
+    from ingest.normalize import _read_zip_entries
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("AndroidManifest.xml", "<manifest/>")
+        z.writestr("classes.dex", b"\x00\x01")
+        z.writestr("res/", b"")  # directory entry - must be excluded
+    buf.seek(0)
+    p = Path("/tmp/_rze.apk"); p.write_bytes(buf.getvalue())
+    entries = _read_zip_entries(p)
+    assert "AndroidManifest.xml" in entries
+    assert "classes.dex" in entries
+    assert "res/" not in entries
+    assert entries["classes.dex"] == b"\x00\x01"
+
+
+def test_sha256_bytes_is_stable_and_hex(tmp_path):
+    # _sha256_bytes: the pure content hash that names the run dir. Must be a
+    # stable 64-char hex over the bytes, independent of path/name. Had zero
+    # coverage.
+    from ingest.normalize import _sha256_bytes
+    h = _sha256_bytes(b"hello")
+    assert h == _sha256_bytes(b"hello")          # deterministic
+    assert len(h) == 64 and all(c in "0123456789abcdef" for c in h)
+    assert _sha256_bytes(b"hello") != _sha256_bytes(b"hellp")
+
+
+def test_is_apk_zip_true_only_with_root_manifest(tmp_path):
+    # _is_apk_zip: an APK is a zip carrying a root AndroidManifest.xml; a plain
+    # zip or a corrupt file is not. Degrades to False (never raises) on a bad
+    # zip. Had zero coverage.
+    import zipfile as _z
+    from ingest.normalize import _is_apk_zip
+
+    apk = tmp_path / "a.apk"
+    with _z.ZipFile(apk, "w") as z:
+        z.writestr("AndroidManifest.xml", "<manifest/>")
+        z.writestr("classes.dex", "dex")
+    assert _is_apk_zip(apk) is True
+
+    plain = tmp_path / "b.zip"
+    with _z.ZipFile(plain, "w") as z:
+        z.writestr("note.txt", "hi")
+    assert _is_apk_zip(plain) is False
+
+    bad = tmp_path / "c.apk"
+    bad.write_bytes(b"not a zip")
+    assert _is_apk_zip(bad) is False
+    assert _is_apk_zip(tmp_path / "missing.apk") is False
+
+
+def test_sha256_split_dir_is_deterministic_and_order_insensitive(tmp_path):
+    # _sha256_split_dir: deterministic identity for a split-APK dir - combines
+    # sorted per-file name+hash so the same set always yields the same output
+    # name (and only .apk files count; other artifacts must not perturb it).
+    # Had zero coverage.
+    import zipfile as _z
+    from ingest.normalize import _sha256_split_dir
+
+    a = tmp_path / "1.apk"
+    with _z.ZipFile(a, "w") as z:
+        z.writestr("classes.dex", b"dex1")
+    b = tmp_path / "2.apk"
+    with _z.ZipFile(b, "w") as z:
+        z.writestr("classes.dex", b"dex2")
+
+    h0 = _sha256_split_dir(tmp_path)
+    assert _sha256_split_dir(tmp_path) == h0  # deterministic on unchanged dir
+
+    # a non-.apk file must not change the identity
+    (tmp_path / "notes.txt").write_text("not an apk", encoding="utf-8")
+    assert _sha256_split_dir(tmp_path) == h0
+
+    # changing one apk's content changes the identity (capture before vs after)
+    with _z.ZipFile(a, "w") as z:
+        z.writestr("classes.dex", b"changed")
+    h_after = _sha256_split_dir(tmp_path)
+    assert h_after != h0
+    assert len(h_after) == 64  # hex
+
+
+def test_normalize_input_rejects_plain_zip_loudly(tmp_path):
+    # normalize.py:101-105: a zip that is neither an APK (no root manifest) nor
+    # an AAB must fail LOUDLY, never silently no-op - the project's principle 3
+    # (a mis-suffixed or wrong-format input must not silently produce nothing).
+    # Real coverage proved this raise branch untested.
+    import zipfile as _z
+    plain = tmp_path / "pkg.zip"
+    with _z.ZipFile(plain, "w") as z:
+        z.writestr("assets/note.txt", "hi")
+    try:
+        normalize.normalize_input(plain, tmp_path / "out")
+        raise AssertionError("expected ValueError for a non-APK non-AAB zip")
+    except ValueError as e:
+        assert "neither an APK" in str(e) and "nor an AAB" in str(e)
+
+
+def test_normalize_split_set_rejects_when_no_dex_anywhere(tmp_path):
+    # normalize.py:163-165: a split set whose APKs carry a manifest but NO
+    # classes*.dex (e.g. a config-only split) must fail loudly rather than
+    # produce an output with no code - "no classes*.dex found across".
+    import zipfile as _z
+    d = tmp_path / "nodex"
+    d.mkdir()
+    # a zip that is a valid APK (root manifest) but contains no dex at all
+    nod_dex = d / "base.apk"
+    with _z.ZipFile(nod_dex, "w") as z:
+        z.writestr("AndroidManifest.xml", "<manifest package='com.x'/>")
+        z.writestr("res/values/strings.xml", "<resources/>")
+    try:
+        normalize.normalize_split_set(d, tmp_path / "out2")
+        raise AssertionError("expected ValueError for a split set with no dex")
+    except ValueError as e:
+        assert "no classes*.dex" in str(e)
+
+
+def test_normalize_input_routes_directory_to_split_set(tmp_path):
+    # normalize.py:101: normalize_input dispatches a DIRECTORY input to the
+    # split-APK set path. The split-set logic itself is tested directly, but the
+    # is_dir routing branch through normalize_input had zero coverage.
+    d = tmp_path / "splits"
+    d.mkdir()
+    _plain_apk(d, "base.apk")
+    out = normalize.normalize_input(d, tmp_path / "out")
+    with zipfile.ZipFile(out) as z:
+        assert "AndroidManifest.xml" in z.namelist()

@@ -59,7 +59,10 @@ from dynamic.success_checks.androgoat import AndroGoatSuccessCheck
 from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
 from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
 from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
-from dynamic.success_checks.technology import TechnologyHooksEngagedCheck
+from dynamic.success_checks.technology import (
+    TechnologyHooksEngagedCheck,
+    liveness_evidence_lines,
+)
 from ingest.metadata import compute_hashes, ingest
 from ingest.normalize import normalize_input
 from report.attribution import attribute_root_evidence, gate_all_third_party
@@ -680,11 +683,15 @@ def run(
     # Wrapped (4-1): a malformed/unvalidated YAML raises inside load_signatures,
     # so it must become a loud StageResult and halt - not a raw traceback with
     # no StageResult and an invisible attempt (NFR-1).
+    # Two distinct loads share one generic stage name, which renders as two
+    # identical "signature_load" rows in the Stage Results table - a reader
+    # cannot tell which signature corpus each loaded. Name them per-corpus so
+    # the table is unambiguous (root vs ssl signature set).
     root_sig_stage, root_signatures = _wrap_stage(
-        "signature_load", load_signatures, Path("config/signatures/root_detection.yaml")
+        "signature_load:root", load_signatures, Path("config/signatures/root_detection.yaml")
     )
     ssl_sig_stage, ssl_signatures = _wrap_stage(
-        "signature_load", load_signatures, Path("config/signatures/ssl_pinning.yaml")
+        "signature_load:ssl", load_signatures, Path("config/signatures/ssl_pinning.yaml")
     )
     stage_results.append(root_sig_stage)
     stage_results.append(ssl_sig_stage)
@@ -747,7 +754,11 @@ def run(
     # scan. An absent/unreadable androguard degrades to a note, not a halt: it is
     # an enhancement source and the pipeline still has real decompiled roots.
     try:
-        dex_scan = scan_dex_strings(apk, root_signatures + ssl_signatures)
+        dex_scan = scan_dex_strings(
+            apk,
+            root_signatures + ssl_signatures,
+            cache_dir=Path("outputs/cache/dexstrings"),
+        )
         merged = _merge_dex_evidence(static_evidence, dex_scan["evidence"],
                                      root_signatures + ssl_signatures, dex_scan["app_package"])
         if merged:
@@ -1015,6 +1026,21 @@ def run(
     )
 
     console.print(f"[bold]Decision: {classification.action.value}[/bold]")
+    # Mirror report/generator.py's Decision-line caveat live: when a governing
+    # surface was not fully analyzed (coverage_limited) or detection-shaped code
+    # matched no signature (unattributed indicators), unknown_uncovered is
+    # non-empty and a NEITHER is "unknown, not absent" - a bare "Decision:
+    # NEITHER" on the console would read as a confident negative (ADR-0006).
+    # Same degradation-class as the unreadable-files / partial-decompile CAUTIONs
+    # below; the report carries it, the console must too.
+    if classification.unknown_uncovered:
+        console.print(
+            f"[bold yellow]Coverage-limited (unknown, not absent): "
+            f"{', '.join(classification.unknown_uncovered)} - a NEITHER here is "
+            "a lower bound, not a confident negative (governing surface not fully "
+            "analyzed, or detection-shaped code matched no signature); see "
+            "Limitations.[/bold yellow]"
+        )
     # Finding J: surface the scan degradation live, not just in the rendered
     # report - a reviewer watching the console run (cli_output.txt) must see
     # that the corpus was degraded AND which file failed, not be blindsided by
@@ -1112,6 +1138,12 @@ def run(
     # --- dynamic analysis ---
     verification: Optional[VerificationResult] = None
     correlation_result = None
+    # Honest reason for the report's "Not evaluated" correlation line when
+    # dynamic RAN but no static/dynamic correlation was produced - distinct
+    # from "dynamic stage skipped" (dynamic never ran). A dynamic run that used
+    # the technology-level hooks-engaged tier, or whose verification could not
+    # be captured, is NOT a skipped stage and must not be reported as one.
+    correlation_skip_reason = None
     verification = None
     # GAP-2: a failed dynamic stage used to _halt and discard the already-correct
     # static analysis + report (a frida-server connection reset lost the static
@@ -1276,7 +1308,9 @@ def run(
                 # target-specific success check). Never a fake pass (ADR-0006).
                 tech_check = TechnologyHooksEngagedCheck()
                 verification = tech_check.check(
-                    dynamic_stage.evidence.get("frida_messages", [])
+                    dynamic_stage.evidence.get("frida_messages", []),
+                    app_still_running=dynamic_stage.evidence.get("app_still_running"),
+                    ui_liveness=dynamic_stage.evidence.get("ui_liveness"),
                 )
                 engaged = verification.evidence_lines.get("bypass hooks engaged", "none")
                 check_stage = StageResult(
@@ -1298,6 +1332,16 @@ def run(
                         ),
                     },
                 )
+                # Dynamic RAN here (technology hooks-engaged tier, real root/ssl
+                # evidence surfaced under Dynamic Verification) - it was not
+                # skipped. Correlation needs a target-specific verification to
+                # compare static findings against, so state that reason honestly
+                # instead of the report defaulting to "dynamic stage skipped".
+                correlation_skip_reason = (
+                    "dynamic used the technology-level hooks-engaged check (no "
+                    "target-specific success check for this app); correlation "
+                    "requires a target-specific verification"
+                )
                 stage_results.append(check_stage)
                 _print_stage(check_stage)
             else:
@@ -1305,12 +1349,29 @@ def run(
                     # logcat was unavailable - the failed check stage was already
                     # recorded above; running the target-specific check on empty
                     # logcat would be misleading. Leave verification None (report
-                    # says "not verified") and correlation not attempted.
+                    # says "not verified") and correlation not attempted - stated
+                    # with the honest reason (dynamic ran; it was not skipped).
                     verification = None
                     correlation_result = None
+                    correlation_skip_reason = (
+                        "logcat capture failed - no verification to correlate against"
+                    )
                 else:
                     try:
                         verification = success_check.check(logcat_output, frida_log)
+                        # Surface the post-bypass liveness + real-time UI
+                        # evidence on EVERY target, not just unknown/technology
+                        # ones - the target-specific check reports the bypass
+                        # result, this injects the auditable liveness lines so
+                        # a known target's report also states whether the app
+                        # survived and its UI is live/focused/un-ANRed.
+                        if verification is not None:
+                            verification.evidence_lines.update(
+                                liveness_evidence_lines(
+                                    dynamic_stage.evidence.get("app_still_running"),
+                                    dynamic_stage.evidence.get("ui_liveness"),
+                                )
+                            )
                         correlation_result = correlation_module.correlate(classification, verification)
                     except Exception as exc:
                         # GAP-2 on an unexpected success-check exception for a
@@ -1319,6 +1380,10 @@ def run(
                         dynamic_failed = True
                         verification = None
                         correlation_result = None
+                        correlation_skip_reason = (
+                            "success-check raised an unexpected exception - "
+                            "correlation not attempted"
+                        )
                         check_stage = StageResult(
                             stage="success-check", status="failed",
                             evidence={"reason": "unexpected success-check exception"},
@@ -1346,6 +1411,7 @@ def run(
         classification=classification,
         verification=verification,
         dynamic_skip_reason=dynamic_skip_reason,
+        correlation_skip_reason=correlation_skip_reason,
         correlation=correlation_result,
         stage_results=stage_results,
         output_dir=REPORTS_ROOT,
@@ -1377,6 +1443,7 @@ def run(
             "classification": classification,
             "verification": verification,
             "correlation": correlation_result,
+            "correlation_skip_reason": correlation_skip_reason,
             "stage_results": stage_results,
             "git_commit": git_commit,
             "target": target,
@@ -1695,6 +1762,7 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         stage_results=[_stage_from_json(s) for s in (run.stage_results_json or [])],
         output_dir=REPORTS_ROOT,
         dynamic_skip_reason=run.dynamic_skip_reason,
+        correlation_skip_reason=run.correlation_skip_reason,
         manifest=_manifest_from_json(run.manifest_json),
         git_commit=rendering_commit,
         coverage=run.coverage,
@@ -1749,6 +1817,7 @@ def _correlation_from_json(c) -> CorrelationResult | None:
     return CorrelationResult(
         matches=c.get("matches"),
         mismatches=c.get("mismatches") or [],
+        unverified=c.get("unverified") or [],
     )
 
 
@@ -1798,6 +1867,14 @@ def verify_audit_log_cmd(
         f"[green]Audit log OK[/green] - {result['total']} record(s), "
         f"{result['chained']} chained, {result['legacy']} legacy"
     )
+    # A valid log can still contain authorizations whose runs never completed
+    # (a crashed or deliberately-halted analysis). Not a failure - but an auditor
+    # must not read a plain "OK" as "every run finished", so surface them.
+    if result.get("uncompleted_runs"):
+        console.print(
+            f"[yellow]Note: {len(result['uncompleted_runs'])} authorized run(s) "
+            f"never completed: {', '.join(result['uncompleted_runs'])}[/yellow]"
+        )
 
 
 if __name__ == "__main__":

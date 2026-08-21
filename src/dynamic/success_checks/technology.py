@@ -40,6 +40,84 @@ _MESSAGE_SAMPLE_LIMIT = 8
 _PAYLOAD_TRUNCATE = 80
 
 
+def liveness_evidence_lines(
+    app_still_running: bool | None, ui_liveness: dict | None
+) -> dict[str, str]:
+    """Post-bypass liveness + real-time UI-responsiveness evidence lines, shared
+    so EVERY run's report surfaces them - not just unknown/technology targets.
+    A claimed bypass is only meaningful if the process survived the settle
+    window and its UI is live, focused, un-ANRed and rendering; state it
+    audibly for every target (ADR-0006), and say 'not captured' when the tool
+    was unavailable rather than guess."""
+    lines = {
+        "app still running after bypass": (
+            "True (process survived the settle window, did not self-terminate)"
+            if app_still_running
+            else (
+                "False (app self-terminated on the injected instrumentation - "
+                "bypass not confirmable)"
+                if app_still_running is False
+                else "not captured (liveness not recorded this run)"
+            )
+        ),
+        "App UI responsiveness (live, real device data)": (
+            _summarize_ui_liveness(ui_liveness)
+            if ui_liveness else "not captured (no live UI evidence this run)"
+        ),
+    }
+    return lines
+
+
+def _summarize_ui_liveness(ui: dict) -> str:
+    """Render the real-time UI-responsiveness evidence compactly. Each signal is
+    real device data; None means that tool was unavailable, reported honestly."""
+    def _fmt(key: str, label: str) -> str:
+        val = ui.get(key)
+        if val is None:
+            return f"{label}:not captured"
+        if isinstance(val, bool):
+            return f"{label}:{'yes' if val else 'no'}"
+        return f"{label}:{val}"
+
+    parts = [_fmt("activity_resumed", "activity RESUMED"),
+             _fmt("window_focused", "window focused"),
+             _fmt("anr_detected", "ANR/frozen-UI")]
+    # TLS trust/validation failure: the honest "why the splash is stuck"
+    # signal - the app is not ANR-frozen, its startup network calls are being
+    # rejected on the certificate trust path (e.g. a MITM/proxy CA not in its
+    # trust store). Surface the first quoted failure so the report names the
+    # actual cause instead of a bare inconclusive SSL.
+    if ui.get("tls_blocked"):
+        sample = ui.get("tls_block_lines") or []
+        quote = ""
+        if sample:
+            line = sample[0]
+            quote = " - " + (line[-90:] if len(line) > 90 else line)
+        parts.append("startup TLS blocked:yes (cert trust rejected on Conscrypt/"
+                     "okhttp path; SSL bypass did not neutralize it)" + quote)
+    nodes = ui.get("clickable_nodes")
+    parts.append(f"interactive nodes:{nodes if nodes is not None else 'not captured'}")
+    # The honest screen-state label (splash/loading vs interactive page) from
+    # real widget data - this is what separates a frozen logo screen from a
+    # reached-and-usable home page, which clickable-count alone cannot do.
+    state = ui.get("screen_state")
+    if state:
+        parts.append(f"screen:{state}")
+    ntext = ui.get("text_node_count")
+    if ntext is not None:
+        parts.append(f"visible text nodes:{ntext}")
+    # When the screen is a splash/loading frame (no interactive widgets, minimal
+    # text), state it explicitly rather than letting a rendered flag read as a
+    # healthy, tappable UI. A bypass on a screen that never advanced is not a
+    # usable-app claim and must not read as one.
+    if state and "splash/loading" in state:
+        parts.append("(app did NOT advance to an interactive page - stuck on splash/loading)")
+    errs = ui.get("_errors")
+    if errs:
+        parts.append("; ".join(str(e) for e in errs[:2]))
+    return ", ".join(parts)
+
+
 def _summarize(message: dict, limit: int = _PAYLOAD_TRUNCATE) -> str:
     """Render one frida message compactly so the report shows what was actually
     observed, not just a pass/fail label. A log message carries a string payload;
@@ -92,7 +170,25 @@ class TechnologyHooksEngagedCheck:
     Each is scoped to the detected checks actually exercised in the run; a
     flow-triggered check never reached emits nothing and stays inconclusive."""
 
-    def check(self, frida_messages: list | None) -> VerificationResult:
+    def check(
+        self,
+        frida_messages: list | None,
+        app_still_running: bool | None = None,
+        ui_liveness: dict | None = None,
+    ) -> VerificationResult:
+        """`app_still_running` is the post-bypass liveness of the app process,
+        recorded by the dynamic stage at the settle window (True = it survived
+        and did not self-terminate on the instrumentation). Surfaced in the
+        report so a claimed bypass is backed by an explicit, auditable
+        liveness signal - a bypass on a process that killed itself would be
+        meaningless, so "still running" is stated, never implied.
+
+        `ui_liveness` is real-time UI-responsiveness evidence gathered from the
+        device after the bypass (dumpsys activity/window, logcat ANR scan,
+        uiautomator interactive-node count) - it proves the app is not merely
+        alive but its UI is live, focused, un-ANRed, and renders interactive
+        nodes. Each signal is honest real device data; None means "not captured"
+        (a missing tool), never a guessed pass."""
         messages = frida_messages or []
         engaged: list[str] = []
         probe_hits: list[str] = []
@@ -144,6 +240,20 @@ class TechnologyHooksEngagedCheck:
         # were actually exercised, which is all either mechanism can claim (ADR-0006).
         root_confirmed = bool(probe_hits)
         evidence_lines = {
+            # Explicit post-bypass liveness (FR-4.6): the app process survived
+            # the settle window and did not self-terminate on the injected
+            # instrumentation. Stated audibly so a bypass claim is never made
+            # against a dead/self-killed process without it being called out.
+            "app still running after bypass": (
+                "True (process survived the settle window, did not self-terminate)"
+                if app_still_running
+                else (
+                    "False (app self-terminated on the injected instrumentation - "
+                    "bypass not confirmable)"
+                    if app_still_running is False
+                    else "not captured (liveness not recorded this run)"
+                )
+            ),
             "bypass hooks engaged": (
                 ", ".join(engaged) if engaged
                 else "none (no hook checkpoint observed)"
@@ -175,7 +285,13 @@ class TechnologyHooksEngagedCheck:
             "TLS handshakes completed post-bypass": (
                 "yes (a TLS handshake completed through the neutralized stack)"
                 if "ssl-handshake" in effects
-                else "none observed (no TLS handshake reached during the run)"
+                else (
+                    "none completed - handshakes were ATTEMPTED but rejected on "
+                    "the cert trust path (SSL bypass did not neutralize them; "
+                    "see startup-TLS signal)"
+                    if (ui_liveness or {}).get("tls_blocked")
+                    else "none observed (no TLS handshake reached during the run)"
+                )
             ),
             # Confirmed SSL bypass, on the app's own observable behavior: its pin-
             # check ran without rejecting and a handshake completed. Never a
@@ -191,6 +307,16 @@ class TechnologyHooksEngagedCheck:
                 f"{len(messages)} total; sample: "
                 + (", ".join(_summarize(m) for m in messages[:_MESSAGE_SAMPLE_LIMIT])
                    if messages else "(none captured)")
+            ),
+            # Real-time UI-responsiveness (from live device data, not inference):
+            # the app's top activity reached RESUMED (foreground), it owns window
+            # focus, no ANR / input-dispatch timeout was logged (UI thread not
+            # frozen), and a real interactive UI hierarchy is rendered. This is
+            # the honest "app is usable, not stuck" claim - it proves the UI is
+            # live and tappable without fabricating a specific click.
+            "App UI responsiveness (live, real device data)": (
+                _summarize_ui_liveness(ui_liveness)
+                if ui_liveness else "not captured (no live UI evidence this run)"
             ),
         }
         return VerificationResult(

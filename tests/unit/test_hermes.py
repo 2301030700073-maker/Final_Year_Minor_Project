@@ -85,6 +85,31 @@ def test_scan_bundle_plain_text_left_to_engine(tmp_path):
     assert res["matches"] == []
 
 
+def test_hermes_degrades_honestly_on_unreadable_bundle(tmp_path):
+    # hermes.py:95-97, 108-109, 143-144: an UNREADABLE bundle (open/read raises
+    # OSError - a directory path is IsADirectoryError) must degrade honestly and
+    # never crash: is_binary_bundle -> True (treated as binary so coverage is not
+    # silently certified), extract_ascii_strings -> [], scan_bundle -> opaque.
+    # Real coverage proved all three OSError branches untested.
+    d = tmp_path / "unreadable.bundle"
+    d.mkdir()  # a directory: open()/read_bytes() raise OSError
+    assert is_binary_bundle(d) is True
+    assert extract_ascii_strings(d) == []
+    assert scan_bundle(d)["kind"] == "opaque"
+
+
+def test_extract_ascii_strings_flushes_run_at_end_of_file(tmp_path):
+    # hermes.py:120: a printable-ASCII run that reaches the very END of the file
+    # (no trailing non-printable byte) must still be appended - the trailing-run
+    # flush after the loop. The sibling recover-constants test only had runs
+    # followed by \x00, so this EOF-flush branch was uncovered. Real coverage
+    # proved line 120 untested.
+    p = _write_bytes(tmp_path, "eof.bundle", b"\x00prefix\x00trailingrun")
+    strings = extract_ascii_strings(p)
+    assert "trailingrun" in strings   # the EOF run was not dropped
+    assert "prefix" in strings
+
+
 def test_scan_bundle_hermes_no_idiom_no_matches(tmp_path):
     p = _write_bytes(
         tmp_path,

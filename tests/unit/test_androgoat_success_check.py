@@ -112,3 +112,27 @@ def test_no_root_probe_is_root_inconclusive():
     )
     assert result.root_bypassed is None
     assert "root_probe_hit" not in result.evidence_lines
+
+
+def test_pin_hook_fired_requires_same_line_pair():
+    # _pin_hook_fired (RESID-6G): the pin-hook check must be line-coherent - a
+    # "not present" line naming the hook must NOT pair with a stray `bypassed`
+    # on a different line to claim ssl_bypassed. Both tokens must share one line.
+    # Had zero direct coverage.
+    from dynamic.success_checks.androgoat import _pin_hook_fired
+    assert _pin_hook_fired("hook present\n  ok: bypassed") is False  # split across lines
+    assert _pin_hook_fired("OkHttp CertificatePinner.check ... bypassed") is True
+    assert _pin_hook_fired("hook not present\nno bypassed here") is False
+    assert _pin_hook_fired("") is False
+
+
+def test_root_probe_hit_confirms_defeated_root_probe():
+    # _root_probe_hit: a frida line carrying both `probeHit` and `root` confirms
+    # the app's own native root check was exercised AND answered-hidden - the
+    # root counterpart of the pin hook firing. Had zero direct coverage.
+    from dynamic.success_checks.androgoat import _root_probe_hit
+    assert _root_probe_hit("{probeHit: 'root', path: /system/bin/su}") is True
+    # tokens split across lines -> not coherent -> no confirmation
+    assert _root_probe_hit("probeHit fired\nbut not root") is False
+    assert _root_probe_hit("no evidence here") is False
+    assert _root_probe_hit("") is False

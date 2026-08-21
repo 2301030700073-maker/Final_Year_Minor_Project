@@ -121,6 +121,13 @@ def test_run_skips_dynamic_and_writes_coverage_bounded_report(run_setup, monkeyp
     # real decision engine ran and detected root from the fixture su path
     assert any("Decision:" in c for c in captured)
 
+    # L-M7-class: the console must carry the same Coverage-limited caveat the
+    # report's Decision line does. native is unscannable here, so both root and
+    # ssl are coverage-limited (unknown_uncovered non-empty) - a bare "Decision:
+    # ROOT_ONLY" with no caveat would read as a confident result, but the root
+    # detection is an upper bound over an uncovered native surface (ADR-0006).
+    assert any("Coverage-limited (unknown, not absent)" in c for c in captured)
+
     # L-M4: native was skipped (native_evidence=None -> native=unscannable), so
     # both root and ssl are coverage-limited and the confidence must render with
     # the upper-bound annotation - not a bare point estimate (ADR-0006).
@@ -332,3 +339,231 @@ def test_unknown_app_root_probe_confirms_in_report(run_setup, monkeypatch):
     # the app-agnostic root confirmation reached the report - NOT understated
     assert "Root bypassed: True" in text
     assert "Root-detection" in text
+
+
+def test_run_composes_coverage_bound_before_unattributed_indicators(run_setup, monkeypatch):
+    # Load-bearing composition order: apply_coverage_bound recomputes
+    # unknown_uncovered from scratch, while apply_unattributed_indicators only
+    # APPENDS to it. If the order were swapped, a content-based (unattributed-only)
+    # coverage_limited marker - the Boundary-1 "a fully-analyzed surface still hides
+    # a technique the corpus doesn't encode" honesty caveat (ADR-0006) - would be
+    # silently recomputed away. Pin: completeness runs first, content second.
+    import cli
+
+    calls = []
+    real_cb = cli.apply_coverage_bound
+    real_ui = cli.apply_unattributed_indicators
+
+    def spy_cb(classification, coverage):
+        calls.append("coverage_bound")
+        return real_cb(classification, coverage)
+
+    def spy_ui(classification, unattributed):
+        calls.append("unattributed")
+        return real_ui(classification, unattributed)
+
+    monkeypatch.setattr("cli.apply_coverage_bound", spy_cb)
+    monkeypatch.setattr("cli.apply_unattributed_indicators", spy_ui)
+
+    cli.run(
+        apk=run_setup / "fixture.apk",
+        justification="ACADEMIC_TRAINING_TARGET",
+        skip_dynamic=True,
+        device_serial=None,
+        target="uncrackable1",
+    )
+
+    assert calls == ["coverage_bound", "unattributed"]
+
+
+def test_run_writes_full_audit_trail_in_order(run_setup, monkeypatch):
+    # ADR-0005: every analysis attempt must be traceable end-to-end. The run
+    # pipeline wires record_authorization (before any analysis stage) then
+    # record_classification and record_run_completion - but run_setup stubs all
+    # three, so no test asserts they actually FIRE. Spy them (replacing the
+    # fixture's stubs) and pin that the trail is written with the real data.
+    import cli
+
+    calls = {"auth": [], "cls": [], "done": []}
+
+    def spy_auth(**kw):
+        calls["auth"].append(kw)
+        return _ok("audit")
+
+    def spy_cls(**kw):
+        calls["cls"].append(kw)
+        return _ok("classification_flush")
+
+    def spy_done(**kw):
+        calls["done"].append(kw)
+        return _ok("completion")
+
+    monkeypatch.setattr(cli, "record_authorization", spy_auth)
+    monkeypatch.setattr(cli, "record_classification", spy_cls)
+    monkeypatch.setattr(cli, "record_run_completion", spy_done)
+
+    cli.run(
+        apk=run_setup / "fixture.apk",
+        justification="ACADEMIC_TRAINING_TARGET",
+        skip_dynamic=True,
+        device_serial=None,
+        target="uncrackable1",
+    )
+
+    # Authorization opens the run, before any classification/completion result.
+    assert len(calls["auth"]) == 1
+    assert calls["auth"][0]["justification"] == "ACADEMIC_TRAINING_TARGET"
+    assert len(calls["cls"]) == 1  # the deterministic verdict is flushed
+    assert len(calls["done"]) == 1  # the run's outcome is recorded
+    # The completion record carries the run's decision action - the end of the
+    # start -> end trail (LIM-A) is populated, not an empty stub.
+    assert "action" in calls["done"][0]
+
+
+def test_merge_native_evidence_caps_confidence_and_unions_indicators():
+    # _merge_native_evidence: native evidence feeds the SAME confidence model as
+    # Java (ADR-0001) - per-category confidence is summed and capped at 1.0, the
+    # evidence lists are extended, and unattributed indicators are unioned so the
+    # single apply_unattributed_indicators call marks coverage-limited exactly
+    # like Java-side. Had zero direct coverage.
+    from types import SimpleNamespace
+    import cli
+    static = SimpleNamespace(
+        root_confidence=0.8, ssl_confidence=0.3,
+        root_evidence=[], ssl_evidence=[],
+        unattributed_indicators=set(),
+    )
+    native = SimpleNamespace(
+        root_confidence=0.5, ssl_confidence=0.2,
+        root_evidence=["root_native"], ssl_evidence=["ssl_native"],
+        unattributed_indicators={"root_native_runtime"},
+    )
+    cli._merge_native_evidence(static, native)
+    assert static.root_confidence == 1.0   # 0.8 + 0.5 capped
+    assert static.ssl_confidence == 0.5    # 0.3 + 0.2
+    assert static.root_evidence == ["root_native"]
+    assert static.ssl_evidence == ["ssl_native"]
+    assert static.unattributed_indicators == {"root_native_runtime"}
+
+
+def test_json_deserializers_round_trip():
+    # The persisted-JSON rebuilders (regenerate-report path): a serialized
+    # classification/verification/correlation/stage round-trips back to typed
+    # objects with the same fields, and None input yields None (pre-persistence
+    # runs). Verification state defaults to deterministic_matched when absent.
+    import cli
+    from common import Action
+
+    cls = cli._classification_from_json({
+        "action": "ROOT_ONLY",
+        "root": {"confidence": 0.8, "detected": True, "evidence": [
+            {"signature_id": "root_su_binary_paths", "file": "MainActivity.java",
+             "line_or_offset": 12, "matched_text": "/system/bin/su"},
+        ]},
+        "ssl": {"confidence": 0.0, "detected": False, "evidence": []},
+    })
+    assert cls.action == Action.ROOT_ONLY
+    assert cls.root.confidence == 0.8
+    assert cls.root.evidence[0].signature_id == "root_su_binary_paths"
+    assert cls.root.evidence[0].verification_state == "deterministic_matched"  # default
+
+    v = cli._verification_from_json({"root_bypassed": True, "ssl_bypassed": None, "evidence_lines": {"k": "v"}})
+    assert v.root_bypassed is True and v.ssl_bypassed is None
+    assert cli._verification_from_json(None) is None
+
+    c = cli._correlation_from_json({"matches": False, "mismatches": ["m"], "unverified": ["u"]})
+    assert c.matches is False and c.mismatches == ["m"] and c.unverified == ["u"]
+
+    s = cli._stage_from_json({"stage": "ingest", "status": "success", "evidence": {"e": 1}})
+    assert s.stage == "ingest" and s.status == "success" and s.evidence == {"e": 1}
+
+
+def test_to_serializable_flattens_dataclasses_enums_and_nested():
+    # _to_serializable: the storage write-path normalizer - dataclasses become
+    # dicts, Enums their value, dicts/lists recurse, scalars pass through. A
+    # nested dataclass inside a list must flatten too. Had zero direct coverage.
+    from dataclasses import dataclass
+    from enum import Enum
+    from storage.results import _to_serializable
+
+    class Color(Enum):
+        RED = "red"
+
+    @dataclass
+    class Inner:
+        x: int
+
+    @dataclass
+    class Outer:
+        name: str
+        color: Color
+        inner: Inner
+        items: list
+
+    out = _to_serializable(Outer("a", Color.RED, Inner(5), [Inner(7)]))
+    assert out == {"name": "a", "color": "red", "inner": {"x": 5}, "items": [{"x": 7}]}
+    assert _to_serializable(5) == 5  # scalar passthrough
+
+
+def test_merge_js_evidence_dedupes_and_routes_by_category():
+    # _merge_js_evidence: Hermes/JS-bundle idiom matches merge into StaticEvidence
+    # at a fixed deterministic weight, deduped per signature_id across bundles,
+    # and routed by category (root vs ssl). matched_text is truncated to 200
+    # chars. Returns the number of NEW signatures added. Had zero coverage.
+    from types import SimpleNamespace
+    import cli
+    static = SimpleNamespace(root_confidence=0.0, ssl_confidence=0.0, root_evidence=[], ssl_evidence=[])
+    js = [
+        ("js_root", "root", "text", "bundle.js"),
+        ("js_ssl", "ssl", "text2", "bundle.js"),
+        ("js_root", "root", "dup", "other.js"),  # already added -> skipped
+    ]
+    added = cli._merge_js_evidence(static, js)
+    assert added == 2
+    assert static.root_confidence > 0.0
+    assert static.ssl_confidence > 0.0
+    assert [e.signature_id for e in static.root_evidence] == ["js_root"]
+    assert [e.signature_id for e in static.ssl_evidence] == ["js_ssl"]
+    assert static.root_evidence[0].verification_state == "deterministic_matched"
+
+
+def test_merge_js_evidence_truncates_matched_text():
+    from types import SimpleNamespace
+    import cli
+    static = SimpleNamespace(root_confidence=0.0, ssl_confidence=0.0, root_evidence=[], ssl_evidence=[])
+    long_text = "x" * 500
+    cli._merge_js_evidence(static, [("js_root", "root", long_text, "b.js")])
+    assert len(static.root_evidence[0].matched_text) <= 200
+
+
+def test_merge_dex_evidence_dedupes_and_skips_unknown_category():
+    # _merge_dex_evidence: merges androguard DEX matches, deduped per
+    # signature_id (a sig already matched by the java/smali scan is NOT
+    # double-counted), routed by category with weight applied and capped at 1.0,
+    # and an unknown category is skipped entirely. Returns the count of NEW
+    # signatures added. Had zero direct coverage.
+    from types import SimpleNamespace
+    import cli
+    static = SimpleNamespace(
+        root_confidence=0.5, ssl_confidence=0.0,
+        root_evidence=[SimpleNamespace(signature_id="existing_root")],
+        ssl_evidence=[],
+    )
+    sigs = [
+        SimpleNamespace(id="root_a", weight=0.3, category="root"),
+        SimpleNamespace(id="ssl_a", weight=0.4, category="ssl"),
+        SimpleNamespace(id="mystery", weight=0.5, category="other"),
+    ]
+    dex = [
+        SimpleNamespace(signature_id="existing_root"),  # dup of java match -> skip
+        SimpleNamespace(signature_id="root_a"),
+        SimpleNamespace(signature_id="ssl_a"),
+        SimpleNamespace(signature_id="mystery"),  # unknown category -> skip
+        SimpleNamespace(signature_id="root_a"),   # dup within dex -> skip
+    ]
+    added = cli._merge_dex_evidence(static, dex, sigs, "com.example.app")
+    assert added == 2
+    assert static.root_confidence == 0.8      # 0.5 + 0.3
+    assert static.ssl_confidence == 0.4
+    assert [e.signature_id for e in static.root_evidence] == ["existing_root", "root_a"]
+    assert [e.signature_id for e in static.ssl_evidence] == ["ssl_a"]

@@ -289,3 +289,253 @@ def test_attribute_dataclass_evidence_without_matched_text_unchanged():
     result = attribution.attribute_root_evidence("owasp.mstg.uncrackable1", evidence)
     assert result["app_owned"] == 1
     assert result["third_party"] == 0
+
+
+def test_under_app_package_recognizes_own_subtree():
+    # The Bug-B parity guard: a class under the app's OWN package is the app's
+    # code even when it shares a vendor prefix, so it must be app-owned - never
+    # asserted third-party. Exact match and subtree both qualify.
+    assert attribution._under_app_package("com.google.mybankapp", "com.google.mybankapp") is True
+    assert attribution._under_app_package("com.google.mybankapp.x", "com.google.mybankapp") is True
+    # a sibling under the same vendor prefix but NOT under the app's package is
+    # not app-owned (the app is com.google.mybankapp, not com.google.*)
+    assert attribution._under_app_package("com.google.other", "com.google.mybankapp") is False
+    assert attribution._under_app_package("com.android.systemui", "com.android.insecurebankv2") is False
+    assert attribution._under_app_package(None, "com.example.app") is False
+    assert attribution._under_app_package("com.example.app", None) is False
+
+
+def test_is_native_lib_detects_so_paths():
+    assert attribution._is_native_lib("lib/arm64-v8a/libsentry.so") is True
+    assert attribution._is_native_lib("libfoo.SO") is True  # case-insensitive
+    assert attribution._is_native_lib("MainActivity.java") is False
+    assert attribution._is_native_lib("") is False
+
+
+def test_native_vendor_returns_known_bundled_lib_basename():
+    # A recognized bundled native SDK returns its basename; an unknown .so is
+    # conservatively the app's OWN native code (never asserted third-party), so
+    # it returns None - the caller then counts it app-owned.
+    assert attribution._native_vendor("/lib/arm64-v8a/libsentry.so") == "libsentry.so"
+    assert attribution._native_vendor("libsentry.so") == "libsentry.so"
+    assert attribution._native_vendor("/lib/x86_64/libflutter.so") == "libflutter.so"
+    assert attribution._native_vendor("/lib/arm64-v8a/libfoo.so") is None  # unknown .so -> app-owned
+    assert attribution._native_vendor("MainActivity.java") is None
+
+
+def test_derive_namespace_modern_jadx_classes_layout():
+    # The modern jadx (>= 1.5) multidex-split layout:
+    # 'classes-<hash>-<ver>/sources/<pkg>/...'. Both the classes-* prefix AND the
+    # 'sources' marker are decompiler layout, not package - so the namespace
+    # starts after 'sources'. This layout is the function's reason for existing
+    # (jadx >= 1.5 multidex APKs), yet it had no test - a regression here would
+    # silently misattribute namespaces on multidex targets.
+    ns = attribution.derive_namespace(
+        "classes-7c8ed94a0b1d-1.5.6/sources/com/google/android/gms/common/net/zza.java"
+    )
+    assert ns == "com.google.android.gms.common.net"
+
+
+def test_derive_namespace_apktool_smali_layout():
+    # apktool smali tree: 'smali/<pkg>/...' with a .smali class file excluded.
+    ns = attribution.derive_namespace("smali/sg/vantagepoint/a/c.smali")
+    assert ns == "sg.vantagepoint.a"
+
+
+def test_vendor_namespace_collapses_to_top_two_segments():
+    # The readable vendor label behind attribution: a full namespace collapses to
+    # its top two segments ('io.sentry.android.core.internal.util' -> 'io.sentry').
+    # This is what renders as the vendor name in the report's Attribution blocks,
+    # yet the function itself had no direct test - a regression here would garble
+    # the vendor labels without any suite failing.
+    assert attribution.vendor_namespace("io.sentry.android.core.internal.util") == "io.sentry"
+    assert attribution.vendor_namespace("com.google.android.gms.ads") == "com.google"
+    assert attribution.vendor_namespace("cn.jpush.android") == "cn.jpush"
+    assert attribution.vendor_namespace("retrofit2") == "retrofit2"  # single segment is stable
+
+
+def test_collect_exported_components_resolves_effective_exported():
+    # The manifest exported-components extraction (reachable attack surface) had
+    # zero direct coverage - the report rendering of its output was tested, but
+    # not the resolution logic: the exported attribute, the Android platform
+    # intent-filter default, and the provider default. A regression here would
+    # silently misreport which components are externally reachable.
+    import xml.etree.ElementTree as ET
+
+    from static.manifest import _collect_exported_components
+
+    root = ET.fromstring(
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application>'
+        '<activity android:name=".Launcher" android:exported="true"/>'
+        '<activity android:name=".Filtered"><intent-filter/></activity>'
+        '<activity android:name=".NoFilter"/>'
+        '<service android:name=".Svc" android:exported="false"/>'
+        '<provider android:name=".Provider"/>'
+        '<receiver android:name=""/>'
+        "</application></manifest>"
+    )
+    app = root.find("application")
+    flags = {c["name"]: c["exported"] for c in _collect_exported_components(app)}
+    assert flags[".Launcher"] is True      # explicit android:exported="true"
+    assert flags[".Filtered"] is True      # no attr, but intent-filter -> exported by platform default
+    assert flags[".NoFilter"] is False     # no attr, no intent-filter -> not exported
+    assert flags[".Svc"] is False          # explicit android:exported="false"
+    assert flags[".Provider"] is True      # provider default: exported regardless of intent-filter
+    assert "" not in flags                 # name-less component skipped
+
+
+def test_manifest_device_admin_and_permissions():
+    # Device-admin detection: a receiver is a device-admin signature only when it
+    # declares BOTH the BIND_DEVICE_ADMIN permission AND an intent-filter. A
+    # receiver with the permission but no filter, or a filter without the
+    # permission, must not count. Plus ordered permission collection. Both had
+    # zero direct coverage.
+    import xml.etree.ElementTree as ET
+
+    from static import manifest
+
+    root = ET.fromstring(
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+        '<uses-permission android:name="android.permission.INTERNET"/>'
+        '<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>'
+        '<receiver android:name=".Admin" android:permission="android.permission.BIND_DEVICE_ADMIN"><intent-filter/></receiver>'
+        '<receiver android:name=".NoFilter" android:permission="android.permission.BIND_DEVICE_ADMIN"/>'
+        '<receiver android:name=".NoPerm"><intent-filter/></receiver>'
+        "</manifest>"
+    )
+    assert manifest._has_device_admin(root) is True
+
+    plain = ET.fromstring(
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application/></manifest>'
+    )
+    assert manifest._has_device_admin(plain) is False
+
+    assert manifest._collect_permissions(root) == [
+        "android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE",
+    ]
+
+
+def test_manifest_nsc_file_resolution(tmp_path):
+    # RESID-5C: the report's "is the declared NSC actually present" check. Only
+    # an @xml/<name> reference against a decoded res/xml/<name>.xml resolves.
+    from pathlib import Path
+
+    from static import manifest
+
+    (tmp_path / "res" / "xml").mkdir(parents=True)
+    (tmp_path / "res" / "xml" / "network_security_config.xml").write_text("<network-security-config/>")
+    assert manifest._resolve_nsc_file("@xml/network_security_config", tmp_path) is True
+    assert manifest._resolve_nsc_file("@xml/missing", tmp_path) is False
+    assert manifest._resolve_nsc_file(None, tmp_path) is None      # nothing to resolve
+    assert manifest._resolve_nsc_file("@xml/x", None) is None      # no resource root
+    assert manifest._resolve_nsc_file("@raw/not_xml", tmp_path) is None  # not @xml/
+
+
+def test_manifest_nsc_cleartext_policy(tmp_path):
+    # The app's default cleartext policy from the resolved NSC base-config,
+    # accepting both namespaced and unprefixed attributes (apktool's AndroGoat
+    # output uses the unprefixed form) and tolerating unreadable files.
+    from static import manifest
+
+    (tmp_path / "res" / "xml").mkdir(parents=True)
+    p = tmp_path / "res" / "xml" / "nsc.xml"
+    p.write_text('<network-security-config><base-config cleartextTrafficPermitted="true"/></network-security-config>')
+    assert manifest._nsc_cleartext_permitted(p) is True
+    p.write_text('<network-security-config><base-config cleartextTrafficPermitted="false"/></network-security-config>')
+    assert manifest._nsc_cleartext_permitted(p) is False
+    p.write_text(
+        '<network-security-config xmlns:android="http://schemas.android.com/apk/res/android">'
+        '<base-config android:cleartextTrafficPermitted="true"/></network-security-config>'
+    )
+    assert manifest._nsc_cleartext_permitted(p) is True
+    p.write_text('<network-security-config/>')
+    assert manifest._nsc_cleartext_permitted(p) is None  # no base-config policy
+    assert manifest._nsc_cleartext_permitted(None) is None
+    bad = tmp_path / "bad.xml"
+    bad.write_text("not xml")
+    assert manifest._nsc_cleartext_permitted(bad) is None  # unparseable
+
+
+def test_manifest_resource_id_int():
+    # The integer key behind a resource reference, from both hex and decimal
+    # forms. Had zero direct coverage.
+    from static import manifest
+    assert manifest._resource_id_int("@0x7f030000") == int("7f030000", 16)
+    assert manifest._resource_id_int("@2131230736") == int("2131230736", 16)
+
+
+def test_manifest_resolve_nsc_path(tmp_path):
+    # _resolve_nsc_path mirrors _resolve_nsc_file but returns the decoded path.
+    from pathlib import Path
+
+    from static import manifest
+
+    (tmp_path / "res" / "xml").mkdir(parents=True)
+    target = tmp_path / "res" / "xml" / "nsc.xml"
+    target.write_text("<network-security-config/>")
+    assert manifest._resolve_nsc_path("@xml/nsc", tmp_path) == target
+    assert manifest._resolve_nsc_path("@xml/missing", tmp_path) is None
+    assert manifest._resolve_nsc_path(None, tmp_path) is None
+    assert manifest._resolve_nsc_path("@raw/x", tmp_path) is None
+
+
+def test_manifest_resources_complete(tmp_path):
+    # G9/H2: every referenced resource resolved cleanly, or the manifest surface
+    # degrades to partial - it must never certify a clean SSL surface over a
+    # config it never actually read.
+    from static import manifest
+
+    (tmp_path / "res" / "xml").mkdir(parents=True)
+    good = tmp_path / "res" / "xml" / "nsc.xml"
+    good.write_text("<network-security-config/>")
+    bad = tmp_path / "res" / "xml" / "bad.xml"
+    bad.write_text("not xml")
+    assert manifest._resources_complete(None, tmp_path) is True          # nothing referenced
+    assert manifest._resources_complete("@xml/nsc", tmp_path) is True    # present and parses
+    assert manifest._resources_complete("@xml/missing", tmp_path) is False
+    assert manifest._resources_complete("@xml/bad", tmp_path) is False   # unparseable
+    assert manifest._resources_complete("@xml/nsc", None) is False       # NSC declared, no tree
+    assert manifest._resources_complete("@7F0E0000", tmp_path) is False  # raw id, unresolvable
+    assert manifest._resources_complete("@raw/x", tmp_path) is True      # non-@xml ref
+
+
+def test_manifest_count_stored_certs(tmp_path):
+    # Stored-cert trust anchors weaken pinning - the count feeds the SSL signal.
+    # Counts system/user/@raw sources from both namespaced and unprefixed src.
+    from static import manifest
+
+    assert manifest._count_stored_certs(None) == 0
+    p = tmp_path / "nsc.xml"
+    p.write_text(
+        '<network-security-config><trust-anchors>'
+        '<certificates src="system"/><certificates src="user"/>'
+        '<certificates src="@raw/extra"/>'
+        '<certificates src="unknown"/>'
+        "</trust-anchors></network-security-config>"
+    )
+    assert manifest._count_stored_certs(p) == 3
+    p.write_text(
+        '<network-security-config xmlns:android="http://schemas.android.com/apk/res/android">'
+        '<trust-anchors><certificates android:src="system"/></trust-anchors></network-security-config>'
+    )
+    assert manifest._count_stored_certs(p) == 1
+
+
+def test_is_dotted_reference_rejects_invalid_segments():
+    # attribution.py:95, 97: _is_dotted_reference must reject segments that
+    # start with a non-alpha/_$ char (line 95) or contain a non-alnum/_$ char
+    # (line 97). The sibling test covered the well-formed and whitespace forms;
+    # these two invalid-segment branches were uncovered.
+    assert attribution._is_dotted_reference("com.1abc") is False   # digit-start seg
+    assert attribution._is_dotted_reference("com..x") is False     # empty segment
+    assert attribution._is_dotted_reference("com.a-b") is False    # hyphen in segment
+
+
+def test_attribute_evidence_without_file_counts_app_owned():
+    # attribution.py:176-178: an evidence item with no file (empty/missing) is
+    # not attributable to any namespace, so it conservatively counts as the
+    # app's own code (ADR-0006 - never assert third-party without a name).
+    result = attribution.attribute_root_evidence(PG, [_FakeEvidence(file="")])
+    assert result is not None
+    assert result["app_owned"] == 1
+    assert result["third_party"] == 0

@@ -132,3 +132,29 @@ def test_detect_packers_runs_on_real_apk():
 
     findings = detect_packers(apk, [])
     assert isinstance(findings, list)  # extraction ran cleanly; no signatures -> no hits
+
+
+def test_packer_entry_validation_rejects_bad_branches():
+    # _validate_packer_entry rejects a packer signature that would silently
+    # never fire. It had zero direct coverage.
+    from pathlib import Path
+
+    from static.packers import VALID_PACKER_SIGNAL_FIELDS, _validate_packer_entry
+
+    p = Path("packer.yaml")
+    field = next(iter(VALID_PACKER_SIGNAL_FIELDS))
+    good = {"id": "x", "packer": "SomePacker", field: ["signal"]}
+
+    def _raises(bad, needle):
+        try:
+            _validate_packer_entry(bad, p)
+        except ValueError as e:
+            assert needle in str(e), e
+            return
+        raise AssertionError(f"expected ValueError with '{needle}'")
+
+    _raises({"id": "x", field: ["s"]}, "no 'packer' name")
+    _raises({"id": "x", "packer": "P"}, "no signals")
+    _raises({**good, field: "notalist"}, "must be a list of strings")
+    _raises({**good, field: ["good", ""]}, "empty entry")
+    _validate_packer_entry(good, p)  # valid entry does not raise

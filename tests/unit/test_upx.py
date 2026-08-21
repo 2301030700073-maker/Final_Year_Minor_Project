@@ -143,3 +143,58 @@ def test_find_upx_returns_none_or_path():
     # Deterministic shape only - real presence depends on the environment. This
     # guards the optional-toolchain contract: None is a valid, graceful answer.
     assert find_upx() is None or isinstance(find_upx(), str)
+
+
+def test_elf_section_names_degrades_to_empty():
+    # _elf_section_names: when pyelftools is unavailable (ELFFile is None) or a
+    # mangled/packed header fails to parse, it returns an empty set so the caller
+    # still falls back to the UPX! magic check - never raises. Had zero coverage.
+    import static.upx as upx
+
+    saved = upx.ELFFile
+    try:
+        upx.ELFFile = None
+        assert upx._elf_section_names(b"") == set()
+        upx.ELFFile = _RaisingELFFile
+        assert upx._elf_section_names(b"\x7fELF garbage") == set()
+    finally:
+        upx.ELFFile = saved
+
+
+class _RaisingELFFile:
+    def __init__(self, stream):
+        raise ValueError("mangled ELF")
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+
+
+def test_is_upx_packed_unreadable_so_returns_false(tmp_path):
+    # upx.py:81-83: an unreadable .so (e.g. missing) must return False, never
+    # raise - the caller's own fail-loud symbol read governs a corrupt lib.
+    assert is_upx_packed(tmp_path / "missing.so") is False
+
+
+def test_unpack_upx_timeout_returns_false(tmp_path, monkeypatch):
+    # upx.py:122-123: a subprocess.run raising TimeoutExpired degrades to
+    # (False, "timed out"), never crashing the unpack (ADR-0006 partial state).
+    import subprocess
+
+    def _boom(*a, **k):
+        raise subprocess.TimeoutExpired("upx", 5)
+
+    monkeypatch.setattr("static.upx.subprocess.run", _boom)
+    ok, err = unpack_upx(tmp_path / "a.so", tmp_path / "a.unpacked.so", upx_bin="upx")
+    assert ok is False and "timed out" in err
+
+
+def test_unpack_upx_subprocess_oserror_returns_false(tmp_path, monkeypatch):
+    # upx.py:124-125: an OSError from subprocess.run (e.g. the binary vanished
+    # between find_upx and the run) degrades to (False, "could not run").
+    def _boom(*a, **k):
+        raise OSError("no such upx")
+
+    monkeypatch.setattr("static.upx.subprocess.run", _boom)
+    ok, err = unpack_upx(tmp_path / "a.so", tmp_path / "a.unpacked.so", upx_bin="upx")
+    assert ok is False and "could not run" in err

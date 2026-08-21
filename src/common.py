@@ -281,6 +281,13 @@ class VerificationResult:
 class CorrelationResult:
     matches: bool
     mismatches: list[str]
+    # RESID-6F completion: static predicted a category but dynamic was NOT able
+    # to test it (inconclusive - the app never exercised the check), distinct
+    # from a true MISMATCH (a conflict: dynamic disproved static, or dynamic
+    # found something static missed). An unverified prediction is not agreement
+    # (matches stays False, never fabricated) and not a conflict - so it gets
+    # its own label instead of reading as a MISMATCH that never happened.
+    unverified: list[str] = field(default_factory=list)
 
 
 class SuccessCheck(Protocol):

@@ -545,9 +545,35 @@ def run_dynamic_stage(
                 )
                 return
 
+            # Real-time UI-responsiveness: the app is alive (self-termination
+            # checked above); now prove its UI is actually live and usable on
+            # the device - activity RESUMED, window focused, no ANR, interactive
+            # nodes rendered - from real dumpsys/logcat/uiautomator data. Each
+            # signal degrades to None ("not captured") if the tool is unavailable;
+            # never fabricated. This runs on the worker thread while the app is
+            # still foregrounded under the attached session.
+            ui_liveness = None
+            try:
+                from dynamic.ui_liveness import check_ui_liveness
+                ui_liveness = check_ui_liveness(device_serial, package_name)
+            except Exception:
+                ui_liveness = None
+
             outcome["result"] = StageResult(
                 stage="dynamic", status="success",
-                evidence={"scripts_applied": scripts_applied, "pid": pid, "frida_messages": messages, "target": target},
+                evidence={
+                    "scripts_applied": scripts_applied, "pid": pid,
+                    "frida_messages": messages, "target": target,
+                    # FR-4.6 liveness: reaching here means the process survived
+                    # the settle window (otherwise classify_self_termination fired
+                    # and we returned the failed path above). A bypass claim on a
+                    # process that killed itself would be meaningless, so the
+                    # success evidence records that the app was still running after
+                    # the bypass scripts - surfaced in the report's Dynamic
+                    # Verification as an explicit, auditable liveness signal.
+                    "app_still_running": True,
+                    "ui_liveness": ui_liveness,
+                },
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
         except Exception as exc:

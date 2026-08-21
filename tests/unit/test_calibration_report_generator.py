@@ -46,6 +46,25 @@ def test_generate_calibration_report_omits_ssl_note_once_all_modules_verify():
     assert "SSL bypass verification is PARTIAL" not in content
 
 
+def test_generate_calibration_report_renders_ssl_partial_note_when_flag_set():
+    # The ssl_verification_partial branch was covered only NEGATIVELY (its
+    # absence when False, in the test above). The positive rendering - when some
+    # modules only partially verify SSL (AndroGoat implements it, the three
+    # UnCrackable checks don't) - must be asserted too: a silent break of the
+    # `{% if report.ssl_verification_partial %}` branch would otherwise pass.
+    report = compute_calibration_report(
+        runs=[], ground_truth={}, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+    # the sibling test deliberately flips this to False; the default here is the
+    # partial-verification state the note exists to surface
+    assert report.ssl_verification_partial is True
+
+    from report.generator import CALIBRATION_TEMPLATE
+    content = CALIBRATION_TEMPLATE.render(report=report)
+
+    assert "SSL bypass verification is PARTIAL" in content
+
+
 def test_generate_calibration_report_flags_vacuous_1p00_when_tn_is_zero(tmp_path):
     # RESID (finding 4): a Tier-2 with TN=0 reports 1.00 precision/recall as a
     # tautology, not a measurement - every ground-truthed case is a positive, so
@@ -107,3 +126,47 @@ def test_ssl_verification_partial_consistent_with_success_checks():
         assert CalibrationReport.ssl_verification_partial is False, (
             "all success checks implement real SSL verification - flip ssl_verification_partial to False"
         )
+
+
+def test_bucket_index_buckets_confidence_and_clamps_boundaries():
+    # _bucket_index: confidence falls in the first half-open bucket where
+    # edges[i] <= c < edges[i+1]; a value at/beyond the last edge (e.g. exactly
+    # 1.0) clamps to the final bucket index. Had zero direct coverage.
+    from calibration.report import _bucket_index
+    edges = [0.5, 0.7, 0.9]
+    assert _bucket_index(0.6, edges) == 0
+    assert _bucket_index(0.7, edges) == 1
+    assert _bucket_index(0.85, edges) == 1
+    assert _bucket_index(0.9, edges) == 1   # == last edge -> final bucket
+    assert _bucket_index(1.0, edges) == 1   # beyond all edges -> final bucket
+    assert _bucket_index(0.4, edges) == 1   # below first edge -> final bucket
+
+
+def test_field_names_builds_category_field_triple():
+    # _field_names: the three RunRow attribute names for a category.
+    from calibration.report import _field_names
+    assert _field_names("root") == ("root_confidence", "root_detected", "root_bypassed")
+    assert _field_names("ssl") == ("ssl_confidence", "ssl_detected", "ssl_bypassed")
+
+
+def test_calibration_report_renders_skeleton_warning_on_small_corpus():
+    # report.skeleton_warning: a sub-30 observation corpus renders a loud
+    # "skeleton, not a statistically robust result" note (so bucket rates are
+    # never read as a reliable confidence-vs-accuracy estimate). A small corpus
+    # is the default state - the positive render must be asserted, not only the
+    # absence when the corpus is large. Had zero direct coverage.
+    from dataclasses import replace
+    from calibration.report import compute_calibration_report
+    from report.generator import CALIBRATION_TEMPLATE
+
+    report = compute_calibration_report(
+        runs=[], ground_truth={}, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+    assert report.skeleton_warning  # total_n=0 < 30 -> warning set
+    content = CALIBRATION_TEMPLATE.render(report=report)
+    assert "Calibration curve is a skeleton, not a statistically robust result" in content
+
+    # negative gate: a corpus large enough (>=30) clears the warning
+    full = replace(report, skeleton_warning="")
+    content = CALIBRATION_TEMPLATE.render(report=full)
+    assert "skeleton, not a statistically robust result" not in content

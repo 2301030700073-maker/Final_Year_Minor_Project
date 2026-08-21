@@ -91,6 +91,7 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
     classification = run_data.get("classification") or {}
     verification = run_data.get("verification")  # None if dynamic stage skipped - kept as None, not coerced to {}
     correlation = run_data.get("correlation")
+    correlation_skip_reason = run_data.get("correlation_skip_reason")
     stage_results = run_data.get("stage_results") or []
 
     root = classification.get("root") or {}
@@ -177,6 +178,7 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
             classification_json=classification,
             verification_json=verification,
             correlation_json=correlation,
+            correlation_skip_reason=correlation_skip_reason,
             stage_results_json=stage_results,
         ))
         session.commit()

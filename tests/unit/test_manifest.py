@@ -395,6 +395,126 @@ def test_parse_manifest_apk_resolves_resource_id_nsc(tmp_path, monkeypatch):
     assert info.resources_complete is False   # no res tree to read the file
 
 
+def test_parse_manifest_apk_resolves_0x_prefixed_resource_id_nsc(tmp_path, monkeypatch):
+    # A8: the binary manifest may reference its NSC as the @0x... resource-ID
+    # spelling (legal per _RESOURCE_ID_NSC). The resolver must strip the 0x prefix
+    # (_resource_id_int) before querying the resource table, so both spellings
+    # resolve to the same integer. The plain @7F0E0000 form is covered above; this
+    # pins the 0x-prefix branch of _resource_id_int, which nothing else reaches.
+    from static.manifest import parse_manifest_apk
+
+    class FakeZip:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self, name):
+            assert name == "AndroidManifest.xml"
+            return b"<binary>"
+    class FakePrinter:
+        def __init__(self, data): self._data = data
+        def get_xml_obj(self):
+            import xml.etree.ElementTree as ET
+            return ET.fromstring(
+                '<manifest xmlns:android="http://schemas.android.com/apk/res/android" '
+                'package="owasp.sat.agoat">'
+                '<application android:networkSecurityConfig="@0x7f0e0000"/></manifest>')
+    class FakeTable:
+        def get_resource_xml_name(self, rid):
+            assert rid == 0x7F0E0000   # the 0x prefix was stripped, same int
+            return "@owasp.sat.agoat:xml/network_security_config"
+    class FakeAPK:
+        def __init__(self, *a, **k): pass
+        def get_android_resources(self): return FakeTable()
+
+    monkeypatch.setattr("zipfile.ZipFile", lambda *a, **k: FakeZip())
+    import pyaxmlparser.axmlprinter as ap
+    monkeypatch.setattr(ap, "AXMLPrinter", FakePrinter)
+    import pyaxmlparser as px
+    monkeypatch.setattr(px, "APK", FakeAPK)
+
+    info = parse_manifest_apk(Path("fake.apk"))
+    assert info.network_security_config == "@xml/network_security_config"
+    assert info.resources_complete is False   # no res tree to read the file
+
+
+def test_parse_manifest_apk_nsc_pass_through_when_not_resource_id(tmp_path, monkeypatch):
+    # A8: the binary-manifest resolver must pass through a NSC that is NOT a raw
+    # resource ID (e.g. an already-readable @xml/<name> reference) unchanged -
+    # it must not treat a non-ID reference as opaque. Covers the nsc_resolver
+    # early-return branch (manifest.py:128), which real coverage proved untested.
+    from static.manifest import parse_manifest_apk
+
+    class FakeZip:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self, name):
+            assert name == "AndroidManifest.xml"
+            return b"<binary>"
+    class FakePrinter:
+        def __init__(self, data): self._data = data
+        def get_xml_obj(self):
+            import xml.etree.ElementTree as ET
+            return ET.fromstring(
+                '<manifest xmlns:android="http://schemas.android.com/apk/res/android" '
+                'package="owasp.sat.agoat">'
+                '<application android:networkSecurityConfig="@xml/network_security_config"/></manifest>')
+
+    monkeypatch.setattr("zipfile.ZipFile", lambda *a, **k: FakeZip())
+    import pyaxmlparser.axmlprinter as ap
+    monkeypatch.setattr(ap, "AXMLPrinter", FakePrinter)
+
+    info = parse_manifest_apk(Path("fake.apk"))
+    # non-ID NSC passed through unchanged, not left as / resolved to something else
+    assert info.network_security_config == "@xml/network_security_config"
+
+
+def test_parse_manifest_apk_unresolvable_resource_id_nsc_degrades_to_opaque(tmp_path, monkeypatch):
+    # A8 honesty: when the resource table either yields a name with no :xml/ part
+    # (manifest.py:141) or raises while resolving (manifest.py:134-135), the NSC
+    # stays as the opaque raw ID and the surface degrades to partial - it is a
+    # real NSC we cannot read, never "no NSC". Real coverage proved both branches
+    # untested (only the successful :xml/ resolution path was).
+    from static.manifest import parse_manifest_apk
+
+    class FakeZip:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self, name):
+            return b"<binary>"
+    class FakePrinter:
+        def __init__(self, data): self._data = data
+        def get_xml_obj(self):
+            import xml.etree.ElementTree as ET
+            return ET.fromstring(
+                '<manifest xmlns:android="http://schemas.android.com/apk/res/android" '
+                'package="owasp.sat.agoat">'
+                '<application android:networkSecurityConfig="@7F0E0000"/></manifest>')
+
+    monkeypatch.setattr("zipfile.ZipFile", lambda *a, **k: FakeZip())
+    import pyaxmlparser.axmlprinter as ap
+    monkeypatch.setattr(ap, "AXMLPrinter", FakePrinter)
+    import pyaxmlparser as px
+
+    # case 1: resolved name lacks the :xml/ separator -> None (stays opaque)
+    class NoXmlNameTable:
+        def get_resource_xml_name(self, rid): return "not_a_resource_path"
+    class NoXmlNameAPK:
+        def __init__(self, *a, **k): pass
+        def get_android_resources(self): return NoXmlNameTable()
+    monkeypatch.setattr(px, "APK", NoXmlNameAPK)
+    info = parse_manifest_apk(Path("fake.apk"))
+    assert info.network_security_config == "@7F0E0000"   # unresolved, opaque
+    assert info.resources_complete is False
+
+    # case 2: the resource table raises -> caught, NSC stays opaque
+    class BoomAPK:
+        def __init__(self, *a, **k): pass
+        def get_android_resources(self): raise RuntimeError("no table")
+    monkeypatch.setattr(px, "APK", BoomAPK)
+    info = parse_manifest_apk(Path("fake.apk"))
+    assert info.network_security_config == "@7F0E0000"
+    assert info.resources_complete is False
+
+
 def test_parse_manifest_apk_resource_id_nsc_reads_resolved_file(tmp_path, monkeypatch):
     # A8 with an apktool res tree present: the resolved @xml/network_security_config
     # must find the decoded file, count it as read (resources_complete=True) and

@@ -7,11 +7,39 @@ attempt, never a silent "skipped, no bypass script available"."""
 import json
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from common import Action, CategoryVerdict, ClassificationResult, Evidence
 from dynamic.synthesizer import ROOT_RECIPES, SSL_RECIPES, synthesize
+from static.native import load_native_signatures
+from static.signatures import load_signatures
+
+
+def _real_signature_ids() -> tuple[set, set]:
+    """Real signature IDs of each category, from every corpus the synthesizer's
+    recipes are keyed against: the Java root/ssl files + the native file (whose
+    entries carry their own root/ssl category)."""
+    root_java = load_signatures(Path("config/signatures/root_detection.yaml"))
+    ssl_java = load_signatures(Path("config/signatures/ssl_pinning.yaml"))
+    native = load_native_signatures(Path("config/signatures/native_detection.yaml"))
+    root_ids = {s.id for s in root_java} | {s.id for s in native if s.category == "root"}
+    ssl_ids = {s.id for s in ssl_java} | {s.id for s in native if s.category == "ssl"}
+    return root_ids, ssl_ids
+
+
+def test_every_recipe_key_is_a_real_signature_id_of_the_right_category():
+    # Wiring guard: a recipe is selected by exact signature_id. A TYPO'd or
+    # category-mismatched key would silently never fire - that technique would
+    # degrade to the universal fallback with no test catching it. This locks
+    # every ROOT_RECIPES/SSL_RECIPES key to a signature that actually exists in
+    # the versioned YAML under the matching category.
+    root_ids, ssl_ids = _real_signature_ids()
+    unknown_root = set(ROOT_RECIPES) - root_ids
+    unknown_ssl = set(SSL_RECIPES) - ssl_ids
+    assert not unknown_root, f"ROOT_RECIPES keys with no root signature: {sorted(unknown_root)}"
+    assert not unknown_ssl, f"SSL_RECIPES keys with no ssl signature: {sorted(unknown_ssl)}"
 
 
 def _cls(action, root_ids=(), ssl_ids=()):
@@ -313,6 +341,25 @@ def test_native_ssl_bypass_emits_custom_verify_hooks():
     assert "SSL_set_custom_verify" in res.source
 
 
+def test_native_ssl_bypass_pins_exact_symbol_return_and_signature_table():
+    # Correctness-critical: each SYMS entry's return value is deliberate and
+    # DIFFERS (SSL_CTX_set_verify -> 0, but the cert-verify/custom-verify SETTERS
+    # -> 1, meaning "don't install the real callback, so the default/no-verify
+    # runs and the pin check is skipped"), and each Frida NativeCallback signature
+    # array must match the real BoringSSL export or Frida parses args wrong and
+    # the hook silently no-ops. Pin sym + params + return + signature atomically.
+    res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["native_ssl_pinning_verify"]), Action.SSL_ONLY)
+    src = res.source
+    table = [
+        "['SSL_CTX_set_verify', function (ctx, mode) { return 0; }, ['pointer', 'int']]",
+        "['SSL_CTX_set_cert_verify_callback', function (ctx, cb, a) { return 1; }, ['pointer', 'pointer', 'pointer']]",
+        "['SSL_CTX_set_custom_verify', function (ctx, mode, cb) { return 1; }, ['pointer', 'int', 'pointer']]",
+        "['SSL_set_custom_verify', function (ssl, mode, cb) { return 1; }, ['pointer', 'int', 'pointer']]",
+    ]
+    for line in table:
+        assert line in src, f"SYMS entry missing or drifted: {line}"
+
+
 def test_native_bypass_observes_handshakes_for_pure_native_hosts():
     # A pure-native app (Flutter dart:io in libflutter.so, Unity libunity.so, or a
     # renamed vendored BoringSSL) has no Java SSL stack, so the Java
@@ -373,6 +420,36 @@ def test_native_root_path_hiding_covers_faccessat():
         _cls(Action.ROOT_ONLY, root_ids=["native_su_binary_embedded"]), Action.ROOT_ONLY
     )
     assert "hidePathProbe('faccessat', 1, -1)" in res.source
+
+
+def test_native_root_path_hiding_pins_complete_arg_index_and_fail_return_table():
+    # Correctness-critical table for the libc path-hiding envelope. Each probe's
+    # path-arg index is load-bearing (openat/statx/faccessat take the path at
+    # args[1], not args[0] - a wrong index silently misses the probe), and fopen
+    # must fail with NULL (0), NOT -1: a C FILE* returning -1 is a nonsense
+    # pointer, whereas NULL reads as file-not-found. Pin the whole table so a
+    # future "simplification" cannot silently break one entry.
+    res = synthesize(
+        _cls(Action.ROOT_ONLY, root_ids=["native_su_binary_embedded"]), Action.ROOT_ONLY
+    )
+    src = res.source
+    expected = {
+        ("access", 0, -1),
+        ("stat", 0, -1),
+        ("lstat", 0, -1),
+        ("statx", 1, -1),
+        ("open", 0, -1),
+        ("openat", 1, -1),
+        ("faccessat", 1, -1),
+        ("fopen", 0, 0),  # NULL FILE*, not -1
+    }
+    actual = set()
+    for fn, arg, ret in expected:
+        line = f"hidePathProbe('{fn}', {arg}, {ret});"
+        assert line in src, f"missing or wrong-arg/ret {line}"
+        actual.add((fn, arg, ret))
+    # No extra or missing probe calls: the table is exact, not just a superset.
+    assert len([l for l in src.splitlines() if l.startswith("hidePathProbe")]) == len(expected)
 
 
 def test_native_root_exec_blocking_covered_for_su_embedded():
@@ -623,3 +700,125 @@ def test_predefined_script_match_reported_by_category():
     assert b.predefined_matched == ["universal-robust-advanced-root--ssl-pinning-bypass"]  # dedup
     n = synthesize(_cls(Action.NEITHER), Action.NEITHER)
     assert n.predefined_matched == []
+
+
+def test_matched_ids_collects_signature_ids():
+    # _matched_ids: extracts signature_ids from evidence. Pure list comprehension
+    # feeding the targeted-vs-universal routing decision. Had zero direct coverage.
+    from types import SimpleNamespace
+    from dynamic.synthesizer import _matched_ids
+    ev = [SimpleNamespace(signature_id="root_su_binary_paths"), SimpleNamespace(signature_id="root_magisk")]
+    assert _matched_ids(ev) == ["root_su_binary_paths", "root_magisk"]
+    assert _matched_ids([]) == []
+
+
+def test_join_script_appends_checkpoint_only_when_ids_present():
+    # _join_script: hooks join on blank lines; a setTimeout checkpoint block is
+    # appended ONLY when checkpoint_ids is non-empty. Had zero direct coverage.
+    from dynamic.synthesizer import _join_script
+    assert _join_script(["/* a */", "/* b */"], []) == "/* a */\n\n/* b */"
+    with_ck = _join_script(["/* a */"], ["root_su_binary_paths"])
+    assert with_ck.startswith("/* a */\n\n")
+    assert 'send({hook: "root_su_binary_paths"});' in with_ck
+    assert "setTimeout" in with_ck
+
+
+def test_file_exists_patch_hides_all_four_file_probes():
+    # _file_exists_patch: the generated hook hides exists/canRead/canWrite/
+    # isDirectory (the four Java File probes a root check uses), applies via
+    # Java.performNow with a Java.perform fallback, emits probeHit: 'root', and
+    # embeds a valid JSON list of the real root-artifact paths. Had zero coverage.
+    import json
+    import re
+    from dynamic.synthesizer import _file_exists_patch, _ROOT_ARTIFACT_PATHS
+    src = _file_exists_patch()
+    assert "Java.performNow" in src
+    assert "Java.perform" in src  # fallback branch
+    for m in ("exists", "canRead", "canWrite", "isDirectory"):
+        assert f"applyPatch('{m}')" in src
+    assert "probeHit: 'root'" in src
+    m = re.search(r"var paths = (\[.*?\]);", src, re.S)
+    assert m, "embedded path literal missing"
+    assert json.loads(m.group(1)) == _ROOT_ARTIFACT_PATHS
+    assert "/system/bin/su" in src
+
+
+def test_native_ssl_pin_bypass_covers_boringssl_family():
+    # _native_ssl_pin_bypass: must carry all four verify-control entrypoints
+    # (the classic set_verify + custom_verify BoringSSL API), enumerate loaded
+    # .so modules rather than a fixed name list, and install via NativeCallback
+    # so the pin check is skipped. The modern custom-verify entries are the
+    # Conscrypt/Cronet/Flutter pinning surface. Had zero direct coverage.
+    from dynamic.synthesizer import _native_ssl_pin_bypass
+    src = _native_ssl_pin_bypass()
+    for sym in ("SSL_CTX_set_verify", "SSL_CTX_set_cert_verify_callback",
+                "SSL_CTX_set_custom_verify", "SSL_set_custom_verify"):
+        assert f"['{sym}'" in src
+    assert "Process.enumerateModules()" in src
+    assert "NativeCallback" in src
+    assert "'.so'" in src
+
+
+def test_native_root_path_hiding_covers_libc_primitives_with_correct_path_args():
+    # _native_root_path_hiding: the JNI equivalent of the File.exists patch.
+    # Pins the libc primitives AND the per-function path-arg index - openat/
+    # statx/faccessat take the path at args[1], the plain forms at args[0], and
+    # fopen must return NULL (0) not -1. A wrong index would silently fail to
+    # hide real probes. Had zero direct coverage.
+    from dynamic.synthesizer import _native_root_path_hiding
+    src = _native_root_path_hiding(["/system/bin/su"])
+    for call in ("hidePathProbe('access', 0, -1)", "hidePathProbe('stat', 0, -1)",
+                 "hidePathProbe('lstat', 0, -1)", "hidePathProbe('statx', 1, -1)",
+                 "hidePathProbe('open', 0, -1)", "hidePathProbe('openat', 1, -1)",
+                 "hidePathProbe('faccessat', 1, -1)", "hidePathProbe('fopen', 0, 0)"):
+        assert call in src
+    assert "Interceptor.attach" in src
+    assert "/system/bin/su" in src
+
+
+def test_evasion_base_scrubs_frida_tokens_and_proc_files():
+    # _evasion_base: the anti-instrumentation base must carry the Frida token
+    # list (incl. the two port tokens), hook the line readers, and byte-scrub
+    # the raw /proc/self/maps + /proc/net/tcp reads. Had zero direct coverage.
+    from dynamic.synthesizer import _evasion_base
+    src = _evasion_base()
+    for tok in ("frida", "gum-js-loop", "frida-server", "'\\n'"):
+        assert tok in src
+    assert ":27042" in src and ":69A2" in src
+    assert "hookLineReader('getline')" in src and "hookLineReader('fgets')" in src
+    assert "'/maps'" in src and "'/net/tcp'" in src
+
+
+def test_ssl_effect_observer_emits_pin_check_and_handshake_signals():
+    # _ssl_effect_observer: the unknown-target behavioral signal must emit both
+    # bypassEffect types (ssl-pin-check on the app's own okhttp/conscrypt
+    # verify entrypoints returning, ssl-handshake on completion) - the honest
+    # TechnologyHooksEngagedCheck source. Had zero direct coverage.
+    from dynamic.synthesizer import _ssl_effect_observer
+    src = _ssl_effect_observer()
+    assert "bypassEffect: 'ssl-pin-check'" in src
+    assert "bypassEffect: 'ssl-handshake'" in src
+    assert "CertificatePinner" in src and "TrustManagerImpl" in src
+    assert "checkServerTrusted" in src
+
+
+def test_native_root_exec_blocking_blocks_root_binaries_only():
+    # _native_root_exec_blocking: the native counterpart of root_runtime_exec_su
+    # - intercepts libc execve/system to block a JNI root check that EXECUTES a
+    # root binary rather than probing a path. Must be conservative: only root
+    # basenames (su/magisk/ksu/apatch) or the which/command -v idiom trigger,
+    # never a benign exec. Had zero direct coverage.
+    from dynamic.synthesizer import _native_root_exec_blocking
+    src = _native_root_exec_blocking()
+    # intercepts execve + system on libc, keyed off root-binary basenames
+    assert "Interceptor.attach" in src
+    assert "execve" in src and "system" in src
+    assert "isRootBin" in src
+    for b in ("su", "magisk", "ksu", "apatch"):
+        assert ("'" + b + "'") in src
+    # the which/command -v shell idiom is caught too
+    assert "which su" in src and "command -v su" in src
+    # a blocked probe emits the probeHit that confirms root (ADR-0006 determinism)
+    assert "probeHit" in src
+    # per-symbol try/catch so a missing export degrades silently, not a hard fail
+    assert "try {" in src

@@ -15,7 +15,69 @@ the integration record, not mocked here.
 
 from pathlib import Path
 
+from static import androguard_scanner as ags
 from static.androguard_scanner import _app_owned, _app_owned_strings, _class_namespace
+
+
+def test_dex_string_cache_hit_avoids_reparse(tmp_path, monkeypatch):
+    # The whole point of the cache: a second scan of the SAME APK bytes must NOT
+    # re-run the expensive _extract_strings (AnalyzeAPK) - only the cheap matcher
+    # re-runs. First call misses and parses; second call hits and skips parsing.
+    apk = tmp_path / "app.apk"
+    apk.write_bytes(b"APK-BYTES-001")
+
+    calls = []
+    monkeypatch.setattr(
+        ags, "_extract_strings",
+        lambda p: calls.append(str(p)) or ("com.example.app", {"sensitive-root-path"}),
+    )
+
+    sigs = [type("S", (), {"id": "root_sig", "patterns": ["sensitive"]})()]
+
+    r1 = ags.scan_dex_strings(apk, sigs, cache_dir=tmp_path / "cache")
+    r2 = ags.scan_dex_strings(apk, sigs, cache_dir=tmp_path / "cache")
+
+    assert len(calls) == 1  # parse ran once, second call served from disk
+    assert r1["string_count"] == 1 and r2["string_count"] == 1
+    assert r1["app_package"] == r2["app_package"] == "com.example.app"
+    cache_files = list((tmp_path / "cache").glob("*.json"))
+    assert len(cache_files) == 1  # one entry written, keyed on the APK sha256
+
+
+def test_dex_string_cache_stale_version_is_a_miss(tmp_path, monkeypatch):
+    # A wrong-version entry must be a miss (re-parse), never served as a valid
+    # result - the same no-silent-staleness discipline as native.analyze_so.
+    apk = tmp_path / "app.apk"
+    apk.write_bytes(b"APK-BYTES-001")
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    # write a stale-version entry under the REAL sha256 key for these APK bytes,
+    # so a hit path genuinely exists - and must still be rejected by the version.
+    stale = cache_dir / "514a6806133cf9d5b509f685f81ddd7f795d55346ebe2fe2cfa921838d948ea1.json"
+    stale.write_text('{"version": "dex-string-v0", "payload": {"app_package": "x", "app_strings": []}}')
+
+    calls = []
+    monkeypatch.setattr(ags, "_extract_strings", lambda p: calls.append(p) or ("com.example.app", {"sensitive-root-path"}))
+    sigs = [type("S", (), {"id": "root_sig", "patterns": ["sensitive"]})()]
+
+    ags.scan_dex_strings(apk, sigs, cache_dir=cache_dir)
+
+    assert len(calls) == 1  # stale entry ignored -> re-parsed
+
+
+def test_dex_string_cache_none_is_always_fresh(tmp_path, monkeypatch):
+    # cache_dir=None (the test default) must keep the old always-parse behavior.
+    apk = tmp_path / "app.apk"
+    apk.write_bytes(b"APK-BYTES-001")
+    calls = []
+    monkeypatch.setattr(ags, "_extract_strings", lambda p: calls.append(p) or ("com.example.app", set()))
+    sigs = [type("S", (), {"id": "root_sig", "patterns": []})()]
+
+    ags.scan_dex_strings(apk, sigs, cache_dir=None)
+    ags.scan_dex_strings(apk, sigs, cache_dir=None)
+
+    assert len(calls) == 2  # no cache -> every call parses
 
 
 def test_class_namespace_parses_and_handles_malformed():
@@ -116,3 +178,84 @@ def test_app_owned_strings_whole_pool_when_cannot_attribute():
     result = _app_owned_strings(dexs, dx, None)
 
     assert "ro.kernel.qemu" in result
+
+
+class _FakeDexFail:
+    """get_classes() raises - the class-namespace iteration error path."""
+
+    def get_classes(self):
+        raise OSError("bad dex")
+
+
+class _FakeDexStrings:
+    """Carries no classes but real get_strings() for the whole-pool degrade."""
+
+    def __init__(self, strings):
+        self._strings = strings
+
+    def get_classes(self):
+        return []
+
+    def get_strings(self):
+        return self._strings
+
+
+class _FakeDexStringsFail:
+    """get_strings() raises inside the xref-walk degrade loop."""
+
+    def get_classes(self):
+        return []
+
+    def get_strings(self):
+        raise OSError("bad strings")
+
+
+class _FakeDxFail:
+    """find_strings() raises - the xref-walk failure path."""
+
+    def find_strings(self):
+        raise OSError("xref walk failed")
+
+
+def test_app_owned_strings_continues_on_class_iteration_error():
+    # androguard_scanner.py:75-76: a dex whose get_classes() raises is skipped
+    # (per-dex except), and a healthy sibling dex still populates app_ns and
+    # keeps its app-owned strings - the whole pool is NOT dropped for one bad dex.
+    app_class = _FakeClass("Lcom/example/app/Main;")
+    s = _FakeString("keep-me", {app_class: None})
+    dexs = [_FakeDexFail(), _FakeDex([app_class])]
+    dx = _FakeDx([s])
+    result = _app_owned_strings(dexs, dx, "com.example.app")
+    assert "keep-me" in result
+
+
+def test_app_owned_strings_skips_none_valued_string():
+    # androguard_scanner.py:83: a string analysis whose get_value() is None is
+    # skipped, never added as the literal None.
+    app_class = _FakeClass("Lcom/example/app/Main;")
+    null = _FakeString(None, {app_class: None})
+    good = _FakeString("real-string", {app_class: None})
+    result = _app_owned_strings([_FakeDex([app_class])], _FakeDx([null, good]), "com.example.app")
+    assert "real-string" in result
+    assert None not in result
+
+
+def test_app_owned_strings_whole_pool_when_no_app_namespace():
+    # androguard_scanner.py:87-88: when no class is app-owned (here only a known
+    # vendor namespace), the whole pool is kept rather than silently dropped -
+    # distinct from test_..._whole_pool_when_cannot_attribute which passes a
+    # None package but still derives an app namespace.
+    vendor_class = _FakeClass("Lokhttp3/OkHttpClient;")
+    s = _FakeString("ro.kernel.qemu", {vendor_class: None})
+    result = _app_owned_strings([_FakeDex([vendor_class])], _FakeDx([s]), "com.example.app")
+    assert "ro.kernel.qemu" in result
+
+
+def test_app_owned_strings_whole_pool_on_xref_walk_failure():
+    # androguard_scanner.py:97-105: when find_strings() itself raises, the walk
+    # degrades to the whole string pool via dex.get_strings() instead of silently
+    # dropping the DEX surface. A dex whose get_strings() also raises is skipped.
+    s = "survives-the-walk"
+    dexs = [_FakeDexStrings([s]), _FakeDexStringsFail()]
+    result = _app_owned_strings(dexs, _FakeDxFail(), "com.example.app")
+    assert s in result

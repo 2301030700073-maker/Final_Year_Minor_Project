@@ -94,6 +94,15 @@ def test_classify_obfuscated_normal_lib_not_flagged():
     assert _classify_obfuscated(exports, strings) is False
 
 
+def test_classify_obfuscated_empty_exports_is_false():
+    # native.py:278-279: a lib with no exports at all cannot be called obfuscated
+    # (there is nothing to mangle) - returns False, never a False-positive
+    # obfuscated claim. Real coverage proved this empty branch untested; the
+    # sibling tests always pass a non-empty export list.
+    assert _classify_obfuscated([], ["anything"]) is False
+    assert _classify_obfuscated([], []) is False
+
+
 def test_match_native_export_symbol_finds_evidence():
     lib = NativeLibrary(abi="arm64-v8a", name="libroot.so", exports=["check_root"])
     sig = NativeSignature(id="native_jni_root_check", category="root", weight=0.5,
@@ -1168,3 +1177,72 @@ def test_recover_body_calls_graceful_on_non_elf(tmp_path):
     f.write_text("hello world not an elf")
     assert _recover_body_calls(f) == (False, [])
     assert _recover_body_calls(str(f)) == (False, [])   # also tolerates a str path
+
+
+def test_native_entry_validation_rejects_bad_branches():
+    # _validate_native_entry rejects a native signature that would silently
+    # no-op or skew detection (same hazard class as the Java-side validator).
+    # It had zero direct coverage.
+    from pathlib import Path
+
+    from static.native import _validate_native_entry
+
+    p = Path("native.yaml")
+    good = {"id": "x", "category": "root", "weight": 0.5, "pattern_type": "export_symbol", "patterns": ["y"], "require_all": True}
+
+    def _raises(bad, needle):
+        try:
+            _validate_native_entry(bad, p)
+        except ValueError as e:
+            assert needle in str(e), e
+            return
+        raise AssertionError(f"expected ValueError with '{needle}'")
+
+    _raises({**good, "category": "Root"}, "invalid category")
+    _raises({**good, "weight": 5}, "invalid weight")
+    _raises({**good, "weight": "0.5"}, "invalid weight")   # non-number
+    _raises({**good, "pattern_type": "bogus"}, "invalid pattern_type")
+    _raises({**good, "patterns": []}, "no patterns")
+    _raises({**good, "require_all": "true"}, "must be a boolean")  # string typo
+    _validate_native_entry(good, p)  # valid entry does not raise
+
+
+def test_trigger_key_deterministic_sorted():
+    # _trigger_key: deterministic cache-key for the security-trigger set - the
+    # Ghidra body gate depends on which signature patterns are present, so a lib
+    # analyzed under one corpus must never be served from a cache built under
+    # another. None/empty -> "<none>"; a set is sorted so order never varies the
+    # key. Had zero direct coverage.
+    from static.native import _trigger_key
+    assert _trigger_key(None) == "<none>"
+    assert _trigger_key(set()) == "<none>"
+    assert _trigger_key({"ssl_verify", "root_su"}) == "root_su,ssl_verify"
+    assert _trigger_key({"b", "a", "c"}) == "a,b,c"
+
+
+def test_run_tool_returns_stdout_and_raises_on_failure(monkeypatch):
+    # native._run_tool: a tool's stdout is returned on success; a timeout or
+    # non-zero exit raises NativeToolError (a corrupt/hung .so must surface as
+    # unscannable, NEVER as a silent empty parse - H1/H4, principle 3). This
+    # wrapper-contract test mocks subprocess.run, not the tool's result. Had zero
+    # coverage.
+    import subprocess as _sp
+    from static.native import _run_tool, NativeToolError
+
+    # success -> stdout
+    monkeypatch.setattr(_sp, "run", lambda *a, **k: _sp.CompletedProcess(
+        a[0], 0, stdout="FUNC checkRoot\nFUNC isRooted\n", stderr=""))
+    assert _run_tool(["readelf", "-Ws", "lib.so"], 30, "readelf") == "FUNC checkRoot\nFUNC isRooted\n"
+
+    # non-zero exit -> loud NativeToolError, not an empty string
+    monkeypatch.setattr(_sp, "run", lambda *a, **k: _sp.CompletedProcess(
+        a[0], 3, stdout="", stderr="boom"))
+    with pytest.raises(NativeToolError, match="exited 3"):
+        _run_tool(["readelf", "-Ws", "lib.so"], 30, "readelf")
+
+    # timeout -> loud NativeToolError naming the tool and the 30s budget
+    def timeout_run(*a, **k):
+        raise _sp.TimeoutExpired(a[0], timeout=k.get("timeout"))
+    monkeypatch.setattr(_sp, "run", timeout_run)
+    with pytest.raises(NativeToolError, match="timed out after 30s"):
+        _run_tool(["ghidra", "lib.so"], 30, "ghidra")

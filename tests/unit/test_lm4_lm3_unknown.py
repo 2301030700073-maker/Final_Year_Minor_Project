@@ -147,3 +147,42 @@ def test_unattributed_indicators_never_upgrades_confidence():
     out = apply_unattributed_indicators(cls, {"ssl": True})
     assert out.ssl.confidence == 0.0
     assert out.ssl.detected is False
+
+
+def test_coverage_bound_recomputes_not_merges_unknown_uncovered():
+    # The composition-order load-bearing property, pinned at the function level:
+    # apply_coverage_bound RECOMPUTES unknown_uncovered from the coverage alone,
+    # discarding any pre-existing content entries. Given fully-analyzed coverage,
+    # a classification that already carries an unattributed-content marker must
+    # come out with [] - a merge would silently defeat the coverage bound. This
+    # is why the pipeline runs coverage_bound BEFORE unattributed_indicators
+    # (test_cli_run_e2e pins that order via the composition spy).
+    from dataclasses import replace
+
+    preloaded = replace(_cls(), unknown_uncovered=["ssl"])
+    out = apply_coverage_bound(preloaded, _FULL)
+
+    assert out.unknown_uncovered == []  # recomputed from coverage, not merged
+    assert out.root.coverage_limited is False
+    assert out.ssl.coverage_limited is False
+
+
+def test_assert_homogeneous_deterministic_rejects_non_deterministic_tiers():
+    # _assert_homogeneous_deterministic (principle 2 / ADR-0001): the static
+    # classification path may ONLY aggregate deterministic_matched evidence - a
+    # non-deterministic tier present in the blend must raise loudly (never be
+    # silently mixed into a static confidence). Empty/all-deterministic pass.
+    from types import SimpleNamespace
+    from static.decision_engine import _assert_homogeneous_deterministic
+    _assert_homogeneous_deterministic([])
+    _assert_homogeneous_deterministic([
+        SimpleNamespace(signature_id="a", verification_state="deterministic_matched"),
+        SimpleNamespace(signature_id="b", verification_state="deterministic_matched"),
+    ])
+    import pytest
+    with pytest.raises(ValueError) as ei:
+        _assert_homogeneous_deterministic([
+            SimpleNamespace(signature_id="bad", verification_state="ai_hypothesized_unverified"),
+        ])
+    assert "bad" in str(ei.value)
+    assert "ai_hypothesized_unverified" in str(ei.value)

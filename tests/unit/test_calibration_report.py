@@ -1,4 +1,7 @@
-from calibration.report import CategoryTier1Report, CategoryTier2Report, RateWithCount, compute_calibration_report
+from calibration.report import (
+    CategoryTier1Report, CategoryTier2Report, RateWithCount,
+    _category_is_confident_negative, compute_calibration_report,
+)
 from calibration.types import GroundTruthEntry, RunRow
 from static.decision_engine import DEFAULT_THRESHOLD
 
@@ -17,6 +20,28 @@ def _run(apk_hash, run_id, action, root_confidence, root_detected, root_bypassed
 
 
 FULLY_ANALYZED = {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed"}
+
+
+def test_js_unanalyzed_negative_is_not_confident_in_calibration():
+    # js is a governing surface (Hermes/RN bundles, Gap-7). A NEITHER whose
+    # js surface is not fully analyzed is NOT a confident negative and must be
+    # excluded from Tier 2 (ADR-0006) - locks the js governing surface into
+    # calibration semantics so a future edit cannot drop it back out.
+    cov = {**FULLY_ANALYZED, "js": "partial"}
+    run = _run(
+        "hash", "run1", "NEITHER", 0.2, False, None,
+        decompile_completeness="complete", coverage=cov,
+    )
+    assert _category_is_confident_negative(run, "root") is False
+    assert _category_is_confident_negative(run, "ssl") is False
+
+    # With js fully analyzed the same negative IS confident.
+    run_full = _run(
+        "hash", "run2", "NEITHER", 0.2, False, None,
+        decompile_completeness="complete", coverage=FULLY_ANALYZED,
+    )
+    assert _category_is_confident_negative(run_full, "root") is True
+    assert _category_is_confident_negative(run_full, "ssl") is True
 
 
 def test_rate_with_count_reports_none_not_zero_on_empty_denominator():

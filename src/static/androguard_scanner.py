@@ -35,6 +35,8 @@ a signature is still NOT evidence of absence of the technique.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from pathlib import Path
 
@@ -104,21 +106,104 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> set[str]:
     return app_strings
 
 
-def scan_dex_strings(apk_path: Path, signatures: list) -> dict:
-    """Match app-owned DEX strings against the given signatures and return
-    {matched: {sig_id: matched_text}, evidence: [Evidence], app_package,
-    string_count}. Raises on a genuinely unreadable APK (fail-loud). The caller
-    decides whether that halts the run - it is an enhancement source, so a
-    degraded note is the usual handling, not a pipeline halt."""
-    logging.getLogger("androguard").setLevel(logging.CRITICAL)
+# ---------------------------------------------------------------------------
+# DEX-string extraction disk cache
+#
+# AnalyzeAPK() on a large APK is the dominant cost of the androguard pass
+# (measured ~5-7 min on a 151 MB React-Native app like PropertyGuru that ships
+# ~290k app-owned strings) and - until the native.analyze_so cache - was not
+# cached on disk, so every run re-parsed the whole APK from scratch even when
+# nothing changed. This cache persists ONLY the expensive, immutable APK-derived
+# data (app_package + the extracted app-owned string set), keyed on the APK
+# bytes' SHA-256. Matching against the signature corpus is recomputed on every
+# call from the cached strings, so a signature-corpus or matcher change never
+# serves a stale result - only the parse is avoided, never the semantics.
+# Invalidation is explicit: bump _DEX_STRING_CACHE_VERSION when the string
+# EXTRACTION logic changes (the same discipline as native.analyze_so and the
+# jadx DEX cache). A stale/wrong-version entry is a miss, never a wrong answer.
+# ---------------------------------------------------------------------------
+
+_DEX_STRING_CACHE_VERSION = "dex-string-v1"
+
+
+def _load_string_cache(cache_dir: Path, apk_sha256: str) -> dict | None:
+    entry = cache_dir / f"{apk_sha256}.json"
+    if not entry.is_file():
+        return None
+    try:
+        data = json.loads(entry.read_text(encoding="utf-8"))
+        if data.get("version") != _DEX_STRING_CACHE_VERSION:
+            return None
+        payload = data["payload"]
+        payload["app_strings"] = set(payload["app_strings"])  # stored as a list, restored to a set
+        return payload
+    except Exception:
+        return None
+
+
+def _save_string_cache(cache_dir: Path, apk_sha256: str, payload: dict) -> None:
+    """Persist the string payload via tmp + atomic replace so a crash mid-write
+    can never leave a partial entry that later reads as valid (a corrupt cache
+    is a miss, never a wrong result)."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    tmp = cache_dir / f"{apk_sha256}.json.tmp"
+    tmp.write_text(
+        json.dumps({"version": _DEX_STRING_CACHE_VERSION, "payload": payload}, sort_keys=True),
+        encoding="utf-8",
+    )
+    tmp.replace(cache_dir / f"{apk_sha256}.json")
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _extract_strings(apk_path: Path) -> tuple[str | None, set[str]]:
+    """Run the expensive, immutable part of the androguard pass: parse the APK
+    and pull out its app-owned string set. This is the piece worth caching -
+    it is a pure function of the APK bytes."""
     from androguard.misc import AnalyzeAPK
-    from static.signatures import _line_matches  # reuse the exact same matcher
 
     _a, d, dx = AnalyzeAPK(str(apk_path))
     app_package = _a.get_package()
     dexs = d if isinstance(d, (list, tuple)) else [d]
+    return app_package, _app_owned_strings(dexs, dx, app_package)
 
-    app_strings = _app_owned_strings(dexs, dx, app_package)
+
+def scan_dex_strings(apk_path: Path, signatures: list, cache_dir: Path | None = None) -> dict:
+    """Match app-owned DEX strings against the given signatures and return
+    {matched: {sig_id: matched_text}, evidence: [Evidence], app_package,
+    string_count}. Raises on a genuinely unreadable APK (fail-loud). The caller
+    decides whether that halts the run - it is an enhancement source, so a
+    degraded note is the usual handling, not a pipeline halt.
+
+    With `cache_dir` set, the expensive AnalyzeAPK string extraction runs once
+    per distinct APK bytes; a subsequent call with the same bytes returns the
+    extracted string payload from disk and only the cheap matcher re-runs.
+    With cache_dir None (the test default) behavior is unchanged - always a
+    fresh parse."""
+    logging.getLogger("androguard").setLevel(logging.CRITICAL)
+    from static.signatures import _line_matches  # reuse the exact same matcher
+
+    if cache_dir is not None:
+        apk_sha = _sha256_file(apk_path)
+        cached = _load_string_cache(cache_dir, apk_sha)
+        if cached is not None:
+            app_package = cached.get("app_package")
+            app_strings = cached["app_strings"]
+        else:
+            app_package, app_strings = _extract_strings(apk_path)
+            _save_string_cache(
+                cache_dir,
+                apk_sha,
+                {"app_package": app_package, "app_strings": sorted(app_strings)},
+            )
+    else:
+        app_package, app_strings = _extract_strings(apk_path)
 
     matched: dict[str, str] = {}
     for s in app_strings:

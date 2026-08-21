@@ -1,4 +1,7 @@
-from common import Action, CategoryVerdict, ClassificationResult, Evidence, StageResult
+from common import (
+    Action, CategoryVerdict, ClassificationResult, CorrelationResult, Evidence,
+    StageResult, VerificationResult,
+)
 from report.generator import generate_report
 
 
@@ -235,6 +238,354 @@ def test_generate_report_ran_but_unverified_when_no_skip_reason(tmp_path):
     assert "reason unknown" not in content
 
 
+def test_generate_report_correlation_not_attempted_does_not_claim_dynamic_skipped(tmp_path):
+    # Regression: on an unknown target the dynamic stage RAN (technology
+    # hooks-engaged tier, real root/ssl evidence) but correlation was not
+    # attempted because there is no target-specific verification to compare
+    # against. The report previously rendered the hardcoded "Not evaluated
+    # (dynamic stage skipped)" - a false statement, the dynamic stage did not
+    # skip. The explicit reason must render instead, and the false skip claim
+    # must never appear.
+    report_path = generate_report(
+        run_id="run4",
+        apk_hash="jkl012",
+        timestamp="2026-07-30T12:00:00",
+        metadata={"hashes": {"sha256": "jkl012"}, "package": {"package_name": "com.unknown"}},
+        classification=_classification(),
+        verification=None,
+        correlation=None,
+        correlation_skip_reason=(
+            "dynamic used the technology-level hooks-engaged check (no "
+            "target-specific success check for this app); correlation requires "
+            "a target-specific verification"
+        ),
+        stage_results=[],
+        output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "dynamic used the technology-level hooks-engaged check" in content
+    assert "Not evaluated (dynamic stage skipped)" not in content
+
+
+def test_generate_report_correlation_not_evaluated_when_dynamic_stage_skipped(tmp_path):
+    # The plain else branch of the correlation block: correlation is None AND no
+    # explicit skip reason was passed, so the dynamic stage genuinely did not run.
+    # It must render the honest "dynamic stage skipped" - previously only NEGATIVE
+    # coverage existed (the skip-reason test asserted its absence), so a silent
+    # break of this else branch would have passed the suite.
+    report_path = generate_report(
+        run_id="skipcorr", apk_hash="sc001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "sc001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        correlation_skip_reason=None, stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "- Not evaluated (dynamic stage skipped)." in content
+
+
+def test_generate_report_attributes_all_third_party_bundled_sdk(tmp_path):
+    # Boundary-4/5 honesty: when every root-detection match lives in a bundled
+    # third-party SDK (none in the app's own package), the report must say so -
+    # "bundled SDK only" inline plus the Attribution block - so a reviewer does
+    # not read SDK telemetry/fraud-detection root checks as the app's own
+    # anti-tampering logic. This attribution branch had zero positive coverage.
+    from dataclasses import replace
+
+    cls = replace(
+        _classification(),
+        root_attribution={
+            "app_package": "com.example.app",
+            "app_owned": 0,
+            "third_party": 2,
+            "vendors": ["okhttp", "adjust"],
+            "all_third_party": True,
+            "mixed": False,
+        },
+    )
+    report_path = generate_report(
+        run_id="sdkattr", apk_hash="sda001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "sda001"}, "package": {"package_name": "com.example.app"}},
+        classification=cls, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    # inline qualifier on the Confidence line
+    assert "**bundled SDK only**" in content
+    # the full Attribution block with the SDK-not-app-own nuance
+    assert "all 2 root-detection matches are in bundled third-party libraries" in content
+    assert "consistent with SDK telemetry/fraud-detection" in content
+    assert "okhttp, adjust" in content
+
+
+def test_generate_report_attributes_mixed_app_and_bundled_sdk(tmp_path):
+    # Boundary-4/5 honesty, the `mixed` half: when root-detection matches split
+    # across the app's own package AND bundled third-party libraries, the report
+    # must say so explicitly (not fall through to the all-third-party or silent
+    # states). This elif branch had zero positive coverage.
+    from dataclasses import replace
+
+    cls = replace(
+        _classification(),
+        root_attribution={
+            "app_package": "com.example.app",
+            "app_owned": 1,
+            "third_party": 1,
+            "vendors": ["okhttp"],
+            "all_third_party": False,  # mixed and all-third-party are mutually exclusive
+            "mixed": True,
+        },
+    )
+    report_path = generate_report(
+        run_id="mixattr", apk_hash="mxa001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "mxa001"}, "package": {"package_name": "com.example.app"}},
+        classification=cls, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "root-detection matches split across the app's own package (1) and bundled third-party libraries (1: okhttp)" in content
+    # the all-third-party qualifier must NOT appear for a mixed split
+    assert "**bundled SDK only**" not in content
+    assert "consistent with SDK telemetry/fraud-detection" not in content
+
+
+def test_generate_report_attributes_ssl_all_third_party_bundled_sdk(tmp_path):
+    # Boundary-4/5 honesty, the SSL half: when every SSL-pinning match lives in a
+    # bundled third-party library (none in the app's own package), the report
+    # must say so - with the OkHttp-CertificatePinner nuance - so a reviewer does
+    # not read bundled SDK pinning as the app's own cert-pinning logic. These SSL
+    # attribution blocks (inline + full) had zero positive coverage.
+    from dataclasses import replace
+
+    ssl = CategoryVerdict(
+        confidence=0.8, detected=True,
+        evidence=[Evidence(signature_id="ssl_okhttp_certificate_pinner", file="OkHttp.java",
+                           line_or_offset=7, matched_text="CertificatePinner")],
+    )
+    cls = replace(
+        _classification(),
+        action=Action.SSL_ONLY,
+        ssl=ssl,
+        ssl_attribution={
+            "app_package": "com.example.app",
+            "app_owned": 0,
+            "third_party": 3,
+            "vendors": ["okhttp"],
+            "all_third_party": True,
+            "mixed": False,
+        },
+    )
+    report_path = generate_report(
+        run_id="sslattr", apk_hash="ssa001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "ssa001"}, "package": {"package_name": "com.example.app"}},
+        classification=cls, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "**bundled SDK only**" in content
+    assert "all 3 SSL-pinning matches are in bundled third-party libraries" in content
+    assert "consistent with bundled SDK pinning (e.g. OkHttp's CertificatePinner)" in content
+
+
+def test_generate_report_surfaces_evidence_cap_truncation(tmp_path):
+    # RESID-4F honesty: when a signature matched more than the 50-row display cap,
+    # the report must tell the reviewer the evidence is truncated and name each
+    # overflowing signature with its total count - a silently-truncated evidence
+    # list would read as "these are all the matches" when it is not. This
+    # truncation block had zero positive coverage.
+    from dataclasses import replace
+
+    cls = replace(_classification(), evidence_capped_counts={"root_su_binary_paths": 55})
+    report_path = generate_report(
+        run_id="cap", apk_hash="cap001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "cap001"}, "package": {"package_name": "com.example.app"}},
+        classification=cls, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Evidence truncated (RESID-4F cap)" in content
+    assert "matched more than the 50-row-per-signature display cap" in content
+    assert "`root_su_binary_paths` matched 55x" in content
+
+
+def test_generate_report_annotates_obfuscation_level(tmp_path):
+    # The obfuscation-level annotation on the per-surface bound: when present it
+    # must render. This branch had zero positive coverage.
+    report_path = generate_report(
+        run_id="obf", apk_hash="obf001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "obf001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        obfuscation_level="heavy", stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Obfuscation: **heavy**" in content
+
+
+def test_generate_report_lists_exported_components(tmp_path):
+    # The exported-components listing: only components flagged exported render,
+    # each with its type and name. This was the last zero-coverage branch in the
+    # report template - non-exported components must be filtered out.
+    from static.manifest import ManifestInfo
+
+    manifest = ManifestInfo(
+        debuggable=False,
+        network_security_config=None,
+        exported_components=[
+            {"type": "activity", "name": "com.example.ExportedActivity", "exported": True},
+            {"type": "service", "name": "com.example.PrivateService", "exported": False},
+        ],
+    )
+    report_path = generate_report(
+        run_id="exp", apk_hash="exp001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "exp001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        manifest=manifest, stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Exported components (1):" in content
+    assert "`activity: com.example.ExportedActivity`" in content
+    assert "PrivateService" not in content  # non-exported filtered out by selectattr
+
+
+def test_generate_report_renders_bypass_verdict_false_and_inconclusive(tmp_path):
+    # The dynamic bypass verdict line has four states per category. Of them,
+    # False (a hard "dynamic ran the bypass and it did not work") and None
+    # (inconclusive) had no positive rendering assertion - a False must render as
+    # a real value, and an inconclusive must say "inconclusive (see evidence
+    # below)" rather than render nothing or a bare True/False.
+    report_path = generate_report(
+        run_id="vfalse", apk_hash="vfa001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "vfa001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(),
+        verification=VerificationResult(root_bypassed=False, ssl_bypassed=None, evidence_lines={}),
+        correlation=None, stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "- Root bypassed: False" in content
+    assert "- SSL bypassed: inconclusive (see evidence below)" in content
+
+
+def test_generate_report_js_partial_coverage_gets_its_own_callout(tmp_path):
+    # Regression: the Scan Coverage section explains native=unscannable and heavy
+    # obfuscation, but the js governing surface (Gap-7 Hermes/RN bundles) had no
+    # callout - a reader saw `| js | partial |` with no consequence explained, on
+    # the project's flagship RN target. A js partial must be called out just like
+    # native so root/ssl coverage-limitation is self-explanatory.
+    report_path = generate_report(
+        run_id="js-partial", apk_hash="jsp001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "jsp001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        coverage={"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "partial"},
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "| js | partial |" in content
+    assert "binary Hermes/bytecode bundle" in content
+
+
+def test_generate_report_js_fully_analyzed_no_callout(tmp_path):
+    report_path = generate_report(
+        run_id="js-full", apk_hash="jsf001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "jsf001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        coverage={"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed"},
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "| js | fully_analyzed |" in content
+    assert "binary Hermes/bytecode bundle" not in content
+
+
+def test_generate_report_renders_unverified_not_mismatch(tmp_path):
+    # RESID-6F completion: static predicted root-detection but the dynamic bypass
+    # was inconclusive (never exercised the check). The report must render this
+    # as the distinct UNVERIFIED third state - never as a MISMATCH implying
+    # static and dynamic disagreed.
+    verification = VerificationResult(root_bypassed=None, ssl_bypassed=None, evidence_lines={})
+    correlation = CorrelationResult(
+        matches=False,
+        mismatches=[],
+        unverified=[
+            "static analysis predicted root-detection present, but dynamic "
+            "verification could not test a bypass (not attempted or inconclusive)"
+        ],
+    )
+    report_path = generate_report(
+        run_id="unverified", apk_hash="uvw001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "uvw001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=verification, correlation=correlation,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "- UNVERIFIED: static analysis predicted root-detection" in content
+    assert "- MISMATCH:" not in content
+    # The verdict headline must name the state, never "- Matches: False" - that
+    # would read as a static/dynamic disagreement that never happened.
+    assert "- Verdict: UNVERIFIED (dynamic could not test" in content
+    assert "- Matches:" not in content
+
+
+def test_generate_report_renders_match_verdict(tmp_path):
+    # The MATCH branch of the tri-state headline: static predicted and dynamic
+    # confirmed - no mismatch, no unverified.
+    correlation = CorrelationResult(matches=True, mismatches=[], unverified=[])
+    report_path = generate_report(
+        run_id="match", apk_hash="mtc001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "mtc001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=correlation,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "- Verdict: MATCH (static and dynamic agree)" in content
+
+
+def test_generate_report_renders_mismatch_verdict(tmp_path):
+    # The MISMATCH branch: static and dynamic genuinely disagreed - the headline
+    # must say so, and must NOT fall through to the unverified/agree states.
+    correlation = CorrelationResult(
+        matches=False,
+        mismatches=["static predicted root-detection, dynamic saw none"],
+        unverified=[],
+    )
+    report_path = generate_report(
+        run_id="mismatch", apk_hash="msm001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "msm001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=correlation,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "- Verdict: MISMATCH (static and dynamic disagreed)" in content
+    assert "- Verdict: MATCH" not in content
+    assert "- Verdict: UNVERIFIED" not in content
+    # the per-item body loop renders each disagreement, not just the headline
+    assert "- MISMATCH: static predicted root-detection, dynamic saw none" in content
+
+
+def test_generate_report_mismatch_verdict_wins_over_unverified(tmp_path):
+    # When a run carries BOTH a genuine disagreement and an inconclusive, the
+    # headline must surface the MISMATCH - a static/dynamic disagreement is more
+    # severe than an inconclusive and must not be hidden behind the UNVERIFIED
+    # state. The template's `mismatches`-first ordering is load-bearing: reorder
+    # it to check `unverified` first and a real disagreement reads as inconclusive.
+    correlation = CorrelationResult(
+        matches=False,
+        mismatches=["static predicted root-detection, dynamic saw none"],
+        unverified=["SSL-pinning could not be tested - inconclusive"],
+    )
+    report_path = generate_report(
+        run_id="both", apk_hash="bth001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "bth001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=correlation,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "- Verdict: MISMATCH (static and dynamic disagreed)" in content
+    assert "- Verdict: UNVERIFIED" not in content  # disagreement wins the headline
+    # both per-item body loops render alongside the headline: the disagreement
+    # line and the inconclusive line are both present, neither swallowed
+    assert "- MISMATCH: static predicted root-detection, dynamic saw none" in content
+    assert "- UNVERIFIED: SSL-pinning could not be tested - inconclusive" in content
+
+
 def test_generate_report_limitations_section_present_and_specific(tmp_path):
     report_path = generate_report(
         run_id="run4", apk_hash="jkl012", timestamp="2026-07-30T12:00:00",
@@ -254,6 +605,40 @@ def test_generate_report_limitations_section_present_and_specific(tmp_path):
     assert "engagement is not confirmation" in content
     assert "hooks engaged" in content
     assert "does not generalize to unseen apps" not in content
+
+
+def test_generate_report_limitations_not_stale_about_unknown_surfacing(tmp_path):
+    # Regression: the Limitations paragraph used to claim un-matched techniques
+    # are "silently absent from the confidence score - not flagged as unknown" -
+    # stale, and directly contradicting the Decision line, which surfaces
+    # coverage-limited indicators as "Coverage-limited (unknown, not absent)"
+    # (Boundary-1). The prose must agree with what the report actually does.
+    cls = _classification()
+    cls = ClassificationResult(
+        action=cls.action, root=cls.root, ssl=cls.ssl,
+        unknown_uncovered=["root_detection_idiom"],
+    )
+    report_path = generate_report(
+        run_id="run5", apk_hash="mno345", timestamp="2026-07-30T12:00:00",
+        metadata={"hashes": {"sha256": "mno345"}, "package": {"package_name": "test.app"}},
+        classification=cls, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    # Decision line surfaces the coverage-limited indicator.
+    assert "Coverage-limited (unknown, not absent)" in content
+    assert "root_detection_idiom" in content
+    # The reason clause must be honest for BOTH mechanisms that set it: a
+    # coverage-limited marker can come from an unexamined surface OR from
+    # detection-shaped code that matched no signature (Boundary-1, ADR-0006) -
+    # never a bare "surface not fully analyzed", which would misdescribe the
+    # fully-analyzed-but-suspicious-content case.
+    assert "detection-shaped code matched no signature" in content
+    # Limitations no longer claims it is silently dropped / not flagged.
+    assert "silently absent from the confidence score" not in content
+    assert "not flagged as" not in content
+    # The honest structural residual is stated instead.
+    assert "cannot be enumerated" in content
 
 
 def test_generate_report_flags_partial_decompile_prominently(tmp_path):
@@ -521,3 +906,232 @@ def test_generate_report_states_authorization_and_operator(tmp_path):
     )
     content = report_path.read_text(encoding="utf-8")
     assert "Authorized by:" not in content
+
+
+def test_decompile_summary_all_branches():
+    # _decompile_summary maps a decompile stage to the fields the Limitations
+    # section reads. It had zero direct coverage - a regression in the
+    # completeness fallback logic would silently mislabel a report's basis.
+    from common import StageResult
+    from report.generator import _decompile_summary
+
+    # no decompile stage at all
+    assert _decompile_summary([]) == {
+        "decompile_completeness": "unknown", "jadx_exit_code": None, "jadx_file_count": None,
+    }
+    # completeness carried in the stage evidence
+    s_ev = StageResult(stage="decompile", status="success",
+                       evidence={"decompile_completeness": "partial", "jadx_exit_code": 0, "jadx_file_count": 3})
+    assert _decompile_summary([s_ev])["decompile_completeness"] == "partial"
+    assert _decompile_summary([s_ev])["jadx_exit_code"] == 0
+    assert _decompile_summary([s_ev])["jadx_file_count"] == 3
+    # no evidence completeness, but status success -> complete
+    s_ok = StageResult(stage="decompile", status="success", evidence={"jadx_file_count": 1})
+    assert _decompile_summary([s_ok])["decompile_completeness"] == "complete"
+    # no evidence completeness and status not success -> unknown
+    s_fail = StageResult(stage="decompile", status="failed", evidence={})
+    out = _decompile_summary([s_fail])
+    assert out["decompile_completeness"] == "unknown"
+    assert out["jadx_exit_code"] is None
+    assert out["jadx_file_count"] is None
+
+
+def test_attrdict_attribute_access():
+    # _AttrDict / _as_attrdict let Jinja read metadata as attributes
+    # (metadata.package.package_name). Nested dicts become nested attrdicts,
+    # non-dict values pass through, and a missing key is None - not an
+    # AttributeError. Had zero direct coverage.
+    from report.generator import _as_attrdict
+    md = _as_attrdict({"package": {"package_name": "com.example.app"}, "ok": 1})
+    assert md.package.package_name == "com.example.app"
+    assert md.ok == 1
+    assert md.missing is None
+    assert _as_attrdict(5) == 5  # non-dict passthrough
+
+
+def test_root_attribution_prefers_classification_field():
+    # _root_attribution: the pipeline-attached field is the single source of
+    # truth (so report and classification_json agree); the metadata-package
+    # fallback exists only for direct generate_report() callers. The prefer
+    # branch had no direct coverage - the attached value must win over any
+    # recomputation.
+    from dataclasses import replace
+    from common import CategoryVerdict, ClassificationResult, Action
+    from report.generator import _root_attribution
+    cls = ClassificationResult(
+        action=Action.ROOT_ONLY,
+        root=CategoryVerdict(confidence=0.8, detected=True, evidence=[]),
+        ssl=CategoryVerdict(confidence=0.0, detected=False, evidence=[]),
+    )
+    cls = replace(cls, root_attribution={"label": "app_owned", "counts": {"root_su_binary_paths": 1}})
+    got = _root_attribution({"package": {"package_name": "com.example.app"}}, cls)
+    assert got == {"label": "app_owned", "counts": {"root_su_binary_paths": 1}}
+
+
+def test_ssl_attribution_prefers_classification_field():
+    # Mirror for SSL: the attached ssl_attribution field wins over recomputation.
+    from dataclasses import replace
+    from common import CategoryVerdict, ClassificationResult, Action
+    from report.generator import _ssl_attribution
+    cls = ClassificationResult(
+        action=Action.SSL_ONLY,
+        root=CategoryVerdict(confidence=0.0, detected=False, evidence=[]),
+        ssl=CategoryVerdict(confidence=0.8, detected=True, evidence=[]),
+    )
+    cls = replace(cls, ssl_attribution={"label": "bundled_sdk"})
+    assert _ssl_attribution({"package": {"package_name": "com.example.app"}}, cls) == {"label": "bundled_sdk"}
+
+
+def test_root_attribution_fallback_computes_when_field_unset():
+    # _root_attribution fallback: when the classification carries no attached
+    # root_attribution (a direct generate_report() caller), it computes from the
+    # evidence + metadata package. Empty evidence -> None (nothing to attribute);
+    # app-owned evidence -> the app_package-labeled dict. The fallback branch had
+    # zero direct coverage (only the prefer branch was tested).
+    from types import SimpleNamespace
+    from common import CategoryVerdict, ClassificationResult, Action
+    from report.generator import _root_attribution
+
+    empty = ClassificationResult(
+        action=Action.ROOT_ONLY,
+        root=CategoryVerdict(confidence=0.8, detected=True, evidence=[]),
+        ssl=CategoryVerdict(confidence=0.0, detected=False, evidence=[]),
+    )
+    assert _root_attribution({"package": {"package_name": "com.example.app"}}, empty) is None
+
+    owned = ClassificationResult(
+        action=Action.ROOT_ONLY,
+        root=CategoryVerdict(confidence=0.8, detected=True, evidence=[
+            SimpleNamespace(file="sources/com/example/app/MainActivity.java"),
+        ]),
+        ssl=CategoryVerdict(confidence=0.0, detected=False, evidence=[]),
+    )
+    got = _root_attribution({"package": {"package_name": "com.example.app"}}, owned)
+    assert got is not None
+    assert got["app_package"] == "com.example.app"
+
+
+def test_generate_report_renders_unaccounted_and_dynamic_loads_sections(tmp_path):
+    # Two coverage-limited branches: unaccounted native loads (an explicit
+    # System.load/loadLibrary whose .so was NOT analyzed -> native partial) and
+    # dynamic code loading (DexClassLoader/forName -> java partial). Both render
+    # a section header AND a per-item body loop - a silent break of either `{% if %}`
+    # gate or its `{% for %}` body would pass uncaught. Had zero direct coverage.
+    classification = _classification()
+    report_path = generate_report(
+        run_id="loads", apk_hash="load001", timestamp="2026-08-12T12:00:00",
+        metadata={"hashes": {"sha256": "load001"}, "package": {"package_name": "com.example.app"}},
+        classification=classification, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+        unaccounted_loads=["/data/local/tmp/secret.so"],
+        dynamic_loads=["sources/com/example/app/MainActivity.java"],
+    )
+    content = report_path.read_text(encoding="utf-8")
+    # unaccounted native load section header + per-item body line + partial note
+    assert "Unaccounted native loads (boundary #4)" in content
+    assert "| `/data/local/tmp/secret.so` |" in content
+    assert "native coverage is forced to `partial`" in content
+    # dynamic code loading section header + per-item body line + partial note
+    assert "Dynamic code loading (coverage-limited)" in content
+    assert "| `sources/com/example/app/MainActivity.java` |" in content
+    assert "Java coverage is forced to `partial`" in content
+
+
+def test_generate_report_omits_load_sections_when_empty(tmp_path):
+    # The negative gates: neither section renders when the lists are absent
+    # (default None). A section that leaked unconditionally would break here.
+    classification = _classification()
+    report_path = generate_report(
+        run_id="noloads", apk_hash="load002", timestamp="2026-08-12T12:00:00",
+        metadata={"hashes": {"sha256": "load002"}, "package": {"package_name": "com.example.app"}},
+        classification=classification, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Unaccounted native loads" not in content
+    assert "Dynamic code loading" not in content
+
+
+def test_generate_report_renders_jni_binding_map_section(tmp_path):
+    # The JNI native-method binding map (boundary #3, static half): a `{% if %}`
+    # gate + per-item body row over (class, method, status). The unresolved note
+    # in the section prose is what forces native partial for an unexamined
+    # surface. Had zero positive render coverage.
+    from types import SimpleNamespace
+    classification = _classification()
+    report_path = generate_report(
+        run_id="jni", apk_hash="jni001", timestamp="2026-08-12T12:00:00",
+        metadata={"hashes": {"sha256": "jni001"}, "package": {"package_name": "com.example.app"}},
+        classification=classification, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+        jni_bindings=[
+            SimpleNamespace(class_name="com.x.Crypto", method_name="encrypt", status="resolved"),
+            SimpleNamespace(class_name="com.x.Native", method_name="unbound", status="unresolved"),
+        ],
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "JNI native-method binding map" in content
+    assert "| `com.x.Crypto` | `encrypt` | resolved |" in content
+    assert "| `com.x.Native` | `unbound` | unresolved |" in content
+    assert "unresolved, native coverage is forced to `partial`" in content
+
+
+def test_generate_report_omits_jni_section_when_empty(tmp_path):
+    classification = _classification()
+    report_path = generate_report(
+        run_id="nojni", apk_hash="jni002", timestamp="2026-08-12T12:00:00",
+        metadata={"hashes": {"sha256": "jni002"}, "package": {"package_name": "com.example.app"}},
+        classification=classification, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "JNI native-method binding map" not in content
+
+
+def test_generate_report_renders_permissions_section(tmp_path):
+    # TEMPLATE line 50: `{% if manifest.permissions %}` renders the app's
+    # permissions (and their count). A silent break of this branch would drop
+    # the whole Permissions line. The positive render must be asserted (it had
+    # zero coverage - only the empty-manifest case could have passed unnoticed).
+    from static.manifest import ManifestInfo
+    manifest = ManifestInfo(
+        debuggable=False, network_security_config=None,
+        permissions=["android.permission.INTERNET", "android.permission.CAMERA"],
+    )
+
+    report_path = generate_report(
+        run_id="perms", apk_hash="prm001", timestamp="2026-08-20T12:00:00",
+        metadata={
+            "hashes": {"sha256": "prm001"},
+            "package": {"package_name": "test.app"},
+            "signer": {"v1_verified": True, "v2_verified": True, "v3_verified": False},
+        },
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path, manifest=manifest,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "**Permissions (2):**" in content
+    assert "android.permission.INTERNET" in content
+    assert "android.permission.CAMERA" in content
+
+
+def test_generate_report_omits_permissions_section_when_none(tmp_path):
+    # Negative gate: an app declaring no permissions must not render an empty
+    # "Permissions (0):" line - the section is absent, not vacuously present.
+    from static.manifest import ManifestInfo
+    manifest = ManifestInfo(debuggable=False, network_security_config=None)  # permissions defaults to []
+
+    report_path = generate_report(
+        run_id="noperms", apk_hash="prm002", timestamp="2026-08-20T12:00:00",
+        metadata={
+            "hashes": {"sha256": "prm002"},
+            "package": {"package_name": "test.app"},
+            "signer": {"v1_verified": True, "v2_verified": True, "v3_verified": False},
+        },
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path, manifest=manifest,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "**Permissions" not in content

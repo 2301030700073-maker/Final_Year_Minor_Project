@@ -322,3 +322,94 @@ def test_string_encryption_true_on_flat_numeric_literals():
         "return new String(b);\n"
     )
     assert _has_string_encryption(text2) is True
+
+
+def test_split_array_items_respects_nested_braces():
+    # _split_array_items splits an array-initializer body on TOP-LEVEL commas,
+    # honoring nested {}/(). This isolates flat R8 literals from gms-style
+    # expression items so the pure-literal count can tell them apart. Had zero
+    # direct coverage.
+    from static.obfuscation import _split_array_items
+    assert _split_array_items("1, 2, 3") == ["1", "2", "3"]
+    assert _split_array_items("1, {2, 3}, 4") == ["1", "{2, 3}", "4"]
+    assert _split_array_items("(a + b), c") == ["(a + b)", "c"]
+    assert _split_array_items("") == []
+
+
+def test_is_pure_numeric_literal_rejects_expressions():
+    # The flat-numeric byte detector: a standalone integer literal (optionally
+    # cast/signed/hex) is an encoded-string byte; ANY expression - e.g.
+    # '(char)((x >> 10) & 31) + 96' - is not. The expression rejection is the
+    # exact PropertyGuru false-positive guard (ADR-0006). Had zero coverage.
+    from static.obfuscation import _is_pure_numeric_literal
+    assert _is_pure_numeric_literal("97") is True
+    assert _is_pure_numeric_literal("(char)97") is True
+    assert _is_pure_numeric_literal("(char) 65") is True
+    assert _is_pure_numeric_literal("0xFF") is True
+    assert _is_pure_numeric_literal("-5") is True
+    assert _is_pure_numeric_literal("(char)((x >> 10) & 31) + 96") is False  # expression
+    assert _is_pure_numeric_literal("a") is False
+    assert _is_pure_numeric_literal("") is False
+
+
+def test_is_minified_name():
+    # _is_minified_name: a name reads as minified when it's <=2 chars OR its
+    # outer ($-segment) is short. The C1 guard: `Cache$urls$1` is a NORMAL inner/
+    # anonymous-class marker, NOT minified - only `a$a` (R8-flattened) is. Had
+    # zero direct coverage.
+    from static.obfuscation import _is_minified_name
+    assert _is_minified_name("a") is True        # 1 char
+    assert _is_minified_name("ab") is True       # 2 chars
+    assert _is_minified_name("a$a") is True      # short outer segment
+    assert _is_minified_name("ab$X") is True     # 2-char outer segment
+    assert _is_minified_name("abc") is False     # 3 chars, clear
+    assert _is_minified_name("Cache$urls$1") is False  # normal inner class (C1)
+
+
+def test_minified_name_ratio_excludes_resource_class():
+    # _minified_name_ratio: fraction of minified names, with the generated `R`
+    # resource class (and R$id/... ) excluded - it is always single-char, always
+    # present, and never an obfuscation signal; counting it inflates the ratio
+    # and mislabels clear apps heavy (C1/G7). Empty/only-R corpus -> 0.0.
+    from static.obfuscation import _minified_name_ratio
+    assert _minified_name_ratio(["R", "R$id", "R$layout"]) == 0.0
+    assert _minified_name_ratio([]) == 0.0
+    assert _minified_name_ratio(["R", "a", "b", "R$id"]) == 1.0  # 2 real, both minified
+    assert _minified_name_ratio(["MainActivity", "R$id", "Helper"]) == 0.0
+    assert _minified_name_ratio(["a", "MainActivity", "R"]) == 0.5
+
+
+def test_has_dynamic_decryptor_expr():
+    # _has_dynamic_decryptor_expr: base-N field extractor and XOR-stream shapes
+    # are decisive decryption signatures (statically UNRECOVERABLE string
+    # encoding - boundary #4). Plain literal/arithmetic bodies are NOT - they
+    # never fire a dynamic-decryptor label (ADR-0006). Had zero coverage.
+    from static.obfuscation import _has_dynamic_decryptor_expr
+    # base-32 field extractor (gms/ads)
+    assert _has_dynamic_decryptor_expr("(char) (((x >> 10) & 31) + 96)") is True
+    # XOR stream (appsflyer)
+    assert _has_dynamic_decryptor_expr("(char) (x ^ 0x1F)") is True
+    # flat R8 literal list - not dynamic
+    assert _has_dynamic_decryptor_expr("97, 98, 99, 0x41") is False
+    # plain arithmetic without a (char) cast - not a decryptor
+    assert _has_dynamic_decryptor_expr("(x + 5) & 3") is False
+
+
+def test_class_simple_names_skips_unreadable_entry(tmp_path):
+    # obfuscation.py:39-40: an unreadable java_files entry (a directory raises
+    # OSError) must be skipped, not crash the whole name pass.
+    from static.obfuscation import _class_simple_names
+    d = tmp_path / "unreadable"
+    d.mkdir()
+    (tmp_path / "MainActivity.java").write_text("public class MainActivity {}\n")
+    assert _class_simple_names([d, tmp_path / "MainActivity.java"]) == ["MainActivity"]
+
+
+def test_any_string_encryption_skips_unreadable_entry(tmp_path):
+    # obfuscation.py:213-214: the OSError guard in the encryption-fingerprint
+    # pass skips an unreadable entry instead of aborting the whole corpus check.
+    from static.obfuscation import _any_string_encryption
+    d = tmp_path / "unreadable"
+    d.mkdir()
+    (tmp_path / "MainActivity.java").write_text("public class MainActivity {}\n")
+    assert _any_string_encryption([d, tmp_path / "MainActivity.java"]) is False

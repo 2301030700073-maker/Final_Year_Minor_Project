@@ -114,3 +114,17 @@ def test_native_mono_runtime_is_ssl_indicator_not_scored_sig():
 
 def test_native_root_and_ssl_indicators_independent():
     assert find_native_indicator_categories("/sbin/su\n/system/etc/security/cacerts") == {"root", "ssl"}
+
+
+def test_compile_returns_cached_patterns():
+    # _compile: compiles (and caches by raw string) the indicator regexes for a
+    # category. Returns a tuple that actually matches; a repeat call reuses the
+    # cached compiled object (identity) instead of recompiling. Had zero coverage.
+    from static.indicators import _compile
+    table = {"root": (r"/system/bin/su", r"\bmagisk\b")}
+    pats = _compile("root", table)
+    assert isinstance(pats, tuple)
+    assert len(pats) == 2
+    assert pats[0].search("/system/bin/su") is not None
+    assert pats[1].search("com.topjohnwu.magisk") is not None
+    assert _compile("root", table)[0] is pats[0]  # cache hit reuses the object

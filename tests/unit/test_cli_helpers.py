@@ -9,13 +9,86 @@ from cli import (
     PACKAGE_TO_TARGET,
     _apply_manifest_ssl_signal,
     _canonical_target,
+    _correlation_from_json,
     _git_commit_hash,
     _git_last_commit_touching,
     _load_thresholds,
+    _stage_from_json,
     _wrap_stage,
 )
 from common import StageResult, StaticEvidence
 from static.manifest import ManifestInfo
+
+
+def test_correlation_from_json_roundtrips_unverified():
+    # The UNVERIFIED third state must survive the DB store -> regenerate parse
+    # seam (cli._correlation_from_json). If a refactor dropped `unverified` from
+    # the parse, stored runs with an inconclusive dynamic would silently lose the
+    # state on regeneration - no correlation test would catch it because this
+    # seam is only exercised via _regenerate_report.
+    parsed = _correlation_from_json({
+        "matches": False,
+        "mismatches": [],
+        "unverified": [
+            "static analysis predicted root-detection present, but dynamic "
+            "verification could not test a bypass (not attempted or inconclusive)"
+        ],
+    })
+    assert parsed is not None
+    assert parsed.matches is False
+    assert parsed.mismatches == []
+    assert len(parsed.unverified) == 1
+    assert "could not test" in parsed.unverified[0]
+
+
+def test_correlation_from_json_legacy_without_unverified_defaults_to_empty():
+    # Runs stored before the unverified field existed have no `unverified` key.
+    # It must default to [] (not crash, not read as a mismatch), so regenerated
+    # legacy reports stay honest.
+    parsed = _correlation_from_json({
+        "matches": True,
+        "mismatches": [],
+    })
+    assert parsed is not None
+    assert parsed.matches is True
+    assert parsed.unverified == []
+
+
+def test_correlation_from_json_none_returns_none():
+    assert _correlation_from_json(None) is None
+
+
+def test_stage_from_json_roundtrips_all_fields():
+    # The Stage Results table on a regenerated report is fed by this parse seam
+    # (cli._stage_from_json). A stored stage must round-trip every field so the
+    # regenerated report shows the same durations/errors/evidence as the live run.
+    parsed = _stage_from_json({
+        "stage": "dynamic",
+        "status": "success",
+        "evidence": {"engaged": True},
+        "error": None,
+        "duration_ms": 1234,
+    })
+    assert parsed.stage == "dynamic"
+    assert parsed.status == "success"
+    assert parsed.evidence == {"engaged": True}
+    assert parsed.error is None
+    assert parsed.duration_ms == 1234
+
+
+def test_stage_from_json_missing_optional_fields_default_to_none():
+    # A stage stored without optional fields (evidence/error/duration) must parse
+    # without crashing and carry None for them - the honest "not recorded"
+    # rendering, never a fabricated value. A missing duration is None, NOT a
+    # fabricated 0: asdict normally serializes the dataclass default 0, so a None
+    # duration here only appears when the record genuinely lacks it (legacy/partial
+    # JSON) - asserting None locks that we never invent a "0ms" duration.
+    parsed = _stage_from_json({"stage": "decompile", "status": "skipped"})
+    assert parsed.stage == "decompile"
+    assert parsed.status == "skipped"
+    assert parsed.evidence is None
+    assert parsed.error is None
+    assert parsed.duration_ms is None
 
 
 def _fake_settings(monkeypatch, body: str):
@@ -423,3 +496,142 @@ def test_package_to_target_maps_every_known_augmentation_target():
     known = set(frida_runner.SCRIPTS_BY_TARGET_ACTION)
     assert SUCCESS_CHECKS.keys() == known
     assert set(PACKAGE_TO_TARGET.values()) == known
+
+
+def test_verify_audit_log_command_reports_ok_on_valid_log(tmp_path, capsys):
+    # The user-facing surface of the tamper-evidence feature (ADR-0005): the
+    # verify-audit-log command must report OK on a genuine chained log and exit 0.
+    import cli
+    from audit.attestation import record_authorization
+
+    log = tmp_path / "audit.jsonl"
+    record_authorization(
+        audit_log_path=log, run_id="r1", apk_hash="a", justification="CTF",
+        operator="tester", git_commit="g",
+    )
+    cli.verify_audit_log_cmd(audit_log=log)
+    out = capsys.readouterr().out
+    assert "Audit log OK" in out
+    assert "1 record(s)" in out
+    # r1 was authorized but never completed (no classification/completion) - the
+    # OK line must NOT let an auditor read "every run finished". Surface it.
+    assert "authorized run(s) never completed" in out
+    assert "r1" in out
+
+
+def test_verify_audit_log_command_no_uncompleted_note_when_all_runs_finish(tmp_path, capsys):
+    # When every authorized run also completed, the OK output must carry no
+    # "never completed" note - surfacing it would be noise.
+    import cli
+    from audit.attestation import record_authorization, record_run_completion
+
+    log = tmp_path / "audit.jsonl"
+    record_authorization(
+        audit_log_path=log, run_id="r1", apk_hash="a", justification="CTF",
+        operator="tester", git_commit="g",
+    )
+    record_run_completion(
+        audit_log_path=log, run_id="r1", apk_hash="a", justification="CTF",
+        operator="tester", git_commit="g", action="NEITHER",
+        stage_statuses={}, verification="not_attempted",
+    )
+    cli.verify_audit_log_cmd(audit_log=log)
+    out = capsys.readouterr().out
+    assert "Audit log OK" in out
+    assert "never completed" not in out
+
+
+def test_verify_audit_log_command_fails_loudly_on_corrupt_log(tmp_path, capsys):
+    # A corrupted log must exit non-zero and say so - the command must never
+    # silently swallow an integrity failure (principle 3: no silent failures).
+    import cli
+
+    log = tmp_path / "audit.jsonl"
+    log.write_text("not json\n")
+    with pytest.raises(typer.Exit) as exc:  # typer.Exit is a click.Exit (RuntimeError)
+        cli.verify_audit_log_cmd(audit_log=log)
+    assert exc.value.exit_code == 1
+    out = capsys.readouterr().out
+    assert "Audit log integrity FAILED" in out
+
+
+def test_re_attribute_aborts_on_invalid_justification_before_any_write(capsys):
+    # ADR-0005 gate on a consumer-visible mutation: re-attribute writes stored
+    # attribution (ADR-0010 caveats), so an invalid justification must abort
+    # BEFORE any DB write. The gate fires first, so this needs no DB mocking -
+    # and the storage import is inside the function, unreachable here.
+    import cli
+
+    with pytest.raises(typer.Exit) as exc:  # typer.Exit is a click.Exit (RuntimeError)
+        cli.re_attribute_cmd(justification="not-a-real-justification", force=False)
+    assert exc.value.exit_code == 1
+    out = capsys.readouterr().out
+    assert "Invalid --justification" in out
+
+
+def test_manifest_from_json_none_for_preexisting_runs():
+    # _manifest_from_json: a regenerated report must keep its Debuggable/network-
+    # security-config section (manifest_json item 3). Runs that predate manifest
+    # persistence carry no manifest -> the rebuild yields None, not a fabricated
+    # default manifest. Had zero coverage.
+    from cli import _manifest_from_json
+    assert _manifest_from_json(None) is None
+    assert _manifest_from_json({}) is None
+
+
+def test_manifest_from_json_rebuilds_and_coerces_types():
+    # _manifest_from_json: the JSON->ManifestInfo bridge. Booleans are coerced
+    # with bool(), stored_certs via int(.. or 0) (None/non-numeric -> 0), and
+    # application_present/resources_complete default True when absent so a
+    # partial persisted manifest still reads as a complete app.
+    from cli import _manifest_from_json
+    from static.manifest import ManifestInfo
+
+    m = _manifest_from_json({
+        "debuggable": True,
+        "network_security_config": "@xml/network_security_config",
+        "stored_certs": "3",
+        "device_admin": 1,
+    })
+    assert isinstance(m, ManifestInfo)
+    assert m.debuggable is True
+    assert m.network_security_config == "@xml/network_security_config"
+    assert m.stored_certs == 3          # int coercion
+    assert m.device_admin is True        # 1 -> bool
+    # defaults: absent fields read as present/complete, not falsy
+    assert m.application_present is True
+    assert m.resources_complete is True
+    assert m.nsc_file_present is None
+
+    # a partial manifest (real bools, from asdict) still reads as complete where
+    # the defaults apply; stored_certs=None degrades to 0, device_admin=0 -> False
+    m2 = _manifest_from_json({"debuggable": False, "stored_certs": None, "device_admin": 0})
+    assert m2.debuggable is False
+    assert m2.stored_certs == 0          # None -> int(None or 0) == 0
+    assert m2.device_admin is False
+    assert m2.application_present is True
+
+
+def test_print_stage_renders_status_icon_and_error(capsys):
+    # _print_stage: the status->icon mapping (success OK / failed FAILED /
+    # skipped SKIPPED) plus the conditional red error line drove the run's
+    # console progress. The error line must appear ONLY when result.error is set,
+    # else a silent failure (principle 3) would render identically to a clean
+    # stage. Had zero coverage.
+    from common import StageResult
+    from cli import _print_stage
+
+    _print_stage(StageResult(stage="ingest", status="success", evidence={}, duration_ms=12))
+    out = capsys.readouterr().out
+    assert "OK" in out and "ingest" in out and "(12ms)" in out
+    assert "FAILED" not in out and "error" not in out.lower()
+
+    _print_stage(StageResult(stage="static", status="failed", evidence={},
+                             error="no jadx binary", duration_ms=0))
+    out = capsys.readouterr().out
+    assert "FAILED" in out and "static" in out
+    assert "no jadx binary" in out  # the error surfaces loudly, never swallowed
+
+    _print_stage(StageResult(stage="dynamic", status="skipped", evidence={}, duration_ms=0))
+    out = capsys.readouterr().out
+    assert "SKIPPED" in out and "FAILED" not in out

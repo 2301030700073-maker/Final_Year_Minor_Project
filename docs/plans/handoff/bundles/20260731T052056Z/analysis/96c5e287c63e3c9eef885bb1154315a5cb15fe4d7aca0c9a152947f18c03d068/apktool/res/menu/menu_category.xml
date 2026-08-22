@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<menu
-  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
-    <item android:icon="@drawable/ic_more_vert_white_24dp" android:id="@id/empty" android:orderInCategory="101" android:title="@string/abc_action_menu_overflow_description" app:iconTint="?primary_color" app:showAsAction="always">
-        <menu>
-            <item android:icon="@drawable/ic_category_black_24dp" android:id="@id/menu_categories" android:title="@string/action_item_categories" app:iconTint="?secondary_color" />
-        </menu>
-    </item>
-</menu>

@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<Button xmlns:android="http://schemas.android.com/apk/res/android"
-    android:gravity="center_vertical"
-    android:id="@+id/edit_actionbar_button_text"
-    android:layout_width="wrap_content"
-    android:layout_height="match_parent"
-    android:minWidth="1dp"
-    style="@style/App.Button.Text"/>

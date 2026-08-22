@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:gravity="center" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="128.0dp"
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <org.schabi.newpipe.views.NewPipeTextView android:textAppearance="?android:textAppearanceLarge" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="¯\\_(ツ)_/¯" />
-    <org.schabi.newpipe.views.NewPipeTextView android:gravity="center" android:layout_gravity="center" android:paddingLeft="16.0dp" android:paddingRight="16.0dp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6.0dp" android:text="@string/empty_list_subtitle" android:paddingHorizontal="16.0dp" />
-</LinearLayout>

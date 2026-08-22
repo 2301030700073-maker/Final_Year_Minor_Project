@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:orientation="vertical" android:paddingTop="16.0dp" android:layout_width="match_parent" android:layout_height="wrap_content"
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <TextView android:textColor="?progressive_color" android:gravity="center_vertical" android:id="@id/filter_header_title" android:layout_width="wrap_content" android:layout_height="46.0dp" android:layout_marginStart="24.0dp" style="@style/H3" />
-    <View android:layout_gravity="bottom" android:background="?border_color" android:layout_width="match_parent" android:layout_height="0.5dp" />
-</LinearLayout>

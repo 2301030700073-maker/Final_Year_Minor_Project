@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <plurals name="listening">
-        <item quantity="one">%s শ্রোতা</item>
-        <item quantity="other">%s শ্রোতা গন</item>
-    </plurals>
-</resources>

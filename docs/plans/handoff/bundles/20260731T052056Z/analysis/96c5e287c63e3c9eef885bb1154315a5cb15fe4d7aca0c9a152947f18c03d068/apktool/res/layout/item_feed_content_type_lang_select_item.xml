@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:gravity="center_vertical" android:id="@id/feed_content_type_lang_container" android:background="?selectableItemBackground" android:paddingTop="16.0dp" android:paddingBottom="16.0dp" android:focusable="true" android:clickable="true" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="24.0dp" android:paddingEnd="20.0dp"
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <TextView android:textSize="16.0sp" android:textColor="?primary_color" android:id="@id/feed_content_type_lang_name" android:layout_width="0.0dp" android:layout_height="wrap_content" android:layout_weight="1.0" />
-    <CheckBox android:id="@id/feed_content_type_lang_checkbox" android:layout_width="32.0dp" android:layout_height="match_parent" />
-</LinearLayout>

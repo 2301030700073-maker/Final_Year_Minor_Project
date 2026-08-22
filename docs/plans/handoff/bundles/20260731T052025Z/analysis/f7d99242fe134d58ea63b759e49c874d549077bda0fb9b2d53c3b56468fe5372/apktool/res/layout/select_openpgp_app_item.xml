@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="12.0dp" android:paddingEnd="7.0dp"
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <ImageView android:layout_gravity="center_vertical" android:id="@android:id/icon1" android:layout_width="48.0dp" android:layout_height="48.0dp" android:layout_marginEnd="8.0dp" />
-    <CheckedTextView android:textAppearance="?textAppearanceTitleLarge" android:ellipsize="marquee" android:gravity="center_vertical" android:id="@android:id/text1" android:layout_width="match_parent" android:layout_height="wrap_content" android:checkMark="?android:listChoiceIndicatorSingle" android:minHeight="?android:listPreferredItemHeight" />
-</LinearLayout>

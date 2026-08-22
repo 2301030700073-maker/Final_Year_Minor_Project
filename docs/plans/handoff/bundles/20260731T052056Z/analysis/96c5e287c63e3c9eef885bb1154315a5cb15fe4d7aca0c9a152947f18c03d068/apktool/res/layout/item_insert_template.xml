@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent"
-  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
-    <com.google.android.material.textfield.TextInputLayout android:gravity="start" android:id="@id/textInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16.0dp" android:textAlignment="viewStart" app:helperTextTextColor="?android:textColorTertiary" app:placeholderTextColor="?android:textColorTertiary">
-        <org.wikipedia.views.PlainPasteEditText android:textSize="16.0sp" android:id="@id/editText" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLength="@integer/description_max_chars" android:lineSpacingExtra="6.0sp" android:inputType="textMultiLine" android:imeOptions="actionDone|flagNoExtractUi" />
-    </com.google.android.material.textfield.TextInputLayout>
-</LinearLayout>

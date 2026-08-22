@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <plurals name="search_results_count">
-        <item quantity="one">1 risultato</item>
-        <item quantity="other">%d risultati</item>
-    </plurals>
-</resources>

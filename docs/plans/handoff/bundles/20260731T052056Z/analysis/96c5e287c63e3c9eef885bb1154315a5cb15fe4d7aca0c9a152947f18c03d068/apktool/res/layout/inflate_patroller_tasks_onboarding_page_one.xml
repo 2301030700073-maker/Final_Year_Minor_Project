@@ -1,3 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<org.wikipedia.onboarding.OnboardingPageView android:layout_width="match_parent" android:layout_height="match_parent" app:centeredImage="@drawable/illustration_patroller_tasks" app:imageSize="260.0dp" app:primaryText="@string/patroller_onboarding_one_title" app:secondaryText="@string/patroller_onboarding_one_content"
-  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto" />

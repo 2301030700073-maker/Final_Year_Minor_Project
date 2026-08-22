@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<navigation android:id="@id/navigation_onboarding" app:startDestination="@id/manageFoldersScreen"
-  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
-    <fragment android:label="@string/folders_action" android:name="com.fsck.k9.ui.managefolders.ManageFoldersFragment" android:id="@id/manageFoldersScreen">
-        <action android:id="@id/action_manageFoldersScreen_to_folderSettingsScreen" app:destination="@id/folderSettingsScreen" />
-    </fragment>
-    <fragment android:label="@string/folder_settings_title" android:name="com.fsck.k9.ui.managefolders.FolderSettingsFragment" android:id="@id/folderSettingsScreen" />
-</navigation>

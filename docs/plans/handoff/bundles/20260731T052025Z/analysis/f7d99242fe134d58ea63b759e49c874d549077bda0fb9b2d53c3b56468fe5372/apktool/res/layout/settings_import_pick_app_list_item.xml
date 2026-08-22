@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:gravity="center_vertical" android:orientation="vertical" android:paddingLeft="24.0dp" android:paddingTop="8.0dp" android:paddingRight="24.0dp" android:paddingBottom="8.0dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="56.0dp" android:paddingHorizontal="24.0dp" android:paddingVertical="8.0dp"
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <com.google.android.material.textview.MaterialTextView android:textAppearance="?textAppearanceBodyLarge" android:id="@id/settings_import_app_name" android:duplicateParentState="true" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-    <com.google.android.material.textview.MaterialTextView android:textAppearance="?textAppearanceBodyMedium" android:id="@id/settings_import_app_note" android:visibility="gone" android:duplicateParentState="true" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/settings_import_app_version_not_supported" />
-</LinearLayout>

@@ -1,3 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<appwidget-provider android:description="@string/widget_description_search" android:minWidth="320.0dp" android:minHeight="32.0dp" android:initialLayout="@layout/widget_search_large" android:previewImage="@drawable/widget_search" android:resizeMode="horizontal" android:minResizeWidth="32.0dp" android:minResizeHeight="34.0dp" android:targetCellWidth="5" android:targetCellHeight="1"
-  xmlns:android="http://schemas.android.com/apk/res/android" />

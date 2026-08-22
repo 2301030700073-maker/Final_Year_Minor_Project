@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="300.0dp"
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <FrameLayout android:id="@id/horizontal_scroll_list_item_image_container" android:layout_width="match_parent" android:layout_height="164.0dp">
-        <org.wikipedia.views.FaceAndColorDetectImageView android:id="@id/horizontal_scroll_list_item_image" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="centerCrop" android:transitionName="@string/transition_news_item" />
-    </FrameLayout>
-    <TextView android:textSize="16.0sp" android:textColor="?primary_color" android:textColorLink="?primary_color" android:ellipsize="end" android:gravity="center_vertical" android:linksClickable="false" android:id="@id/horizontal_scroll_list_item_text" android:layout_width="match_parent" android:layout_height="0.0dp" android:layout_marginTop="12.0dp" android:layout_marginBottom="16.0dp" android:maxLines="4" android:layout_weight="1.0" android:lineSpacingExtra="8.0sp" android:layout_marginStart="16.0dp" android:layout_marginEnd="16.0dp" />
-</LinearLayout>

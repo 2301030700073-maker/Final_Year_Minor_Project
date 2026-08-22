@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <dimen name="activity_horizontal_margin">64.0dp</dimen>
-    <dimen name="imagePreviewSheetPeekHeight">600.0dp</dimen>
-</resources>

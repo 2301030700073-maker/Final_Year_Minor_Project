@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<merge android:layout_width="match_parent" android:layout_height="wrap_content"
-  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
-    <TextView android:textSize="24.0sp" android:textStyle="bold" android:textColor="?primary_color" android:id="@id/userNameView" android:layout_width="0.0dp" android:layout_height="wrap_content" android:lineSpacingExtra="4.0sp" android:fontFamily="sans-serif" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent" />
-    <TextView android:textSize="16.0sp" android:textColor="?success_color" android:id="@id/editCountsView" android:layout_width="0.0dp" android:layout_height="wrap_content" android:layout_marginTop="8.0dp" android:lineSpacingExtra="5.0sp" android:fontFamily="sans-serif-medium" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toBottomOf="@id/userNameView" />
-</merge>

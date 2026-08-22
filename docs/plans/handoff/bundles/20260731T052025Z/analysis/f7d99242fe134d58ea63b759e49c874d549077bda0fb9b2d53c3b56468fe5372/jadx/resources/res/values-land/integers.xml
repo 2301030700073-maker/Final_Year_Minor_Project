@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <integer name="date_picker_header_max_lines_material">4</integer>
-    <integer name="mtrl_calendar_selection_text_lines">6</integer>
-</resources>

@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:orientation="vertical" android:background="?selectableItemBackground" android:layout_width="match_parent" android:layout_height="wrap_content"
-  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
-    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content">
-        <ImageView android:id="@id/filterByBotSelected" android:padding="12.0dp" android:layout_width="48.0dp" android:layout_height="48.0dp" android:src="@drawable/ic_mode_edit_white_24dp" android:contentDescription="@null" android:layout_marginStart="12.0dp" android:layout_marginEnd="4.0dp" app:tint="?progressive_color" />
-        <TextView android:textColor="?progressive_color" android:gravity="center_vertical" android:id="@id/footer_title" android:layout_width="wrap_content" android:layout_height="48.0dp" android:text="@string/notifications_filter_update_app_languages" android:layout_marginStart="8.0dp" style="@style/H3.Button" />
-    </LinearLayout>
-    <View android:layout_gravity="bottom" android:background="?border_color" android:layout_width="match_parent" android:layout_height="0.5dp" />
-</LinearLayout>

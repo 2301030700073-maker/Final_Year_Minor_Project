@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<merge android:layout_width="match_parent" android:layout_height="wrap_content"
-  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
-    <com.google.android.material.textview.MaterialTextView android:textAppearance="?android:textAppearanceSmall" android:textColor="@color/gray500" android:linksClickable="true" android:id="@id/licenseText" android:layout_width="match_parent" android:layout_height="wrap_content" android:drawablePadding="8.0dp" android:lineSpacingMultiplier="1.2" android:drawableStart="@drawable/ic_license_cc" android:layout_marginStart="8.0dp" android:layout_marginEnd="8.0dp" app:drawableTint="@color/gray500" />
-    <TextView android:textAppearance="?android:textAppearanceSmall" android:textColor="@color/gray500" android:linksClickable="true" android:id="@id/anonWarningText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8.0dp" android:lineSpacingMultiplier="1.2" android:layout_marginStart="40.0dp" android:layout_marginEnd="8.0dp" />
-</merge>

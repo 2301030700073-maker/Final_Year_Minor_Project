@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:id="@id/accounts_item_layout" android:descendantFocusability="blocksDescendants" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="?android:listPreferredItemHeight"
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <View android:id="@id/chip" android:layout_width="8.0dp" android:layout_height="match_parent" android:layout_marginEnd="8.0dp" />
-    <LinearLayout android:gravity="center_vertical" android:orientation="vertical" android:layout_width="0.0dp" android:layout_height="wrap_content" android:layout_weight="1.0" android:paddingStart="1.0dp" android:paddingEnd="0.0dp">
-        <com.google.android.material.textview.MaterialTextView android:textAppearance="?textAppearanceTitleMedium" android:ellipsize="end" android:id="@id/description" android:layout_width="match_parent" android:layout_height="wrap_content" android:singleLine="true" />
-        <com.google.android.material.textview.MaterialTextView android:textAppearance="?textAppearanceBodyMedium" android:textColor="?colorSecondary" android:ellipsize="end" android:id="@id/email" android:layout_width="match_parent" android:layout_height="wrap_content" android:singleLine="true" />
-    </LinearLayout>
-</LinearLayout>

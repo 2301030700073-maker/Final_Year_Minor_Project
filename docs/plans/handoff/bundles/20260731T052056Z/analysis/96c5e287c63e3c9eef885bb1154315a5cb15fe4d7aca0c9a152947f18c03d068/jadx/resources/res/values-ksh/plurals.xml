@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <plurals name="view_continue_reading_card_subtitle">
-        <item quantity="one">jäßtere</item>
-        <item quantity="other">vör %d Dähsch</item>
-    </plurals>
-</resources>

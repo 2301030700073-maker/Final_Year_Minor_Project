@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:orientation="vertical" android:paddingLeft="16.0dp" android:paddingTop="10.0dp" android:paddingRight="16.0dp" android:paddingBottom="10.0dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingHorizontal="16.0dp" android:paddingVertical="10.0dp"
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <org.wikipedia.views.AppTextView android:textColor="@android:color/white" android:id="@id/textView" android:layout_width="wrap_content" android:layout_height="wrap_content" style="@style/H3.Button" />
-    <FrameLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8.0dp">
-        <com.google.android.material.button.MaterialButton android:id="@id/buttonView" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/onboarding_got_it" style="@style/App.Button.Secondary" />
-        <TextView android:textSize="16.0sp" android:textColor="@android:color/white" android:layout_gravity="end|center" android:id="@id/countView" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-    </FrameLayout>
-</LinearLayout>

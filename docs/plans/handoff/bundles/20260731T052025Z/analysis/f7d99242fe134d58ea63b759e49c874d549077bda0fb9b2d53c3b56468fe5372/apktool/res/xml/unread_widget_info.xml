@@ -1,3 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<appwidget-provider android:minWidth="40.0dp" android:minHeight="40.0dp" android:updatePeriodMillis="0" android:initialLayout="@layout/unread_widget_layout" android:configure="app.k9mail.feature.widget.unread.UnreadWidgetConfigurationActivity" android:previewImage="@drawable/preview_unread_widget"
-  xmlns:android="http://schemas.android.com/apk/res/android" />

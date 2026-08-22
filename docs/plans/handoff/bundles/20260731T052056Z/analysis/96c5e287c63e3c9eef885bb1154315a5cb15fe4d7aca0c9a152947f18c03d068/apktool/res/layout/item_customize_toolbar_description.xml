@@ -1,3 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<TextView android:textSize="16.0sp" android:textColor="?primary_color" android:padding="16.0dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/customize_toolbar_shortcut_description_text" android:lineSpacingMultiplier="1.12"
-  xmlns:android="http://schemas.android.com/apk/res/android" />

@@ -3,6 +3,11 @@ __pycache__/
 *.pyc
 .env
 .pytest_cache/
+# Test/coverage run artifacts - regenerated on every `pytest` run, never source.
+# Same class as the bundle bloat below (an artifact a stray `git add .` would
+# otherwise commit); .pytest-tmp is this project's TMPDIR for pytest.
+.coverage
+.pytest-tmp/
 # Generated analysis/reports/audit output - never commit (a stray `git add .`
 # would otherwise sweep the full audit history + APK analysis into the repo).
 outputs/
@@ -19,3 +24,20 @@ tools/cfr/
 # Reference-box tooling binaries: version-pinned downloads (see README), never committed
 tools/frida-server-*
 tools/jadx/
+
+# A1: per-bundle decompiled APK trees. collect_verification_bundle.py copies the
+# full jadx/apktool `analysis/` output into each handoff bundle; that subtree is
+# regenerable decompiler output (duplicated across every timestamped bundle of the
+# same APK) and accounts for ~630k tracked files / ~7.6 GB - the exact repo bloat
+# `outputs/` above is ignored to prevent, just landing under docs/ instead. Ignore
+# only the `analysis/` subtree so each bundle's genuine handoff evidence (reports/,
+# SUMMARY.md, environment.json, pytest_output.txt, cli_output.txt, calibration_*)
+# is still committed. The `*` matches current AND future bundles, so a new handoff
+# never re-bloats the repo. Already-tracked trees still need one-time untracking.
+# Use an UNQUOTED shell glob so it expands to the real per-bundle dirs before git
+# sees it: a quoted git pathspec '.../*/analysis' treats * as matching / and
+# removes nothing (a silent no-op), and matching the wildcard against the whole
+# tree is pathologically slow. --ignore-unmatch tolerates not-yet-committed
+# bundles whose analysis/ is on disk but not in the index:
+#   git rm -r --cached -q --ignore-unmatch docs/plans/handoff/bundles/*/analysis
+docs/plans/handoff/bundles/*/analysis/

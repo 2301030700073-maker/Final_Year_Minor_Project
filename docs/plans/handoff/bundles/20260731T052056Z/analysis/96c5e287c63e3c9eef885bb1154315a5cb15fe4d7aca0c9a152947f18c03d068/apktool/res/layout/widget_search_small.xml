@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<FrameLayout android:id="@id/widget_container" android:background="@drawable/widget_shape_inner" android:padding="2.0dp" android:layout_width="match_parent" android:layout_height="72.0dp"
-  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
-    <ImageView android:layout_gravity="center" android:layout_width="32.0dp" android:layout_height="32.0dp" android:src="@drawable/ic_wikipedia_w" android:tint="@color/widget_primary" android:contentDescription="@null" />
-</FrameLayout>

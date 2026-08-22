@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent"
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <com.google.android.material.appbar.MaterialToolbar android:id="@id/toolbar" android:layout_width="match_parent" android:layout_height="?actionBarSize" />
-    <org.wikipedia.views.WikiSwipeRefreshLayout android:id="@id/refreshContainer" android:background="?paper_color" android:layout_width="match_parent" android:layout_height="match_parent">
-        <androidx.recyclerview.widget.RecyclerView android:id="@id/recyclerView" android:scrollbars="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" />
-    </org.wikipedia.views.WikiSwipeRefreshLayout>
-</LinearLayout>

@@ -1,7 +1,0 @@
-package expo.modules.storereview;
-
-/* loaded from: classes5.dex */
-public final class R {
-    private R() {
-    }
-}

@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:orientation="vertical" android:id="@id/linear_layout" android:background="?paper_color" android:layout_width="match_parent" android:layout_height="wrap_content"
-  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
-    <TextView android:textSize="20.0sp" android:textStyle="bold" android:textColor="?primary_color" android:gravity="center_vertical" android:id="@id/end_of_scroll_message" android:clickable="false" android:layout_width="wrap_content" android:layout_height="48.0dp" android:text="@string/on_this_day_end_of_scroll_message" android:layout_marginStart="16.0dp" android:letterSpacing="0.0" />
-    <com.google.android.material.button.MaterialButton android:id="@id/back_to_future_text_view" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginBottom="16.0dp" android:text="@string/on_this_day_back_to_future" android:layout_marginStart="16.0dp" app:icon="@drawable/ic_baseline_arrow_up_alt_24" app:iconGravity="end" />
-</LinearLayout>

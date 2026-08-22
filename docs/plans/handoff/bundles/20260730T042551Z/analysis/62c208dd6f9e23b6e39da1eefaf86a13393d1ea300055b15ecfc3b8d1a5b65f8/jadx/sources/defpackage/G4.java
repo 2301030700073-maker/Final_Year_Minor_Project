@@ -1,9 +1,0 @@
-package defpackage;
-
-import java.lang.annotation.ElementType;
-import java.lang.annotation.Target;
-
-@Target({ElementType.PARAMETER, ElementType.METHOD, ElementType.FIELD})
-/* loaded from: classes3.dex */
-public @interface G4 {
-}

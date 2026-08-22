@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="@dimen/editor_min_line_item_height"
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <TextView android:enabled="false" android:textSize="@dimen/editor_form_text_size" android:textColor="?android:textColorSecondary" android:id="@id/display_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="6.0dp" android:singleLine="true" android:layout_marginStart="4.0dp" />
-    <include android:layout_marginStart="12.0dp" layout="@layout/account_type_info" />
-</LinearLayout>

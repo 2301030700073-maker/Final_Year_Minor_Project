@@ -1,3 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<objectAnimator android:interpolator="@android:interpolator/fast_out_slow_in" android:duration="500" android:startOffset="500" android:valueFrom="@string/splash_clip_from" android:valueTo="@string/splash_clip_to" android:valueType="pathType" android:propertyName="pathData"
-  xmlns:aapt="http://schemas.android.com/aapt" xmlns:android="http://schemas.android.com/apk/res/android" />

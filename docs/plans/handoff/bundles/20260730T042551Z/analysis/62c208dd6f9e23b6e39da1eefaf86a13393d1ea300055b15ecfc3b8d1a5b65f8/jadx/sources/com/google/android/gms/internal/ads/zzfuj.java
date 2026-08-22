@@ -1,8 +1,0 @@
-package com.google.android.gms.internal.ads;
-
-/* loaded from: classes.dex */
-public final class zzfuj {
-    public static zzfuh zza(Object obj) {
-        return new zzfuh(obj.getClass().getSimpleName(), null);
-    }
-}

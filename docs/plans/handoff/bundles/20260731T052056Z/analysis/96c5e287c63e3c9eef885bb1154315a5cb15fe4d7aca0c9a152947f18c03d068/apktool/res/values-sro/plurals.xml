@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <plurals name="page_edit_history_article_edits_since_year">
-        <item quantity="one">%1$d càmbiu de su %2$s</item>
-        <item quantity="other">%1$d càmbius de su %2$s</item>
-    </plurals>
-</resources>

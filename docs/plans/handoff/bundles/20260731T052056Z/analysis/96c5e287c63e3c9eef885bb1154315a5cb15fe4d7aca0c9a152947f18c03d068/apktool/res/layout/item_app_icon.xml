@@ -1,3 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<com.google.android.material.imageview.ShapeableImageView android:id="@id/app_icon" android:padding="2.0dp" android:layout_width="64.0dp" android:layout_height="64.0dp" android:layout_margin="12.0dp" android:scaleType="centerCrop" app:shapeAppearanceOverlay="@style/CircularImageView" app:strokeWidth="2.0dp"
-  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto" />

@@ -98,6 +98,18 @@ class RunRecord(Base):
     # per-run bound to report/exclude against.
     coverage: Mapped[dict | None] = mapped_column(JSON)
 
+    # A3: the run-local annotations that explain WHY a surface in `coverage` above
+    # is bounded - dex_attribution_degraded, dart_aot_libs, jni_bindings,
+    # unaccounted_loads, dynamic_loads, js_evidence, webview_sites. Persisted so a
+    # regenerated report (re-attribute -> _regenerate_report) reproduces the cause
+    # sections instead of dropping them; an absent cause section must never read as
+    # "cause absent" (ADR-0006). JSON, not scalar columns: exactly like `coverage`
+    # these are per-run report detail with no calibration query need, so they obey
+    # this table's rule of promoting only calibration filters to real columns. NULL
+    # on runs written before this column existed (cause unrecoverable there, which
+    # _regenerate_report detects to keep the annotation-loss disclosure honest).
+    coverage_causes: Mapped[dict | None] = mapped_column(JSON)
+
     git_commit: Mapped[str | None] = mapped_column(String)
     target: Mapped[str | None] = mapped_column(String)
     # Authoritative app identity, denormalized from apks.package_name so a run

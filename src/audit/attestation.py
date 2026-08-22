@@ -19,8 +19,16 @@ import json
 import os
 import re
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:  # POSIX advisory locking. Guarded so the module still imports (and every
+    # pure test still runs) on a non-POSIX machine - ADR-0007: pure-Python logic
+    # must be unit-testable anywhere, with no assumption about the host.
+    import fcntl
+except ImportError:  # pragma: no cover - only on a non-POSIX host
+    fcntl = None  # type: ignore[assignment]
 
 from common import StageResult, elapsed_ms
 
@@ -54,18 +62,38 @@ def _canonical(record: dict) -> str:
     return json.dumps(base, sort_keys=True, separators=(",", ":"))
 
 
-# Per-path tail-hash cache (LIM-B). The CLI is single-process and only ever
-# appends, so the last seen `record_hash` stays valid between appends - this
-# turns a whole-file rescan on every append (O(n²)) into one read per path.
-# A path is read once, on first use in the process, then maintained here.
-_last_hash_by_path: dict[str, str | None] = {}
+# Per-path tail cache (LIM-B), held as (file_size_when_cached, tail_record_hash).
+# Caching the tail turns a whole-file rescan on every append (O(n²) over a run)
+# into one read per path. The SIZE is the validity witness: this log is
+# append-only, so a size still equal to the cached one proves no other writer has
+# appended since and the cached hash is provably still the tail; a differing size
+# (another process appended, or the file was rotated/replaced) invalidates the
+# entry and forces a fresh read.
+#
+# The witness is what makes the cache safe. Keyed on path alone it assumed
+# single-process access ("the CLI is single-process and only ever appends"), so a
+# second concurrent CLI holding a warm cache would chain its record onto a tail
+# that had already been superseded - producing two records with the same
+# prev_hash, a forked chain, which is precisely the tampering shape the hash
+# chain exists to make detectable (ADR-0005).
+_tail_by_path: dict[str, tuple[int, str | None]] = {}
+
+_NO_FILE_SIZE = -1  # sentinel: the log does not exist yet
+
+
+def _log_size(audit_log_path: Path) -> int:
+    try:
+        return audit_log_path.stat().st_size
+    except FileNotFoundError:
+        return _NO_FILE_SIZE
 
 
 def _last_record_hash(audit_log_path: Path) -> str | None:
     """Hash of the last record, to chain the next one onto (None when empty)."""
     key = str(audit_log_path)
-    if key in _last_hash_by_path:
-        return _last_hash_by_path[key]
+    cached = _tail_by_path.get(key)
+    if cached is not None and cached[0] == _log_size(audit_log_path):
+        return cached[1]
 
     try:
         with open(audit_log_path, encoding="utf-8") as f:
@@ -83,10 +111,13 @@ def _last_record_hash(audit_log_path: Path) -> str | None:
                     raise ValueError(
                         f"audit log corrupt: line is not valid JSON ({exc}): {line}"
                     ) from exc
-            _last_hash_by_path[key] = prev_hash
+            # Witness the size of exactly the bytes just read, from the same fd,
+            # so a cached size can never describe a file state other than the
+            # one this hash was derived from.
+            _tail_by_path[key] = (os.fstat(f.fileno()).st_size, prev_hash)
             return prev_hash
     except FileNotFoundError:
-        _last_hash_by_path[key] = None
+        _tail_by_path[key] = (_NO_FILE_SIZE, None)
         return None
 
 
@@ -113,30 +144,70 @@ def _maybe_rotate(audit_log_path: Path) -> str | None:
             )
             tail_hash = _last_record_hash(audit_log_path)  # capture BEFORE the pop below
             os.replace(audit_log_path, archive)
-            _last_hash_by_path.pop(str(audit_log_path), None)
+            _tail_by_path.pop(str(audit_log_path), None)
             return tail_hash
     except FileNotFoundError:
         pass  # first record: nothing to rotate
     return None
 
 
+@contextmanager
+def _exclusive_append_lock(fileobj):
+    """Serialize appenders on the log file itself, so read-tail -> compute-hash ->
+    write is one atomic critical section across processes.
+
+    The lock is taken on the log's own append fd rather than a sidecar `.lock`
+    file for two reasons: it needs no extra file (the audit directory stays
+    exactly the log plus its archives - a property the rotation tests assert), and
+    it cannot be defeated by a stale lock file left behind by a killed process.
+    `flock` is advisory and released automatically if the holder dies, so a
+    crashed run cannot wedge the log.
+
+    A host without `fcntl` yields unlocked: locking is a concurrency hardening,
+    and refusing to append there would break the audit log on a platform where
+    the single-process path was always correct anyway."""
+    if fcntl is None:  # pragma: no cover - only on a non-POSIX host
+        yield
+        return
+    fcntl.flock(fileobj.fileno(), fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        fcntl.flock(fileobj.fileno(), fcntl.LOCK_UN)
+
+
 def _append_audit_record(audit_log_path: Path, record: dict) -> None:
     """Append one hash-chained record with an fsync (A4: flush() alone only
-    reaches the OS page cache; a crash right after would silently drop it)."""
+    reaches the OS page cache; a crash right after would silently drop it), inside
+    an exclusive lock so two concurrent appenders cannot chain onto the same tail
+    and fork the chain."""
     audit_log_path = Path(audit_log_path)
     audit_log_path.parent.mkdir(parents=True, exist_ok=True)
     anchor = _maybe_rotate(audit_log_path)
-    # A rotation returns the archived file's tail hash: the new file's first
-    # record chains onto it, so the chain is continuous across the boundary.
-    # Otherwise (no rotation) chain onto the current file's own tail as before.
-    record["prev_hash"] = anchor if anchor is not None else _last_record_hash(audit_log_path)
-    record["record_hash"] = hashlib.sha256(_canonical(record).encode()).hexdigest()
     with open(audit_log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, sort_keys=True) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
-    # Keep the cache in sync so the next append chains in O(1), not O(log-size).
-    _last_hash_by_path[str(audit_log_path)] = record["record_hash"]
+        with _exclusive_append_lock(f):
+            # Read the tail INSIDE the lock and chain onto what is actually on
+            # disk. Hashing before the lock (as this did) meant a tail read
+            # moments earlier could already be superseded by another process's
+            # append, and both records would carry the same prev_hash. The
+            # size-witnessed cache keeps this O(1) whenever this process is in
+            # fact the only writer - the normal single-CLI case.
+            on_disk_tail = _last_record_hash(audit_log_path)
+            # A rotation hands back the archived file's tail hash to anchor the
+            # fresh file's FIRST record, keeping the chain continuous across the
+            # boundary. It applies only while that fresh file is still empty: if
+            # a concurrent appender already landed a record in it, that record is
+            # the real tail, and anchoring past it would fork the chain.
+            record["prev_hash"] = on_disk_tail if on_disk_tail is not None else anchor
+            record["record_hash"] = hashlib.sha256(_canonical(record).encode()).hexdigest()
+            f.write(json.dumps(record, sort_keys=True) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+            # Re-witness under the lock so the next append chains in O(1).
+            _tail_by_path[str(audit_log_path)] = (
+                os.fstat(f.fileno()).st_size,
+                record["record_hash"],
+            )
 
 
 def _append_outcome(

@@ -345,7 +345,6 @@ def scan(
                 if file_path.suffix.lower() != ".properties":
                     raise
                 text = file_path.read_text(encoding="latin-1")
-            lines = text.splitlines()
         except (OSError, UnicodeDecodeError):
             # RESID-4G: an unreadable file (e.g. chmod-000, a corrupt entry) was
             # silently dropped while scanned_file_count still counted it as

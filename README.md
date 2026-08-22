@@ -45,7 +45,13 @@ Verify each with its `--version` flag before proceeding — don't assume a silen
 
 ## 4. Rooted emulator or device
 
-Frida requires root. Use a Google APIs (not Google Play) x86_64 system image if using an AVD emulator, or a rooted physical device. Confirm `adb root` succeeds and `frida-ps -U` lists processes before running anything against a real target — this is the single most failure-prone part of the whole setup, worth verifying in isolation first.
+Frida requires root. Use a Google APIs (not Google Play) x86_64 system image if using an AVD emulator, or a rooted physical device. Confirm `adb root` succeeds, then verify the Frida path with:
+
+```bash
+PYTHONPATH=src uv run python -m cli verify-device
+```
+
+`verify-device` checks the device is online and runs the *same* connection path the dynamic stage uses, auto-provisioning a version-matched `frida-server` if the on-device one is missing or mismatched. On WSL2 with a Windows-host emulator, do **not** use `frida-ps -U` for this check — Frida's USB auto-discovery can't see the TCP-served emulator and hangs (`frida-ps -U` is fine for a USB-attached physical device). This is the single most failure-prone part of the whole setup, worth verifying in isolation first — see the runbook (`docs/plans/runbook-local-scan.md`).
 
 ## 5. Run an analysis
 
@@ -56,6 +62,8 @@ PYTHONPATH=src uv run python -m cli run --apk APK_Test/UnCrackable-Level1.apk --
 ```
 
 (`--help` shows the full option list, including `--skip-dynamic`, `--device`, and `--target`.)
+
+**Where these commands run, and the full sequence.** Every scan command runs in the **WSL2 Ubuntu** terminal — the repo, `uv`, and `adb` all live there; Windows is used only to boot the emulator/AVD. For the complete boot → static-only → static + dynamic → static + dynamic + traffic-capture sequence, with the exact per-shell (Windows vs Ubuntu) commands, the manual per-boot prerequisites, and the per-`--target` table, follow the local scan runbook: [`docs/plans/runbook-local-scan.md`](docs/plans/runbook-local-scan.md). Static-only (`--skip-dynamic`) needs no device, root, or frida-server — it is the one scan type that runs anywhere the Python core and jadx/apktool are installed.
 
 ## 6. Calibration report (Phase 4)
 

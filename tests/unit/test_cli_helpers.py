@@ -142,6 +142,20 @@ def test_load_thresholds_missing_section_falls_back_to_default(monkeypatch):
     assert _load_thresholds() == (0.7, 0.7)
 
 
+def test_load_thresholds_present_but_non_numeric_value_raises_loudly(monkeypatch):
+    # A2: the file is PRESENT (someone placed tuned thresholds intending them to
+    # govern detection) but a value is non-numeric. Silently falling back to the
+    # engine default here would move the decision boundary with no signal - the
+    # principle-3 silent-wrong-answer the anchor+loud-fail fix removes. Distinct
+    # from an ABSENT file (legitimate default, above) and an out-of-RANGE value (a
+    # ValueError raised after parse, above): a non-numeric value trips float()
+    # inside the read and is surfaced as a loud RuntimeError, never swallowed.
+    _fake_settings(monkeypatch, "thresholds:\n  root: not_a_number\n  ssl: 0.7\n")
+
+    with pytest.raises(RuntimeError, match="could not be read/parsed"):
+        _load_thresholds()
+
+
 def test_apply_manifest_ssl_signal_noops_without_nsc():
     evidence = StaticEvidence()
 

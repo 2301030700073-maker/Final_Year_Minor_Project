@@ -183,6 +183,63 @@ def test_install_failure_preserves_static_report_and_exits_nonzero(run_setup, mo
     assert any("Dynamic stage FAILED" in c for c in captured)
 
 
+def test_no_device_setup_failure_preserves_static_report_and_exits_nonzero(run_setup, monkeypatch):
+    # GAP-2 on the EARLIEST dynamic steps (the exact crash this guards): discover_
+    # device and install_apk run BEFORE the already-guarded install-verify / run_
+    # dynamic_stage paths and were UNGUARDED. On a box with no connected device -
+    # discover_device raises CalledProcessError when the adb daemon is unreachable
+    # (the WSL2 adb socket failure) or RuntimeError when `adb devices` is empty -
+    # the whole CLI crashed with a raw traceback and DISCARDED the already-complete
+    # static report. It must instead record a failed dynamic stage, STILL write the
+    # full static report, surface the failure loudly, and exit non-zero - identical
+    # to the install-verify / run_dynamic_stage / logcat guarantees, for the two
+    # steps that run before them. Without --skip-dynamic, "no device" is a LOUD
+    # failure (exit non-zero), never a silent skip: the operator asked for dynamic
+    # verification and must be told it could not run (Principle 3 / NFR-1). The
+    # --skip-dynamic flag is the explicit opt-out for a static-only clean exit 0.
+    import subprocess
+    from dynamic import device as device_mod
+
+    def _adb_daemon_unreachable(serial):
+        # faithful to the observed repro: `adb devices` exits non-zero
+        raise subprocess.CalledProcessError(1, ["adb", "devices"])
+
+    monkeypatch.setattr(device_mod, "discover_device", _adb_daemon_unreachable)
+    monkeypatch.setattr(
+        cli, "synthesize",
+        lambda classification, action: SimpleNamespace(source="root", applied_hooks=[]),
+    )
+
+    captured = []
+    original_print = cli.console.print
+    cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
+    try:
+        with pytest.raises(typer.Exit) as ei:
+            cli.run(
+                apk=run_setup / "fixture.apk",
+                justification="ACADEMIC_TRAINING_TARGET",
+                skip_dynamic=False,
+                capture_traffic=False,
+                device_serial=None,
+                target="uncrackable1",
+            )
+    finally:
+        cli.console.print = original_print
+
+    assert ei.value.exit_code == 1  # no device + no --skip-dynamic must exit non-zero
+    reports_dir = run_setup / "reports"
+    report_files = sorted(reports_dir.rglob("*.md"))
+    assert report_files, "a no-device setup failure must NOT discard the static report"
+    text = report_files[0].read_text(encoding="utf-8")
+    # the setup failure is surfaced in the report's Stage Results row (error field),
+    # naming the failing step - not a raw traceback and not a silent skip
+    assert "dynamic setup failed" in text
+    # the static detection work is still present in the preserved report
+    assert "Root-detection" in text
+    # the loud post-report failure was surfaced, not a silent swallow
+    assert any("Dynamic stage FAILED" in c for c in captured)
+
+
 def test_unexpected_dynamic_exception_preserves_static_report_and_exits_nonzero(run_setup, monkeypatch):
     # GAP-2 on an UNEXPECTED dynamic-stage exception (not a clean failed/skipped
     # StageResult): a real-world app that makes run_dynamic_stage throw - an

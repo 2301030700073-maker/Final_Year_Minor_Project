@@ -525,3 +525,74 @@ def test_verify_audit_log_skips_blank_lines(tmp_path):
     assert result["total"] == 1      # the blank line was not counted
     assert result["legacy"] == 1
     assert result["archives_checked"] == 0
+
+
+def test_append_chains_onto_on_disk_tail_not_stale_cache(tmp_path):
+    # Concurrency integrity (hash chain, ADR-0005): the per-path tail cache must
+    # never let an append chain onto a tail another writer has already superseded.
+    # Two records sharing one prev_hash is a FORKED chain - precisely the tamper
+    # shape the chain exists to make detectable - so a warm cache plus an external
+    # append must still yield one linear chain.
+    import hashlib
+    import json as _json
+
+    from audit import attestation
+
+    log = tmp_path / "audit.jsonl"
+    attestation._append_audit_record(log, {"a": 1})
+    first = _json.loads(log.read_text().splitlines()[0])
+    assert attestation._last_record_hash(log) == first["record_hash"]  # cache warm
+
+    # a second writer (another CLI process) appends its own correctly-chained record
+    outside = {"b": 2, "prev_hash": first["record_hash"]}
+    outside["record_hash"] = hashlib.sha256(
+        attestation._canonical(outside).encode()
+    ).hexdigest()
+    with open(log, "a", encoding="utf-8") as f:
+        f.write(_json.dumps(outside, sort_keys=True) + "\n")
+
+    attestation._append_audit_record(log, {"c": 3})
+
+    lines = [_json.loads(x) for x in log.read_text().splitlines()]
+    assert len(lines) == 3
+    # chains onto the OUTSIDE record, not the stale cached tail
+    assert lines[2]["prev_hash"] == outside["record_hash"]
+    # the fork that the unwitnessed cache produced: same prev_hash as line 2
+    assert lines[2]["prev_hash"] != first["record_hash"]
+    assert attestation._last_record_hash(log) == lines[2]["record_hash"]
+
+
+def test_tail_cache_is_size_witnessed(tmp_path):
+    # The witness that makes the cache safe: an append-only log whose size is
+    # unchanged provably has the same tail (serve the cache, O(1)); a changed size
+    # means another writer appended and the entry must be re-read, never served.
+    import json as _json
+
+    from audit import attestation
+
+    log = tmp_path / "audit.jsonl"
+    attestation._append_audit_record(log, {"a": 1})
+    key = str(log)
+    size, tail = attestation._tail_by_path[key]
+    assert size == log.stat().st_size and tail is not None
+
+    with open(log, "a", encoding="utf-8") as f:
+        f.write(_json.dumps({"record_hash": "outside-tail"}) + "\n")
+    # size now differs from the witness -> the stale cached tail is NOT served
+    assert attestation._last_record_hash(log) == "outside-tail"
+
+
+def test_append_works_without_fcntl(tmp_path, monkeypatch):
+    # ADR-0007: pure-Python paths must run anywhere. On a host without fcntl
+    # (non-POSIX) the lock degrades to a no-op and appends still chain correctly -
+    # locking is concurrency hardening, not a precondition for auditing.
+    import json as _json
+
+    from audit import attestation
+
+    monkeypatch.setattr(attestation, "fcntl", None)
+    log = tmp_path / "audit.jsonl"
+    attestation._append_audit_record(log, {"a": 1})
+    attestation._append_audit_record(log, {"b": 2})
+    lines = [_json.loads(x) for x in log.read_text().splitlines()]
+    assert lines[1]["prev_hash"] == lines[0]["record_hash"]

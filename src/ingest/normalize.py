@@ -144,13 +144,20 @@ def normalize_split_set(directory: Path, out_dir: Path) -> Path:
 
     dex_blobs: list[bytes] = []
     non_dex: dict[str, bytes] = {}
-    for p in apks:
+    # Merge the identified base APK FIRST so its non-dex entries win collisions by
+    # construction. setdefault keeps the first writer, so the previous `for p in
+    # apks` (a sorted list) only made base win when "base.apk" happened to sort
+    # ahead of every split - a split named e.g. "aaa.apk" would otherwise shadow
+    # the base's manifest-side resources/libs. Ordering base first makes the
+    # documented "base wins" precedence real instead of incidental to filename sort.
+    ordered = [base] + [p for p in apks if p != base]
+    for p in ordered:
         for name, data in _read_zip_entries(p).items():
             if Path(name).name.startswith("classes") and Path(name).name.endswith(".dex"):
                 # each split ships its own dex - keep them all
                 dex_blobs.append(data)
             else:
-                non_dex.setdefault(name, data)  # base wins on non-dex collisions
+                non_dex.setdefault(name, data)  # base wins: it is merged first
 
     if not dex_blobs:
         raise ValueError(f"no classes*.dex found across {directory}")

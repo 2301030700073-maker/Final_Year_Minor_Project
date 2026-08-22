@@ -71,9 +71,10 @@ from ingest.normalize import normalize_input
 from report.attribution import attribute_root_evidence, gate_all_third_party
 from report.generator import generate_calibration_report, generate_report
 from static.coverage import (
+    apply_attribution_degraded_java,
     apply_coverage_bound,
     apply_unattributed_indicators,
-    apply_unresolved_java,
+    apply_dynamic_loading_java,
     apply_unresolved_native,
     dart_aot_coverage,
     is_dart_aot_lib,
@@ -88,7 +89,7 @@ from static.webview import find_webview_js
 from static.jnibridge import has_unresolved
 from static.deobfuscate import find_mapping_file, parse_mapping
 from static.decision_engine import DEFAULT_THRESHOLD, classify
-from static.androguard_scanner import scan_dex_strings
+from static.androguard_scanner import BrokenSignatureError, scan_dex_strings
 from static.decompile import decompile
 from static.manifest import ManifestInfo, parse_manifest, parse_manifest_apk
 from static.native import (
@@ -105,6 +106,18 @@ from storage.results import existing_metadata, load_runs_for_calibration, save_m
 
 app = typer.Typer()
 console = Console()
+
+# Config inputs (signatures, thresholds, ground truth) are read-only project
+# assets versioned in git alongside this code, so they anchor to the project
+# root and resolve no matter what cwd the CLI is invoked from. A bare relative
+# "config/..." silently fell back to default thresholds - or falsely failed a
+# signature load - when the tool was run from any other directory: a principle-3
+# silent-wrong-answer / false-failure (A2). Outputs deliberately stay cwd-
+# relative below: they are operator-produced artifacts, and writing them under
+# the invocation directory is intended CLI behavior, not a detection-correctness
+# input.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CONFIG_ROOT = PROJECT_ROOT / "config"
 
 OUTPUTS_ROOT = Path("outputs")
 ANALYSIS_ROOT = OUTPUTS_ROOT / "analysis"
@@ -232,7 +245,7 @@ def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
     # overlap a signature pattern gets its bodies decompiled even with no Java_*
     # export (closing the stripped-non-JNI blind spot). The trigger set is the
     # union of every pattern - self-maintaining as signatures are added.
-    signatures = load_native_signatures(Path("config/signatures/native_detection.yaml"))
+    signatures = load_native_signatures(CONFIG_ROOT / "signatures" / "native_detection.yaml")
     triggers = security_triggers(signatures)
     libraries = []
     errors: list[str] = []
@@ -404,17 +417,38 @@ def _apply_manifest_ssl_signal(static_evidence, manifest_info) -> None:
 def _load_thresholds() -> tuple[float, float]:
     """Per-category detection thresholds from config/settings.yaml (4-3), so
     root and ssl can be tuned/calibrated independently instead of sharing one
-    hardcoded number. Thresholds are a tuning knob, not pipeline-fatal input -
-    a missing/unreadable section falls back to the engine default rather than
-    failing the run."""
+    hardcoded number.
+
+    Absence is legitimate: thresholds are an optional tuning knob, so a
+    settings.yaml that does not exist (or exists but carries no `thresholds`
+    section) falls back to the engine default. But a settings.yaml that EXISTS
+    yet cannot be read or parsed is a different case - someone placed tuned
+    thresholds here intending them to govern detection, and silently reverting
+    to defaults would be a principle-3 silent-wrong-answer: the decision
+    boundary would move with no signal. That case now fails loud. The path is
+    anchored to the project root (CONFIG_ROOT), not cwd, so invoking the CLI
+    from another directory no longer silently drops the tuned thresholds (A2)."""
+    import yaml
+
+    settings_path = CONFIG_ROOT / "settings.yaml"
+    if not settings_path.exists():
+        # Absent settings is a legitimate "use engine defaults" - not an error.
+        return DEFAULT_THRESHOLD, DEFAULT_THRESHOLD
     try:
-        import yaml
-        with open("config/settings.yaml", encoding="utf-8") as f:
+        with open(settings_path, encoding="utf-8") as f:
             thresholds = (yaml.safe_load(f) or {}).get("thresholds", {})
         root = float(thresholds.get("root", DEFAULT_THRESHOLD))
         ssl = float(thresholds.get("ssl", DEFAULT_THRESHOLD))
-    except (OSError, ValueError, TypeError, yaml.YAMLError):
-        return DEFAULT_THRESHOLD, DEFAULT_THRESHOLD
+    except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
+        # The file is present but unreadable/unparseable, or a threshold value is
+        # non-numeric (float() raise). Falling back to defaults here would move
+        # the detection boundary with no signal (principle 3). Fail loud instead.
+        raise RuntimeError(
+            f"{settings_path} exists but could not be read/parsed ({exc}); "
+            "refusing to silently fall back to default detection thresholds - a "
+            "tuned decision boundary would be lost with no signal. Fix the file, "
+            "or remove it to intentionally use engine defaults."
+        ) from exc
     # RESID-4D: a threshold is the one hand-authored input that was never
     # range-checked - a typo like root: 1.5 or -0.2 silently pinned detection
     # always-NEITHER / always-DETECTED with no error, unlike every other config
@@ -424,7 +458,7 @@ def _load_thresholds() -> tuple[float, float]:
     for name, value in (("root", root), ("ssl", ssl)):
         if not (0 <= value <= 1):
             raise ValueError(
-                f"config/settings.yaml: threshold '{name}' = {value} is out of range - "
+                f"{settings_path}: threshold '{name}' = {value} is out of range - "
                 f"must be in [0, 1]"
             )
     return root, ssl
@@ -702,10 +736,10 @@ def run(
     # cannot tell which signature corpus each loaded. Name them per-corpus so
     # the table is unambiguous (root vs ssl signature set).
     root_sig_stage, root_signatures = _wrap_stage(
-        "signature_load:root", load_signatures, Path("config/signatures/root_detection.yaml")
+        "signature_load:root", load_signatures, CONFIG_ROOT / "signatures" / "root_detection.yaml"
     )
     ssl_sig_stage, ssl_signatures = _wrap_stage(
-        "signature_load:ssl", load_signatures, Path("config/signatures/ssl_pinning.yaml")
+        "signature_load:ssl", load_signatures, CONFIG_ROOT / "signatures" / "ssl_pinning.yaml"
     )
     stage_results.append(root_sig_stage)
     stage_results.append(ssl_sig_stage)
@@ -767,12 +801,19 @@ def run(
     # dedup in _merge_dex_evidence keeps it non-duplicative with the java/smali
     # scan. An absent/unreadable androguard degrades to a note, not a halt: it is
     # an enhancement source and the pipeline still has real decompiled roots.
+    # Starts False and is only ever set by a scan that RAN: an androguard that
+    # never ran (absent/unreadable, the except below) is not an attribution
+    # failure - jadx remains the primary java evidence and java_coverage already
+    # reflects its completeness, so degrading java there would over-report on
+    # every environment without androguard installed.
+    _dex_attribution_degraded = False
     try:
         dex_scan = scan_dex_strings(
             apk,
             root_signatures + ssl_signatures,
             cache_dir=Path("outputs/cache/dexstrings"),
         )
+        _dex_attribution_degraded = bool(dex_scan["attribution_degraded"])
         merged = _merge_dex_evidence(static_evidence, dex_scan["evidence"],
                                      root_signatures + ssl_signatures, dex_scan["app_package"])
         if merged:
@@ -784,6 +825,34 @@ def run(
             console.print(
                 f"[dim]androguard: {dex_scan['string_count']} app-owned DEX string(s), no new matches[/dim]"
             )
+        if _dex_attribution_degraded:
+            # Visible, not silent: the operator must be able to see that these
+            # DEX matches are whole-pool (possibly vendor-owned) and that the
+            # java surface is bounded as a result.
+            console.print(
+                "[yellow]androguard: app-owned attribution unavailable - matched the "
+                "WHOLE DEX string pool, so matches may include vendor-library strings "
+                "and app-owned strings may have been missed; java surface bounded to "
+                "partial (unknown, not absent).[/yellow]"
+            )
+    except BrokenSignatureError as exc:
+        # A signature whose matcher raised on EVERY DEX string it was evaluated
+        # against is a broken detection RULE, not androguard being unavailable: it
+        # contributed no evidence, and a swallowed-continue would let that read as a
+        # clean negative (principle 3/NFR-1). Halt loudly and record it as a failed
+        # stage - the same treatment a malformed regex gets at load time (RESID-4B) -
+        # so the defect is fixed at source, never worked around. Kept ABOVE the
+        # tolerant handler below, which would otherwise absorb this RuntimeError
+        # subclass into the benign "androguard unavailable" skip and hide the defect.
+        broken_stage = StageResult(
+            stage="dex_string_scan",
+            status="failed",
+            evidence={"broken_signatures": str(exc)},
+            error=str(exc),
+        )
+        stage_results.append(broken_stage)
+        _print_stage(broken_stage)
+        _halt(stage_results)
     except Exception as exc:  # androguard absent / unreadable - enhancement, not a halt
         console.print(f"[yellow]androguard skipped: {exc}[/yellow]")
 
@@ -836,7 +905,7 @@ def run(
     # are now scannable (.html/.htm in SCANNED_SUFFIXES), so the bridge call sites
     # are labelled below without degrading coverage; only a *remote* http(s) JS
     # source is JS we cannot read statically and forces the java surface to
-    # partial (handled in the apply_unresolved_java fold below, ADR-0006).
+    # partial (handled in the apply_dynamic_loading_java fold below, ADR-0006).
     webview_sites, webview_has_remote_js = (
         find_webview_js(native_java_files) if native_java_files else ([], False)
     )
@@ -896,7 +965,7 @@ def run(
     # whenever the DEX is not fully readable. androguard absence/unreadability
     # degrades to a note, not a halt (enhancement source, like the androguard
     # DEX scan).
-    packer_signatures = load_packer_signatures(Path("config/signatures/packers.yaml"))
+    packer_signatures = load_packer_signatures(CONFIG_ROOT / "signatures" / "packers.yaml")
     packer_stage, packer_findings = _wrap_stage(
         "packers", detect_packers, apk, packer_signatures
     )
@@ -1001,10 +1070,18 @@ def run(
     # Coverage-limited: WebView remote JS (gap A2) is folded into the same java
     # downgrade - a remote http(s) JS source (loadUrl/loadDataWithBaseURL with an
     # external URL) is JS we cannot read statically, semantically the same
-    # unexamined-java case as dynamic class loading. apply_unresolved_java is
+    # unexamined-java case as dynamic class loading. apply_dynamic_loading_java is
     # idempotent (fully_analyzed -> partial only), so combining is safe.
     _java_dynamic_unexamined = bool(dynamic_loads) or bool(webview_has_remote_js)
-    coverage_map = apply_unresolved_java(coverage_map, _java_dynamic_unexamined)
+    coverage_map = apply_dynamic_loading_java(coverage_map, _java_dynamic_unexamined)
+    # Coverage-limited: the DEX string scan lost app-owned attribution and matched
+    # the WHOLE constant pool (no app-owned namespace derivable, or the xref walk
+    # raised). Those matches may include vendor strings and the same broken view
+    # may have missed app-owned ones, so the java surface is not the fully-
+    # attributed one `fully_analyzed` claims - bound it to partial so a java
+    # NEITHER over it reads as "unknown, not absent" (ADR-0006). Same additive,
+    # downgrade-only semantics as the cases above; the evidence found is kept.
+    coverage_map = apply_attribution_degraded_java(coverage_map, _dex_attribution_degraded)
     # Real-world gap A1: a Hermes/binary JS bundle present degrades the `js` surface
     # to partial - we recover its string constants, not full JS control flow, so a
     # js/root/ssl NEITHER is never a confident negative over bundle-hidden logic
@@ -1197,17 +1274,53 @@ def run(
         stage_results.append(dynamic_stage)
         _print_stage(dynamic_stage)
     else:
-        serial = device.discover_device(device_serial)
-        # FR-4.2: install_apk's check=True only confirms adb accepted the
-        # install command - not that the package actually registered. A silent
-        # install failure (signature mismatch, insufficient storage, device
-        # quirk) must fail loudly here via pm list packages, not sail into the
-        # dynamic stage where frida can't attach to a non-installed package and
-        # fails confusingly downstream (NFR-1). verify_installed was dead code;
-        # this is where it belongs.
-        device.install_apk(serial, apk)
-        install_ok = device.verify_installed(serial, package_name)
-        if not install_ok:
+        # GAP-2 (setup path): discover_device and install_apk are the EARLIEST
+        # dynamic steps and the most likely to fail on a box with no connected
+        # device/emulator - discover_device raises RuntimeError when `adb devices`
+        # is empty, or CalledProcessError when the adb daemon itself is unreachable
+        # (e.g. the WSL2 adb socket failure). install_apk runs `adb install` with
+        # check=True, so an incompatible APK (ABI/signature/minSdk/storage) raises
+        # CalledProcessError. Both were UNGUARDED: either one crashed the entire
+        # CLI with a raw traceback and DISCARDED the already-complete static report
+        # - the exact report-losing failure GAP-2 fixed for the install-verification
+        # and run_dynamic_stage paths, still live on the two steps that run before
+        # them (and the first thing hit on any environment without a device). Wrap
+        # them - and verify_installed, which shells out to `pm list packages` and
+        # can also raise on a dying device - in the same pattern: record a failed
+        # dynamic stage, keep the static report, surface loudly, exit non-zero.
+        # serial is reset to None so no downstream stage (logcat, traffic capture)
+        # touches a half-open device.
+        serial = None
+        install_ok = False
+        try:
+            serial = device.discover_device(device_serial)
+            # FR-4.2: install_apk's check=True only confirms adb accepted the
+            # install command - not that the package actually registered. A silent
+            # install failure (signature mismatch, insufficient storage, device
+            # quirk) must fail loudly here via pm list packages, not sail into the
+            # dynamic stage where frida can't attach to a non-installed package and
+            # fails confusingly downstream (NFR-1). verify_installed was dead code;
+            # this is where it belongs.
+            device.install_apk(serial, apk)
+            install_ok = device.verify_installed(serial, package_name)
+        except Exception as exc:
+            dynamic_stage = StageResult(
+                stage="dynamic", status="failed",
+                evidence={
+                    "reason": (
+                        "dynamic setup failed before the app could run - no usable "
+                        "device/emulator, or the APK could not be installed/verified "
+                        "(pass --skip-dynamic to run static-only cleanly)"
+                    ),
+                    "synthesized": {"source": synth.source, "applied_hooks": synth.applied_hooks},
+                },
+                error=f"dynamic setup failed ({type(exc).__name__}): {exc}",
+            )
+            stage_results.append(dynamic_stage)
+            _print_stage(dynamic_stage)
+            dynamic_failed = True
+            serial = None
+        if serial is not None and not install_ok:
             # FR-4.2 / GAP-2: an arbitrary real-world app that fails to install
             # (ABI mismatch, signature, minSdk, storage) must NOT _halt and
             # discard the already-complete static analysis - exactly the report-
@@ -1232,7 +1345,7 @@ def run(
             stage_results.append(dynamic_stage)
             _print_stage(dynamic_stage)
             dynamic_failed = True
-        else:
+        elif serial is not None:
             # Passed as synthesized to run_dynamic_stage, which only consumes it
             # when there's no target-specific script (unknown target / real app) -
             # hand-authored scripts for known targets take precedence. `synth` was
@@ -1427,7 +1540,21 @@ def run(
     capture_failed = False
     if capture_traffic:
         try:
-            capture_serial = serial if not skip_dynamic else device.discover_device(device_serial)
+            # serial is None here only if dynamic setup above already failed to
+            # find a usable device; re-attempting capture on a nonexistent device
+            # would surface as a confusing "raised unexpectedly", so fail with the
+            # honest reason instead (still caught below -> failed capture stage,
+            # report preserved, non-zero exit). Under --skip-dynamic the capture
+            # stage resolves its own serial since dynamic never ran.
+            if skip_dynamic:
+                capture_serial = device.discover_device(device_serial)
+            elif serial is not None:
+                capture_serial = serial
+            else:
+                raise RuntimeError(
+                    "no usable device for traffic capture - dynamic setup already "
+                    "failed to find a connected device/emulator"
+                )
             capture_stage = mitmproxy_capture.run_capture_stage(
                 capture_serial, package_name, ANALYSIS_ROOT / "captures",
             )
@@ -1453,6 +1580,31 @@ def run(
     # Extracted into _finalize_run so the H1/H2 failure handling is unit-testable
     # (a failed audit completion must not be silent; a DB save failure must still
     # record the completion and surface the report path).
+    #
+    # A3: the run-local annotations that explain each coverage bound, built once
+    # and used two ways - spread into report_kwargs so the live report renders the
+    # cause sections, and persisted in save_payload (below) so a regenerated report
+    # reproduces them instead of silently dropping the cause, which ADR-0006
+    # forbids reading as "cause absent". Keys are exactly generate_report()'s
+    # parameter names so the dict spreads straight into both call sites.
+    coverage_causes = dict(
+        jni_bindings=(
+            native_evidence.jni_bindings if native_evidence is not None else None
+        ),
+        unaccounted_loads=(
+            native_evidence.unaccounted_loads if native_evidence is not None else None
+        ),
+        dynamic_loads=dynamic_loads or None,
+        js_evidence=js_matches or None,
+        webview_sites=webview_sites or None,
+        dart_aot_libs=dart_aot_libs or None,
+        # Name the CAUSE of the java bound in the report, not just its effect: the
+        # coverage table shows java=partial, which alone is indistinguishable from
+        # heavy obfuscation or a packer. An analyst reading the report without the
+        # console output must be able to tell that DEX matches here have unverified
+        # ownership (ADR-0006: the bound is only honest if its reason is legible).
+        dex_attribution_degraded=_dex_attribution_degraded,
+    )
     report_kwargs = dict(
         run_id=run_id,
         apk_hash=apk_hash,
@@ -1471,16 +1623,7 @@ def run(
         obfuscation_level=obfuscation_level,
         operator=operator,
         justification=justification,
-        jni_bindings=(
-            native_evidence.jni_bindings if native_evidence is not None else None
-        ),
-        unaccounted_loads=(
-            native_evidence.unaccounted_loads if native_evidence is not None else None
-        ),
-        dynamic_loads=dynamic_loads or None,
-        js_evidence=js_matches or None,
-        webview_sites=webview_sites or None,
-        dart_aot_libs=dart_aot_libs or None,
+        **coverage_causes,
     )
     # The report path is returned (not used) here - _finalize_run writes the .md
     # and prints it itself, so binding the return to a local was a dead assignment
@@ -1500,6 +1643,7 @@ def run(
             "target": target,
             "package_name": package_name,
             "coverage": coverage_map,
+            "coverage_causes": coverage_causes,
             "obfuscation_level": obfuscation_level,
             "manifest": asdict(manifest_info) if manifest_info else None,
         },
@@ -1818,6 +1962,16 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
     if run.obfuscation_level:
         metadata.setdefault("package", {})
         metadata["package"]["obfuscation_level"] = run.obfuscation_level
+    # A3: the coverage cause annotations are now persisted as a single JSON column
+    # (runs.coverage_causes), so a regenerated report reproduces the DEX-attribution
+    # / Dart-AOT / JNI / unaccounted-load / dynamic-load / JS / WebView sections
+    # faithfully instead of dropping them. Keys are generate_report()'s parameter
+    # names, so the stored dict feeds straight through. The round-trip is lossless
+    # for rendering: the template accesses these via {{ item }} on primitives, Jinja
+    # attribute-or-getitem (works unchanged on the reloaded dicts), and 4-tuple
+    # unpacking (a JSON list unpacks identically) - there is no Python-side attribute
+    # access on them, so plain dicts/lists render exactly as the live objects did.
+    causes = run.coverage_causes or {}
     generate_report(
         run_id=run.run_id,
         apk_hash=run.apk_sha256,
@@ -1834,6 +1988,19 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         git_commit=rendering_commit,
         coverage=run.coverage,
         obfuscation_level=run.obfuscation_level,
+        jni_bindings=causes.get("jni_bindings"),
+        unaccounted_loads=causes.get("unaccounted_loads"),
+        dynamic_loads=causes.get("dynamic_loads"),
+        js_evidence=causes.get("js_evidence"),
+        webview_sites=causes.get("webview_sites"),
+        dart_aot_libs=causes.get("dart_aot_libs"),
+        dex_attribution_degraded=bool(causes.get("dex_attribution_degraded", False)),
+        # The annotation-loss disclosure now fires ONLY for runs written before
+        # coverage_causes existed (the column is NULL there): those genuinely cannot
+        # reconstruct the cause, so the report must say so rather than let a missing
+        # section read as "cause absent" (ADR-0006). A run WITH persisted causes
+        # regenerates faithfully and needs no disclaimer.
+        regenerated_from_stored_data=run.coverage_causes is None,
     )
 
 
@@ -1964,10 +2131,34 @@ def verify_device_cmd(
     console = Console()
 
     # 1. Device present and online.
-    adb = device._require_adb()
-    devices_out = subprocess.run(
-        [adb, "devices"], capture_output=True, text=True, timeout=20,
-    ).stdout
+    try:
+        adb = device._require_adb()
+        proc = subprocess.run(
+            [adb, "devices"], capture_output=True, text=True, timeout=20,
+        )
+    except Exception as exc:
+        # _require_adb (adb binary missing) or subprocess timeout/OS error. The
+        # docstring promises the REAL reason on ANY failure - never a silent OK
+        # and never a raw traceback - so surface it and exit non-zero.
+        console.print(f"[bold red]Could not run `adb devices`:[/bold red] {exc}")
+        raise typer.Exit(code=1)
+    devices_out = proc.stdout
+    # `adb devices` exiting non-zero means the adb daemon itself is unreachable -
+    # e.g. the WSL2 adb relay socket failure ("UtilConnectUnix: socket failed") -
+    # NOT merely "no emulator booted". That diagnostic is written to stderr, which
+    # the old code dropped (reading only .stdout), so the operator saw a
+    # misleading "(empty)" and the unhelpful "boot the emulator" advice for what
+    # is actually a broken relay. Surface stderr and name the daemon failure
+    # distinctly, with the remediation that actually applies.
+    if proc.returncode != 0:
+        console.print(
+            f"[bold red]`adb devices` failed (exit {proc.returncode}) - the adb "
+            "daemon is unreachable, not merely missing an emulator:[/bold red]\n"
+            f"{(proc.stderr or devices_out).strip() or '(no output)'}\n"
+            "Fix the adb/WSL2 relay (restart the Windows adb server) before a "
+            "dynamic scan."
+        )
+        raise typer.Exit(code=1)
     present = any(
         (line.split()[:2] == [device_serial, "device"])
         for line in devices_out.splitlines()[1:]

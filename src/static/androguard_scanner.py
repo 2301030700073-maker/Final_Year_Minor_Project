@@ -31,6 +31,14 @@ FP discipline (ADR-0006) is preserved: a string is matched only if at least one
 class that references it is app-owned, so benign library strings ("test-keys" in
 a vendor SDK) are not promoted to detection evidence. Additive-only - absence of
 a signature is still NOT evidence of absence of the technique.
+
+When that attribution is impossible (no app-owned namespace derivable, or the
+androguard xref walk raises) the scan falls back to matching the whole constant
+pool. That fallback is reported as `attribution_degraded`, never left implicit:
+the matches it yields may include vendor strings AND the same broken view may
+have missed app-owned ones, so cli.py bounds the java coverage surface to
+`partial` for that run rather than letting a whole-pool result read as an
+ordinary attributed scan (ADR-0006: an unreliable view cannot certify a clean).
 """
 
 from __future__ import annotations
@@ -40,6 +48,21 @@ import logging
 from pathlib import Path
 
 from common import Evidence, atomic_json_write, is_known_third_party, is_under_package, load_json_cache, sha256_file
+
+
+class BrokenSignatureError(RuntimeError):
+    """Raised when a signature's matcher raised on EVERY DEX string it was
+    evaluated against - a broken detection rule, not androguard being absent.
+
+    This is deliberately a distinct type (not a bare Exception) so the caller can
+    tell it apart from the ordinary "androguard unavailable / unreadable APK" case:
+    that case is a tolerated enhancement-skip (a yellow note, the run continues on
+    jadx evidence), but a systematically-raising signature is an engine defect that
+    contributed no evidence and would otherwise read as a clean negative - the
+    silent failure principle 3/NFR-1 forbids. The caller catches this type
+    specifically and turns it into a loud, recorded halt (a failed StageResult),
+    while still swallowing the unavailability case below it.
+    """
 
 
 def _class_namespace(class_name: str) -> str | None:
@@ -60,10 +83,18 @@ def _app_owned(ns: str, app_package: str | None) -> bool:
     return not is_known_third_party(ns)
 
 
-def _app_owned_strings(dex_objs, dx, app_package: str | None) -> set[str]:
-    """The set of DEX string values referenced by at least one app-owned class.
+def _app_owned_strings(dex_objs, dx, app_package: str | None) -> tuple[set[str], bool]:
+    """The set of DEX string values referenced by at least one app-owned class,
+    plus `attribution_degraded`.
+
     Strings only reachable from vendor namespaces are dropped so precision is
-    not weakened by library strings."""
+    not weakened by library strings. `attribution_degraded` is True when that
+    per-class attribution could NOT be applied and the whole constant pool was
+    returned instead - either no app-owned namespace was derivable, or the xref
+    walk raised. The caller must propagate it: a whole-pool result is a weaker
+    claim than an attributed one (it may include vendor strings, and the same
+    broken view may equally have missed app-owned ones), so it must not be
+    reported as an ordinary, fully-attributed scan."""
     app_ns: set[str] = set()
     for dex in dex_objs:
         try:
@@ -74,6 +105,9 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> set[str]:
         except Exception:
             continue
 
+    # No app-owned namespace at all => every per-string attribution below takes
+    # the whole-pool branch. Hoisted here because app_ns is loop-invariant.
+    degraded = not app_ns
     app_strings: set[str] = set()
     try:
         for s_analysis in dx.find_strings():
@@ -82,7 +116,8 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> set[str]:
                 continue
             if not app_ns:
                 # Can't attribute - include the whole pool rather than silently
-                # dropping the DEX surface (the caller still reports counts).
+                # dropping the DEX surface; `degraded` tells the caller so the
+                # coverage bound can reflect it.
                 app_strings.add(val)
                 continue
             keep = False
@@ -95,14 +130,15 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> set[str]:
                 app_strings.add(val)
     except Exception:
         # xref walk failed - degrade to the whole pool rather than silently
-        # dropping the DEX surface, and let the caller see the counts.
+        # dropping the DEX surface, and tell the caller attribution was lost.
+        degraded = True
         for dex in dex_objs:
             try:
                 for s in dex.get_strings():
                     app_strings.add(s)
             except Exception:
                 continue
-    return app_strings
+    return app_strings, degraded
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +158,7 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> set[str]:
 # jadx DEX cache). A stale/wrong-version entry is a miss, never a wrong answer.
 # ---------------------------------------------------------------------------
 
-_DEX_STRING_CACHE_VERSION = "dex-string-v1"
+_DEX_STRING_CACHE_VERSION = "dex-string-v2"
 
 
 def _load_string_cache(cache_dir: Path, apk_sha256: str) -> dict | None:
@@ -141,24 +177,32 @@ def _save_string_cache(cache_dir: Path, apk_sha256: str, payload: dict) -> None:
 
 
 
-def _extract_strings(apk_path: Path) -> tuple[str | None, set[str]]:
+def _extract_strings(apk_path: Path) -> tuple[str | None, set[str], bool]:
     """Run the expensive, immutable part of the androguard pass: parse the APK
-    and pull out its app-owned string set. This is the piece worth caching -
-    it is a pure function of the APK bytes."""
+    and pull out its app-owned string set, plus whether attribution degraded to
+    whole-pool matching. This is the piece worth caching - it is a pure function
+    of the APK bytes."""
     from androguard.misc import AnalyzeAPK
 
     _a, d, dx = AnalyzeAPK(str(apk_path))
     app_package = _a.get_package()
     dexs = d if isinstance(d, (list, tuple)) else [d]
-    return app_package, _app_owned_strings(dexs, dx, app_package)
+    app_strings, degraded = _app_owned_strings(dexs, dx, app_package)
+    return app_package, app_strings, degraded
 
 
 def scan_dex_strings(apk_path: Path, signatures: list, cache_dir: Path | None = None) -> dict:
     """Match app-owned DEX strings against the given signatures and return
     {matched: {sig_id: matched_text}, evidence: [Evidence], app_package,
-    string_count}. Raises on a genuinely unreadable APK (fail-loud). The caller
-    decides whether that halts the run - it is an enhancement source, so a
-    degraded note is the usual handling, not a pipeline halt.
+    string_count, attribution_degraded}. Raises on a genuinely unreadable APK
+    (fail-loud). The caller decides whether that halts the run - it is an
+    enhancement source, so a degraded note is the usual handling, not a pipeline
+    halt.
+
+    `attribution_degraded` True means app-owned attribution could not be applied
+    and the WHOLE constant pool was matched instead, so these matches are a
+    weaker claim than usual and the java coverage surface must be bounded
+    accordingly (coverage.apply_attribution_degraded_java).
 
     With `cache_dir` set, the expensive AnalyzeAPK string extraction runs once
     per distinct APK bytes; a subsequent call with the same bytes returns the
@@ -174,27 +218,75 @@ def scan_dex_strings(apk_path: Path, signatures: list, cache_dir: Path | None = 
         if cached is not None:
             app_package = cached.get("app_package")
             app_strings = cached["app_strings"]
+            # Indexed, not .get()-defaulted: the cache version gates this key's
+            # presence, so a v2 entry missing it is a corrupt entry and must fail
+            # loudly rather than silently defaulting to "not degraded" - which
+            # would restore exactly the over-confident clean this fix removes.
+            attribution_degraded = cached["attribution_degraded"]
         else:
-            app_package, app_strings = _extract_strings(apk_path)
+            app_package, app_strings, attribution_degraded = _extract_strings(apk_path)
             _save_string_cache(
                 cache_dir,
                 apk_sha,
-                {"app_package": app_package, "app_strings": sorted(app_strings)},
+                {
+                    "app_package": app_package,
+                    "app_strings": sorted(app_strings),
+                    "attribution_degraded": attribution_degraded,
+                },
             )
     else:
-        app_package, app_strings = _extract_strings(apk_path)
+        app_package, app_strings, attribution_degraded = _extract_strings(apk_path)
 
+    # Principle 3 / NFR-1: the primary text scan (signatures.scan) calls this same
+    # _line_matches WITHOUT a try/except, so a matcher that raises there halts the
+    # pipeline loudly. This DEX scan historically swallowed the identical exception
+    # with `except: continue`, so a signature whose matcher raised on every DEX
+    # string it was evaluated against would contribute no evidence and be
+    # indistinguishable from a clean negative - the exact silent failure principle 3
+    # forbids, and an asymmetry with the primary scanner. (Malformed regexes are
+    # already rejected at load time - RESID-4B - so this is defense-in-depth for the
+    # residual match-time path: an unhandled pattern_type or a future matcher bug,
+    # exercised here on DEX-pool strings the source scan may never have seen.) Track
+    # evaluations vs errors per signature so a systematically-broken one is surfaced
+    # (raised below) instead of silently disappearing; a signature that matches, or
+    # errors only on some strings, is unaffected - a single value that trips one
+    # matcher is not a broken rule.
     matched: dict[str, str] = {}
+    sig_evaluated: dict[str, int] = {}
+    sig_errored: dict[str, int] = {}
+    sig_last_error: dict[str, str] = {}
     for s in app_strings:
         for sig in signatures:
             if sig.id in matched:
+                # Already matched - demonstrably works; stop re-evaluating it.
                 continue
+            sig_evaluated[sig.id] = sig_evaluated.get(sig.id, 0) + 1
             try:
                 text = _line_matches(s, sig)
-            except Exception:
+            except Exception as exc:
+                sig_errored[sig.id] = sig_errored.get(sig.id, 0) + 1
+                sig_last_error[sig.id] = f"{type(exc).__name__}: {exc}"
                 continue
             if text:
                 matched[sig.id] = text
+
+    # A signature that errored on EVERY string it was evaluated against never had a
+    # chance to match: it is broken, not absent. Only sigs that errored at least
+    # once appear in sig_errored; of those, flag the ones whose error count equals
+    # their evaluation count (a matched sig stopped early with errored < evaluated,
+    # so it is never flagged). Raise the dedicated type - the caller turns it into a
+    # halted stage, distinct from the tolerant "androguard unavailable" path.
+    broken = [
+        f"{sid} (raised on all {sig_evaluated[sid]} string(s) evaluated; "
+        f"last error {sig_last_error[sid]})"
+        for sid, n_err in sig_errored.items()
+        if n_err == sig_evaluated.get(sid, 0)
+    ]
+    if broken:
+        raise BrokenSignatureError(
+            "DEX string matcher raised on every evaluation of signature(s): "
+            + "; ".join(sorted(broken))
+        )
 
     evidence = [
         Evidence(
@@ -210,4 +302,5 @@ def scan_dex_strings(apk_path: Path, signatures: list, cache_dir: Path | None = 
         "evidence": evidence,
         "app_package": app_package,
         "string_count": len(app_strings),
+        "attribution_degraded": attribution_degraded,
     }

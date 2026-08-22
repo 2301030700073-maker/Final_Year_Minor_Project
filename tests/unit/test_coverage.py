@@ -5,7 +5,8 @@ from common import CategoryVerdict
 from static.coverage import (
     GOVERNING_SURFACES,
     _min_coverage,
-    apply_unresolved_java,
+    apply_attribution_degraded_java,
+    apply_dynamic_loading_java,
     apply_unresolved_native,
     category_is_confident_negative,
     dart_aot_coverage,
@@ -209,26 +210,26 @@ def test_coverage_bound_line_mentions_partial_manifest():
     assert "ssl: NEITHER is a lower bound, NOT confident" in line
 
 
-def test_apply_unresolved_java_downgrades_only_fully_analyzed():
+def test_apply_dynamic_loading_java_downgrades_only_fully_analyzed():
     # Dynamic code loading present -> java surface degrades to partial so a java
     # NEITHER is never a confident negative over a dynamically-hidden payload.
-    assert apply_unresolved_java({"java": "fully_analyzed"}, True)["java"] == "partial"
+    assert apply_dynamic_loading_java({"java": "fully_analyzed"}, True)["java"] == "partial"
     # never upgrades, never downgrades below partial
-    assert apply_unresolved_java({"java": "partial"}, True)["java"] == "partial"
-    assert apply_unresolved_java({"java": "fully_analyzed"}, False)["java"] == "fully_analyzed"
+    assert apply_dynamic_loading_java({"java": "partial"}, True)["java"] == "partial"
+    assert apply_dynamic_loading_java({"java": "fully_analyzed"}, False)["java"] == "fully_analyzed"
     # other surfaces untouched
-    m = apply_unresolved_java({"java": "fully_analyzed", "native": "fully_analyzed"}, True)
+    m = apply_dynamic_loading_java({"java": "fully_analyzed", "native": "fully_analyzed"}, True)
     assert m["java"] == "partial" and m["native"] == "fully_analyzed"
     # additive: returns a new dict, original unchanged
     orig = {"java": "fully_analyzed"}
-    apply_unresolved_java(orig, True)
+    apply_dynamic_loading_java(orig, True)
     assert orig["java"] == "fully_analyzed"
 
 
-def test_apply_unresolved_java_propagates_to_categories():
+def test_apply_dynamic_loading_java_propagates_to_categories():
     # Because GOVER==NING_SURFACES for root/ssl both include "java", a partial java
     # surface removes the confident-negative status for both categories.
-    cov = apply_unresolved_java(
+    cov = apply_dynamic_loading_java(
         {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed"}, True
     )
     assert category_is_confident_negative("root", cov) is False
@@ -283,3 +284,34 @@ def test_confidence_bound_never_alters_numeric_confidence():
     line = confidence_bound("root", verdict, {"native": "unscannable"})
     assert line.startswith("0.35")
     assert verdict.confidence == 0.35  # unchanged
+
+
+def test_apply_attribution_degraded_java_downgrades_only_fully_analyzed():
+    # F4: the DEX scan lost app-owned attribution and matched the WHOLE constant
+    # pool -> the java surface is not the fully-attributed one fully_analyzed
+    # claims, so it degrades to partial (ADR-0006: an unreliable view of a surface
+    # cannot certify a clean over it).
+    assert apply_attribution_degraded_java({"java": "fully_analyzed"}, True)["java"] == "partial"
+    # never upgrades, never downgrades below partial
+    assert apply_attribution_degraded_java({"java": "partial"}, True)["java"] == "partial"
+    assert apply_attribution_degraded_java({"java": "unscannable"}, True)["java"] == "unscannable"
+    # an attributed scan is untouched - no over-degradation
+    assert apply_attribution_degraded_java({"java": "fully_analyzed"}, False)["java"] == "fully_analyzed"
+    # other surfaces untouched
+    m = apply_attribution_degraded_java({"java": "fully_analyzed", "native": "fully_analyzed"}, True)
+    assert m["java"] == "partial" and m["native"] == "fully_analyzed"
+    # additive: returns a new dict, original unchanged
+    orig = {"java": "fully_analyzed"}
+    apply_attribution_degraded_java(orig, True)
+    assert orig["java"] == "fully_analyzed"
+
+
+def test_apply_attribution_degraded_java_propagates_to_categories():
+    # root/ssl both govern on "java", so a whole-pool DEX scan removes the
+    # confident-negative status for both - the point of threading the signal.
+    cov = apply_attribution_degraded_java(
+        {"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed",
+         "js": "fully_analyzed"}, True
+    )
+    assert category_is_confident_negative("root", cov) is False
+    assert category_is_confident_negative("ssl", cov) is False

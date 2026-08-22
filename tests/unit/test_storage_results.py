@@ -164,6 +164,53 @@ def test_save_run_persists_correlation_skip_reason(tmp_path):
         assert record.dynamic_skip_reason is None
 
 
+def test_save_run_persists_coverage_causes_for_faithful_regeneration(tmp_path):
+    # A3: re-attribute -> _regenerate_report re-renders the report from the stored
+    # RunRecord. Before this fix the row persisted the coverage MAP but NONE of the
+    # per-surface CAUSE annotations (dex_attribution_degraded, jni_bindings,
+    # dynamic_loads, ...), so a regenerated report silently dropped every "why this
+    # surface is bounded" section - an absence that reads as "cause absent" (ADR-
+    # 0006). They now round-trip as one JSON column so regeneration reproduces them.
+    # Nested dataclasses are already normalized by _to_serializable, so what
+    # persists is plain JSON (a dict here, exactly as a JNIBinding would serialize).
+    verdict = CategoryVerdict(confidence=0.9, detected=True, evidence=[])
+    classification = ClassificationResult(action=Action.ROOT_ONLY, root=verdict, ssl=verdict)
+    causes = {
+        "dex_attribution_degraded": True,
+        "dynamic_loads": ["libfoo.so"],
+        "jni_bindings": [{"class_name": "Lcom/x/A;", "method_name": "n", "status": "unresolved"}],
+        "webview_sites": None,
+    }
+
+    save_metadata(tmp_path, "abc123", {"package": {"package_name": "test.app"}})
+    save_run(tmp_path, "abc123", "run_cc", {
+        "classification": classification,
+        "coverage_causes": causes,
+        "stage_results": [],
+    })
+
+    with Session(get_engine(tmp_path)) as session:
+        record = session.get(RunRecord, "run_cc")
+    assert record.coverage_causes == causes  # every cause survived the round-trip
+
+
+def test_save_run_coverage_causes_is_none_when_run_carried_none(tmp_path):
+    # The other half of A3: a run with no cause annotations must persist NULL, not
+    # {} - _regenerate_report uses `coverage_causes is None` as the exact signal that
+    # a run predates the column and its causes are unrecoverable, firing the
+    # annotation-loss disclosure. If absence persisted as {} the disclosure would
+    # never fire for legacy runs (dishonest) or would fire for new ones (noise).
+    verdict = CategoryVerdict(confidence=0.1, detected=False, evidence=[])
+    classification = ClassificationResult(action=Action.ROOT_ONLY, root=verdict, ssl=verdict)
+
+    save_metadata(tmp_path, "def456", {"package": {"package_name": "test.app"}})
+    save_run(tmp_path, "def456", "run_none", {"classification": classification, "stage_results": []})
+
+    with Session(get_engine(tmp_path)) as session:
+        record = session.get(RunRecord, "run_none")
+    assert record.coverage_causes is None
+
+
 def test_save_run_orphan_without_apks_row_fails_loudly(tmp_path):
     # FR-7/NFR-1 (Finding B): runs.apk_sha256 -> apks.sha256 was declared but
     # unenforced - SQLite has PRAGMA foreign_keys=OFF by default, so a run

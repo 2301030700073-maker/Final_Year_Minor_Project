@@ -15,6 +15,8 @@ the integration record, not mocked here.
 
 from pathlib import Path
 
+import pytest
+
 from static import androguard_scanner as ags
 from static.androguard_scanner import _app_owned, _app_owned_strings, _class_namespace
 
@@ -29,10 +31,10 @@ def test_dex_string_cache_hit_avoids_reparse(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(
         ags, "_extract_strings",
-        lambda p: calls.append(str(p)) or ("com.example.app", {"sensitive-root-path"}),
+        lambda p: calls.append(str(p)) or ("com.example.app", {"sensitive-root-path"}, False),
     )
 
-    sigs = [type("S", (), {"id": "root_sig", "patterns": ["sensitive"]})()]
+    sigs = [type("S", (), {"id": "root_sig", "patterns": ["sensitive"], "pattern_type": "string_literal", "case_sensitive": True})()]
 
     r1 = ags.scan_dex_strings(apk, sigs, cache_dir=tmp_path / "cache")
     r2 = ags.scan_dex_strings(apk, sigs, cache_dir=tmp_path / "cache")
@@ -58,8 +60,8 @@ def test_dex_string_cache_stale_version_is_a_miss(tmp_path, monkeypatch):
     stale.write_text('{"version": "dex-string-v0", "payload": {"app_package": "x", "app_strings": []}}')
 
     calls = []
-    monkeypatch.setattr(ags, "_extract_strings", lambda p: calls.append(p) or ("com.example.app", {"sensitive-root-path"}))
-    sigs = [type("S", (), {"id": "root_sig", "patterns": ["sensitive"]})()]
+    monkeypatch.setattr(ags, "_extract_strings", lambda p: calls.append(p) or ("com.example.app", {"sensitive-root-path"}, False))
+    sigs = [type("S", (), {"id": "root_sig", "patterns": ["sensitive"], "pattern_type": "string_literal", "case_sensitive": True})()]
 
     ags.scan_dex_strings(apk, sigs, cache_dir=cache_dir)
 
@@ -71,13 +73,56 @@ def test_dex_string_cache_none_is_always_fresh(tmp_path, monkeypatch):
     apk = tmp_path / "app.apk"
     apk.write_bytes(b"APK-BYTES-001")
     calls = []
-    monkeypatch.setattr(ags, "_extract_strings", lambda p: calls.append(p) or ("com.example.app", set()))
-    sigs = [type("S", (), {"id": "root_sig", "patterns": []})()]
+    monkeypatch.setattr(ags, "_extract_strings", lambda p: calls.append(p) or ("com.example.app", set(), False))
+    sigs = [type("S", (), {"id": "root_sig", "patterns": [], "pattern_type": "string_literal", "case_sensitive": True})()]
 
     ags.scan_dex_strings(apk, sigs, cache_dir=None)
     ags.scan_dex_strings(apk, sigs, cache_dir=None)
 
     assert len(calls) == 2  # no cache -> every call parses
+
+
+def test_broken_signature_raises_not_silently_skipped(tmp_path, monkeypatch):
+    # A4: a signature whose matcher raises on EVERY string it is evaluated against
+    # is a broken RULE, not an absent technique. The old `except: continue` in the
+    # matcher loop swallowed it, so it contributed no evidence and read as a clean
+    # negative - the silent failure principle 3/NFR-1 forbids, and an asymmetry with
+    # signatures.scan(), which calls the same _line_matches unguarded. It must now
+    # surface as BrokenSignatureError so the caller can halt loudly (distinct from
+    # androguard being unavailable). An invalid pattern_type drives _line_matches'
+    # own `raise ValueError("unknown pattern_type...")` on every evaluation - the
+    # exact residual match-time path load-time validation (RESID-4B) cannot cover
+    # for a signature object that reaches the scanner directly (e.g. a test double,
+    # or a future matcher bug on DEX-pool strings the source scan never exercised).
+    apk = tmp_path / "app.apk"
+    apk.write_bytes(b"APK-BYTES-001")
+    monkeypatch.setattr(
+        ags, "_extract_strings",
+        lambda p: ("com.example.app", {"any-app-string", "another-string"}, False),
+    )
+    broken = type("S", (), {"id": "root_sig", "patterns": ["x"], "pattern_type": "bogus", "case_sensitive": True})()
+
+    with pytest.raises(ags.BrokenSignatureError) as excinfo:
+        ags.scan_dex_strings(apk, [broken], cache_dir=None)
+    # Names the offending signature so the halt is actionable, not just "something broke".
+    assert "root_sig" in str(excinfo.value)
+
+
+def test_partly_erroring_signature_that_matches_is_not_flagged(tmp_path, monkeypatch):
+    # The all-errored guard must not fire on a signature that DOES match: a valid
+    # string_literal signature matches its string and is never evaluated as broken,
+    # even though other app strings don't match it (a non-match is not an error).
+    # Proves the flag is "raised on every evaluation", not "didn't match everything".
+    apk = tmp_path / "app.apk"
+    apk.write_bytes(b"APK-BYTES-001")
+    monkeypatch.setattr(
+        ags, "_extract_strings",
+        lambda p: ("com.example.app", {"sensitive-root-path", "unrelated-string"}, False),
+    )
+    good = type("S", (), {"id": "root_sig", "patterns": ["sensitive"], "pattern_type": "string_literal", "case_sensitive": True})()
+
+    result = ags.scan_dex_strings(apk, [good], cache_dir=None)  # must NOT raise
+    assert result["matched"] == {"root_sig": "sensitive"}
 
 
 def test_class_namespace_parses_and_handles_malformed():
@@ -161,10 +206,11 @@ def test_app_owned_strings_keeps_only_app_owned():
     dexs = [_FakeDex([app_class, vendor_class])]
     dx = _FakeDx([app_string, vendor_string])
 
-    result = _app_owned_strings(dexs, dx, "com.example.app")
+    result, degraded = _app_owned_strings(dexs, dx, "com.example.app")
 
     assert "com.android.insecurebankv2" in result
     assert "test-keys" not in result  # vendor-only string not promoted
+    assert degraded is False  # attribution applied - no whole-pool fallback
 
 
 def test_app_owned_strings_whole_pool_when_cannot_attribute():
@@ -175,9 +221,12 @@ def test_app_owned_strings_whole_pool_when_cannot_attribute():
     dexs = [_FakeDex([app_class])]
     dx = _FakeDx([s])
 
-    result = _app_owned_strings(dexs, dx, None)
+    result, degraded = _app_owned_strings(dexs, dx, None)
 
     assert "ro.kernel.qemu" in result
+    # A None package still derives an app namespace from the non-vendor class, so
+    # this is the ATTRIBUTED path - it must not report a degraded attribution.
+    assert degraded is False
 
 
 class _FakeDexFail:
@@ -225,8 +274,9 @@ def test_app_owned_strings_continues_on_class_iteration_error():
     s = _FakeString("keep-me", {app_class: None})
     dexs = [_FakeDexFail(), _FakeDex([app_class])]
     dx = _FakeDx([s])
-    result = _app_owned_strings(dexs, dx, "com.example.app")
+    result, degraded = _app_owned_strings(dexs, dx, "com.example.app")
     assert "keep-me" in result
+    assert degraded is False  # a healthy sibling dex preserved attribution
 
 
 def test_app_owned_strings_skips_none_valued_string():
@@ -235,9 +285,10 @@ def test_app_owned_strings_skips_none_valued_string():
     app_class = _FakeClass("Lcom/example/app/Main;")
     null = _FakeString(None, {app_class: None})
     good = _FakeString("real-string", {app_class: None})
-    result = _app_owned_strings([_FakeDex([app_class])], _FakeDx([null, good]), "com.example.app")
+    result, degraded = _app_owned_strings([_FakeDex([app_class])], _FakeDx([null, good]), "com.example.app")
     assert "real-string" in result
     assert None not in result
+    assert degraded is False
 
 
 def test_app_owned_strings_whole_pool_when_no_app_namespace():
@@ -247,8 +298,11 @@ def test_app_owned_strings_whole_pool_when_no_app_namespace():
     # None package but still derives an app namespace.
     vendor_class = _FakeClass("Lokhttp3/OkHttpClient;")
     s = _FakeString("ro.kernel.qemu", {vendor_class: None})
-    result = _app_owned_strings([_FakeDex([vendor_class])], _FakeDx([s]), "com.example.app")
+    result, degraded = _app_owned_strings([_FakeDex([vendor_class])], _FakeDx([s]), "com.example.app")
     assert "ro.kernel.qemu" in result
+    # F4: the whole-pool fallback is a WEAKER claim than an attributed scan (this
+    # vendor string is now matchable), so it must be reported, not left implicit.
+    assert degraded is True
 
 
 def test_app_owned_strings_whole_pool_on_xref_walk_failure():
@@ -257,5 +311,8 @@ def test_app_owned_strings_whole_pool_on_xref_walk_failure():
     # dropping the DEX surface. A dex whose get_strings() also raises is skipped.
     s = "survives-the-walk"
     dexs = [_FakeDexStrings([s]), _FakeDexStringsFail()]
-    result = _app_owned_strings(dexs, _FakeDxFail(), "com.example.app")
+    result, degraded = _app_owned_strings(dexs, _FakeDxFail(), "com.example.app")
     assert s in result
+    # F4: a failed xref walk means the whole pool was substituted - the caller
+    # must learn attribution was lost, or a whole-pool scan reads as attributed.
+    assert degraded is True  # xref walk failed -> whole-pool fallback

@@ -206,6 +206,37 @@ checks.
 | `{{ d }}` |
 {% endfor %}
 {% endif %}
+{% if regenerated_from_stored_data -%}
+### Report regenerated from stored data (annotation loss)
+
+This report was re-rendered from the persisted run record, not produced by a live
+analysis. The per-surface coverage table above **is** persisted, so the bounds
+themselves are exact - but the *cause* annotations that explain a bound are not
+persisted columns. DEX attribution degradation, Dart AOT snapshot libs, JNI bindings
+and unaccounted `dlopen` loads, dynamic code loading, JS/Hermes evidence and WebView
+sites are all run-local values.
+
+Their absence from this regenerated report is therefore **not** evidence they were
+absent from the original run. Read a `partial` surface here as "bounded, cause not
+reconstructible from storage", and consult the original run's report for the reason
+(ADR-0006: an absence must never be read as a negative).
+{% endif %}
+{% if dex_attribution_degraded -%}
+### DEX string attribution degraded (coverage-limited)
+
+The DEX constant-pool scan could not attribute strings to app-owned classes, so it
+matched the **whole** string pool instead - either no app-owned namespace was
+derivable from the class list, or androguard's cross-reference walk failed.
+Normally a DEX string becomes evidence only when at least one class referencing it
+belongs to the app's own package; that rule is what keeps a bundled library's
+benign constant (`test-keys` inside a vendor SDK) out of the findings. With it
+unavailable, two consequences follow: any DEX-level match in this report may
+belong to a third-party library rather than to the app, and app-owned strings may
+equally have been missed. The `java` surface is therefore forced to `partial` and
+a java/root/ssl NEITHER is **not** a confident negative (ADR-0006). The DEX
+evidence is retained rather than discarded - each match is a real hit on a real
+string in this APK; only its *ownership* is unverified.
+{% endif %}
 ## Dynamic Verification
 
 - Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}attempted, bypass not verified (no target-specific success check){% endif %}{% endif %}
@@ -323,6 +354,8 @@ def generate_report(
     js_evidence: list | None = None,
     webview_sites: list | None = None,
     dart_aot_libs: list | None = None,
+    dex_attribution_degraded: bool = False,
+    regenerated_from_stored_data: bool = False,
 ) -> Path:
     output_dir = Path(output_dir) / apk_hash
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -355,6 +388,8 @@ def generate_report(
         js_evidence=js_evidence,
         webview_sites=webview_sites,
         dart_aot_libs=dart_aot_libs,
+        dex_attribution_degraded=dex_attribution_degraded,
+        regenerated_from_stored_data=regenerated_from_stored_data,
         confidence_bound=confidence_bound,
     )
     report_path.write_text(content, encoding="utf-8")

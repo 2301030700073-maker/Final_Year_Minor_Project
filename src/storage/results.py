@@ -153,6 +153,12 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
             # payload (coverage.py's per_surface_coverage), so report and
             # calibration read the same bound. None when the run carried none.
             coverage=run_data.get("coverage"),
+            # A3: persist the run-local cause annotations for the coverage bounds so
+            # a regenerated report reproduces them. Already run through
+            # _to_serializable above, so nested JNIBinding dataclasses (and any
+            # other dataclass items) are plain JSON dicts/lists here. None when the
+            # run carried none.
+            coverage_causes=run_data.get("coverage_causes"),
             git_commit=run_data.get("git_commit"),
             target=run_data.get("target"),
             package_name=run_data.get("package_name"),

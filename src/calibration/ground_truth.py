@@ -25,7 +25,13 @@ import yaml
 
 from calibration.types import GroundTruthEntry
 
-DEFAULT_PATH = Path("config/ground_truth.yaml")
+# Anchored to the project root, not cwd (A2): this config input is a read-only
+# asset versioned in git alongside the code, and a bare relative "config/..."
+# path made load_ground_truth() falsely fail (FileNotFoundError) whenever the
+# CLI or calibration was invoked from any directory other than the project root,
+# even though the file was present. parents[2] of src/calibration/ground_truth.py
+# is the project root; the sibling cli.py CONFIG_ROOT anchor uses the same rule.
+DEFAULT_PATH = Path(__file__).resolve().parents[2] / "config" / "ground_truth.yaml"
 
 
 def load_ground_truth(path: Path = DEFAULT_PATH) -> dict[str, GroundTruthEntry]:

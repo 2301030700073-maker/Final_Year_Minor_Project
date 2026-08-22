@@ -129,7 +129,7 @@ def test_normalize_split_set_requires_some_apk(tmp_path):
         assert "no .apk" in str(e)
 
 
-def test_is_aab_and_sorted_dex_entries():
+def test_is_aab_and_sorted_dex_entries(tmp_path):
     # _is_aab: a .aab suffix is authoritative; otherwise a zip is an AAB only if
     # it carries base/manifest/AndroidManifest.xml; a bad zip is never an AAB.
     # _sorted_dex_entries: returns only base/classes*.dex, sorted. Pure zip
@@ -148,7 +148,7 @@ def test_is_aab_and_sorted_dex_entries():
     with zipfile.ZipFile(plain, "w") as z:
         z.writestr("AndroidManifest.xml", "<manifest/>")
     plain.seek(0)
-    tmp = Path("/tmp/_is_aab_plain.apk"); tmp.write_bytes(plain.getvalue())
+    tmp = (tmp_path / "_is_aab_plain.apk"); tmp.write_bytes(plain.getvalue())
     assert _is_aab(tmp) is False
 
     # a zip WITH the AAB manifest -> an AAB
@@ -156,11 +156,11 @@ def test_is_aab_and_sorted_dex_entries():
     with zipfile.ZipFile(aab, "w") as z:
         z.writestr("base/manifest/AndroidManifest.xml", "<manifest/>")
     aab.seek(0)
-    tmp2 = Path("/tmp/_is_aab_true.aab"); tmp2.write_bytes(aab.getvalue())
+    tmp2 = (tmp_path / "_is_aab_true.aab"); tmp2.write_bytes(aab.getvalue())
     assert _is_aab(tmp2) is True
 
     # garbage bytes -> not an AAB (no crash)
-    junk = Path("/tmp/_is_aab_junk.apk"); junk.write_bytes(b"\x00\x01garbage")
+    junk = (tmp_path / "_is_aab_junk.apk"); junk.write_bytes(b"\x00\x01garbage")
     assert _is_aab(junk) is False
 
     # sorted_dex_entries over an in-memory zip
@@ -173,7 +173,7 @@ def test_is_aab_and_sorted_dex_entries():
         assert _sorted_dex_entries(z) == ["base/classes.dex", "base/classes2.dex", "base/classes3.dex"]
 
 
-def test_read_zip_entries_excludes_directories():
+def test_read_zip_entries_excludes_directories(tmp_path):
     # _read_zip_entries: reads a zip to {name: bytes}, excluding directory
     # entries (trailing '/'). Pure zip parsing - had zero direct coverage.
     import io
@@ -186,7 +186,7 @@ def test_read_zip_entries_excludes_directories():
         z.writestr("classes.dex", b"\x00\x01")
         z.writestr("res/", b"")  # directory entry - must be excluded
     buf.seek(0)
-    p = Path("/tmp/_rze.apk"); p.write_bytes(buf.getvalue())
+    p = (tmp_path / "_rze.apk"); p.write_bytes(buf.getvalue())
     entries = _read_zip_entries(p)
     assert "AndroidManifest.xml" in entries
     assert "classes.dex" in entries

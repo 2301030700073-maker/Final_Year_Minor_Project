@@ -172,19 +172,50 @@ def apply_unresolved_native(
     return coverage
 
 
-def apply_unresolved_java(
+def apply_dynamic_loading_java(
     coverage: dict[str, Coverage],
-    has_unresolved: bool,
+    has_dynamic_loading: bool,
 ) -> dict[str, Coverage]:
-    """Coverage-limited: dynamic code loading present (DexClassLoader /
-    PathClassLoader / Class.forName / DexFile / loadDex) means the app releases
-    and loads a payload DEX at runtime - code the static scan cannot see. Downgrade
-    the java surface to `partial` so a java NEITHER is never a confident negative
-    over a dynamically-hidden payload (ADR-0006). Pure: returns a new dict, only
-    ever downgrades fully_analyzed -> partial (never upgrades), so it is additive
-    and safe alongside `apply_coverage_bound`."""
+    """Boundary-4: dynamic code loading present (DexClassLoader / PathClassLoader /
+    Class.forName / DexFile / loadDex) means the app releases and loads a payload
+    DEX at runtime - code the static scan cannot see. Downgrade the java surface to
+    `partial` so a java NEITHER is never a confident negative over a
+    dynamically-hidden payload (ADR-0006). Named for the boundary it enforces
+    (dynamic loading), NOT boundary-3 JNI resolution: the sibling
+    `apply_unresolved_native` is the JNI-unresolved gate, and the old name
+    `apply_unresolved_java`/param `has_unresolved` invited feeding the wrong flag.
+    Pure: returns a new dict, only ever downgrades fully_analyzed -> partial (never
+    upgrades), so it is additive and safe alongside `apply_coverage_bound`."""
 
-    if not has_unresolved:
+    if not has_dynamic_loading:
+        return coverage
+    if coverage.get("java") == "fully_analyzed":
+        return {**coverage, "java": "partial"}
+    return coverage
+
+
+def apply_attribution_degraded_java(
+    coverage: dict[str, Coverage],
+    attribution_degraded: bool,
+) -> dict[str, Coverage]:
+    """Downgrade the java surface to `partial` when the DEX string scan could not
+    attribute strings to app-owned classes and fell back to matching the WHOLE
+    constant pool (androguard_scanner._app_owned_strings: no app-owned namespace
+    was derivable, or the xref walk raised).
+
+    That fallback loses the exact property the DEX evidence source relies on -
+    "a string is matched only if at least one class that references it is
+    app-owned" - so its matches may include vendor-library strings. The same
+    broken class/xref view also means app-owned strings may have been MISSED.
+    Either way the DEX was not read the fully-attributed way `fully_analyzed`
+    claims, so a java NEITHER over it is a lower bound, not a confident negative
+    (ADR-0006). Note this is a coverage bound, not a retraction: the evidence
+    found is kept (dropping it would silently discard a real surface), it simply
+    can no longer certify a clean.
+
+    Pure: returns a new dict, only ever downgrades fully_analyzed -> partial
+    (never upgrades), so it is additive and safe alongside `apply_coverage_bound`."""
+    if not attribution_degraded:
         return coverage
     if coverage.get("java") == "fully_analyzed":
         return {**coverage, "java": "partial"}
@@ -294,7 +325,14 @@ def apply_unattributed_indicators(
     root = classification.root
     ssl = classification.ssl
     unknown = list(classification.unknown_uncovered)
-    for cat in unattributed:
+    for cat, present in unattributed.items():
+        # Honor the bool VALUE, not merely the key: the dict[str, bool] contract
+        # allows a False (indicator considered and found absent), which must NOT
+        # mark the category coverage-limited. Iterating keys alone silently flagged
+        # a {cat: False} entry - manufacturing an "unknown" from an absent indicator
+        # is exactly the confident-negative-vs-unknown confusion ADR-0006 forbids.
+        if not present:
+            continue
         if cat == "root":
             root = replace(root, coverage_limited=True)
         elif cat == "ssl":

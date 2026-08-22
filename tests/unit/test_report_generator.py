@@ -512,6 +512,73 @@ def test_generate_report_omits_dart_aot_block_when_absent(tmp_path):
     assert "Dart AOT snapshot (Flutter)" not in content
 
 
+def test_generate_report_names_dex_attribution_degradation_as_the_cause(tmp_path):
+    # The coverage table alone shows java=partial, which is indistinguishable from
+    # heavy obfuscation or a packer. When the DEX scan fell back to whole-pool
+    # matching, the report must name THAT as the cause - an analyst reading the .md
+    # without the console output otherwise cannot tell that these matches have
+    # unverified ownership (ADR-0006: a bound is only honest if its reason is legible).
+    report_path = generate_report(
+        run_id="dex-degraded", apk_hash="dex001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "dex001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        coverage={"java": "partial", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed"},
+        stage_results=[], output_dir=tmp_path,
+        dex_attribution_degraded=True,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "DEX string attribution degraded (coverage-limited)" in content
+    assert "app-owned" in content
+
+
+def test_generate_report_omits_dex_attribution_block_when_attribution_held(tmp_path):
+    # Default False: an ordinary attributed scan must not carry the degradation note,
+    # or the note stops meaning anything.
+    report_path = generate_report(
+        run_id="dex-ok", apk_hash="dex002", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "dex002"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        coverage={"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed"},
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "DEX string attribution degraded" not in content
+
+
+def test_generate_report_declares_annotation_loss_when_regenerated(tmp_path):
+    # A regenerated report renders from persisted columns only. The coverage map IS
+    # persisted, but the run-local flags naming each bound's CAUSE are not, so a
+    # missing cause-section must not read as "cause absent" (ADR-0006). Asserted with
+    # dex_attribution_degraded left False on purpose: that is the state of the real
+    # regeneration path, and it pins the note as a SIBLING of the DEX-degradation
+    # block rather than nested inside it - nested, it could never render here.
+    report_path = generate_report(
+        run_id="regen", apk_hash="rgn001", timestamp="2026-08-20T12:00:00 (report regenerated from stored data)",
+        metadata={"hashes": {"sha256": "rgn001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        coverage={"java": "partial", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed"},
+        stage_results=[], output_dir=tmp_path,
+        regenerated_from_stored_data=True,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Report regenerated from stored data (annotation loss)" in content
+    assert "not** evidence they were" in content
+    # The sibling-not-nested property: the DEX block stays off, the note still shows.
+    assert "DEX string attribution degraded" not in content
+
+
+def test_generate_report_omits_annotation_loss_note_for_a_live_run(tmp_path):
+    report_path = generate_report(
+        run_id="live", apk_hash="rgn002", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "rgn002"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        coverage={"java": "fully_analyzed", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed"},
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "regenerated from stored data" not in content
+
+
 def test_generate_report_js_fully_analyzed_no_callout(tmp_path):
     report_path = generate_report(
         run_id="js-full", apk_hash="jsf001", timestamp="2026-08-20T12:00:00",

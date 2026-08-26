@@ -27,6 +27,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# ── Host config (G21: env-overridable; defaults = the reference WSL2 box) ──
+# These were hardcoded to one collaborator's Windows profile and host IP. They
+# stay as documented DEFAULTS so the reference invocation is unchanged, but any
+# other host overrides them via env without editing this script, e.g.:
+#   FRIDA_RELAY_WIN_PATH='C:\Users\me\AppData\Local\Temp\frida_relay.py' \
+#   WIN_HOST_IP=172.20.0.1 bash run.sh
+FRIDA_RELAY_WIN_PATH="${FRIDA_RELAY_WIN_PATH:-C:\\Users\\Divyang\\AppData\\Local\\Temp\\frida_relay.py}"
+
 echo ""
 echo "══════════════════════════════════════════════════"
 echo "  Phase 1 — Auto Runner"
@@ -119,12 +127,13 @@ fi
 if $ALL_OK; then
     echo ""
     echo "─── 6. ADB forward + relay ───"
+    echo "  $INFO  Relay: $FRIDA_RELAY_WIN_PATH  (override via FRIDA_RELAY_WIN_PATH / WIN_HOST_IP)"
     adb forward --remove-all 2>/dev/null
     adb forward tcp:27044 tcp:27042 2>/dev/null && echo "  $PASS  ADB forward: 27044 → 27042"
     powershell.exe -Command "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { \$_.CommandLine -match 'frida_relay' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" 2>/dev/null || true
-    powershell.exe -Command "Start-Process -WindowStyle Hidden python -ArgumentList '\"C:\\Users\\Divyang\\AppData\\Local\\Temp\\frida_relay.py\" 27043 127.0.0.1 27044'" 2>/dev/null || true
+    powershell.exe -Command "Start-Process -WindowStyle Hidden python -ArgumentList '\"${FRIDA_RELAY_WIN_PATH}\" 27043 127.0.0.1 27044'" 2>/dev/null || true
     sleep 2
-    WIN_IP=$(ip route show default | awk '{print $3}' 2>/dev/null || echo "172.22.32.1")
+    WIN_IP="${WIN_HOST_IP:-$(ip route show default | awk '{print $3}' 2>/dev/null || echo "172.22.32.1")}"
     python3 -c "import socket; s=socket.socket(); s.settimeout(3); s.connect(('$WIN_IP', 27043)); s.close()" 2>/dev/null && echo "  $PASS  Relay OK ($WIN_IP:27043)" || {
         echo "  $FAIL  Relay not connecting"
         echo "         Check Windows Python: powershell.exe -Command \"python --version\""

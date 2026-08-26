@@ -1,0 +1,21 @@
+OK  ingest  (0ms)
+OK  audit  (4ms)
+OK  decompile  (0ms)
+OK  signature_load  (4ms)
+OK  signature_load  (1ms)
+OK  static_scan  (3ms)
+OK  manifest_parse  (0ms)
+OK  native_scan  (1ms)
+OK  obfuscation  (0ms)
+OK  decision_engine  (0ms)
+Decision: ROOT_ONLY
+CAUTION: 1 candidate file(s) could not be read (OSError): 
+original/AndroidManifest.xml - treat any NEITHER/Inconclusive verdict as 
+degraded, not a full-scan clean.
+OK  audit  (1ms)
+OK  dynamic  (2649ms)
+
+Report: 
+outputs/reports/1da8bf57d266109f9a07c01bf7111a1975ce01f190b9d914bcd3ae3dbef96f21
+/f222392f65b940e49760d9c7dcffb8b9.md
+

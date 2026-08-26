@@ -1,0 +1,101 @@
+# Analysis Report
+
+**Run ID:** 37ab6c7acc344d5fbddacacfe8debc26
+**Generated:** 2026-08-12T19:30:29.942649+00:00
+**Analysis code:** d04b662ffa7181b2e6fe1518703c1ecf8fc63af3
+**Authorized by:** 2301030700073-maker (justification: ACADEMIC_TRAINING_TARGET)
+
+**Package:** owasp.mstg.uncrackable1
+**APK SHA-256:** 1da8bf57d266109f9a07c01bf7111a1975ce01f190b9d914bcd3ae3dbef96f21
+**Version:** 1.0 (code 1)
+**SDK:** min=19, target=28
+**Signing:** v1=yes, v2=yes, v3=no, v4=no; cert SHA-256: cbe68ab87d64341c3fc78119dc1229e8aa86f93fdb2c33aa61252fd491485b1d
+
+
+**Toolchain:** aapt2=Android Asset Packaging Tool (aapt) 2.19-debian, apksigner=0.9, jadx=1.5.1, apktool=3.0.1
+
+**Debuggable:** no
+**Network security config:** none
+
+
+
+## Classification
+
+**Decision:** ROOT_ONLY (root threshold 0.7, ssl threshold 0.7)
+**Files scanned:** 26 (RESID-4C: a low count means this verdict is based on a small corpus - a NEITHER is not proof of absence) **CAUTION: 1 candidate file(s) could not be read (OSError): `original/AndroidManifest.xml` - treat any NEITHER/Inconclusive verdict as degraded, not a full-scan clean.**
+
+### Root-detection
+- Confidence: 0.80 -> DETECTED
+- `root_su_via_path_env_check` at sources/sg/vantagepoint/a/c.java:10 - `new File(str, "su").exists()`
+- `root_build_tags_test_keys` at sources/sg/vantagepoint/a/c.java:19 - `test-keys`
+- `root_known_indicator_files` at sources/sg/vantagepoint/a/c.java:23 - `/system/app/Superuser.apk`
+
+
+### SSL-pinning
+- Confidence: 0.00 -> Inconclusive
+
+
+
+## Scan Coverage (ADR-0008)
+
+Per-surface bound of this scan - a `partial`/`unscannable` surface is a lower bound, never a confident negative. Obfuscation: **heavy**
+
+| Surface | Coverage |
+|---|---|
+| java | partial |
+| native | unscannable |
+| manifest | fully_analyzed |
+
+> **Native:** unscannable means the APK had no scannable `.so` (or none at all) - a native NEITHER is not proof a native root/SSL check is absent.
+
+> **Heavy obfuscation:** the Java surface is `partial` even on a complete decompile - encrypted/unreachable strings mean a clean Java NEITHER is not proof of absence (N1/G-C).
+
+
+## Dynamic Verification
+
+- Root bypassed: True
+- SSL bypassed: inconclusive (see evidence below)
+- hooks_installed: `all three hooked`
+- hook_fired_c.a: `c.a: forced_result=false`
+- hook_fired_c.b: `c.b: forced_result=false`
+- hook_fired_c.c: `c.c: forced_result=false`
+- hook_fired_b.a: `b.a: forced_result=false`
+
+
+## Static vs. Dynamic Correlation
+
+- Matches: True
+
+
+## Stage Results
+
+| Stage | Status | Duration (ms) | Error |
+|---|---|---|---|
+| ingest | success | 0 |  |
+| audit | success | 1 |  |
+| decompile | success | 0 |  |
+| signature_load | success | 4 |  |
+| signature_load | success | 1 |  |
+| static_scan | success | 3 |  |
+| manifest_parse | success | 0 |  |
+| native_scan | success | 1 |  |
+| obfuscation | success | 0 |  |
+| decision_engine | success | 0 |  |
+| audit | success | 2 |  |
+| dynamic | success | 2609 |  |
+| audit | success | 3 |  |
+
+## Limitations
+
+This report is produced by a deterministic, signature-based pipeline (ADR-0001) - no AI/LLM component decides whether root-detection or SSL-pinning is present (ADR-0003).
+
+**Static detection is signature-based.** Root-detection and SSL-pinning are identified by matching decompiled sources/resources against a hand-authored, versioned signature set (`config/signatures/`). A technique matching no known pattern goes undetected and is silently absent from the confidence score - not flagged as "unknown." This is structural, not specific to this run.
+
+**Decompilation is not guaranteed to succeed.** jadx has failed outright on some real-world APKs tested against this pipeline - F-Droid, Root Checker, and the Nexus Launcher system app all failed to decompile - and larger/heavily-obfuscated production apps typically only partial-decompile rather than failing cleanly (e.g. PropertyGuru, 151MB React Native, exits with status 1 after producing ~27,720 source files). The partial-output-tolerance path keeps whatever jadx did produce instead of discarding it, but a partial run is a lower bound, not a definitive scan. See `docs/execution_changes/phase-1-changes-and-lessons.md`.
+
+This run's decompilation completed successfully (6 source files) - static findings reflect a full scan of the decompiled output.
+
+
+**Dynamic bypass does not generalize to unseen apps.** Every bypass technique here is a hand-written Frida script targeting one target's exact class/method names, confirmed empirically three separate times (UnCrackable1/2/3). Static detection generalizes (the same signatures matched all three targets unchanged, and correctly returned NEITHER on an unrelated real app); dynamic bypass does not - closing that gap is the deterministic bypass synthesizer and AI-gated learner (ADR-0008 groups C/D, roadmap items 12-20), an explicit non-goal here (see the PRD).
+
+**"Zero false positives" is not a claim this system makes.** Confidence is measured and reported, never asserted as unconditional (ADR-0006).

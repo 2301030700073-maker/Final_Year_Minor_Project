@@ -1,0 +1,15 @@
+OK  ingest  (137ms)
+OK  audit  (2ms)
+OK  decompile  (0ms)
+OK  signature_load  (2ms)
+OK  signature_load  (1ms)
+OK  static_scan  (4ms)
+OK  manifest_parse  (0ms)
+OK  decision_engine  (0ms)
+Decision: ROOT_ONLY
+OK  dynamic  (7673ms)
+
+Report: 
+outputs/reports/1da8bf57d266109f9a07c01bf7111a1975ce01f190b9d914bcd3ae3dbef96f21
+/88745631.md
+

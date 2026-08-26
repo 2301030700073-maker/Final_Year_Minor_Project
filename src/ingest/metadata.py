@@ -282,13 +282,32 @@ def ingest(
         # are confirmed identical on the reuse path, so evidence stays authoritative.
         if reuse_metadata:
             if (reuse_metadata.get("hashes") or {}).get("sha256") == evidence["hashes"]["sha256"]:
-                evidence["package"] = reuse_metadata.get("package")
-                evidence["signer"] = reuse_metadata.get("signer")
-                evidence["tool_versions"] = reuse_metadata.get("tool_versions")
-                return StageResult(
-                    stage="ingest", status="success", evidence=evidence,
-                    duration_ms=elapsed_ms(start),
-                )
+                # Only take the reuse shortcut if the stored record carries the
+                # same usable package_name the fresh path guarantees below (the
+                # None gate). A reuse record is only ever written from a prior
+                # SUCCESSFUL ingest that already passed that gate - cli.py halts a
+                # failed ingest before save_metadata - so today this always holds.
+                # But the reuse path must self-guarantee that contract, not lean on
+                # the cross-module invariant "the store only ever holds gated
+                # metadata" (decider-owns-its-guard). If a stored record ever lacks
+                # a usable package_name (an imported/older-format DB, a partial
+                # record, a future caching layer), returning success here would hand
+                # None to the dynamic stage's frida attach and to cli's target
+                # resolution (evidence["package"]["package_name"]) - the exact
+                # confusing downstream failure the fresh-path gate exists to
+                # prevent. Fall through to a full tool-backed ingest instead: it
+                # re-derives the package correctly, or fails loudly if the APK
+                # genuinely has none. Strictly safe - a bad cache is recomputed,
+                # never promoted to a confident success.
+                reused_package = reuse_metadata.get("package")
+                if isinstance(reused_package, dict) and reused_package.get("package_name") is not None:
+                    evidence["package"] = reused_package
+                    evidence["signer"] = reuse_metadata.get("signer")
+                    evidence["tool_versions"] = reuse_metadata.get("tool_versions")
+                    return StageResult(
+                        stage="ingest", status="success", evidence=evidence,
+                        duration_ms=elapsed_ms(start),
+                    )
         package_metadata = parse_aapt2_output(run_aapt2_dump(apk_path))
         evidence["package"] = package_metadata.__dict__
         # The downstream dynamic stage hands package_name to frida_runner.attach() ->

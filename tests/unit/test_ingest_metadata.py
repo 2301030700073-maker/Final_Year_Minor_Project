@@ -313,6 +313,46 @@ def test_ingest_reuses_existing_record_and_skips_tools(tmp_path, monkeypatch):
     assert result.evidence["hashes"]["sha256"] == existing["hashes"]["sha256"]
 
 
+def test_ingest_does_not_reuse_record_lacking_usable_package_name(tmp_path, monkeypatch):
+    """Decider-owns-its-guard: the fresh path fails loudly when package_name is
+    None (to stop a None reaching the dynamic stage's frida attach and cli's
+    target resolution at evidence["package"]["package_name"]), but the reuse
+    shortcut must enforce the SAME contract rather than trust that the store only
+    ever holds gated metadata. A reuse record whose stored package has no usable
+    package_name must NOT short-circuit to success - it must fall through to a
+    full tool-backed re-ingest that re-derives the package (or fails loudly).
+    Not reachable on the live pipeline today (a failed ingest halts before
+    save_metadata, so existing_metadata only returns successfully-gated records),
+    but the function must self-guarantee. Pre-fix this returned success carrying
+    package_name=None WITHOUT ever calling aapt2. Mirrors the hash-mismatch
+    fall-through test below: aapt2 is mocked to a real package so a fall-through
+    yields the FRESH package_name, not the reuse record's None."""
+    sample = tmp_path / "sample.apk"
+    sample.write_bytes(_valid_apk_bytes())
+
+    monkeypatch.setattr(
+        "ingest.metadata.run_aapt2_dump",
+        lambda *a, **k: "package: name='com.freshly.reingested' versionCode='1'\n",
+    )
+    monkeypatch.setattr("ingest.metadata.run_apksigner_verify", lambda *a, **k: "Verifies\n")
+
+    h = compute_hashes(sample)
+    existing = {
+        "hashes": h.__dict__,
+        "size_bytes": sample.stat().st_size,
+        "package": {"package_name": None, "permissions": []},  # unusable - no package name
+        "signer": {"v1_verified": True, "signer_count": 1},
+        "tool_versions": {"aapt2": "2.0"},
+    }
+
+    result = ingest(sample, reuse_metadata=existing, precomputed_hashes=h)
+
+    # Fell through to a fresh tool-backed ingest -> package came from aapt2, never
+    # the unusable reuse record. A bad cache is recomputed, not a fake success.
+    assert result.status == "success"
+    assert result.evidence["package"]["package_name"] == "com.freshly.reingested"
+
+
 def test_ingest_reingests_when_reused_file_hash_mismatches(tmp_path, monkeypatch):
     """FR-1.3: a changed file (hash mismatch vs the stored record) must NOT
     reuse stale metadata - it falls through to a full tool-backed re-ingest."""

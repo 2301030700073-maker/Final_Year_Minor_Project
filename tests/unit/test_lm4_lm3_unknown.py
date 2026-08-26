@@ -2,7 +2,7 @@
 'unknown, not absent' (unknown_uncovered) marker.
 
 L-M4: a category's NEITHER is a confident negative only when every governing
-surface (root -> {java,native}, ssl -> {java,native,manifest}) is fully_analyzed.
+surface (root -> {java,native,js}, ssl -> {java,native,manifest,js}) is fully_analyzed.
 When one is partial/unscannable, the verdict's confidence is an upper bound and
 the category must be flagged coverage_limited.
 
@@ -186,3 +186,31 @@ def test_assert_homogeneous_deterministic_rejects_non_deterministic_tiers():
         ])
     assert "bad" in str(ei.value)
     assert "ai_hypothesized_unverified" in str(ei.value)
+
+
+def test_category_is_confident_negative_none_and_empty_are_not_confident():
+    # The confident-negative decider owns the None/empty semantics itself, so no
+    # caller can drift by forgetting the guard (the SIG1 lesson): a run with no
+    # coverage map at all means nothing was analyzed, so every governing surface
+    # is effectively unscannable and a NEITHER can never be a confident negative.
+    from static.coverage import category_is_confident_negative
+
+    for cov in (None, {}):
+        assert category_is_confident_negative("root", cov) is False
+        assert category_is_confident_negative("ssl", cov) is False
+    # An unknown category is likewise never confident (unchanged behavior).
+    assert category_is_confident_negative("bogus", _FULL) is False
+
+
+def test_no_coverage_map_marks_every_category_coverage_limited():
+    # Regression: apply_coverage_bound is the "unknown, not absent" safety net,
+    # and the run that MOST needs it is one with no coverage map at all. It must
+    # do the maximally-conservative thing - mark BOTH root and ssl
+    # coverage_limited so neither NEITHER reads as a confident negative - not
+    # crash on None.get (which, if later "fixed" by swallowing the error, would
+    # silently let a NEITHER pass as a confident false negative, ADR-0006).
+    for cov in (None, {}):
+        out = apply_coverage_bound(_cls(), cov)
+        assert out.root.coverage_limited is True
+        assert out.ssl.coverage_limited is True
+        assert out.unknown_uncovered == ["root", "ssl"]

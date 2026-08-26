@@ -40,12 +40,33 @@ def load_ground_truth(path: Path = DEFAULT_PATH) -> dict[str, GroundTruthEntry]:
 
     entries: dict[str, GroundTruthEntry] = {}
     for apk_hash, fields in raw.items():
-        source = (fields or {}).get("source")
+        fields = fields or {}
+        source = fields.get("source")
         if not source:
             raise ValueError(
                 f"ground_truth.yaml entry '{apk_hash}' has no 'source' - every entry "
                 "must cite how its root/ssl values were independently established"
             )
+        # Enforce the GroundTruthEntry `bool | None` contract at load time. A
+        # dataclass does NOT validate its annotations at runtime, and PyYAML
+        # produces non-booleans for natural hand-edits that then silently
+        # MISCLASSIFY in Tier 2 (verified empirically): lowercase `none` and
+        # quoted `"false"`/`"true"` parse to truthy STRINGS, so an entry meant
+        # "absent" or "unset" reads as PRESENT and a clean scan becomes a
+        # fabricated false_negative; a falsy non-bool (`0`, `""`) reads as ABSENT
+        # and can launder a genuine miss into a true_negative - a silent confident
+        # false negative (ADR-0006). Only real true/false/null (or an omitted key)
+        # are admissible; anything else halts loudly (principle 3 / NFR-1) instead
+        # of corrupting the integrity-critical calibration measurement.
+        for field_name in ("root", "ssl"):
+            value = fields.get(field_name)
+            if not (isinstance(value, bool) or value is None):
+                raise ValueError(
+                    f"ground_truth.yaml entry '{apk_hash}' field '{field_name}' must be "
+                    f"true, false, or null (got {value!r} of type {type(value).__name__}) - "
+                    "write an unestablished value as null or omit the key; never quote the "
+                    "boolean, and do not use lowercase `none` (both parse as truthy strings)"
+                )
         entries[apk_hash] = GroundTruthEntry(
             apk_hash=apk_hash,
             root=fields.get("root"),

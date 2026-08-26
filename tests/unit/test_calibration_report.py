@@ -1,6 +1,6 @@
 from calibration.report import (
-    CategoryTier1Report, CategoryTier2Report, RateWithCount,
-    _category_is_confident_negative, compute_calibration_report,
+    CategoryTier1Report, CategoryTier2Report, DEFAULT_BUCKET_EDGES, RateWithCount,
+    _bucket_index, _category_is_confident_negative, compute_calibration_report,
 )
 from calibration.types import GroundTruthEntry, RunRow
 from static.decision_engine import DEFAULT_THRESHOLD
@@ -347,6 +347,46 @@ def test_pre_coverage_negative_but_full_coverage_counts_tn():
     assert report.tier2["root"].n == 1
 
 
+def test_full_coverage_miss_counts_as_false_negative_not_excluded():
+    # Calibration-integrity, the recall-honesty guard (ADR-0006/FR-9). recall =
+    # TP/(TP+FN), so a GENUINE miss - the engine said NEITHER, EVERY governing
+    # surface was fully_analyzed, and the ground-truth registry says the technique
+    # is really present - MUST count as a FALSE NEGATIVE. If it were silently
+    # excluded like an under-covered negative, FN would undercount and recall
+    # would inflate: the tool would overclaim its own completeness, the exact
+    # failure ADR-0006 forbids. classify_tier2's FN branch is unit-tested
+    # (test_calibration_outcomes.py:46), but nothing pinned that the report's two
+    # negative-only exclusion gates + per-category ground-truth routing actually
+    # let a full-coverage miss REACH that branch through compute_calibration_report.
+    # Asymmetric truth (root present, ssl absent) additionally locks that the miss
+    # is slotted into the RIGHT category: a getattr(gt_entry, category) misroute
+    # would flip these two blocks and this test would catch it.
+    runs = [
+        _run("miss_hash", "r1", "NEITHER", 0.00, False, None,
+             decompile_completeness="complete", coverage=FULLY_ANALYZED),
+    ]
+    ground_truth = {
+        "miss_hash": GroundTruthEntry("miss_hash", root=True, ssl=False, source="manual review"),
+    }
+
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+
+    # root: a real miss under full coverage is COUNTED as FN, not excluded.
+    assert report.tier2["root"].false_negative == 1
+    assert report.tier2["root"].true_negative == 0
+    assert report.tier2["root"].n == 1
+    assert report.excluded_partial_decompile["root"] == 0  # NOT dropped as under-covered
+    assert report.excluded_no_ground_truth["root"] == 0
+    # recall reflects the miss honestly: TP=0, FN=1 -> 0.0, never None-hidden or inflated.
+    assert report.tier2["root"].recall.rate == 0.0
+    # ssl: genuinely absent + full coverage + gt absent -> a real confident TN,
+    # proving the root miss was NOT misrouted into ssl's bucket.
+    assert report.tier2["ssl"].true_negative == 1
+    assert report.tier2["ssl"].false_negative == 0
+
+
 def test_calibration_curve_marks_each_runs_own_threshold_as_a_boundary_edge():
     # FR-9 (Finding D): the curve used one current threshold as the decision
     # boundary for the whole corpus. Now each run's persisted threshold is merged
@@ -375,3 +415,32 @@ def test_calibration_curve_marks_each_runs_own_threshold_as_a_boundary_edge():
     assert 0.85 in edges
     # and the run lands in the bucket just below its own 0.85 boundary
     assert any(b.range_low <= 0.84 < b.range_high for b in curve)
+
+
+def test_bucket_index_below_lowest_edge_goes_to_bottom_not_top():
+    # CURVE1: half-open buckets [lo, hi); the top edge (1.0) belongs to the top
+    # bucket, but a confidence BELOW the lowest edge must land in the BOTTOM
+    # bucket, never fall through to the top. With a zoomed edge set (an analyst
+    # focusing the curve on the decision region [0.5,1.0]) a 0.0-confidence run -
+    # and EVERY NEITHER carries confidence 0.0 - previously landed in the TOP
+    # high-confidence bucket via the bare `len(edges)-2` fallback, silently
+    # corrupting the FR-9 calibration curve. The decider owns its own out-of-range
+    # guard (cf. COV1/SIG1); a caller must not have to anchor edges at 0.0.
+    zoom = [0.5, 0.7, 0.9, 1.0]      # buckets: 0=[0.5,0.7) 1=[0.7,0.9) 2=[0.9,1.0)
+    assert _bucket_index(0.0, zoom) == 0     # below range -> bottom (was 2, the top bucket)
+    assert _bucket_index(0.49, zoom) == 0    # below range -> bottom
+    assert _bucket_index(0.5, zoom) == 0     # exactly the lowest edge -> bottom
+    assert _bucket_index(0.8, zoom) == 1     # interior unchanged
+    assert _bucket_index(1.0, zoom) == 2     # top edge -> top bucket (unchanged)
+
+
+def test_bucket_index_default_edges_placement_unchanged():
+    # The fix is behavior-preserving for the real consumer: default edges start
+    # at 0.0 and confidence is a [0,1] score, so the below-range branch is never
+    # taken and every placement is identical to before.
+    e = DEFAULT_BUCKET_EDGES
+    assert _bucket_index(0.0, e) == 0                # [0.0,0.1)
+    assert _bucket_index(0.05, e) == 0
+    assert _bucket_index(0.7, e) == 7                # [0.7,0.8)
+    assert _bucket_index(0.95, e) == 9               # [0.9,1.0)
+    assert _bucket_index(1.0, e) == len(e) - 2       # top edge -> top bucket [0.9,1.0)

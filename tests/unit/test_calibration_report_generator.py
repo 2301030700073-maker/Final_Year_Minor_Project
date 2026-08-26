@@ -26,6 +26,10 @@ def test_generate_calibration_report_writes_file_with_expected_content(tmp_path)
     assert "abc123" in content
     assert "N/A (no data)" in content  # ssl Tier 1 confirmation rate - never attempted
     assert "SSL bypass verification" in content or "ssl_bypassed=None" in content
+    # G18: the Tier-1 confirmation rate is explicitly framed as a LOWER BOUND on
+    # precision (not precision itself), with Tier 2 named as the real measurement -
+    # making the friend's "confirmation rate is a lower bound on precision" explicit.
+    assert "lower bound on precision, not precision itself" in content
 
 
 def test_generate_calibration_report_omits_ssl_note_once_all_modules_verify():
@@ -87,8 +91,57 @@ def test_generate_calibration_report_flags_vacuous_1p00_when_tn_is_zero(tmp_path
     from report.generator import CALIBRATION_TEMPLATE
     content = CALIBRATION_TEMPLATE.render(report=report)
 
-    assert "has TN=0: the 1.00 precision/recall is a tautology, not a measurement" in content
-    assert "Every ground-truthed root case is a positive" in content
+    assert "has TN=0: the 1.00 precision is a tautology, not a measurement" in content
+    assert "Every ground-truthed root case in Tier 2 is a positive" in content
+
+    # CALIB-TN0-LABEL: the SAME fixture leaves ssl with n=0 (its one ground-truth
+    # entry was a NEGATIVE that got coverage-excluded from Tier 2, not measured), so
+    # ssl precision/recall render "N/A", not 1.00. The tautology warning must NOT
+    # fire for ssl - a bare `TN==0` gate did, emitting a "1.00 ... tautology" caveat
+    # and "Every ground-truthed ssl case is a positive" (both false: n=0, and the ssl
+    # ground truth was a negative) directly beneath an N/A cell.
+    assert report.tier2["ssl"].n == 0  # ssl fully excluded -> no Tier-2 corpus
+    assert "ssl has TN=0" not in content
+    assert "ground-truthed ssl case" not in content
+
+
+def test_tn0_tautology_warning_suppressed_once_a_negative_control_exists():
+    # CALIB-TN0-LABEL: the warning's whole point is "no negative control, so the
+    # false-positive direction is untestable." The instant a real negative control
+    # is added - even one the detector gets WRONG (FP>0) - that claim is false and
+    # precision is genuinely <1.00, so the caveat must disappear rather than sit
+    # self-contradictorily beneath a <1.00 precision cell. TN is still 0 here (the
+    # negative was mis-detected, not correctly cleared), which the bare `TN==0` gate
+    # wrongly treated as "positive-only corpus."
+    runs = [
+        RunRow(
+            apk_hash="pos_hash", run_id="r1", action="SSL_ONLY",
+            root_confidence=0.0, root_detected=False, root_bypassed=None,
+            ssl_confidence=0.90, ssl_detected=True, ssl_bypassed=True,
+            decompile_completeness="complete",
+        ),
+        RunRow(
+            apk_hash="neg_hash", run_id="r2", action="SSL_ONLY",
+            root_confidence=0.0, root_detected=False, root_bypassed=None,
+            ssl_confidence=0.85, ssl_detected=True, ssl_bypassed=None,
+            decompile_completeness="complete",
+        ),
+    ]
+    ground_truth = {
+        "pos_hash": GroundTruthEntry("pos_hash", root=None, ssl=True, source="manual review"),
+        "neg_hash": GroundTruthEntry("neg_hash", root=None, ssl=False, source="manual review"),
+    }
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+    t2 = report.tier2["ssl"]
+    assert (t2.true_positive, t2.false_positive, t2.true_negative) == (1, 1, 0)
+    assert t2.precision.rate == 0.5  # a mis-detected negative control -> precision < 1.00
+
+    from report.generator import CALIBRATION_TEMPLATE
+    content = CALIBRATION_TEMPLATE.render(report=report)
+    assert "ssl has TN=0" not in content  # a negative control DOES exist; no tautology
+    assert "tautology" not in content
 
 
 def test_ssl_verification_partial_consistent_with_success_checks():
@@ -131,7 +184,13 @@ def test_ssl_verification_partial_consistent_with_success_checks():
 def test_bucket_index_buckets_confidence_and_clamps_boundaries():
     # _bucket_index: confidence falls in the first half-open bucket where
     # edges[i] <= c < edges[i+1]; a value at/beyond the last edge (e.g. exactly
-    # 1.0) clamps to the final bucket index. Had zero direct coverage.
+    # 1.0) goes to the final bucket, and a value BELOW the first edge goes to the
+    # BOTTOM bucket (CURVE1). The prior version of this characterization test
+    # asserted below-first-edge -> FINAL bucket, mislabelled "clamps": sending a
+    # low confidence to the top high-confidence bucket is misbucketing, not
+    # clamping, and would corrupt the calibration curve under a zoomed edge set
+    # (bucket_edges not anchored at 0.0). The code's own fallback comment only
+    # ever anticipated the top edge; below-range was an unintended fall-through.
     from calibration.report import _bucket_index
     edges = [0.5, 0.7, 0.9]
     assert _bucket_index(0.6, edges) == 0
@@ -139,7 +198,7 @@ def test_bucket_index_buckets_confidence_and_clamps_boundaries():
     assert _bucket_index(0.85, edges) == 1
     assert _bucket_index(0.9, edges) == 1   # == last edge -> final bucket
     assert _bucket_index(1.0, edges) == 1   # beyond all edges -> final bucket
-    assert _bucket_index(0.4, edges) == 1   # below first edge -> final bucket
+    assert _bucket_index(0.4, edges) == 0   # below first edge -> BOTTOM bucket (CURVE1)
 
 
 def test_field_names_builds_category_field_triple():
@@ -170,3 +229,75 @@ def test_calibration_report_renders_skeleton_warning_on_small_corpus():
     full = replace(report, skeleton_warning="")
     content = CALIBRATION_TEMPLATE.render(report=full)
     assert "skeleton, not a statistically robust result" not in content
+
+
+def test_tier2_exclusion_note_names_every_governing_surface():
+    # The calibration report's Tier-2 methodology footnote states which governing
+    # surfaces gate a confident true-negative. That prose MUST match the gate the
+    # code actually enforces (static.coverage.category_is_confident_negative over
+    # GOVERNING_SURFACES) - a drift here misdescribes the exclusion criteria in a
+    # user-facing scientific artifact. Regression for the stale note that omitted
+    # `js` (Hermes/RN bundle surface) after js became a governing surface: the
+    # doc claimed root->{java,native}, ssl->{java,native,manifest} while the gate
+    # already required js on both. Assert the note names every surface the gate
+    # uses, cross-checked against the constant so a future surface can't be added
+    # to the gate without the report tracking it.
+    from report.generator import CALIBRATION_TEMPLATE
+    from static.coverage import GOVERNING_SURFACES
+
+    report = compute_calibration_report(
+        runs=[], ground_truth={}, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+    content = CALIBRATION_TEMPLATE.render(report=report)
+
+    # The note line itself (not just anywhere in the doc).
+    note_line = next(
+        (ln for ln in content.splitlines() if "excluded from Tier 2 when any of its governing surfaces" in ln),
+        None,
+    )
+    assert note_line is not None, "Tier-2 per-surface exclusion note is missing from the report"
+    for category, surfaces in GOVERNING_SURFACES.items():
+        rendered = f"{category}->{{{','.join(surfaces)}}}"
+        assert rendered in note_line, (
+            f"Tier-2 note must name the enforced governing surfaces for {category}: "
+            f"expected '{rendered}' in\n{note_line}"
+        )
+    # Explicit belt-and-braces: js is present for both categories (the drift that regressed).
+    assert "js}" in note_line
+
+
+def test_tier2_exclusion_line_names_both_decompile_and_coverage_causes():
+    # Honesty fix (calibration N/A attribution): excluded_partial_decompile counts
+    # a NEITHER dropped from Tier 2 for EITHER reason a negative isn't proof of
+    # absence - a partial decompile OR an under-covered governing surface
+    # (native/manifest/js, incl. a pre-coverage run with no map). Here the ONLY
+    # excluded run decompiled COMPLETELY and was dropped purely for missing
+    # coverage; if the rendered report still blamed "partial/unknown decompile"
+    # alone it would send the operator to fix the wrong thing. The Tier-2
+    # exclusion line must name the coverage cause too, not the decompile alone.
+    runs = [RunRow(
+        apk_hash="cov_hash", run_id="r1", action="NEITHER",
+        root_confidence=0.0, root_detected=False, root_bypassed=None,
+        ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+        decompile_completeness="complete", coverage=None,  # complete decompile, NO coverage map
+    )]
+    ground_truth = {"cov_hash": GroundTruthEntry("cov_hash", root=False, ssl=False, source="manual review")}
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+    # precondition: the exclusion is real and coverage-caused, not a decompile miss
+    assert report.excluded_partial_decompile["root"] == 1
+
+    from report.generator import CALIBRATION_TEMPLATE
+    content = CALIBRATION_TEMPLATE.render(report=report)
+
+    exclusion_line = next(
+        ln for ln in content.splitlines()
+        if ln.startswith("Excluded from Tier 2 (partial/unknown decompile")
+    )
+    lowered = exclusion_line.lower()
+    assert "decompile" in lowered  # the original cause stays named
+    assert ("surface" in lowered or "under-covered" in lowered or "coverage" in lowered), (
+        f"Tier-2 exclusion line must also name the under-covered-surface cause, "
+        f"not the decompile alone:\n{exclusion_line}"
+    )

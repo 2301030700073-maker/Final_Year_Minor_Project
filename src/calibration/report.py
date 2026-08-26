@@ -103,6 +103,13 @@ class CalibrationReport:
     tier2: dict[Category, CategoryTier2Report]
     calibration_curve: dict[Category, list[CalibrationCurveBucket]]
     excluded_no_ground_truth: dict[Category, int] = field(default_factory=dict)
+    # Despite the "decompile" in the name, this counts a NEITHER excluded from
+    # Tier 2 for EITHER reason a negative isn't proof of absence: a partial/
+    # unknown decompile (compute loop's first gate) OR an under-covered governing
+    # surface - native/manifest/js, incl. pre-coverage runs (the per-surface
+    # coverage gate). The two gates are mutually exclusive (the decompile gate
+    # `continue`s first), so this stays a single, non-double-counted total; every
+    # consumer must describe both causes, never the decompile alone.
     excluded_partial_decompile: dict[Category, int] = field(default_factory=dict)
     # Manually maintained, not derived from run data - whether every
     # success_checks/*.py module implements real SSL bypass verification is
@@ -122,10 +129,22 @@ def _field_names(category: Category) -> tuple[str, str, str]:
 
 
 def _bucket_index(confidence: float, edges: list[float]) -> int:
+    # Half-open buckets [edges[i], edges[i+1]); the very top edge (e.g. exactly
+    # 1.0) belongs to the top bucket, caught by the fall-through below. A
+    # confidence BELOW the lowest edge belongs to the BOTTOM bucket, never the
+    # top: the bare `return len(edges) - 2` fallback used to catch BOTH cases, so
+    # with a zoomed edge set (bucket_edges not anchored at 0.0) a low/zero-
+    # confidence run - and every NEITHER carries confidence 0.0 - would land in
+    # the TOP high-confidence bucket and silently corrupt the calibration curve.
+    # The decider owns its own out-of-range guard; a caller must not have to
+    # anchor edges at 0.0 for this to be correct (cf. COV1/SIG1). No behavior
+    # change under the default edges (they start at 0.0, confidence is in [0,1]).
+    if confidence < edges[0]:
+        return 0
     for i in range(len(edges) - 1):
         if edges[i] <= confidence < edges[i + 1]:
             return i
-    return len(edges) - 2  # confidence == edges[-1] (e.g. exactly 1.0)
+    return len(edges) - 2  # confidence >= edges[-1] (e.g. exactly 1.0) -> top bucket
 
 
 def compute_calibration_report(

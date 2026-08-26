@@ -53,3 +53,57 @@ def test_load_ground_truth_empty_file_returns_empty_dict(tmp_path):
     gt_file.write_text("")
 
     assert load_ground_truth(gt_file) == {}
+
+
+def test_load_ground_truth_rejects_lowercase_none_string_as_category(tmp_path):
+    # GT1: `root: none` (lowercase - the natural way a human writes "not
+    # established") is NOT a YAML null. PyYAML parses it to the truthy STRING
+    # "none", which classify_tier2 then reads as PRESENT, turning a clean scan
+    # into a fabricated false_negative (verified empirically). The loader must
+    # reject it loudly, not silently corrupt Tier 2 - the correct spelling is
+    # `null` or omitting the key.
+    gt_file = tmp_path / "ground_truth.yaml"
+    gt_file.write_text("somehash:\n  root: none\n  ssl: false\n  source: manual review\n")
+    with pytest.raises(ValueError, match="root"):
+        load_ground_truth(gt_file)
+
+
+def test_load_ground_truth_rejects_quoted_boolean(tmp_path):
+    # GT1: a quoted boolean is a truthy string. `ssl: "false"` (intended absent)
+    # reads as PRESENT -> a correct clean scan becomes a false_negative, silently
+    # deflating recall. Reject loudly (root is valid here, so ssl is the offender).
+    gt_file = tmp_path / "ground_truth.yaml"
+    gt_file.write_text('somehash:\n  root: true\n  ssl: "false"\n  source: manual review\n')
+    with pytest.raises(ValueError, match="ssl"):
+        load_ground_truth(gt_file)
+
+
+def test_load_ground_truth_rejects_falsy_non_bool_that_would_launder_a_miss(tmp_path):
+    # GT1, the ADR-0006 direction: a falsy non-bool (`0`, `""`) reads as ABSENT.
+    # If a technique is genuinely present but written `0`, a real miss
+    # (detected=False) is laundered into a true_negative - a silent confident
+    # false negative. Only real booleans / null are admissible.
+    gt_file = tmp_path / "ground_truth.yaml"
+    gt_file.write_text("somehash:\n  root: 0\n  ssl: false\n  source: manual review\n")
+    with pytest.raises(ValueError, match="root"):
+        load_ground_truth(gt_file)
+
+
+def test_load_ground_truth_accepts_all_real_boolean_and_null_forms(tmp_path):
+    # The complement: every ADMISSIBLE form (true / false / null / omitted key)
+    # still loads and round-trips to the exact Python value classify_tier2
+    # expects - so the stricter validation rejects only the footguns above, never
+    # a correct entry (this is what proved the real config still loads clean).
+    gt_file = tmp_path / "ground_truth.yaml"
+    gt_file.write_text(
+        "a:\n  root: true\n  ssl: false\n  source: s\n"
+        "b:\n  root: false\n  ssl: null\n  source: s\n"
+        "c:\n  root: true\n  source: s\n"  # ssl omitted -> None
+    )
+    e = load_ground_truth(gt_file)
+    assert (e["a"].root, e["a"].ssl) == (True, False)
+    assert (e["b"].root, e["b"].ssl) == (False, None)
+    assert (e["c"].root, e["c"].ssl) == (True, None)
+    for entry in e.values():  # never a str/int that would misclassify downstream
+        for v in (entry.root, entry.ssl):
+            assert isinstance(v, bool) or v is None

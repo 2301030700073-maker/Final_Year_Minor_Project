@@ -17,6 +17,7 @@ from common import (
     StaticEvidence,
     derive_namespace,
     is_known_third_party,
+    is_third_party_file,
     load_yaml_entries,
 )
 from static.deobfuscate import MappingTable, deobfuscate_source
@@ -261,6 +262,7 @@ def scan(
     signatures: list[Signature],
     sqlite_path: Path | str | None = None,
     mapping: MappingTable | None = None,
+    app_package: str | None = None,
 ) -> StaticEvidence:
     """Scan one or more decompiled-output roots (e.g. jadx's Java sources and
     apktool's decoded resources) against the given signatures.
@@ -362,8 +364,20 @@ def scan(
         # RESID-4A/4F recording, shared by the per-line and multiline paths so a
         # hit from either lands identically (same set/counters/Evidence rows).
         # _third_party_file is computed once per file (not per signature) so the
-        # exclusion check stays off the hot per-line loop.
-        _third_party_file = is_known_third_party(derive_namespace(str(file_path.relative_to(root))))
+        # exclusion check stays off the hot per-line loop. Bug-B parity with
+        # androguard_scanner._app_owned and report/attribution.py: an app whose
+        # OWN package sits under a recognized vendor prefix (Cash App is
+        # com.squareup.cash; a Google/Facebook/Tencent first-party app is
+        # com.google.*/com.facebook.*/com.tencent.*) must NOT have its own source
+        # files excluded as a bundled SDK - doing so drops the app's own root/SSL
+        # logic from the PRIMARY scan (method-body idioms like `implements
+        # X509TrustManager` the DEX string scan cannot recover) and lets a
+        # confident NEITHER be certified over unscanned app code (ADR-0006). The
+        # shared is_third_party_file() applies the is_under_package override; with
+        # app_package None (the test/default) it reduces to the historical
+        # is_known_third_party() check exactly, so behavior there is unchanged.
+        _third_party_file = is_third_party_file(
+            derive_namespace(str(file_path.relative_to(root))), app_package)
         def _record(signature: Signature, matched_text: str, line_number: int) -> None:
             # Third-party exclusion (GAP-1): bundled SDKs (GMS, okhttp, Sentry,
             # ...) perform their own root/SSL checks. Counting those matches as
@@ -400,6 +414,7 @@ def scan(
                 file=str(file_path.relative_to(root)),
                 line_or_offset=line_number,
                 matched_text=matched_text,
+                evidence_type=signature.evidence_type,  # G11: carry provenance
             )
             if signature.category == "root":
                 evidence.root_evidence.append(item)

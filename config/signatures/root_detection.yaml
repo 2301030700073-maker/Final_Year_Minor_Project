@@ -119,6 +119,14 @@
     - "com.koushikdutta.rommanager"
     - "com.thirdparty.superuser"
     - "com.dimon.laptop.tablet2.honeycomb"
+    # KingRoot / Kingo Root - two mass-market one-click root managers still
+    # widely probed for in 2026 root detection. Verified 2026-08 by DEX
+    # extraction: both exact package strings are present in a shipping build of
+    # Facebook (571.0.0.44.73), embedded as constants its root check queries.
+    # Same corroborative weight and rationale as the SuperSU-era managers above
+    # (package can be absent without ruling out root; presence is a real signal).
+    - "com.kingroot.kinguser"
+    - "com.kingo.root"
   evidence_type: bytecode_string
 
 - id: root_su_via_path_env_check
@@ -245,6 +253,14 @@
     - "RootCloak"
     - "HideMyRoot"
     - "suhide"
+    # RootCloak is probed for by its Xposed module PACKAGE names, not the
+    # display string "RootCloak" above - and that literal is case-sensitive, so
+    # it does not catch the lowercase package. Verified 2026-08 by DEX
+    # extraction: PropertyGuru (2026.5.4) embeds both package constants below and
+    # zero occurrences of mixed-case "RootCloak", so the existing literal misses
+    # this real probe; these package forms close that gap.
+    - "com.devadvance.rootcloak"
+    - "com.devadvance.rootcloakplus"
   evidence_type: bytecode_string
 
 # --- Play Integrity / SafetyNet attestation era (2026) ---

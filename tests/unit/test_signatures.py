@@ -1531,6 +1531,66 @@ def test_scan_skips_third_party_file_matching_pass(tmp_path):
     assert ev.unreadable_file_count == 0
 
 
+def test_scan_keeps_app_owned_file_under_vendor_prefix(tmp_path):
+    # Bug-B regression (confident FALSE NEGATIVE): an app whose OWN package sits
+    # under a recognized vendor prefix - Cash App is com.squareup.cash, a Google
+    # first-party app is com.google.android.apps.* - must have its own source
+    # files SCANNED, not excluded as a bundled SDK. The primary scan historically
+    # applied a bare is_known_third_party() with no app-package override (unlike
+    # the DEX scan and report attribution), so such an app's own SSL/root logic -
+    # e.g. a custom X509TrustManager the DEX string scan cannot recover from
+    # constants - vanished from the scan while java coverage still read
+    # fully_analyzed: a confident NEITHER over the app's own unscanned code.
+    from static.signatures import Signature, scan
+    appdir = tmp_path / "com" / "squareup" / "cash"
+    appdir.mkdir(parents=True)
+    (appdir / "Pinning.java").write_text("class C implements X509TrustManager {}\n")
+    sig = Signature(id="tm", category="ssl", weight=0.5, pattern_type="regex",
+                    patterns=["implements X509TrustManager"], evidence_type="source")
+
+    # No app package known -> historical behavior preserved exactly: com.squareup
+    # is a vendor prefix, so with nothing to prove app-ownership the file is
+    # excluded (the safe default reduces to the old is_known_third_party check).
+    assert scan(tmp_path, [sig]).ssl_evidence == []
+
+    # With the app's own package supplied, the file is app-owned and scanned.
+    ev = scan(tmp_path, [sig], app_package="com.squareup.cash")
+    assert [e.signature_id for e in ev.ssl_evidence] == ["tm"]
+    assert ev.scanned_file_count == 1
+
+
+def test_scan_still_excludes_genuine_vendor_under_app_package(tmp_path):
+    # The fix must not OVER-loosen: with the app package supplied, a genuine
+    # bundled-SDK file whose namespace is a vendor NOT under the app package is
+    # still excluded (a GMS X509TrustManager is not the app's own logic - the
+    # original GAP-1 false positive this exclusion exists to prevent).
+    from static.signatures import Signature, scan
+    gms = tmp_path / "com" / "google" / "android" / "gms"
+    gms.mkdir(parents=True)
+    (gms / "X.java").write_text('String p = "/system/bin/su";\n')
+    sig = Signature(id="su", category="root", weight=0.5, pattern_type="regex",
+                    patterns=["/system/bin/su"], evidence_type="source")
+    ev = scan(tmp_path, [sig], app_package="com.squareup.cash")
+    assert ev.root_evidence == []       # genuine GMS vendor file still excluded
+    assert ev.scanned_file_count == 1
+
+
+def test_is_third_party_file_bugb_semantics():
+    # The shared definition both scanners and report attribution agree on.
+    from common import is_third_party_file
+    # App-owned under a vendor prefix -> NOT third party (Bug B).
+    assert is_third_party_file("com.squareup.cash", "com.squareup.cash") is False
+    assert is_third_party_file("com.squareup.cash.ui", "com.squareup.cash") is False
+    # Genuine vendor, not under the app package -> third party.
+    assert is_third_party_file("com.google.android.gms", "com.squareup.cash") is True
+    # No/empty app package -> reduces to the plain vendor check (historical).
+    assert is_third_party_file("com.squareup.cash", None) is True
+    assert is_third_party_file("com.squareup.cash", "") is True
+    # An unknown namespace is never asserted third party (could be app code).
+    assert is_third_party_file("sg.vantagepoint.a", "sg.vantagepoint") is False
+    assert is_third_party_file("com.myapp", None) is False
+
+
 def test_2026_corpus_broadening_additions_loaded():
     # 2026 broadening: resetprop/Magisk-hide + rw-system + hardware key
     # attestation (root); Cash-App Paraphrase + Ktor + dart:io SecurityContext
@@ -1616,3 +1676,27 @@ def test_2026_corpus_broadening_round4_additions_loaded():
     }.items():
         assert sig_id in ssl_sigs, f"missing ssl sig {sig_id}"
         assert marker in ssl_sigs[sig_id].patterns, (sig_id, marker)
+
+
+def test_evidence_default_provenance_is_unspecified():
+    # G11: Evidence built without an explicit provenance defaults to
+    # "unspecified" - the new field is backward-compatible, never required, so
+    # older callers/fixtures/stored rows stay valid.
+    from common import Evidence
+    e = Evidence(signature_id="x", file="A.java", line_or_offset=1, matched_text="su")
+    assert e.evidence_type == "unspecified"
+
+
+def test_scan_stamps_evidence_type_from_signature(tmp_path):
+    # G11: the emitted Evidence carries the driving signature's evidence_type
+    # (forensic provenance - a distinct axis from pattern_type). Before this,
+    # evidence_type was parsed from YAML and never propagated: a dead field.
+    from static.signatures import Signature
+    sig = Signature(id="t_root_su", category="root", weight=0.5,
+                    pattern_type="regex", patterns=["/system/bin/su"],
+                    evidence_type="bytecode_string")
+    (tmp_path / "M.java").write_text('String s = "/system/bin/su";\n', encoding="utf-8")
+    evidence = scan(tmp_path, [sig])
+    hits = [e for e in evidence.root_evidence if e.signature_id == "t_root_su"]
+    assert hits, "signature did not match"
+    assert all(e.evidence_type == "bytecode_string" for e in hits)

@@ -168,16 +168,22 @@ def _launch_app(serial: str, package: str) -> None:
     )
 
 
-def _cleanup(serial: str, proxy_port: int, proc: subprocess.Popen | None) -> None:
+def _cleanup(serial: str, proxy_port: int, proc: subprocess.Popen | None) -> list[str]:
     """Best-effort restore of device state after a capture. A failed cleanup is
-    recorded but never fatal - like clear_logcat's retry-then-record, the goal
-    is to not leak a proxy setting or a stray mitmdump, not to abort the run.
+    non-fatal but NEVER silent: each failure is collected and RETURNED so the
+    caller records it on the StageResult evidence (principle 3 - no silent
+    failure). Like clear_logcat's retry-then-record, the goal is to not leak a
+    proxy setting or a stray mitmdump, not to abort the run - but a leak that
+    does happen must be visible in the report, not swallowed by a bare `pass`.
 
     On WSL2 the device has no direct NAT, so clearing the proxy would leave it
     with no internet at all. Instead the device proxy is restored to the
     pass-through proxy (the working-internet path) when that proxy is up; only
     on native Linux (where the device reaches the internet directly) is the
     proxy cleared outright."""
+    warnings: list[str] = []
+    restored = False
+    last_exc: Exception | None = None
     for _ in range(CLEANUP_RETRIES):
         try:
             if (_on_wsl2()
@@ -185,22 +191,30 @@ def _cleanup(serial: str, proxy_port: int, proc: subprocess.Popen | None) -> Non
                 device.set_http_proxy(serial, "127.0.0.1", INTERNET_PROXY_PORT)
             else:
                 device.clear_http_proxy(serial)
+            restored = True
             break
-        except Exception:
+        except Exception as exc:
+            last_exc = exc
             time.sleep(0.5)
+    if not restored:
+        warnings.append(
+            f"device proxy not restored after {CLEANUP_RETRIES} retries - the "
+            f"device may be left without a working proxy/internet: {last_exc}"
+        )
     try:
         device.adb_reverse(serial, proxy_port, proxy_port, add=False)
-    except Exception:
-        pass
+    except Exception as exc:
+        warnings.append(f"adb reverse --remove {proxy_port} failed (leaked reverse): {exc}")
     if proc is not None:
         try:
             proc.terminate()
-        except Exception:
-            pass
+        except Exception as exc:
+            warnings.append(f"local mitmdump terminate failed (may be stray): {exc}")
     # On WSL2 the mitmdump runs on the Windows host, so stop it there too (the
     # pass-through proxy is a separate python.exe and is intentionally left up).
     if _on_wsl2():
         _stop_windows_mitmdump()
+    return warnings
 
 
 def _on_wsl2() -> bool:
@@ -365,6 +379,10 @@ def run_capture_stage(
 
     flows_path: Path = out_dir / "capture.mitm"  # always bound for the except path
     proc: subprocess.Popen | None = None
+    # Bound before the try so the `finally` can attach cleanup warnings to
+    # whichever result we return (principle 3: a failed device-state cleanup is
+    # recorded on the evidence, never silently dropped).
+    result: StageResult | None = None
     try:
         cert = device.create_mitm_ca(confdir)
         system_ca = device.push_system_ca(serial, cert)
@@ -434,7 +452,7 @@ def run_capture_stage(
 
         flows = _parse_flow_detail(stdout_text or "")
         if not flows:
-            return StageResult(
+            result = StageResult(
                 stage="capture-traffic", status="failed",
                 evidence={
                     "reason": "no flows captured",
@@ -456,8 +474,9 @@ def run_capture_stage(
                     "the capture window"
                 ),
             )
+            return result
         hosts = sorted({f.host for f in flows if f.host})
-        return StageResult(
+        result = StageResult(
             stage="capture-traffic", status="success",
             evidence={
                 "flows_count": len(flows),
@@ -476,12 +495,20 @@ def run_capture_stage(
                 ],
             },
         )
+        return result
     except Exception as exc:
-        return StageResult(
+        result = StageResult(
             stage="capture-traffic", status="failed",
             evidence={"reason": "capture exception", "flows_path": str(flows_path)},
             error=f"capture stage raised: {exc}",
         )
+        return result
     finally:
-        # Restore device proxy / reverse and kill mitmdump even on failure.
-        _cleanup(serial, proxy_port, proc)
+        # Restore device proxy / reverse and kill mitmdump even on failure, and
+        # record (never swallow) any cleanup failure on the returned result's
+        # evidence so a leaked proxy/reverse/stray mitmdump is visible in the
+        # report (principle 3). A cleanup failure is non-fatal - it never flips
+        # the stage's success/failure verdict, only annotates it.
+        cleanup_warnings = _cleanup(serial, proxy_port, proc)
+        if cleanup_warnings and result is not None:
+            result.evidence["cleanup_warnings"] = cleanup_warnings

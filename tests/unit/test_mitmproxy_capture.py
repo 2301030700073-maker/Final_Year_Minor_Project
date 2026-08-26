@@ -389,3 +389,62 @@ def test_run_capture_stage_wsl2_fails_when_windows_mitmdump_missing(monkeypatch,
     assert result.status == "failed"
     assert result.evidence["reason"] == "Windows-host mitmdump not found"
     assert "Windows host" in result.error
+
+
+def test_cleanup_returns_no_warnings_on_clean_restore(monkeypatch):
+    # The happy path returns an empty warning list - nothing to record. Pins the
+    # new return contract so the caller's `if cleanup_warnings` stays a no-op.
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: False)
+    monkeypatch.setattr(device, "clear_http_proxy", lambda s: None)
+    monkeypatch.setattr(device, "adb_reverse", lambda *a, **k: None)
+    assert mitmproxy_capture._cleanup("emulator-5554", 8081, None) == []
+
+
+def test_cleanup_records_warning_when_proxy_restore_fails(monkeypatch):
+    # The exact silent-failure the fix targets: a device left without a restored
+    # proxy (docstring: "not leak a proxy setting"). It must come back as a
+    # warning string across all retries, never a swallowed bare `pass`.
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: False)
+    monkeypatch.setattr(mitmproxy_capture.time, "sleep", lambda s: None)
+
+    def boom(s):
+        raise RuntimeError("adb shell settings put failed")
+
+    monkeypatch.setattr(device, "clear_http_proxy", boom)
+    monkeypatch.setattr(device, "adb_reverse", lambda *a, **k: None)
+    warnings = mitmproxy_capture._cleanup("emulator-5554", 8081, None)
+    assert any("proxy not restored" in w for w in warnings)
+
+
+def test_cleanup_records_warning_when_reverse_removal_fails(monkeypatch):
+    # A leaked adb-reverse is also recorded, not swallowed.
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: False)
+    monkeypatch.setattr(device, "clear_http_proxy", lambda s: None)
+
+    def boom(*a, **k):
+        raise RuntimeError("adb reverse --remove rejected")
+
+    monkeypatch.setattr(device, "adb_reverse", boom)
+    warnings = mitmproxy_capture._cleanup("emulator-5554", 8081, None)
+    assert any("reverse" in w for w in warnings)
+
+
+def test_capture_stage_attaches_cleanup_warnings_to_evidence(monkeypatch, tmp_path):
+    # End-to-end: a cleanup failure after a SUCCESSFUL capture must surface on the
+    # result's evidence as `cleanup_warnings` - the capture succeeded but the
+    # device was left degraded, and that is recorded, not silent (principle 3).
+    # Non-fatal: the success verdict and the real flows are unchanged. This makes
+    # the docstring promise ("a failed cleanup is recorded") true end-to-end.
+    _mock_native_run(monkeypatch, tmp_path)  # native success path, flows parsed
+
+    def boom(s):
+        raise RuntimeError("device offline during cleanup")
+
+    monkeypatch.setattr(device, "clear_http_proxy", boom)
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path,
+        mitmdump_path="mitmdump", capture_window=0.1)
+    assert result.status == "success"          # cleanup failure never flips the verdict
+    assert result.evidence["flows_count"] == 2  # real flows intact
+    assert "cleanup_warnings" in result.evidence
+    assert any("proxy not restored" in w for w in result.evidence["cleanup_warnings"])

@@ -57,6 +57,17 @@ class ManifestInfo:
     # captures AndroGoat's base-config cleartextTrafficPermitted="true", which the
     # application-level attribute alone missed.
     cleartext_permitted: bool | None = None
+    # Domains an explicit <domain-config cleartextTrafficPermitted="true"> override
+    # permits cleartext to, even when the base policy forbids it. A per-domain
+    # cleartext permit is a real attack-surface fact the base-config flag alone
+    # hides; surfaced additively (never flips a policy negative), empty when none.
+    cleartext_domains: list[str] = field(default_factory=list)
+    # Expiration dates on NSC <pin-set expiration="YYYY-MM-DD"> elements. Android
+    # STOPS enforcing a pin-set once this date passes (it falls back to normal CA
+    # validation), so an expired pin-set is declared-but-inactive pinning the
+    # report must flag. Raw strings here (clock-free, testable); the run timestamp
+    # decides expiry in the report layer.
+    pin_set_expirations: list[str] = field(default_factory=list)
     permissions: list[str] = field(default_factory=list)
     exported_components: list[dict] = field(default_factory=list)
 
@@ -199,9 +210,16 @@ def _parse_manifest_root(
         None if allow_backup_attr is None
         else allow_backup_attr.strip().lower() in ("true", "1")
     )
+    # Resolve the networkSecurityConfig file ONCE and reuse it for every NSC-derived
+    # fact below (cleartext base policy, per-domain overrides, pin-set expirations,
+    # stored trust-anchors). Each consumer previously re-resolved the same path -
+    # redundant work on a file we have already located. Each _nsc_* helper still
+    # parses defensively from the path, so a helper called directly in a test is
+    # unaffected.
+    nsc_path = _resolve_nsc_path(network_security_config, resource_root)
     # Effective cleartext: the application flag wins when set; otherwise the NSC
     # base-config cleartextTrafficPermitted governs all non-overridden domains.
-    nsc_cleartext = _nsc_cleartext_permitted(_resolve_nsc_path(network_security_config, resource_root))
+    nsc_cleartext = _nsc_cleartext_permitted(nsc_path)
     cleartext_permitted = uses_cleartext_traffic if uses_cleartext_traffic is not None else nsc_cleartext
     permissions = _collect_permissions(root)
     exported_components = _collect_exported_components(application)
@@ -218,7 +236,7 @@ def _parse_manifest_root(
     # _count_stored_certs cannot hit the swallowed-ParseError path.
     resources_complete = _resources_complete(network_security_config, resource_root)
     stored_certs = (
-        _count_stored_certs(_resolve_nsc_path(network_security_config, resource_root))
+        _count_stored_certs(nsc_path)
         if resources_complete else 0
     )
 
@@ -233,6 +251,8 @@ def _parse_manifest_root(
         uses_cleartext_traffic=uses_cleartext_traffic,
         allow_backup=allow_backup,
         cleartext_permitted=cleartext_permitted,
+        cleartext_domains=_nsc_cleartext_domains(nsc_path),
+        pin_set_expirations=_nsc_pin_set_expirations(nsc_path),
         permissions=permissions,
         exported_components=exported_components,
     )
@@ -260,13 +280,73 @@ def _nsc_cleartext_permitted(nsc_path: Path | None) -> bool | None:
     return None
 
 
+def _nsc_cleartext_domains(nsc_path: Path | None) -> list[str]:
+    """Domains an explicit <domain-config cleartextTrafficPermitted="true"> permits
+    cleartext to. A base-config cleartext=false is secure by default, yet a
+    domain-config override still exposes specific domains to cleartext - a real
+    attack-surface fact the base-config flag alone hides. Returns the ordered,
+    de-duplicated <domain> values of every domain-config that ITSELF sets
+    cleartextTrafficPermitted true (nested configs are visited individually with
+    their own flag). Only EXPLICIT permits are surfaced, never an inherited or
+    inferred one, so this adds fact and never flips a policy negative (ADR-0006).
+    Empty when there is no NSC, it cannot be read, or nothing permits cleartext."""
+    if nsc_path is None:
+        return []
+    try:
+        tree = ET.parse(nsc_path)
+    except (ET.ParseError, OSError):
+        return []
+    domains: list[str] = []
+    seen: set[str] = set()
+    for config in tree.getroot().iter("domain-config"):
+        # Same namespace tolerance as the base-config read: the attribute can be
+        # android:-prefixed or bare depending on how the NSC was decoded.
+        val = config.get(f"{ANDROID_NS}cleartextTrafficPermitted") or config.get("cleartextTrafficPermitted")
+        if val is None or val.strip().lower() not in ("true", "1"):
+            continue
+        # Direct-child <domain>s belong to THIS config's flag (a nested config with
+        # its own flag is visited on its own iteration), so attribution is exact.
+        for dom in config.findall("domain"):
+            name = (dom.text or "").strip()
+            if name and name not in seen:
+                seen.add(name)
+                domains.append(name)
+    return domains
+
+
+def _nsc_pin_set_expirations(nsc_path: Path | None) -> list[str]:
+    """The `expiration` attribute of every NSC <pin-set expiration="YYYY-MM-DD">.
+    Android stops enforcing a pin-set once its expiration date has passed (it
+    falls back to normal CA validation), so a matched <pin-set> whose date is in
+    the past is declared-but-not-enforced pinning. Returns the raw date strings -
+    pure and clock-free (no `today`), so it stays deterministic and fixture-
+    testable; the report compares them against the run's own timestamp. A pin-set
+    with no expiration never expires and is omitted. Empty when there is no NSC,
+    it cannot be read, or no pin-set declares an expiration."""
+    if nsc_path is None:
+        return []
+    try:
+        tree = ET.parse(nsc_path)
+    except (ET.ParseError, OSError):
+        return []
+    out: list[str] = []
+    for pinset in tree.getroot().iter("pin-set"):
+        exp = pinset.get(f"{ANDROID_NS}expiration") or pinset.get("expiration")
+        if exp and exp.strip():
+            out.append(exp.strip())
+    return out
+
+
 def _collect_permissions(root: ET.Element) -> list[str]:
-    """The ordered android:name values of every <uses-permission> element."""
+    """The ordered android:name values of every <uses-permission> element,
+    including the <uses-permission-sdk-23> form (granted only on API 23+, but a
+    real declared permission a security platform must not miss)."""
     perms = []
-    for el in root.findall("uses-permission"):
-        name = el.get(f"{ANDROID_NS}name")
-        if name:
-            perms.append(name)
+    for tag in ("uses-permission", "uses-permission-sdk-23"):
+        for el in root.findall(tag):
+            name = el.get(f"{ANDROID_NS}name")
+            if name:
+                perms.append(name)
     return perms
 
 
@@ -358,13 +438,20 @@ def _count_stored_certs(nsc_path: Path | None) -> int:
 
 
 def _has_device_admin(root: ET.Element) -> bool:
-    """True when a <receiver> declares the BIND_DEVICE_ADMIN permission - the
-    signature of a device-admin app that can install/update system certificates.
-    The permission is the receiver's `android:permission` attribute (a device-admin
-    receiver uses that attribute, plus the DEVICE_ADMIN_ENABLED intent-filter)."""
+    """True when a <receiver> is a device-admin receiver: it declares the
+    BIND_DEVICE_ADMIN permission together with an intent-filter (the system binds
+    a DeviceAdminReceiver protected with that permission), OR it declares an
+    intent-filter for the DEVICE_ADMIN_ENABLED action (the canonical device-admin
+    marker). Such an app can install/update system-level certificates. Firing on
+    EITHER signal also catches a device admin that declared the action but omitted
+    the recommended permission attribute, without adding a false positive - both
+    are specific to device-admin receivers."""
+    admin_action = "android.app.action.DEVICE_ADMIN_ENABLED"
     for receiver in root.iter("receiver"):
-        if receiver.find("intent-filter") is None:
-            continue
-        if receiver.get(f"{ANDROID_NS}permission") == "android.permission.BIND_DEVICE_ADMIN":
+        if (receiver.get(f"{ANDROID_NS}permission") == "android.permission.BIND_DEVICE_ADMIN"
+                and receiver.find("intent-filter") is not None):
             return True
+        for action in receiver.iter("action"):
+            if action.get(f"{ANDROID_NS}name") == admin_action:
+                return True
     return False

@@ -121,6 +121,38 @@ def extract_ascii_strings(path: Path, min_len: int = _MIN_STRING_LEN) -> list[st
     return strings
 
 
+def extract_utf16le_strings(path: Path, min_len: int = _MIN_STRING_LEN) -> list[str]:
+    """Recover printable runs stored as UTF-16LE - each Latin character is a
+    printable byte followed by 0x00. The ASCII pass sees such a run as single
+    characters isolated by NULs and drops every one (each is a length-1 run), so a
+    detection idiom stored as a wide string is silently missed entirely (HERM1).
+    This second pass recovers them by walking printable/NUL byte pairs, re-syncing
+    one byte at a time so a run is found at any alignment. Same conservative framing
+    as the ASCII pass and the module as a whole: this only surfaces MORE real
+    literals for idiom matching - `js` coverage still degrades to `partial`
+    (constants, not control flow), never asserting the bundle was fully analyzed."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return []
+    strings: list[str] = []
+    cur = bytearray()
+    i, n = 0, len(data)
+    while i + 1 < n:
+        lo, hi = data[i], data[i + 1]
+        if hi == 0 and 32 <= lo <= 126:
+            cur.append(lo)
+            i += 2
+        else:
+            if len(cur) >= min_len:
+                strings.append(bytes(cur).decode("ascii"))
+            cur.clear()
+            i += 1
+    if len(cur) >= min_len:
+        strings.append(bytes(cur).decode("ascii"))
+    return strings
+
+
 def scan_bundle(path: Path) -> dict:
     """Recover root/SSL idioms from a binary JS bundle.
 
@@ -143,7 +175,11 @@ def scan_bundle(path: Path) -> dict:
     except OSError:
         return {"kind": "opaque", "strings": 0, "matches": []}
     kind = "hermes" if raw.startswith(HERMES_MAGIC) else "binary"
-    strings = extract_ascii_strings(path)
+    # Recover BOTH 1-byte-per-char (ASCII) and UTF-16LE wide strings: a detection
+    # idiom stored as a wide string is invisible to the ASCII pass alone (HERM1),
+    # so scanning only ASCII would silently miss it. Combining both surfaces more
+    # real literals; coverage still degrades to `partial` regardless.
+    strings = extract_ascii_strings(path) + extract_utf16le_strings(path)
     matches: list[tuple[str, str, str]] = []
     for string in strings:
         for sig_id, category, idiom in JS_ROOT_IDIOMS:

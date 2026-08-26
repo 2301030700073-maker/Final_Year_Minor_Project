@@ -119,3 +119,21 @@ def test_scan_bundle_hermes_no_idiom_no_matches(tmp_path):
     res = scan_bundle(p)
     assert res["kind"] == "hermes"
     assert res["matches"] == []
+
+
+def test_scan_bundle_recovers_utf16le_wide_stored_idiom(tmp_path):
+    # HERM1: a detection idiom stored UTF-16LE (each Latin char is a printable byte
+    # then 0x00) is invisible to the ASCII pass - every char is isolated by a NUL
+    # and dropped as a length-1 run. extract_utf16le_strings recovers it, so
+    # scan_bundle matches an idiom the ASCII-only pass would have missed entirely.
+    from static.hermes import extract_utf16le_strings
+    wide = "/system/bin/su".encode("utf-16-le")
+    p = _write_bytes(tmp_path, "wide.bundle", b"\x1f\xbc\x0c\x00" + wide)
+    # the ASCII pass alone recovers nothing usable from the wide-stored token
+    assert "/system/bin/su" not in extract_ascii_strings(p)
+    # the UTF-16LE pass recovers it
+    assert "/system/bin/su" in extract_utf16le_strings(p)
+    # and scan_bundle now matches the root idiom that would otherwise be missed
+    res = scan_bundle(p)
+    assert res["kind"] == "hermes"
+    assert any(mt == "/system/bin/su" for _sid, _cat, mt in res["matches"])

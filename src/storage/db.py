@@ -175,21 +175,36 @@ def _migrate_schema(engine) -> None:
     and every save fails (live-caught: `runs.coverage` added by ADR-0008). This is
     idempotent: we read the real columns via the inspector and ALTER ADD COLUMN
     only those the model declares but the table lacks. No-op on a fresh DB.
+
+    Covers EVERY table the model declares - both `apks` and `runs`, and any table a
+    future phase adds - not just `runs`. `save_metadata` writes an ApkRecord on
+    every ingest (results.py), so a column added to ApkRecord would break saves on
+    a pre-existing DB with exactly the "no such column" failure the coverage column
+    caused on `runs`. The migration owns its own general contract here rather than
+    leaning on the unstated invariant that only RunRecord ever grows
+    (decider-owns-its-guard) - it iterates the model's declared tables instead of
+    hardcoding one. Table CREATION stays create_all's job: a declared table not yet
+    on disk is skipped (this step only ADDs columns/indexes to existing tables, the
+    strictly safe direction), so calling this directly on a partially-built DB
+    (e.g. only `runs` created) never errors on the absent table.
     """
     with engine.begin() as conn:
         insp = inspect(conn)
-        table = RunRecord.__tablename__
-        existing = {c["name"] for c in insp.get_columns(table)}
-        for col in RunRecord.__table__.columns:
-            if col.name in existing:
-                continue
-            col_type = col.type.compile(engine.dialect)
-            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col.name} {col_type}"))
-        # ALTER ADD COLUMN above never creates the indexes a fresh create_all
-        # would (e.g. ix_runs_package_name); a migrated DB would silently miss
-        # them. Create any index the model declares that isn't already present.
-        index_names = {row[1] for row in conn.exec_driver_sql(f"PRAGMA index_list({table})")}
-        for ix in RunRecord.__table__.indexes:
-            if ix.name not in index_names:
-                cols = ", ".join(c.name for c in ix.columns)
-                conn.execute(text(f"CREATE INDEX {ix.name} ON {table} ({cols})"))
+        on_disk = set(insp.get_table_names())
+        for tbl in Base.metadata.sorted_tables:
+            if tbl.name not in on_disk:
+                continue  # create_all owns creation; we only extend existing tables
+            existing = {c["name"] for c in insp.get_columns(tbl.name)}
+            for col in tbl.columns:
+                if col.name in existing:
+                    continue
+                col_type = col.type.compile(engine.dialect)
+                conn.execute(text(f"ALTER TABLE {tbl.name} ADD COLUMN {col.name} {col_type}"))
+            # ALTER ADD COLUMN above never creates the indexes a fresh create_all
+            # would (e.g. ix_runs_package_name); a migrated DB would silently miss
+            # them. Create any index the model declares that isn't already present.
+            index_names = {row[1] for row in conn.exec_driver_sql(f"PRAGMA index_list({tbl.name})")}
+            for ix in tbl.indexes:
+                if ix.name not in index_names:
+                    cols = ", ".join(c.name for c in ix.columns)
+                    conn.execute(text(f"CREATE INDEX {ix.name} ON {tbl.name} ({cols})"))

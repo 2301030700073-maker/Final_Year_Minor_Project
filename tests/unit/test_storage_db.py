@@ -89,3 +89,53 @@ def test_get_engine_migrates_column_added_since_db_was_created(tmp_path):
         row = session.get(RunRecord, "run_migrated")
         assert row is not None
         assert row.coverage == {"java": "partial", "native": "unscannable", "manifest": "fully_analyzed"}
+
+
+def test_get_engine_migrates_apks_columns_added_since_db_was_created(tmp_path):
+    # DB-MIG1 (decider-owns-its-guard, same class as the runs case above): the
+    # migration must repair EVERY declared table, not just `runs`. save_metadata
+    # writes an ApkRecord on every ingest (results.py), so an apks column the model
+    # gained after the original identity table - package_name, certificate_sha256,
+    # the signer flags - is absent on a pre-existing DB and every save_metadata
+    # fails with "no such column: apks.<x>", exactly the failure `runs.coverage`
+    # caused. Build an old-schema apks table (the three columns present at first
+    # write) and confirm get_engine brings it up to the current model and a write
+    # using the added columns round-trips. This FAILS before the fix (migration
+    # only touched `runs`, so the ApkRecord insert raises OperationalError).
+    import sqlite3
+
+    db_path = tmp_path / DB_FILENAME
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE apks (sha256 VARCHAR PRIMARY KEY, first_ingested_at VARCHAR, raw_metadata JSON NOT NULL)")
+    # A minimal runs table too, so get_engine's runs migration is a distinct no-op
+    # from the apks one under test (both tables exist -> create_all creates neither).
+    conn.execute(
+        "CREATE TABLE runs ("
+        "  run_id VARCHAR PRIMARY KEY, apk_sha256 VARCHAR, timestamp VARCHAR,"
+        "  classification_json JSON NOT NULL, stage_results_json JSON NOT NULL)"
+    )
+    conn.commit()
+    conn.close()
+
+    engine = get_engine(tmp_path)
+    apks_cols = {c["name"] for c in inspect(engine).get_columns("apks")}
+    # columns the model declares that the old two-plus-blob identity table lacked
+    assert {"package_name", "certificate_sha256", "signer_v1_verified"} <= apks_cols
+    # the declared index on package_name is created too (ALTER ADD COLUMN wouldn't)
+    apks_indexes = {row[1] for row in engine.raw_connection().cursor()
+                    .execute("PRAGMA index_list(apks)").fetchall()}
+    assert "ix_apks_package_name" in apks_indexes
+
+    with Session(engine) as session:
+        session.add(ApkRecord(
+            sha256="deadbeef", first_ingested_at="2026-01-01T00:00:00", raw_metadata={},
+            package_name="com.example.app", certificate_sha256="cafe", signer_v1_verified=True,
+        ))
+        session.commit()
+
+    with Session(engine) as session:
+        row = session.get(ApkRecord, "deadbeef")
+        assert row is not None
+        assert row.package_name == "com.example.app"
+        assert row.certificate_sha256 == "cafe"
+        assert row.signer_v1_verified is True

@@ -427,6 +427,60 @@ def record_re_attribution(
     return _append_outcome(audit_log_path, record, start)
 
 
+def authorization_for_run(audit_log_path: Path, run_id: str) -> dict | None:
+    """Recover a run's original authorization (operator + justification) from the
+    immutable audit log by run_id, for faithful report regeneration.
+
+    ADR-0005 makes the audit log - not the mutable RunRecord - the authoritative,
+    tamper-evident home of a run's authorization. A report regenerated from stored
+    data (re-attribute -> _regenerate_report) therefore sources its "Authorized by"
+    line here, rather than from a duplicated DB copy that re-attribute itself could
+    drift. Scans the current log AND rotated archives (RESID-2C naming, oldest to
+    newest, same discovery verify_audit_log uses), so a run whose authorization has
+    since rotated out of the live file is still recoverable; the newest matching
+    record wins. Returns {"operator": ..., "justification": ...} for the matching
+    run_authorized event, or None when none is found - a genuinely unrecoverable
+    authorization the caller must disclose explicitly, never omit silently (NFR-1).
+    Never raises: a missing directory or a corrupt line is skipped, mirroring
+    verify_audit_log's "never raises" contract."""
+    if not run_id:
+        return None
+    path = Path(audit_log_path)
+    archive_re = re.compile(re.escape(path.name) + r"\.\d{8}T\d{6}Z$")
+    try:
+        archives = sorted(
+            p for p in path.parent.iterdir()
+            if archive_re.match(p.name) and p.is_file()
+        )
+    except FileNotFoundError:
+        archives = []
+    files = archives + ([path] if path.is_file() else [])
+    found: dict | None = None
+    for file in files:
+        try:
+            with open(file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        # A corrupt line is verify_audit_log's business to flag; here
+                        # it is simply not a recoverable authorization - skip it.
+                        continue
+                    if rec.get("event") == "run_authorized" and rec.get("run_id") == run_id:
+                        # Keep scanning newer files so the most recent authorization
+                        # for this id wins (ids are unique in practice; defensive).
+                        found = {
+                            "operator": rec.get("operator"),
+                            "justification": rec.get("justification"),
+                        }
+        except OSError:
+            continue
+    return found
+
+
 def verify_audit_log(audit_log_path: Path) -> dict:
     """Re-derive the hash chain and report integrity. Returns a dict and never
     raises on corrupt content - it collects every error it finds. Records
@@ -454,9 +508,24 @@ def verify_audit_log(audit_log_path: Path) -> dict:
     # record anchors to the most-recent archive's tail hash, so a deleted
     # archive breaks the chain of the surviving files rather than being silently
     # absent from the scan.
-    archives = sorted(
-        p for p in path.parent.iterdir() if archive_re.match(p.name) and p.is_file()
-    )
+    #
+    # The audit directory may not exist yet: verify run before any analysis has
+    # created outputs/ (OUTPUTS_ROOT is relative, made only on the first append),
+    # or a --audit-log path pointing into a not-yet-existent dir. That is not
+    # corruption - nothing was ever logged - so a missing parent yields no
+    # archives and, with no current file either, falls through to the clean-empty
+    # result below. Catch it rather than let iterdir() raise, honoring this
+    # function's documented "never raises" contract (a missing dir is
+    # indistinguishable from an empty one, which already returns valid-empty; a
+    # fully deleted trail with no retained anchor is undetectable by any
+    # self-contained hash chain either way - an ADR-0005 boundary, not weakened
+    # here).
+    try:
+        archives = sorted(
+            p for p in path.parent.iterdir() if archive_re.match(p.name) and p.is_file()
+        )
+    except FileNotFoundError:
+        archives = []
     if not path.is_file() and not archives:
         return {
             "valid": True, "total": 0, "chained": 0, "legacy": 0,

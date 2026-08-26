@@ -454,7 +454,27 @@ def test_verify_audit_log_empty_when_no_log_and_no_archives(tmp_path):
     assert check["errors"] == []
 
 
-def test_record_authorization_fails_loudly_on_corrupt_log(tmp_path):
+def test_verify_audit_log_clean_empty_when_parent_dir_does_not_exist(tmp_path):
+    # attestation.py verify_audit_log: the sibling test above put the log
+    # directly in tmp_path, whose parent already exists - so it only exercised
+    # "dir exists, no file/archives". The archive scan iterates path.parent, and
+    # that directory legitimately may not exist yet: `verify-audit-log` run before
+    # any analysis has created outputs/ (OUTPUTS_ROOT is relative and made only on
+    # the first append), or a --audit-log path in a not-yet-created dir. Before
+    # the fix, path.parent.iterdir() raised FileNotFoundError - a raw traceback out
+    # of the CLI verify command, contradicting the docstring's "never raises" and
+    # the clean-empty intent (a never-created trail is "nothing logged", not
+    # corruption). It must return the SAME clean-empty result as the sibling case,
+    # not crash.
+    log = tmp_path / "never_created" / "audit.jsonl"
+    assert not log.parent.exists()
+    check = verify_audit_log(log)  # must not raise
+    assert check["valid"] is True
+    assert check["total"] == 0
+    assert check["chained"] == 0
+    assert check["legacy"] == 0
+    assert check["archives_checked"] == 0
+    assert check["errors"] == []
     # attestation.py:226-227: record_authorization on a corrupt log must return
     # a FAILED StageResult, never a raw traceback (RESID-2D). The equivalent
     # corrupt-log path was tested for record_classification but not for the

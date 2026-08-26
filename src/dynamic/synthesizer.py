@@ -991,10 +991,12 @@ class SynthesisResult:
     ssl_hook_count: int = 0
     universal_categories: list[str] = field(default_factory=list)
     # Fix-5: the predefined third-party scripts this bypass is deterministically
-    # matched to, by detected category (e.g. ["universal-robust-advanced-root--ssl-pinning-bypass"]
-    # for an SSL action, because PREDEFINED_SCRIPT_COVERS contains "ssl"). This is
-    # the no-AI predefined-script match for a finding whose technique the hand-
-    # authored recipe catalog does not cover exactly.
+    # matched to, by the action's REQUESTED category (e.g. ["universal-robust-advanced-root--ssl-pinning-bypass"]
+    # for an SSL action, because PREDEFINED_SCRIPT_COVERS contains "ssl"). Gated on
+    # the requested category (wants_root/wants_ssl), NOT on detection: a wanted
+    # category always earns a real universal attempt (see the per-category guards
+    # below), so the predefined script is its no-AI match even for a finding whose
+    # technique the hand-authored recipe catalog does not cover exactly.
     predefined_matched: list[str] = field(default_factory=list)
 
 
@@ -1071,15 +1073,25 @@ def synthesize(classification: ClassificationResult, action: Action) -> Synthesi
             ssl_hooks.append(UNIVERSAL_SSL)
             universal.append("ssl")
 
-    # Nothing specific detected but the action still demands a bypass - use the
-    # category universal so a real attempt happens (the core L-M2 generalization).
-    if not root_hooks and not ssl_hooks:
-        if wants_root:
-            root_hooks.append(UNIVERSAL_ROOT)
-            universal.append("root")
-        if wants_ssl:
-            ssl_hooks.append(UNIVERSAL_SSL)
-            universal.append("ssl")
+    # Every relevant category the action demands gets at least the universal base
+    # so a real attempt always happens (this function's docstring contract / the
+    # core L-M2 generalization). Guarded per-category and independently: a mixed
+    # BOTH action whose evidence populated only one category must still cover the
+    # other, never silently skipping the requested bypass. Under sane thresholds
+    # (>0) the classifier cannot emit a detected category with empty evidence -
+    # confidence is incremented in lockstep with every appended Evidence
+    # (signatures.py, native.py, cli._route_evidence) - so for every reachable
+    # classification each wanted category is already covered by the blocks above
+    # and these guards are no-ops (byte-identical output). They let synthesize
+    # honor its own contract without relying on that cross-module invariant
+    # (decider-owns-its-guard), and only ever ADD a universal attempt - the safe
+    # direction, never suppressing or downgrading a targeted hook.
+    if wants_root and not root_hooks:
+        root_hooks.append(UNIVERSAL_ROOT)
+        universal.append("root")
+    if wants_ssl and not ssl_hooks:
+        ssl_hooks.append(UNIVERSAL_SSL)
+        universal.append("ssl")
 
     all_hooks = evasion_hooks + root_hooks + ssl_hooks
     # Checkpoints for the technology-level "hooks engaged" signal cover BOTH the
@@ -1097,9 +1109,12 @@ def synthesize(classification: ClassificationResult, action: Action) -> Synthesi
     if ssl_hooks and UNIVERSAL_SSL not in ssl_hooks:
         source = source + "\n\n" + _ssl_effect_observer()
 
-    # Fix-5: the predefined script matched to this bypass, by detected category.
-    # A technique the hand-authored catalog does not cover exactly is still
-    # bypassed without AI by the predefined universal for its category.
+    # Fix-5: the predefined script matched to this bypass, by the action's REQUESTED
+    # category (wants_root/wants_ssl below), NOT by detection - a wanted category
+    # always gets a real universal attempt above, so its predefined match holds even
+    # when nothing was detected in it. A technique the hand-authored catalog does not
+    # cover exactly is still bypassed without AI by the predefined universal for its
+    # category.
     predefined_matched = sorted({
         PREDEFINED_SCRIPT_NAME
         for cat in (("root",) if wants_root else ()) + (("ssl",) if wants_ssl else ())

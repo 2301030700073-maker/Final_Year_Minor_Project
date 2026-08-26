@@ -191,7 +191,7 @@ class TechnologyHooksEngagedCheck:
         (a missing tool), never a guessed pass."""
         messages = frida_messages or []
         engaged: list[str] = []
-        probe_hits: list[str] = []
+        root_probe_hits: list[str] = []
         effects: list[str] = []
         for m in messages:
             if not isinstance(m, dict):
@@ -202,8 +202,16 @@ class TechnologyHooksEngagedCheck:
                 if hook and str(hook) not in engaged:
                     engaged.append(str(hook))
                 ph = payload.get("probeHit")
-                if ph:
-                    probe_hits.append(f"{ph}:{payload.get('path', '?')}")
+                # Only a root-VALUED probeHit confirms a ROOT bypass. The
+                # synthesized native envelope emits probeHit:'root' (the app's own
+                # root check answered-false); a future non-root probe recipe
+                # (emulator/debugger) would carry a different value and must NOT
+                # promote root_bypassed - the same probeHit-VALUE precision AG-SC1
+                # established for the AndroGoat check (see androgoat.py's
+                # _ROOT_PROBE_RE). The decider owns this guard here rather than
+                # relying on the synthesizer only ever emitting 'root'.
+                if ph and str(ph) == "root":
+                    root_probe_hits.append(f"{ph}:{payload.get('path', '?')}")
                 eff = payload.get("bypassEffect")
                 if eff and eff not in effects:
                     effects.append(str(eff))
@@ -238,7 +246,7 @@ class TechnologyHooksEngagedCheck:
         # "completion" event: the probeHit itself is the check returning its result.
         # Symmetric in honesty to SSL - it confirms the detected root checks that
         # were actually exercised, which is all either mechanism can claim (ADR-0006).
-        root_confirmed = bool(probe_hits)
+        root_confirmed = bool(root_probe_hits)
         evidence_lines = {
             # Explicit post-bypass liveness (FR-4.6): the app process survived
             # the settle window and did not self-terminate on the injected
@@ -272,7 +280,7 @@ class TechnologyHooksEngagedCheck:
             # Fix-3: the raw probes that drove the confirmation - the app actually
             # probed these root artifacts and was answered-false.
             "root artifact probes answered-false": (
-                ", ".join(dict.fromkeys(probe_hits)) if probe_hits
+                ", ".join(dict.fromkeys(root_probe_hits)) if root_probe_hits
                 else "none observed (no root check reached during the run)"
             ),
             # Fix-1: observable SSL effect - a TLS handshake completed through the

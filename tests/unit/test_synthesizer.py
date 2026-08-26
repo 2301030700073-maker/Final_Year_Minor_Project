@@ -841,3 +841,30 @@ def test_native_root_exec_blocking_blocks_root_binaries_only():
     assert "probeHit" in src
     # per-symbol try/catch so a missing export degrades silently, not a hard fail
     assert "try {" in src
+
+
+def test_both_action_covers_each_relevant_category_independently():
+    # Contract (synthesize docstring / L-M2): every relevant category the action
+    # demands gets at least the universal base so a real attempt always happens.
+    # A BOTH whose evidence populated only ONE category must still cover the other
+    # - never a silent skip of the requested bypass. Unreachable under sane
+    # thresholds >0 (confidence is coupled to evidence, so BOTH implies BOTH
+    # categories carry evidence); this pins synthesize's self-contained guarantee
+    # so it never depends on that cross-module classifier invariant
+    # (decider-owns-its-guard), and only ever ADDS a universal attempt.
+    r = synthesize(_cls(Action.BOTH, root_ids=["root_su_binary_paths"], ssl_ids=[]), Action.BOTH)
+    assert r.ssl_hook_count >= 1 and "ssl" in r.universal_categories
+    assert r.root_hook_count >= 1  # the populated side stays covered
+    r2 = synthesize(_cls(Action.BOTH, root_ids=[], ssl_ids=["okhttp_certificate_pinner"]), Action.BOTH)
+    assert r2.root_hook_count >= 1 and "root" in r2.universal_categories
+    assert r2.ssl_hook_count >= 1
+
+
+def test_single_category_actions_unchanged_by_independent_guards():
+    # Equivalence pin: for every REACHABLE action the per-category blocks already
+    # populate each wanted category, so the independent universal guards are
+    # no-ops. ROOT_ONLY/SSL_ONLY must never leak the other category's hooks.
+    ro = synthesize(_cls(Action.ROOT_ONLY, root_ids=["root_su_binary_paths"]), Action.ROOT_ONLY)
+    assert ro.ssl_hook_count == 0 and "ssl" not in ro.universal_categories
+    so = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["okhttp_certificate_pinner"]), Action.SSL_ONLY)
+    assert so.root_hook_count == 0 and "root" not in so.universal_categories

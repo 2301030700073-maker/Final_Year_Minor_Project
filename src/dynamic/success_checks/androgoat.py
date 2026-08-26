@@ -19,6 +19,8 @@ hook-confirmed result).
 
 from __future__ import annotations
 
+import re
+
 from common import VerificationResult
 
 # The message the bypass script sends from CertificatePinner.check. A hook
@@ -45,18 +47,37 @@ def _pin_hook_fired(frida_log: str) -> bool:
     return False
 
 
+# The synthesized native root envelope emits `send({probeHit: 'root', path: ...})`;
+# cli.py logs each frida message as str(message_dict), so the on-wire form in
+# frida_log is Python-repr - `'probeHit': 'root'`. Match the probeHit VALUE, not a
+# bare "root" substring (AG-SC1): the old `"probeHit" in line and "root" in line`
+# also fired on a line that merely contained both tokens - a frida error/diagnostic
+# naming a probeHit handler and a path under /root, or a probeHit of some OTHER type
+# whose path happens to contain "root" - over-claiming a confirmed root bypass.
+# `['\"]?` on the key tolerates the bare-key JS-object form and the quoted repr/JSON
+# forms; requiring the value quoted on both sides keeps it precise. Tolerating single
+# OR double quotes means a future switch to JSON logging cannot silently turn this
+# into a false negative.
+_ROOT_PROBE_RE = re.compile(r"probeHit['\"]?\s*:\s*['\"]root['\"]")
+
+
 def _root_probe_hit(frida_log: str) -> bool:
     """A root-artifact probe answered-false is the app's own root check being
     defeated - the root counterpart of the pin-hook firing. The synthesized
     native root envelope (loaded alongside the SSL script for an AndroGoat
     BOTH/ROOT run) emits `{probeHit: 'root', path: <su path>}` when it hides a
-    libc access/stat/exec probe, so a line carrying both confirms the root check
-    was exercised AND answered-hidden. On the rooted test device that probe would
-    otherwise return rooted, so the probeHit IS the check being defeated - the
-    same root-confirmation rule the technology-level check applies to unknown
-    targets."""
+    libc access/stat/exec probe, so a line whose probeHit VALUE is 'root' confirms
+    the root check was exercised AND answered-hidden. On the rooted test device
+    that probe would otherwise return rooted, so the probeHit IS the check being
+    defeated - the same root-confirmation rule the technology-level check applies
+    to unknown targets.
+
+    AG-SC1: match the probeHit value precisely (`_ROOT_PROBE_RE`) rather than a
+    loose `"root" in line`, so a non-root probeHit - or an error line that merely
+    mentions "root" - cannot over-claim a confirmed root bypass. Same line-coherent
+    rigor `_pin_hook_fired` applies to the SSL side (RESID-6G)."""
     for line in frida_log.splitlines():
-        if "probeHit" in line and "root" in line:
+        if _ROOT_PROBE_RE.search(line):
             return True
     return False
 

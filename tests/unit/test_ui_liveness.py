@@ -269,3 +269,29 @@ def test_summarize_ui_liveness_renders_signals():
     assert "activity RESUMED:yes" in s
     assert "window focused:not captured" in s
     assert "ANR/frozen-UI:no" in s
+
+
+def test_pidof_failure_is_recorded_not_silent(monkeypatch):
+    # ui_liveness.py:248: pid is a best-effort attribution helper, but a genuine
+    # adb failure resolving it must be RECORDED in _errors (the module's
+    # contract: a failed shell call is surfaced, never a silent absence) - not
+    # swallowed by a bare except. Attribution still falls back to package-only
+    # matching (a supported mode), so no signal is fabricated and the scan still
+    # completes; the failure is simply made visible instead of vanishing.
+    from dynamic import ui_liveness
+    def fake_run(cmd, **kw):
+        if "pidof" in cmd:
+            raise OSError("device offline resolving pid")
+        if "uiautomator" in cmd:
+            return type("R", (), {"stdout": "UI hierchary dumped to: /sdcard/ui_dump.xml"})()
+        if "cat" in cmd:
+            return type("R", (), {"stdout": '<node text="Home" clickable="true"/>'})()
+        if "dumpsys" in cmd or "logcat" in cmd:
+            return type("R", (), {"stdout": ""})()
+        raise AssertionError(cmd)
+    monkeypatch.setattr(ui_liveness.subprocess, "run", fake_run)
+    r = ui_liveness.check_ui_liveness("s", "com.x", adb="adb")
+    assert any("pidof" in e for e in r["_errors"])
+    # the scan still completed with package-only attribution - no signal lost
+    assert r["clickable_nodes"] == 1
+    assert r["anr_detected"] is False

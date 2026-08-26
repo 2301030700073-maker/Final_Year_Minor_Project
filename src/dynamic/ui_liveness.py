@@ -245,8 +245,16 @@ def check_ui_liveness(serial: str, package: str, adb: str | None = None) -> dict
             capture_output=True, text=True, timeout=15,
         ).stdout.strip()
         pid = pid or None
-    except Exception:
+    except Exception as e:
+        # pid is a best-effort attribution helper (SDK-tagged logcat lines that
+        # carry the app's pid but not its package name). A genuine adb failure
+        # resolving it degrades the ANR/TLS scan below to package-only
+        # attribution - a supported, tested fallback that fabricates no signal.
+        # But this module's contract is that a failed shell call is SURFACED
+        # ("not captured"), never a silent absence (see the other four excepts
+        # and the docstring), so record it rather than swallowing it.
         pid = None
+        result["_errors"] = result.get("_errors", []) + [f"pidof: {e}"]
     try:
         out = subprocess.run(
             [adb, "-s", serial, "shell", "logcat", "-d"],

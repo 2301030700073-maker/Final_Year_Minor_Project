@@ -153,6 +153,31 @@ def test_root_confirmed_on_observed_probe_hit():
     assert v3.root_bypassed is None  # engagement alone, no probe observed
 
 
+def test_non_root_probe_hit_does_not_confirm_root():
+    # Decider-owns-its-guard (parallels AG-SC1 for the AndroGoat check): ROOT is
+    # confirmed ONLY by a root-VALUED probeHit. Every probeHit the synthesizer
+    # emits today is 'root', but the confirmation must not RELY on that
+    # cross-module invariant - a probeHit of some OTHER type (a future
+    # emulator/debugger probe recipe) must NOT promote root_bypassed, or an
+    # unrelated probe would silently over-claim a confirmed root bypass. Same
+    # probeHit-VALUE precision androgoat.py's _ROOT_PROBE_RE already enforces.
+    v = TechnologyHooksEngagedCheck().check(
+        [{"type": "send", "payload": {"probeHit": "emulator", "path": "qemu"}}]
+    )
+    assert v.root_bypassed is None  # a non-root probe must not confirm root
+    assert "none observed" in v.evidence_lines["root artifact probes answered-false"]
+    # A root-valued probe alongside a non-root one still confirms root, and the
+    # root-artifact line names ONLY the root probe (the non-root probe is not
+    # mislabeled as a root artifact).
+    v2 = TechnologyHooksEngagedCheck().check([
+        {"type": "send", "payload": {"probeHit": "emulator", "path": "qemu"}},
+        {"type": "send", "payload": {"probeHit": "root", "path": "/sbin/su"}},
+    ])
+    assert v2.root_bypassed is True
+    assert "/sbin/su" in v2.evidence_lines["root artifact probes answered-false"]
+    assert "qemu" not in v2.evidence_lines["root artifact probes answered-false"]
+
+
 def test_ssl_confirmed_only_when_pin_check_and_handshake_both_observed():
     # Fix-1: the app's own Java pin-check ran without rejecting (ssl-pin-check)
     # AND a handshake completed (ssl-handshake) - its pin logic demonstrably

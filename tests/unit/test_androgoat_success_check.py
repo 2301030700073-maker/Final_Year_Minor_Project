@@ -136,3 +136,27 @@ def test_root_probe_hit_confirms_defeated_root_probe():
     assert _root_probe_hit("probeHit fired\nbut not root") is False
     assert _root_probe_hit("no evidence here") is False
     assert _root_probe_hit("") is False
+
+
+def test_root_probe_hit_requires_root_typed_value_not_loose_substring():
+    # AG-SC1: the old check ("probeHit" in line and "root" in line) over-claimed a
+    # confirmed root bypass on ANY line containing both substrings - a frida
+    # error/diagnostic naming a probeHit handler and a /root path, or a probeHit of
+    # a NON-root type whose path merely contains "root". Root confirmation now
+    # requires the probeHit VALUE to be 'root' (the emitter's actual contract).
+    from dynamic.success_checks.androgoat import _root_probe_hit
+    # error line names probeHit and root but is not a root-typed probeHit -> no confirm
+    assert _root_probe_hit(
+        "{'type': 'error', 'description': 'probeHit handler failed for /system/xbin, not root'}"
+    ) is False
+    # a non-root probeHit whose path merely contains 'root' -> no confirm
+    assert _root_probe_hit(
+        "{'probeHit': 'ssl', 'path': '/data/data/com.rootcheck.app/f'}"
+    ) is False
+    # the genuine root-typed probeHit, exactly as cli.py logs it (str(message_dict),
+    # Python-repr single quotes) -> confirm
+    assert _root_probe_hit(
+        "{'type': 'send', 'payload': {'probeHit': 'root', 'path': '/system/bin/su'}}"
+    ) is True
+    # JSON double-quoted form tolerated too (forward-compat) -> confirm
+    assert _root_probe_hit('{"probeHit": "root", "path": "/sbin/su"}') is True

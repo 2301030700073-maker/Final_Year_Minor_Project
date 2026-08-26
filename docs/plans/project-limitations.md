@@ -62,10 +62,16 @@ A single-researcher, deterministic analysis tool that, given an APK: ingests it,
 - **`config/settings.yaml` dead config** (G1) — per-category root/ssl thresholds are now loaded from it; the path/model-routing keys remain unused.
 - **Audit log not tamper-evident** (G15) — records are hash-chained and fsynced, with a `verify-audit-log` command; `outputs/` is gitignored.
 
+**Resolved since the 2026-07-31 review** (in addition to the list above):
+- **Native `.so` scanned; `.smali` scanned; matching widened** (G6, G7) — a wired `native_scan` stage (`cli.py` → `static.native`) analyzes ELF symbols and decompiled bodies; `.smali` is in `SCANNED_SUFFIXES`, and suffix coverage was extended to RN/Hermes JS bundles, Flutter assets, and WebView `.html` containers. Matching is no longer single-line/case-sensitive: `_line_matches` folds case by default (opt-in `case_sensitive` flag) and a multiline whole-text pass complements the per-line scan.
+- **CLI orchestrator tested** (G20) — `run`, `verify-device`, `verify-audit-log`, `calibration-report`, the JSON deserializers, `_finalize_run`, `_load_thresholds`, and `_operator_identity` (the audit-log attestation gate) are covered across `tests/unit/test_cli_*.py` (69 tests).
+- **`run.sh` de-hardcoded** (G21) — the Windows relay path and host IP are env-overridable (`FRIDA_RELAY_WIN_PATH` / `WIN_HOST_IP`) with the reference values as documented defaults, so no personal path is baked into an operational line.
+- **Ground-truth registry** (G17) — `config/ground_truth.yaml` is a maintained, loaded-and-validated registry (`load_ground_truth` + tests), not a diverged/ad-hoc list.
+- **Partial-decompile controls excluded from Tier 2** (G18) — a not-detected verdict on an incompletely-decompiled APK is excluded from precision (`excluded_partial_decompile` counts surfaced in the report), so a decompile miss is never scored as a true negative.
+- **CI for the toolchain-free unit suite** (G22) — `.github/workflows/unit-tests.yml` runs `uv sync --locked` + `uv run pytest tests/unit` (1102 tests) on every push to `main` and every PR. Scoped strictly to the deterministic core; the Android-toolchain / dynamic side is deliberately NOT run in CI (validated on the reference WSL2 environment per ADR-0007 and the testing philosophy), so CI never implies coverage it does not have.
+
 **Still open:**
-- `.smali`/`.so` not scanned (G6, G7); matching is single-line/case-sensitive.
-- CLI orchestrator largely untested (G20); `run.sh` has hardcoded personal paths (G21); no CI (G22).
-- Ground-truth registry diverged / partial-decompile controls excluded (G17, G18).
+- **Signature corpus is a lower bound, by design** (ADR-0006; the residual G7 surface) — 2026 additions closed several items (Play Integrity verdict tokens, RN SSL-pinning libs, Frida/Substrate hook + boot-integrity probes, several packers); detection-shaped code matching no signature is surfaced as coverage-limited (unknown, never a confident negative). This surface is intentionally never "complete."
 
 These are known and documented — **not** hidden. Fixing them is legitimate future work within the deterministic core.
 

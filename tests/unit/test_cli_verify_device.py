@@ -39,6 +39,18 @@ def _patch_deps(monkeypatch, *, present=True, frida_ok=True):
         "cli.device.setup_frida_connection",
         lambda serial: _FakeFridaDevice(frida_ok),
     )
+    # The resolution guard runs between "device present" and the frida check;
+    # stub it to a clean "unset" reading so the existing assertions are
+    # unaffected. Tests that exercise the guard override this per-test.
+    monkeypatch.setattr(
+        "cli.device.screen_resolution_check",
+        lambda serial: {
+            "status": "unset", "detected": "1080x1920", "physical": "1080x1920",
+            "override": None, "expected": None,
+            "message": "screen resolution 1080x1920 (set EXPECTED_AVD_RESOLUTION "
+                       "to lock the known-target coordinate guard)",
+        },
+    )
 
 
 def test_verify_device_ok_reports_ready(monkeypatch):
@@ -98,3 +110,26 @@ def test_verify_device_adb_binary_missing_surfaces_reason_not_traceback(monkeypa
     result = runner.invoke(app, ["verify-device"])
     assert result.exit_code == 1
     assert "Could not run" in result.output and "adb not found" in result.output
+
+
+def test_verify_device_resolution_mismatch_warns_but_does_not_fail(monkeypatch):
+    # G13: a resolution drift from the value the known-target UI coordinates
+    # were validated at must be LOUD at preflight, but it is advisory - it warns
+    # and the otherwise-green preflight still completes (exit 0), because a wrong
+    # AVD size is the operator's to fix, not a reason to block the scan path.
+    _patch_deps(monkeypatch, present=True, frida_ok=True)
+    monkeypatch.setattr(
+        "cli.device.screen_resolution_check",
+        lambda serial: {
+            "status": "mismatch", "detected": "720x1280", "physical": "720x1280",
+            "override": None, "expected": "1080x1920",
+            "message": "screen resolution 720x1280 != expected 1080x1920 - "
+                       "hardcoded known-target UI coordinates were validated at "
+                       "1080x1920 and may not fire at 720x1280",
+        },
+    )
+    result = runner.invoke(app, ["verify-device"])
+    assert result.exit_code == 0, result.output       # advisory: warns, never gates
+    assert "RESOLUTION WARNING" in result.output
+    assert "720x1280" in result.output and "1080x1920" in result.output
+    assert "FRIDA_OK" in result.output                # preflight still completes

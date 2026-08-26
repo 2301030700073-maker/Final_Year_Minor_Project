@@ -9,10 +9,14 @@ from cli import (
     PACKAGE_TO_TARGET,
     _apply_manifest_ssl_signal,
     _canonical_target,
+    _completeness_console_caveat,
     _correlation_from_json,
+    _correlation_skip_reason_for_failed_stage,
     _git_commit_hash,
     _git_last_commit_touching,
+    _halt,
     _load_thresholds,
+    _operator_identity,
     _stage_from_json,
     _wrap_stage,
 )
@@ -626,6 +630,103 @@ def test_manifest_from_json_rebuilds_and_coerces_types():
     assert m2.application_present is True
 
 
+def test_manifest_from_json_roundtrips_security_and_attack_surface_fields():
+    # Regression: _manifest_from_json restored only 7 of 15 fields, silently
+    # dropping package_name, permissions, exported_components, allow_backup,
+    # cleartext_permitted/domains, uses_cleartext_traffic, and pin_set_expirations.
+    # save_run asdicts the FULL ManifestInfo into manifest_json (via
+    # _to_serializable), so those ARE stored - dropping them on regenerate blanked
+    # real attack-surface/SSL-policy facts. Most consequential: an EXPIRED
+    # pin_set_expirations (declared-but-inactive pinning the report MUST flag) and
+    # permissions (whose empty list inverts the INTERNET cross-reference). Build
+    # the blob the way the pipeline does - asdict(ManifestInfo) - so the test
+    # tracks the real serialization instead of a hand-shaped dict that could drift.
+    from dataclasses import asdict
+    from cli import _manifest_from_json
+    from static.manifest import ManifestInfo
+
+    original = ManifestInfo(
+        debuggable=True,
+        network_security_config="@xml/nsc",
+        application_present=True,
+        nsc_file_present=True,
+        stored_certs=2,
+        device_admin=True,
+        resources_complete=True,
+        package_name="com.example.app",
+        uses_cleartext_traffic=True,
+        allow_backup=True,
+        cleartext_permitted=True,
+        cleartext_domains=["insecure.example.com"],
+        pin_set_expirations=["2020-01-01"],  # expired -> inactive pinning, must survive
+        permissions=["android.permission.INTERNET", "android.permission.CAMERA"],
+        exported_components=[{"name": "com.example.app.Exported", "exported": True}],
+    )
+    rebuilt = _manifest_from_json(asdict(original))
+    assert rebuilt == original  # every field round-trips losslessly
+
+
+def test_manifest_from_json_preserves_tristate_unset_vs_false():
+    # allow_backup / cleartext_permitted / uses_cleartext_traffic are bool|None:
+    # the report renders "unset" (None), "no" (False), and "yes" (True)
+    # DIFFERENTLY. A bool() coercion on restore would collapse "unset" into "no",
+    # so these three pass through untouched - False stays False, None stays None.
+    from cli import _manifest_from_json
+
+    false_m = _manifest_from_json({
+        "debuggable": False, "network_security_config": None,
+        "allow_backup": False, "cleartext_permitted": False,
+        "uses_cleartext_traffic": False,
+    })
+    assert false_m.allow_backup is False
+    assert false_m.cleartext_permitted is False
+    assert false_m.uses_cleartext_traffic is False
+    # absent -> None (unset), NOT coerced to False
+    unset_m = _manifest_from_json({"debuggable": False, "network_security_config": None})
+    assert unset_m.allow_backup is None
+    assert unset_m.cleartext_permitted is None
+    assert unset_m.uses_cleartext_traffic is None
+    assert unset_m.permissions == []
+    assert unset_m.pin_set_expirations == []
+
+
+def test_classification_from_json_roundtrips_coverage_caveat_and_provenance():
+    # Regression (ADR-0006, the consequential one): _classification_from_json
+    # dropped unknown_uncovered (the "Coverage-limited (unknown, not absent)"
+    # caveat the report renders at generator.py:103), the per-verdict
+    # coverage_limited flag, evidence_capped_counts (the truncation disclosure),
+    # and per-evidence evidence_type (forensic provenance). Dropping
+    # unknown_uncovered on regenerate made a coverage-bound NEITHER re-render as a
+    # CONFIDENT NEGATIVE - the exact mislabel the field exists to prevent. Build
+    # the blob via asdict + Enum->value so it matches the real save_run store.
+    from dataclasses import asdict
+    from cli import _classification_from_json
+    from common import Action, CategoryVerdict, ClassificationResult, Evidence
+
+    ev = Evidence(
+        signature_id="ROOT-1", file="a/b.smali", line_or_offset=12,
+        matched_text="su", evidence_type="bytecode_string",
+    )
+    original = ClassificationResult(
+        action=Action.NEITHER,
+        root=CategoryVerdict(confidence=0.0, detected=False, evidence=[ev], coverage_limited=True),
+        ssl=CategoryVerdict(confidence=0.0, detected=False, evidence=[], coverage_limited=True),
+        unknown_uncovered=["root", "ssl"],
+        evidence_capped_counts={"ROOT-1": 300},
+    )
+    blob = asdict(original)
+    blob["action"] = original.action.value  # mirror _to_serializable's Enum->value
+    rebuilt = _classification_from_json(blob)
+    # the caveat-critical fields survive - a coverage-limited NEITHER stays one
+    assert rebuilt.unknown_uncovered == ["root", "ssl"]
+    assert rebuilt.root.coverage_limited is True
+    assert rebuilt.ssl.coverage_limited is True
+    assert rebuilt.evidence_capped_counts == {"ROOT-1": 300}
+    assert rebuilt.root.evidence[0].evidence_type == "bytecode_string"
+    # full-object equality proves nothing else drifted on the round-trip either
+    assert rebuilt == original
+
+
 def test_print_stage_renders_status_icon_and_error(capsys):
     # _print_stage: the status->icon mapping (success OK / failed FAILED /
     # skipped SKIPPED) plus the conditional red error line drove the run's
@@ -649,3 +750,131 @@ def test_print_stage_renders_status_icon_and_error(capsys):
     _print_stage(StageResult(stage="dynamic", status="skipped", evidence={}, duration_ms=0))
     out = capsys.readouterr().out
     assert "SKIPPED" in out and "FAILED" not in out
+
+
+# ── G20: _operator_identity — the audit log's "who ran it" attestation ──
+# ADR-0005 / NFR-1 / principle 7: a dual-use tool must record a VERIFIABLE
+# operator or halt; it must never silently log a spoofable blank. This function
+# was untested despite being the sole gate on that guarantee.
+
+def test_operator_identity_prefers_explicit_env(monkeypatch):
+    # An explicit ANALYSIS_OPERATOR short-circuits before git is ever consulted.
+    calls = []
+    def fake_run(cmd, capture_output=None, text=None, check=None):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="SHOULD-NOT-BE-USED\n", stderr="")
+    monkeypatch.setattr("cli.subprocess.run", fake_run)
+    monkeypatch.setenv("ANALYSIS_OPERATOR", "alice@team")
+
+    assert _operator_identity() == "alice@team"
+    assert calls == []  # git was never consulted - env short-circuits
+
+
+def test_operator_identity_falls_back_to_git_config(monkeypatch):
+    monkeypatch.delenv("ANALYSIS_OPERATOR", raising=False)
+    def fake_run(cmd, capture_output=None, text=None, check=None):
+        assert cmd == ["git", "config", "user.name"]
+        return subprocess.CompletedProcess(cmd, 0, stdout="Bob Builder\n", stderr="")
+    monkeypatch.setattr("cli.subprocess.run", fake_run)
+
+    assert _operator_identity() == "Bob Builder"
+
+
+def test_operator_identity_empty_env_is_not_a_valid_attestation(monkeypatch):
+    # An empty ANALYSIS_OPERATOR is falsy - it must NOT be accepted as identity;
+    # the function falls through to git rather than logging a blank operator.
+    monkeypatch.setenv("ANALYSIS_OPERATOR", "")
+    def fake_run(cmd, capture_output=None, text=None, check=None):
+        return subprocess.CompletedProcess(cmd, 0, stdout="Git Fallback\n", stderr="")
+    monkeypatch.setattr("cli.subprocess.run", fake_run)
+
+    assert _operator_identity() == "Git Fallback"
+
+
+def test_operator_identity_halts_loudly_when_unresolvable(monkeypatch):
+    # Neither env nor git resolves -> RuntimeError, NOT a silent "unknown".
+    monkeypatch.delenv("ANALYSIS_OPERATOR", raising=False)
+    def fake_run(cmd, capture_output=None, text=None, check=None):
+        raise subprocess.CalledProcessError(1, cmd)
+    monkeypatch.setattr("cli.subprocess.run", fake_run)
+
+    with pytest.raises(RuntimeError) as exc:
+        _operator_identity()
+    assert "ANALYSIS_OPERATOR" in str(exc.value)
+
+
+def test_operator_identity_halts_when_git_name_is_blank(monkeypatch):
+    # git config succeeds but returns an empty name (a real unconfigured state):
+    # a blank is not a verifiable operator, so it must halt, not return "".
+    monkeypatch.delenv("ANALYSIS_OPERATOR", raising=False)
+    def fake_run(cmd, capture_output=None, text=None, check=None):
+        return subprocess.CompletedProcess(cmd, 0, stdout="\n", stderr="")
+    monkeypatch.setattr("cli.subprocess.run", fake_run)
+
+    with pytest.raises(RuntimeError):
+        _operator_identity()
+
+
+def test_halt_exits_nonzero_loudly():
+    # The pipeline's loud-failure contract: _halt raises a non-zero typer.Exit
+    # (never returns to let a failed run continue). Exercised indirectly by every
+    # e2e failure path; asserted directly here.
+    with pytest.raises(typer.Exit) as exc:
+        _halt([])
+    assert exc.value.exit_code == 1
+
+
+def test_completeness_console_caveat_names_both_lower_bound_states():
+    # Console<->report parity: the live console must mirror the report's
+    # decompile-completeness caveat for BOTH lower-bound states, not just `partial`.
+    # `unknown` is reachable live (cli.py's `.get("decompile_completeness","unknown")`
+    # default; a reused decompile whose completeness sidecar could not be read,
+    # DECCMT-UNKNOWN1) and was previously unnamed on the console while the report named
+    # it. The lower-bound consequence was already surfaced (unknown -> java unscannable
+    # -> the coverage-limited line), so this is a parity/disclosure fix, not a
+    # correctness hole - hence: partial and unknown BOTH yield a lower-bound caveat,
+    # complete yields NONE (never a false lower-bound claim over a full scan).
+    partial = _completeness_console_caveat("partial", 1563, 1)
+    assert partial is not None
+    assert "PARTIAL decompile" in partial
+    assert "1563 files" in partial and "jadx exit 1" in partial
+    assert "lower bound, not a confident negative" in partial
+
+    unknown = _completeness_console_caveat("unknown", None, None)
+    assert unknown is not None
+    assert "completeness could not be determined" in unknown
+    assert "lower bound, not a confident negative" in unknown
+
+    # A complete decompile gets no caveat (parity with the report, which prints a
+    # positive line, not a CAUTION) - and never a false lower-bound claim.
+    assert _completeness_console_caveat("complete", 9000, 0) is None
+
+
+def test_correlation_skip_reason_for_failed_stage_names_failure_never_claims_skipped():
+    # not-attempted != skipped: a FAILED dynamic stage (early setup/install/exception
+    # paths) leaves correlation_skip_reason None, so the report's correlation fallback
+    # would falsely print "dynamic stage skipped". The guard names the honest reason for
+    # a failed stage, preserves any more-specific reason already set, and returns None
+    # for a non-failed stage so the genuine-skip fallback stays reserved for real skips.
+    failed = _correlation_skip_reason_for_failed_stage(
+        None, "failed", "dynamic setup failed before the app could run"
+    )
+    assert failed is not None
+    assert "dynamic stage failed" in failed
+    assert "dynamic setup failed before the app could run" in failed
+    assert "no verification to correlate" in failed
+    # a more-specific reason already set by a success-branch path is preserved verbatim
+    assert (
+        _correlation_skip_reason_for_failed_stage(
+            "logcat capture failed - no verification to correlate against", "failed", "x"
+        )
+        == "logcat capture failed - no verification to correlate against"
+    )
+    # a genuine skip (status "skipped") is NOT relabeled - stays None so the template
+    # else ("dynamic stage skipped") remains reserved for actual skips
+    assert _correlation_skip_reason_for_failed_stage(None, "skipped", "--skip-dynamic passed") is None
+    # a successful stage with no reason set also stays None
+    assert _correlation_skip_reason_for_failed_stage(None, "success", None) is None
+    # failed stage with no reason string still names the failure (no crash on None)
+    fallback = _correlation_skip_reason_for_failed_stage(None, "failed", None)
+    assert fallback is not None and "see stage status" in fallback

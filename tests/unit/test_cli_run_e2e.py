@@ -135,6 +135,168 @@ def test_run_skips_dynamic_and_writes_coverage_bounded_report(run_setup, monkeyp
     assert "upper bound" in text
 
 
+def test_run_audits_metadata_lookup_db_lock_before_halting(run_setup, monkeypatch):
+    """PREP-AUDIT1: compute_hashes + the FR-1.3 reuse lookup (existing_metadata,
+    a SQLite read) run after the normalize guard but before record_authorization.
+    A concurrent run can make that read raise 'database is locked', which must be
+    recorded as a failed input-stage attempt (ADR-0005), not crash untraceably.
+    Because compute_hashes already ran, the recorded event must carry the REAL
+    hash (not None, unlike the normalize-failure case). Pre-fix the exception
+    propagated as a bare crash with zero audit trail (no typer.Exit, spy uncalled)."""
+    import typer
+
+    def _boom(root, h):
+        raise Exception("database is locked")
+
+    monkeypatch.setattr(cli, "existing_metadata", _boom)
+
+    recorded = []
+
+    def _spy(**kwargs):
+        recorded.append(kwargs)
+        return cli.StageResult(stage="ingest_failed", status="success", evidence={})
+
+    monkeypatch.setattr(cli, "record_ingest_failure", _spy)
+
+    with pytest.raises(typer.Exit):
+        cli.run(
+            apk=run_setup / "fixture.apk",
+            justification="ACADEMIC_TRAINING_TARGET",
+            skip_dynamic=True,
+            capture_traffic=False,
+            device_serial=None,
+            target="uncrackable1",
+        )
+
+    assert len(recorded) == 1
+    # compute_hashes ran before the failing lookup, so the real hash is captured
+    assert recorded[0]["apk_hash"] == "e2e" + "0" * 60
+    assert "database is locked" in recorded[0]["error"]
+    # no report written for a halted pre-audit attempt
+    assert not sorted((run_setup / "reports").rglob("*.md"))
+
+
+def test_run_audits_metadata_persist_db_lock_before_halting(run_setup, monkeypatch):
+    """SAVEMETA-AUDIT1: save_metadata is a DB-backed write running one stage past
+    PREP-AUDIT1's guarded existing_metadata READ, still BEFORE record_authorization
+    writes the run's first audit event. A concurrent run makes that write raise
+    'database is locked' (OperationalError). Pre-fix that crashed a
+    justification-validated attempt with ZERO audit trail (the raise propagated as
+    a bare Exception, not a typer.Exit, and nothing was recorded). It must instead
+    be recorded as a failed input-stage attempt (ADR-0005) carrying the REAL hash
+    (not None), and halt with no report written."""
+    import typer
+
+    def _boom(*args, **kwargs):
+        raise Exception("database is locked")
+
+    monkeypatch.setattr(cli, "save_metadata", _boom)
+
+    recorded = []
+
+    def _spy(**kwargs):
+        recorded.append(kwargs)
+        return cli.StageResult(stage="ingest_failed", status="success", evidence={})
+
+    monkeypatch.setattr(cli, "record_ingest_failure", _spy)
+
+    with pytest.raises(typer.Exit):
+        cli.run(
+            apk=run_setup / "fixture.apk",
+            justification="ACADEMIC_TRAINING_TARGET",
+            skip_dynamic=True,
+            capture_traffic=False,
+            device_serial=None,
+            target="uncrackable1",
+        )
+
+    # exactly one failed-attempt event, carrying the REAL hash (not None)
+    assert len(recorded) == 1
+    assert recorded[0]["apk_hash"] == "e2e" + "0" * 60
+    assert "database is locked" in recorded[0]["error"]
+    # no report written for a halted pre-audit attempt
+    assert not sorted((run_setup / "reports").rglob("*.md"))
+
+
+def test_run_degrades_when_mapping_file_unreadable(run_setup, monkeypatch):
+    """DEOBF-GUARD1: the R8 mapping load is an additive best-effort enhancement
+    whose documented failure mode is mapping=None -> scan the original text. But
+    read_text still raises on a mapping.txt find_mapping_file saw as a file yet is
+    unreadable (mode 000 / another owner) or that vanished in the TOCTOU window.
+    An uncaught OSError there crashed the whole run AFTER decompile+audit+
+    signature-load succeeded, discarding that work over a lost recall bonus. It
+    must degrade to mapping=None with a yellow warning and still produce the
+    report, matching the sibling androguard/string-recovery enhancements. Pre-fix
+    the run raised FileNotFoundError and wrote no report."""
+    gone = run_setup / "gone-mapping.txt"  # never created -> read_text raises
+    monkeypatch.setattr(cli, "find_mapping_file", lambda roots: gone)
+
+    captured = []
+    original_print = cli.console.print
+    cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
+    try:
+        cli.run(
+            apk=run_setup / "fixture.apk",
+            justification="ACADEMIC_TRAINING_TARGET",
+            skip_dynamic=True,
+            capture_traffic=False,
+            device_serial=None,
+            target="uncrackable1",
+        )
+    finally:
+        cli.console.print = original_print
+
+    # degraded, not crashed: the report was still written...
+    report_files = sorted((run_setup / "reports").rglob("*.md"))
+    assert report_files, "run crashed on the unreadable mapping instead of degrading"
+    # ...and the degradation was announced loudly, not silently swallowed
+    assert any("deobfuscation skipped" in c for c in captured)
+
+
+def test_run_audits_input_normalization_failure_before_halting(run_setup, monkeypatch):
+    # NORM-AUDIT1: normalize_input runs one line before the ingest-failure audit
+    # handler and fails loudly by design on a malformed AAB / non-APK zip / empty
+    # split dir. Pre-fix an uncaught raise there crashed with only a stderr
+    # traceback and left ZERO audit trail - unlike the ingest failure six lines
+    # later, which records record_ingest_failure (ADR-0005: every authorized
+    # analysis ATTEMPT must be traceable). The justification is already validated
+    # when normalize runs, so a normalize failure IS an authorized attempt and
+    # must be audited the same way. This pins that a normalize failure (a) records
+    # a failed input-stage event carrying the real error and (b) halts via
+    # typer.Exit - never a raw ValueError with no record. Pre-fix both assertions
+    # fail: the ValueError propagates (not typer.Exit) and the spy is never called.
+    import typer
+
+    def _boom(apk, out):
+        raise ValueError("input is a zip but neither an APK nor an AAB")
+
+    monkeypatch.setattr(cli, "normalize_input", _boom)
+
+    recorded = []
+
+    def _spy(**kw):
+        recorded.append(kw)
+        return cli.StageResult(stage="ingest_failed", status="success", evidence={})
+
+    monkeypatch.setattr(cli, "record_ingest_failure", _spy)
+
+    with pytest.raises(typer.Exit):
+        cli.run(
+            apk=run_setup / "fixture.apk",
+            justification="ACADEMIC_TRAINING_TARGET",
+            skip_dynamic=True,
+            capture_traffic=False,
+            device_serial=None,
+            target="uncrackable1",
+        )
+
+    # the failed attempt was audited exactly once, carrying the normalize error
+    assert len(recorded) == 1
+    assert "neither an APK nor an AAB" in recorded[0]["error"]
+    # halted at the input stage: no report was written (ingest never ran)
+    assert not sorted((run_setup / "reports").rglob("*.md"))
+
+
 def test_install_failure_preserves_static_report_and_exits_nonzero(run_setup, monkeypatch):
     # FR-4.2 / GAP-2 on the install path: an arbitrary real-world app that fails
     # to install (ABI/signature/minSdk/storage) used to _halt and discard the

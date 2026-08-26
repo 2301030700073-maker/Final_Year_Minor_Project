@@ -35,6 +35,7 @@ from audit.attestation import (
     record_run_completion,
     record_re_attribution,
     verify_audit_log,
+    authorization_for_run,
 )
 from calibration.ground_truth import DEFAULT_PATH as DEFAULT_GROUND_TRUTH_PATH
 from calibration.ground_truth import load_ground_truth
@@ -395,6 +396,128 @@ def _merge_js_evidence(static_evidence, js_matches) -> int:
     return added
 
 
+def _scan_binary_bundles(roots):
+    """HERM2: recover binary JS bundles across the SAME roots the text signature
+    engine scans (static_roots = jadx + apktool + optional cfr), not just
+    assets/.
+
+    A Hermes/`.hbc`/`.bundle` blob can ship under `res/raw/` (or any decoded
+    resource dir), not only `assets/`. The text engine skips it everywhere (the
+    `signatures._is_binary` NUL probe), so scanning binary bundles under `assets/`
+    ALONE left a bundle placed elsewhere unread by BOTH engines - `has_binary_bundle`
+    stayed False and `js` read `fully_analyzed`, certifying a confident negative
+    over root/SSL logic we never looked at (ADR-0006). Mirroring the text engine's
+    root list closes that asymmetry: the binary path now covers exactly what the
+    text path covers, differing only in handling the binary files the text probe
+    skips.
+
+    `is_bundle_candidate` (suffix) + `is_binary_bundle` (NUL probe) still gate
+    every file, so widening the walk only ever surfaces MORE real binary bundles:
+    a plain-text `.js` is `is_binary_bundle == False` -> left to the text engine
+    (never double-counted), and a non-bundle resource (`.png`, `.arsc`) fails the
+    suffix gate. Only actual bundle-suffixed files are ever opened, so the wider
+    walk adds negligible cost. Returns `(has_binary_bundle, js_matches)` where each
+    match is `(sig_id, category, matched_text, file)`. Module-level + pure-ish
+    (filesystem read only) so the walk scope is unit-testable without the pipeline."""
+    has_binary_bundle = False
+    js_matches: list[tuple[str, str, str, str]] = []
+    for root in roots:
+        if root is None:
+            continue
+        root_path = Path(root)
+        if not root_path.is_dir():
+            continue
+        for bundle in root_path.rglob("*"):
+            if not is_bundle_candidate(bundle) or not is_binary_bundle(bundle):
+                continue
+            res = scan_bundle(bundle)
+            # HERM2-GUARD1 (own-your-guard): degrade `js` for ANY bundle scan_bundle
+            # did not classify as plain-text, rather than trusting a hardcoded list
+            # of binary kinds. scan_bundle returns "plain" ONLY when is_binary_bundle
+            # is False, and the gate above already excluded those, so every result
+            # here is a recovered-constants-only binary bundle and js MUST read
+            # partial. `!= "plain"` keeps this correct if scan_bundle ever grows a
+            # new binary kind - a hardcoded ("hermes","binary","opaque") would then
+            # silently under-report has_binary_bundle -> js falsely fully_analyzed ->
+            # a confident negative over an unread bundle (ADR-0006). Zero behavior
+            # change today (plain is unreachable past the gate); this closes the
+            # cross-module coupling so the decider owns its own contract.
+            has_binary_bundle = has_binary_bundle or res["kind"] != "plain"
+            for sig_id, category, matched_text in res["matches"]:
+                js_matches.append((sig_id, category, matched_text, str(bundle)))
+    return has_binary_bundle, js_matches
+
+
+def _full_java_corpus(roots):
+    """The decompiled-Java corpus across every decompiler root the completeness
+    metric counts as COVERED: jadx_output AND the CFR fallback recovery
+    (cfr_output).
+
+    DYNCOV1: `_jadx_covered` (decompile.py) credits CFR recovery toward a
+    `complete` completeness label on the whole-APK path - jadx can exit non-zero,
+    CFR rescue re-reads the APK, and completeness reads `complete` → java
+    `fully_analyzed`. The signature engine already scans cfr_output (cli appends
+    `fallback_output` to `static_roots`), so the dynload / webview
+    coverage-degradation scans that gate the confident-negative decision MUST see
+    it too. Otherwise a `DexClassLoader` or a remote `loadUrl` in a class jadx
+    FAILED on but CFR RECOVERED is missed, `has_remote_js`/`dynamic_loads` stay
+    empty, and java stays `fully_analyzed` - a confident negative over code the
+    completeness metric already counted as read (ADR-0006).
+
+    Deduped by class-relative path because a whole-APK CFR rescue re-reads classes
+    jadx already wrote; on a collision the LARGER file wins so a truncated jadx
+    stub never shadows CFR's fuller recovery (recall-safe). Widening the corpus is
+    purely conservative: it can only ADD a load/remote-JS hit → java partial,
+    never remove one. A `stat` is taken only on an actual path collision (the rare
+    rescue case), so the common no-fallback path pays nothing extra."""
+    best: dict[str, Path] = {}
+    for root in roots:
+        if not root:
+            continue
+        rp = Path(root)
+        if not rp.is_dir():
+            continue
+        for f in rp.rglob("*.java"):
+            rel = f.relative_to(rp).as_posix()
+            cur = best.get(rel)
+            if cur is None:
+                best[rel] = f
+                continue
+            try:
+                if f.stat().st_size > cur.stat().st_size:
+                    best[rel] = f
+            except OSError:
+                pass  # keep the first-seen copy if the newer one is unreadable
+    return list(best.values())
+
+
+_OBF_ORDER = {"clear": 0, "light": 1, "heavy": 2}
+
+
+def _max_obfuscation(a, b):
+    """Return the MORE-SEVERE of two obfuscation levels (clear < light < heavy)."""
+    return a if _OBF_ORDER[a] >= _OBF_ORDER[b] else b
+
+
+def _obfuscation_level_over_corpus(jadx_output, cfr_output):
+    """DYNCOV1 (obfuscation half): read obfuscation over BOTH the jadx-only corpus
+    and the full jadx+CFR corpus, returning the more-severe.
+
+    `_jadx_covered` credits the CFR recovery toward a `complete` completeness label,
+    so string-encryption OR heavy minification in a class jadx failed on but CFR
+    recovered must be able to force java→partial - otherwise it certifies
+    `fully_analyzed` over hidden literals / obfuscated detection code (ADR-0006).
+    `_any_string_encryption` is a monotonic existence check and benefits directly
+    from the wider corpus. But `_minified_name_ratio` is a RATIO, not monotonic
+    under corpus widening: CFR's extra classes could in principle dilute a heavy
+    reading downward. So we FLOOR the wider reading at the jadx-only reading - the
+    CFR classes can only ever RAISE the level, never dilute it. Conservative in the
+    one safe direction (more partial), never sharpening a negative."""
+    jadx_level = detect_obfuscation_level(_full_java_corpus([jadx_output]))
+    full_level = detect_obfuscation_level(_full_java_corpus([jadx_output, cfr_output]))
+    return _max_obfuscation(jadx_level, full_level)
+
+
 def _apply_manifest_ssl_signal(static_evidence, manifest_info) -> None:
     """Record a declared android:networkSecurityConfig as SSL evidence so the
     report can show it (5-1) - but give it no confidence weight. A bare
@@ -490,6 +613,69 @@ def _print_stage(result: StageResult) -> None:
     console.print(f"{icon}  {result.stage}  ({result.duration_ms}ms)")
     if result.error:
         console.print(f"    [red]{result.error}[/red]")
+
+
+def _completeness_console_caveat(
+    completeness: str, jadx_file_count, jadx_exit_code
+) -> str | None:
+    """Live-console mirror of the report's decompile-completeness caveat
+    (generator.py Limitations block). Returns the CAUTION line for a lower-bound
+    decompile state, or None for a complete decompile (no caveat, like the report).
+
+    L-M7 mirrored only the `partial` state to the console; `unknown` (missing or
+    unreadable completeness record, reachable on the LIVE path via cli.py's
+    `.get("decompile_completeness", "unknown")` default and via a reused decompile
+    whose sidecar could not be read, DECCMT-UNKNOWN1) was left unnamed on the
+    console even though the report carried a dedicated caveat for it. The lower-bound
+    CONSEQUENCE was already surfaced live (unknown -> java `unscannable` -> the
+    coverage-limited line), so nothing false printed - but the specific cause went
+    unnamed, breaking the stated console<->report parity (the report carries it, the
+    console must too). Extending the mirror to `unknown` closes that parity gap in the
+    safe direction (more disclosure), reversing nothing."""
+    if completeness == "partial":
+        return (
+            f"[bold red]CAUTION: based on a PARTIAL decompile "
+            f"({jadx_file_count} files, jadx exit {jadx_exit_code}) - "
+            "a NEITHER here is a lower bound, not a confident negative; see Limitations.[/bold red]"
+        )
+    if completeness == "unknown":
+        return (
+            "[bold red]CAUTION: decompile completeness could not be determined "
+            "(missing or unreadable completeness record from a cached run) - treat any "
+            "NEITHER/Inconclusive verdict as a lower bound, not a confident negative; "
+            "see Limitations.[/bold red]"
+        )
+    return None
+
+
+def _correlation_skip_reason_for_failed_stage(
+    existing: str | None, dynamic_status: str, dynamic_reason: str | None
+) -> str | None:
+    """not-attempted != skipped: name the honest reason a FAILED dynamic stage left
+    no verification to correlate, so the report's correlation fallback does not print
+    the generic "dynamic stage skipped" - a false statement, the stage failed, it did
+    not skip.
+
+    The three early dynamic-failure paths (setup failed, install-verify failed,
+    unexpected dynamic-stage exception) fail BEFORE the success branch, so none of the
+    success-branch `correlation_skip_reason` assignments (logcat-fail, check-raised,
+    unknown-target tech check) ever run - leaving `correlation_skip_reason` None and the
+    template falling through to the plain else ("dynamic stage skipped"). That else is
+    correct only for a genuine skip (--skip-dynamic / NEITHER classification, where the
+    stage status is "skipped"); for a "failed" status it is a false cause.
+
+    Decider-owns-its-guard: this single centralized guard covers every failed path at
+    once (rather than editing each failure site and risking one drifting), preserves any
+    more-specific reason a caller already set, and returns None for a non-failed stage so
+    the genuine-skip fallback stays reserved for actual skips."""
+    if existing is not None:
+        return existing
+    if dynamic_status == "failed":
+        return (
+            f"dynamic stage failed ({dynamic_reason or 'see stage status'}) "
+            "- no verification to correlate"
+        )
+    return None
 
 
 def _wrap_stage(stage_name: str, fn, *args, **kwargs):
@@ -657,9 +843,77 @@ def run(
     # hashing we synthesize a single root-level APK (pure zipfile, no new toolchain).
     # The normalized APK is what gets hashed -> the output dir keys to the content
     # actually analyzed, and every downstream reader stays unchanged.
-    apk = normalize_input(apk, ANALYSIS_ROOT / "normalized")
-    prehashed = compute_hashes(apk)
-    existing = existing_metadata(ANALYSIS_ROOT, prehashed.sha256)
+    try:
+        apk = normalize_input(apk, ANALYSIS_ROOT / "normalized")
+    except Exception as exc:
+        # ADR-0005 parity with the failed-ingest handler below. Normalization is
+        # the input stage feeding ingest and fails loudly by design on a malformed
+        # AAB / non-APK zip / empty split dir - but it runs one line before the
+        # ingest-failure audit path, so an uncaught raise here would crash with
+        # only an ephemeral stderr traceback and leave ZERO audit trail. The
+        # justification is already validated (above) and operator/git_commit are
+        # set, so a normalize failure is an authorized analysis ATTEMPT that must
+        # be traceable, exactly like the failed ingest six lines down. Mirror that
+        # path: record a failed input-stage event (no APK hash yet - normalize
+        # failed before hashing, and a split-dir input has no single hash;
+        # record_ingest_failure takes apk_hash=None), surface a failed StageResult,
+        # and halt. Additive traceability only - it still halts nonzero, never
+        # masking the failure.
+        norm_result = StageResult(
+            stage="normalize", status="failed", evidence={},
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        stage_results.append(norm_result)
+        _print_stage(norm_result)
+        logged = record_ingest_failure(
+            audit_log_path=AUDIT_LOG_PATH,
+            apk_hash=None,
+            justification=justification,
+            operator=operator,
+            git_commit=git_commit,
+            error=norm_result.error or "input normalization failed",
+        )
+        if logged.status == "failed":
+            console.print(
+                "[bold red]WARNING: could not append the input-failure event - the "
+                "audit log appears corrupt, so this failed attempt may be "
+                "untraceable.[/bold red]"
+            )
+        _halt(stage_results)
+    # PREP-AUDIT1: hashing and the FR-1.3 reuse lookup also run before
+    # record_authorization. compute_hashes can raise on an IO/TOCTOU error, and
+    # existing_metadata opens the SQLite store where a concurrent run can hit
+    # "database is locked" (an OperationalError) - either would crash in the
+    # one-line gap between the normalize guard above and the ingest-failure
+    # handler below with ZERO audit trail, the same ADR-0005 hole NORM-AUDIT1
+    # closed for normalize. Mirror that path: record the real hash if it was
+    # already computed (else None), surface a failed StageResult, and halt.
+    prehashed = None
+    try:
+        prehashed = compute_hashes(apk)
+        existing = existing_metadata(ANALYSIS_ROOT, prehashed.sha256)
+    except Exception as exc:
+        prep_result = StageResult(
+            stage="input-prep", status="failed", evidence={},
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        stage_results.append(prep_result)
+        _print_stage(prep_result)
+        logged = record_ingest_failure(
+            audit_log_path=AUDIT_LOG_PATH,
+            apk_hash=prehashed.sha256 if prehashed else None,
+            justification=justification,
+            operator=operator,
+            git_commit=git_commit,
+            error=prep_result.error or "input preparation failed",
+        )
+        if logged.status == "failed":
+            console.print(
+                "[bold red]WARNING: could not append the input-prep-failure event - "
+                "the audit log appears corrupt, so this failed attempt may be "
+                "untraceable.[/bold red]"
+            )
+        _halt(stage_results)
     ingest_result = ingest(apk, reuse_metadata=existing, precomputed_hashes=prehashed)
     stage_results.append(ingest_result)
     _print_stage(ingest_result)
@@ -688,7 +942,45 @@ def run(
         _halt(stage_results)
 
     apk_hash = ingest_result.evidence["hashes"]["sha256"]
-    save_metadata(ANALYSIS_ROOT, apk_hash, ingest_result.evidence)
+    # SAVEMETA-AUDIT1: save_metadata is the LAST unguarded operation before
+    # record_authorization (885) writes the first audit event of the run. It is a
+    # DB-backed SQLite write (storage/results.py, session.merge) into the SAME
+    # store existing_metadata reads - PREP-AUDIT1 guarded that READ one stage up
+    # but not this WRITE, which takes an exclusive lock and so is at least as
+    # exposed to a concurrent run's "database is locked" (OperationalError). A
+    # raise here crashed a justification-validated attempt in the window between
+    # the ingest handler and the authorization record with ZERO audit trail
+    # (record_authorization, the first success-path audit event, hasn't run yet),
+    # the exact NORM/PREP-AUDIT1 hole one stage further down than PREP-AUDIT1
+    # swept - and its own note said to sweep EVERY pre-auth stage. Mirror that
+    # path: surface a failed StageResult, record the failed attempt with the REAL
+    # hash (apk_hash is known here), and halt.
+    try:
+        save_metadata(ANALYSIS_ROOT, apk_hash, ingest_result.evidence)
+    except Exception as exc:
+        save_meta_result = StageResult(
+            stage="metadata-persist",
+            status="failed",
+            evidence={},
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        stage_results.append(save_meta_result)
+        _print_stage(save_meta_result)
+        logged = record_ingest_failure(
+            audit_log_path=AUDIT_LOG_PATH,
+            apk_hash=apk_hash,
+            justification=justification,
+            operator=operator,
+            git_commit=git_commit,
+            error=save_meta_result.error or "metadata persistence failed",
+        )
+        if logged.status == "failed":
+            console.print(
+                "[bold red]WARNING: could not append the metadata-persist-failure event - "
+                "the audit log appears corrupt, so this failed attempt may be "
+                "untraceable.[/bold red]"
+            )
+        _halt(stage_results)
 
     # App-agnostic target resolution. With --target omitted, the real package is
     # now known from ingest - resolve the augmentation target from it so ANY apk
@@ -764,7 +1056,24 @@ def run(
     mapping = None
     mapping_path = find_mapping_file(static_roots)
     if mapping_path is not None:
-        mapping = parse_mapping(mapping_path.read_text(encoding="utf-8", errors="replace"))
+        # DEOBF-GUARD1: this is an additive best-effort enhancement (see comment
+        # above) whose documented failure mode is mapping=None -> scan the original
+        # text unchanged, exactly the common missing-mapping case. But read_text
+        # still raises on a mapping.txt find_mapping_file saw as a file yet is
+        # unreadable (mode 000, another owner in a shared analysis dir) or that
+        # vanished in the TOCTOU window between the find and the read (errors=
+        # "replace" only handles DECODE errors, not IO). An uncaught OSError here
+        # would crash the whole run AFTER decompile+audit+signature-load already
+        # succeeded, discarding that completed work over a lost recall bonus.
+        # Degrade to mapping=None with a loud yellow warning, matching the two
+        # other additive enhancements below (androguard, string-recovery).
+        # parse_mapping itself never raises (it skips malformed lines by design),
+        # so a corrupt mapping already degrades - this closes the IO-error hole.
+        try:
+            mapping = parse_mapping(mapping_path.read_text(encoding="utf-8", errors="replace"))
+        except Exception as exc:
+            mapping = None
+            console.print(f"[yellow]deobfuscation skipped: {exc}[/yellow]")
         if mapping:
             console.print(
                 f"[dim]Deobfuscation: recovered {len(mapping.obfuscated_to_original)} "
@@ -774,6 +1083,12 @@ def run(
         "static_scan", scan, static_roots, root_signatures + ssl_signatures,
         sqlite_path=Path(ANALYSIS_ROOT) / apk_hash / "xref.sqlite",
         mapping=mapping,
+        # Bug-B parity: hand scan() the app's declared package so a first-party
+        # app whose own package sits under a vendor prefix (e.g. com.squareup.cash,
+        # com.google.android.apps.*) keeps its own source files in the scan
+        # instead of being excluded as a bundled SDK (a confident-NEITHER over the
+        # app's own unscanned code). Matches the DEX scan and report attribution.
+        app_package=ingest_result.evidence["package"]["package_name"],
     )
     # L-M8: the pure scan returns StaticEvidence, but _wrap_stage's generic
     # wrapper only surfaces status (evidence={}) - so the OSError/unreadable-file
@@ -891,7 +1206,17 @@ def run(
     # scan so it can reconcile every declared `native` method against the libs
     # (jnibridge). Only when jadx produced sources; otherwise reconciliation is
     # skipped and coverage is untouched.
-    native_java_files = list(Path(jadx_output).rglob("*.java")) if jadx_output else []
+    # DYNCOV1: scan the FULL decompiled-Java corpus the completeness metric counts
+    # as covered - jadx_output AND the CFR fallback recovery (cfr_output) - not
+    # jadx alone. `_jadx_covered` credits CFR recovery toward a `complete`
+    # completeness label (decompile.py), so a `DexClassLoader`/remote `loadUrl` in
+    # a class jadx FAILED on but CFR RECOVERED would otherwise be missed by the
+    # dynload/webview scans below, leaving java `fully_analyzed`: a confident
+    # negative over code the metric already counted as read (ADR-0006). Purely
+    # additive - it can only degrade java to partial, never sharpen a negative.
+    native_java_files = (
+        _full_java_corpus([jadx_output, cfr_output]) if jadx_output else []
+    )
     # Coverage-limited: dynamic code loading (DexClassLoader/PathClassLoader/
     # Class.forName/DexFile/loadDex) releases and loads a payload DEX at runtime -
     # code we cannot see statically. Detect the loading call sites over the same
@@ -919,25 +1244,17 @@ def run(
     if native_evidence is not None:
         _merge_native_evidence(static_evidence, native_evidence)
 
-    # Real-world gap A1: Hermes/binary JS bundles (React Native release
+    # Real-world gap A1 + HERM2: Hermes/binary JS bundles (React Native release
     # assets/index.android.bundle, .hbc) are binary, so the text engine skips them
     # (signatures._is_binary NUL-probe) and jadx only reads DEX. Recover each
-    # bundle's string-constant table and match root/SSL idioms against it. The
-    # recovered constants are real deterministic evidence, but we see constants,
-    # not full JS control flow - so a binary bundle also degrades the `js` surface
-    # to partial below (ADR-0006). Plain-text JS needs no work here: the signature
-    # engine already scans `.js/.jsbundle/.bundle`.
-    js_matches: list[tuple[str, str, str, str]] = []
-    has_binary_bundle = False
-    assets_root = apktool_output / "assets" if apktool_output else None
-    if assets_root is not None and assets_root.is_dir():
-        for bundle in assets_root.rglob("*"):
-            if not is_bundle_candidate(bundle) or not is_binary_bundle(bundle):
-                continue
-            res = scan_bundle(bundle)
-            has_binary_bundle = has_binary_bundle or res["kind"] in ("hermes", "binary", "opaque")
-            for sig_id, category, matched_text in res["matches"]:
-                js_matches.append((sig_id, category, matched_text, str(bundle)))
+    # bundle's string-constant table and match root/SSL idioms against it, across
+    # the SAME roots the text scan walks (static_roots) - a bundle under res/raw/
+    # is just as unread by the text engine as one under assets/. The recovered
+    # constants are real deterministic evidence, but we see constants, not full JS
+    # control flow - so a binary bundle also degrades the `js` surface to partial
+    # below (ADR-0006). Plain-text JS needs no work here: the signature engine
+    # already scans `.js/.jsbundle/.bundle` (is_binary_bundle gates it out).
+    has_binary_bundle, js_matches = _scan_binary_bundles(static_roots)
     if js_matches:
         _merge_js_evidence(static_evidence, js_matches)
 
@@ -947,7 +1264,7 @@ def run(
     # drive native/manifest coverage. The per-surface map is persisted per run
     # and feeds the report + calibration exclusion (G1/F2/G-A).
     obfuscation_stage, obfuscation_level = _wrap_stage(
-        "obfuscation", detect_obfuscation_level, list((Path(jadx_output)).rglob("*.java"))
+        "obfuscation", _obfuscation_level_over_corpus, jadx_output, cfr_output
     )
     stage_results.append(obfuscation_stage)
     _print_stage(obfuscation_stage)
@@ -974,8 +1291,17 @@ def run(
     if packer_stage.status == "failed":
         console.print(f"[yellow]packer detection degraded (non-fatal): {packer_stage.error}[/yellow]")
         packed = False
+        # PACK1: a FAILED packer scan (androguard could not read the APK - the
+        # very failure the design anticipates for adversarial/packed targets)
+        # leaves packing un-ruled-out. Do not halt (enhancement source), but
+        # java_coverage must NOT then certify a confident negative: a cleanly-
+        # packed app decompiles only its loader stub to exit-0 `complete`, so
+        # `packed` is the sole gate. packer_scanned=False forces java->partial
+        # WITHOUT fabricating a packed=True detection (ADR-0006, safe direction).
+        packer_scanned = False
     else:
         packed = bool(packer_findings)
+        packer_scanned = True
         for pf in packer_findings:
             console.print(
                 f"[yellow]packer: {pf.packer} ({pf.packer_id}) -> {', '.join(pf.signals)}[/yellow]"
@@ -995,7 +1321,12 @@ def run(
     # recovery is additive, never an exhaustive-cleanup claim. Recovery degrades
     # to a note on any read error (enhancement source, like the androguard scan).
     if jadx_output:
-        java_files = list(Path(jadx_output).rglob("*.java"))
+        # DYNCOV1 (string-recovery half): recover hidden strings over the FULL
+        # corpus the completeness metric counts as covered (jadx + CFR recovery),
+        # not jadx alone - an R8-encrypted literal in a class jadx failed on but CFR
+        # recovered would otherwise stay hidden from the signature engine. Purely
+        # additive: more recovered strings can only ADD a match, never remove one.
+        java_files = _full_java_corpus([jadx_output, cfr_output])
         try:
             recovered = recover_hidden_strings(java_files)
         except Exception as exc:
@@ -1041,6 +1372,9 @@ def run(
         # Gap-2: a detected packer forces the Java surface to partial - the real
         # DEX is hidden, so a confident static negative is impossible.
         packed=packed,
+        # PACK1: a failed packer scan (packing never ruled out) forces java
+        # partial the same way, without claiming a packer was detected.
+        packer_scanned=packer_scanned,
     )
     # Boundary-3 static half: a declared `native` method that no extracted lib
     # statically binds and no JNI_OnLoad can dynamically register is `unresolved`
@@ -1154,17 +1488,16 @@ def run(
             f"could not be read (OSError): {', '.join(classification.unreadable_files)} - "
             "treat any NEITHER/Inconclusive verdict as degraded, not a full-scan clean.[/bold red]"
         )
-    # L-M7: the partial-decompile CAUTION was console-invisible (Finding L) - a
-    # reviewer watching cli_output.txt saw the Decision with no lower-bound hint,
-    # while the report carried "CAUTION: based on a PARTIAL decompile". Mirror
-    # the report (generator.py) live so a partial decompile is never read as a
-    # confident negative on the console.
-    if decompile_completeness == "partial":
-        console.print(
-            f"[bold red]CAUTION: based on a PARTIAL decompile "
-            f"({jadx_file_count} files, jadx exit {jadx_exit_code}) - "
-            "a NEITHER here is a lower bound, not a confident negative; see Limitations.[/bold red]"
-        )
+    # L-M7 + completeness parity: mirror the report's decompile-completeness caveat
+    # live for BOTH lower-bound states (partial AND unknown) via
+    # _completeness_console_caveat, so a reviewer watching cli_output.txt sees the same
+    # lower-bound hint the .md carries and the specific cause is named for `unknown`
+    # too (previously only `partial` was mirrored - see the helper's docstring).
+    _completeness_caveat = _completeness_console_caveat(
+        decompile_completeness, jadx_file_count, jadx_exit_code
+    )
+    if _completeness_caveat:
+        console.print(_completeness_caveat)
     # L-M4: surface the coverage bound explicitly in the Decision block - the
     # per-surface map plus, per category, whether a NEITHER would be a confident
     # negative or a coverage-bound lower bound. L-M7's CAUTION above only covers
@@ -1576,6 +1909,15 @@ def run(
     # run doesn't misleadingly look like someone chose to skip verification.
     dynamic_skip_reason = dynamic_stage.evidence.get("reason", "skipped") if dynamic_stage.status == "skipped" else None
 
+    # not-attempted != skipped: a FAILED dynamic stage (setup/install/unexpected
+    # exception before the success branch) leaves correlation_skip_reason None, so the
+    # report's correlation fallback would falsely read "dynamic stage skipped". Name the
+    # honest failed-stage reason once here (decider-owns-its-guard), preserving any
+    # more-specific reason already set and leaving genuine skips as None.
+    correlation_skip_reason = _correlation_skip_reason_for_failed_stage(
+        correlation_skip_reason, dynamic_stage.status, dynamic_stage.evidence.get("reason")
+    )
+
     # --- terminal persistence: report + SQLite save + audit completion ---
     # Extracted into _finalize_run so the H1/H2 failure handling is unit-testable
     # (a failed audit completion must not be silent; a DB save failure must still
@@ -1698,9 +2040,10 @@ def _calibration_table(report) -> tuple[list[str], list[list[str]]]:
     cells). Kept separate from the Rich rendering so header/cell parity is a
     unit-testable fact rather than a hand-maintained layout: a future cell
     added without its header (or vice versa) would misalign the table
-    silently. Renders both Tier-2 exclusion counts (no-GT and partial-
-    decompile) for parity with the generated report's two "Excluded from
-    Tier 2..." lines."""
+    silently. Renders both Tier-2 exclusion counts - no-GT, and the
+    negative-not-proof-of-absence count (which covers BOTH partial decompiles
+    and under-covered governing surfaces) - for parity with the generated
+    report's two "Excluded from Tier 2..." lines."""
     def _fmt(rate: float | None) -> str:
         return f"{rate:.2f}" if rate is not None else "N/A"
 
@@ -1756,20 +2099,26 @@ def calibration_report(
     if report.skeleton_warning:
         console.print(f"[yellow]{report.skeleton_warning}[/yellow]")
 
-    # A bare "N/A" Tier 2 reads like a missing computation, but here it can be
-    # the honest result of the decompile-completeness exclusion (report.py): a
-    # detected verdict from a partial decompile isn't trustworthy either way,
-    # so partial-decompile observations are dropped from Tier 2. When that
-    # leaves a category with no TP/FP/FN to measure against, say so explicitly.
+    # A bare "N/A" Tier 2 reads like a missing computation, but here it is the
+    # honest result of a negative-direction exclusion (report.py): a detected=False
+    # verdict is dropped from Tier 2 whenever it isn't proof of absence - either
+    # the decompile was partial/unknown, OR a governing surface (native/manifest/
+    # js) was under-covered (e.g. a stripped .so, or a pre-coverage run with no
+    # map). excluded_partial_decompile holds BOTH causes (report.py's two
+    # negative-only gates), so the note must name both rather than blame the
+    # decompile alone and send the operator to fix the wrong thing. When the
+    # exclusion leaves a category with no TP/FP/FN to measure, say so explicitly.
     for category in CATEGORIES:
         excluded = report.excluded_partial_decompile.get(category, 0)
         if report.tier2[category].precision.rate is None and excluded:
             console.print(
                 f"[yellow]Note: {category} Tier 2 is N/A - {excluded} ground-truth "
-                f"observation(s) were excluded as partial decompiles; a Tier-2 "
-                f"verdict needs an {category}:true target that decompiles "
-                f"completely, otherwise there is no true-positive to measure "
-                f"precision/recall against.[/yellow]"
+                f"observation(s) were excluded because a negative there isn't proof "
+                f"of absence (partial/unknown decompile, or an under-covered "
+                f"native/manifest/js surface); a Tier-2 verdict needs an "
+                f"{category}:true target that both decompiles completely and has "
+                f"every governing surface fully analyzed, otherwise there is no "
+                f"true-positive to measure precision/recall against.[/yellow]"
             )
 
     output_path = generate_calibration_report(report, CALIBRATION_REPORTS_ROOT)
@@ -1972,10 +2321,31 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
     # unpacking (a JSON list unpacks identically) - there is no Python-side attribute
     # access on them, so plain dicts/lists render exactly as the live objects did.
     causes = run.coverage_causes or {}
+    # ADR-0005: a run's authorization (operator + justification) is not a column on
+    # the mutable RunRecord - its authoritative, tamper-evident home is the audit
+    # log. Recover it by run_id so the regenerated report's "Authorized by" line is
+    # faithful to the original run rather than silently dropped. A regenerated report
+    # that omitted authorization would misrepresent a dual-use analysis as
+    # unauthorized - the opposite of this project's disclosure discipline (Principle 7).
+    _auth = authorization_for_run(AUDIT_LOG_PATH, run.run_id)
+    if _auth is not None:
+        regen_operator = _auth.get("operator")
+        regen_justification = _auth.get("justification")
+    else:
+        # Genuinely unrecoverable (a legacy run authorized before run_id was carried
+        # in the log, or whose authorizing record AND its archive were pruned):
+        # disclose it explicitly. Never render a silent absence that a reader would
+        # take as "no authorization was required" (NFR-1/ADR-0006).
+        regen_operator = "unavailable on regeneration"
+        regen_justification = (
+            "not recoverable from audit log - see the immutable audit log (ADR-0005)"
+        )
     generate_report(
         run_id=run.run_id,
         apk_hash=run.apk_sha256,
         timestamp=timestamp,
+        operator=regen_operator,
+        justification=regen_justification,
         metadata=metadata,
         classification=cls,
         verification=_verification_from_json(run.verification_json),
@@ -2011,6 +2381,12 @@ def _classification_from_json(cj: dict) -> ClassificationResult:
             file=d["file"],
             line_or_offset=d["line_or_offset"],
             matched_text=d["matched_text"],
+            # G11 provenance: restore the forensic evidence_type so a regenerated
+            # report keeps its "(bytecode_string)"-style HOW-detected annotation
+            # (generator template renders `{{ e.evidence_type }}`). Dropping it
+            # silently re-rendered every match as "(unspecified)". Default matches
+            # the dataclass, so a row predating the field stays unspecified.
+            evidence_type=d.get("evidence_type", "unspecified"),
             verification_state=d.get("verification_state", "deterministic_matched"),
         )
 
@@ -2019,6 +2395,10 @@ def _classification_from_json(cj: dict) -> ClassificationResult:
             confidence=d["confidence"],
             detected=d["detected"],
             evidence=[_ev(e) for e in d.get("evidence", [])],
+            # L-M4/ADR-0006: restore the per-category coverage-limited flag so the
+            # reconstructed verdict keeps "detected=False here is a lower bound, not
+            # a confident negative". Default False matches the dataclass.
+            coverage_limited=d.get("coverage_limited", False),
         )
 
     return ClassificationResult(
@@ -2032,6 +2412,19 @@ def _classification_from_json(cj: dict) -> ClassificationResult:
         unreadable_files=cj.get("unreadable_files", []),
         root_attribution=cj.get("root_attribution"),
         ssl_attribution=cj.get("ssl_attribution"),
+        # L-M3/ADR-0006 (the consequential one): restore the coverage-limited
+        # category list. The report template renders the "Coverage-limited
+        # (unknown, not absent)" caveat from classification.unknown_uncovered;
+        # dropping it on regeneration made a coverage-bound NEITHER re-render as a
+        # CONFIDENT NEGATIVE - the exact mislabel this field exists to prevent.
+        # Default [] matches the dataclass, so a genuinely-covered (or pre-field)
+        # row stays empty rather than fabricating a caveat.
+        unknown_uncovered=cj.get("unknown_uncovered", []),
+        # RESID-4F: restore the per-signature truncation counts so the regenerated
+        # report keeps its "Evidence truncated (N signatures matched >50x)"
+        # disclosure instead of silently implying the shown 50 rows were the whole
+        # story. Default {} matches the dataclass.
+        evidence_capped_counts=cj.get("evidence_capped_counts", {}),
     )
 
 
@@ -2079,6 +2472,29 @@ def _manifest_from_json(m) -> ManifestInfo | None:
         stored_certs=int(m.get("stored_certs") or 0),
         device_admin=bool(m.get("device_admin")),
         resources_complete=bool(m.get("resources_complete", True)),
+        # A regenerated report must carry the SAME attack-surface + SSL-policy facts
+        # the live report showed. These were dropped, so a re-attribute regeneration
+        # silently blanked them: package/permissions/exported-components (the
+        # reachable attack surface), the effective cleartext policy + per-domain
+        # permits, allowBackup (a data-exfil control), and - most consequential -
+        # the NSC pin_set_expirations, since an EXPIRED pin-set is declared-but-
+        # inactive pinning the report must flag (generator.py:640 cross-checks it
+        # against the run timestamp; dropping it re-read an expired pin-set as
+        # active). Dropping `permissions` also inverted the INTERNET cross-reference
+        # (an empty list reads as "no INTERNET declared"). None/[] defaults match
+        # the dataclass, so a row predating a field keeps its safe default rather
+        # than fabricating one. The tri-state bools (allow_backup / cleartext_
+        # permitted / uses_cleartext_traffic) are passed through WITHOUT bool() so
+        # "unset" (None) stays distinct from "no" (False) - the template renders
+        # those three cases differently, and a bool() would collapse unset into no.
+        package_name=m.get("package_name"),
+        uses_cleartext_traffic=m.get("uses_cleartext_traffic"),
+        allow_backup=m.get("allow_backup"),
+        cleartext_permitted=m.get("cleartext_permitted"),
+        cleartext_domains=m.get("cleartext_domains") or [],
+        pin_set_expirations=m.get("pin_set_expirations") or [],
+        permissions=m.get("permissions") or [],
+        exported_components=m.get("exported_components") or [],
     )
 
 
@@ -2172,7 +2588,26 @@ def verify_device_cmd(
         raise typer.Exit(code=1)
     console.print(f"[green]device[/green] {device_serial} present")
 
-    # 2. Root + frida-server (auto version-check/re-provision) + WSL2 relay +
+    # 2. G13 resolution guard: known-target dynamic scans drive the UI with
+    #    hardcoded tap coordinates validated at ONE resolution; if the AVD was
+    #    recreated at another size those taps miss, the app's check never fires,
+    #    and the run reports a false "inconclusive" no mocked-UI unit test can
+    #    catch. Surface any drift loudly here. Advisory: it warns, never gates
+    #    (a wrong resolution is the operator's to fix, not a reason to block an
+    #    otherwise-green preflight) - but it is never a silent no-op (NFR-7).
+    try:
+        res = device.screen_resolution_check(device_serial)
+    except Exception as exc:
+        console.print(f"[yellow]resolution guard skipped:[/yellow] {exc}")
+    else:
+        if res["status"] == "mismatch":
+            console.print(f"[bold yellow]RESOLUTION WARNING[/bold yellow] {res['message']}")
+        elif res["status"] == "unknown":
+            console.print(f"[yellow]resolution guard:[/yellow] {res['message']}")
+        else:
+            console.print(f"[green]resolution[/green] {res['message']}")
+
+    # 3. Root + frida-server (auto version-check/re-provision) + WSL2 relay +
     #    connect + enumerate. Any failure here surfaces the real reason.
     try:
         frida_dev = device.setup_frida_connection(device_serial)

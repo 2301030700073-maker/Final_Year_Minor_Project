@@ -8,6 +8,7 @@ from static.decompile import (
     CACHE_REGISTRY_NAME,
     _enforce_cache_budget,
     _find_cfr_jar,
+    _jadx_covered,
     _load_registry,
     require_tool,
     _run_secondary_fallback,
@@ -892,3 +893,85 @@ def test_run_tool_logged_marks_timeout_and_returns_timer_rc(tmp_path, monkeypatc
     rc, tail = _run_tool_logged(["jadx", "-q"], log, 30, "jadx")
     assert rc == _TIMEOUT_RC
     assert "timed out after 30s" in tail
+
+
+# --- G1: quantified top-level class recovery for partial decompiles ------------
+
+
+def test_count_top_level_smali_excludes_inner_classes(tmp_path):
+    # apktool writes one .smali per class; inner classes (Foo$Inner) are separate
+    # files. Only stems without '$' are top-level, comparable to jadx's
+    # one-.java-per-top-level-class output. Multi-dex smali_classesN counts too.
+    from static.decompile import _count_top_level_smali
+    apk = tmp_path / "apktool"
+    (apk / "smali" / "com" / "a").mkdir(parents=True)
+    (apk / "smali_classes2" / "com" / "b").mkdir(parents=True)
+    (apk / "smali" / "com" / "a" / "Foo.smali").write_text(".class Foo")
+    (apk / "smali" / "com" / "a" / "Foo$Inner.smali").write_text(".class Inner")
+    (apk / "smali" / "com" / "a" / "Foo$1.smali").write_text(".class anon")
+    (apk / "smali_classes2" / "com" / "b" / "Bar.smali").write_text(".class Bar")
+    assert _count_top_level_smali(apk) == 2  # Foo, Bar - not the two inner files
+
+
+def test_count_top_level_smali_missing_dir_is_zero(tmp_path):
+    from static.decompile import _count_top_level_smali
+    assert _count_top_level_smali(tmp_path / "nope") == 0
+
+
+def test_class_recovery_ratio_is_jadx_over_smali(tmp_path):
+    from static.decompile import _class_recovery
+    apk = tmp_path / "apktool"
+    (apk / "smali" / "p").mkdir(parents=True)
+    for name in ("A", "B", "C", "D"):
+        (apk / "smali" / "p" / f"{name}.smali").write_text(".class")
+    out = _class_recovery(jadx_file_count=1, apktool_dir=apk)
+    assert out["smali_top_level_classes"] == 4
+    assert out["class_recovery_ratio"] == 0.25
+
+
+def test_class_recovery_zero_denominator_is_unknown_not_fabricated(tmp_path):
+    # apktool produced no smali (resources-only / apktool partial): the ratio must
+    # be None (unknown), never a fabricated 0/0 or a misleading number (ADR-0006).
+    from static.decompile import _class_recovery
+    out = _class_recovery(jadx_file_count=10, apktool_dir=tmp_path / "empty")
+    assert out["smali_top_level_classes"] == 0
+    assert out["class_recovery_ratio"] is None
+
+
+# --- DEC1: jadx-coverage decision must not launder a per-DEX hole to complete ---
+
+def test_jadx_covered_clean_run_is_covered_on_both_paths():
+    # rc == 0 is always covered, whichever path produced it.
+    assert _jadx_covered(per_dex=True, jadx_returncode=0, fallback={}, jadx_file_count=0) is True
+    assert _jadx_covered(per_dex=False, jadx_returncode=0, fallback={}, jadx_file_count=0) is True
+
+
+def test_jadx_covered_per_dex_hole_is_not_laundered_by_aggregate_recovery():
+    # DEC1 regression. Per-DEX path: _decompile_dexes ALREADY folded per-DEX
+    # recovery into rc (rc != 0 => at least one DEX is a real unrecovered hole).
+    # A huge AGGREGATE recovery count from a *sibling* DEX must NOT flip this run
+    # to covered - that would launder an unread DEX into 'complete' and turn a
+    # NEITHER verdict into a confident negative over code never scanned (ADR-0006).
+    laundering_fallback = {"fallback_recovered": True, "fallback_file_count": 1000}
+    assert _jadx_covered(
+        per_dex=True, jadx_returncode=1,
+        fallback=laundering_fallback, jadx_file_count=10) is False
+
+
+def test_jadx_covered_whole_apk_recovery_rescues_partial():
+    # Whole-APK path (one jadx run, one recovery run): a jadx exit 1 IS rescued
+    # when the secondary engine independently re-read the APK with comparable
+    # output (>= 0.5 of what jadx wrote). This measured rule is preserved.
+    rescued = {"fallback_recovered": True, "fallback_file_count": 60}
+    assert _jadx_covered(
+        per_dex=False, jadx_returncode=1, fallback=rescued, jadx_file_count=100) is True
+
+
+def test_jadx_covered_whole_apk_thin_recovery_stays_partial():
+    # Whole-APK recovery BELOW the ratio is not enough - stays uncovered.
+    thin = {"fallback_recovered": True, "fallback_file_count": 10}
+    assert _jadx_covered(
+        per_dex=False, jadx_returncode=1, fallback=thin, jadx_file_count=100) is False
+    # No recovery at all -> uncovered.
+    assert _jadx_covered(
+        per_dex=False, jadx_returncode=1, fallback={}, jadx_file_count=100) is False

@@ -51,6 +51,29 @@ def test_java_coverage_packed_not_confident_on_partial():
     assert java_coverage("unknown", "clear", packed=True) == "unscannable"
 
 
+def test_java_coverage_failed_packer_scan_forces_partial_even_on_complete():
+    # PACK1 (confident-FN closure): when the packer stage FAILS (androguard could
+    # not read the APK - the failure the design anticipates for adversarial/packed
+    # targets), packing is never ruled out. A cleanly-packed app hides its real
+    # DEX as an encrypted asset and jadx decompiles only the loader stub to exit-0
+    # 'complete' with light/clear obfuscation, so `packed` is the SOLE gate. Before
+    # PACK1 a failed scan defaulted packed=False and java read fully_analyzed ->
+    # confident negative over the hidden DEX (ADR-0006). packer_scanned=False must
+    # now force partial - even though packed stays False (no fabricated detection).
+    assert java_coverage("complete", "clear", packed=False, packer_scanned=False) == "partial"
+    assert java_coverage("complete", "light", packed=False, packer_scanned=False) == "partial"
+    # A SUCCESSFUL scan that found nothing (the default) still certifies fully_analyzed.
+    assert java_coverage("complete", "clear", packed=False, packer_scanned=True) == "fully_analyzed"
+    assert java_coverage("complete", "clear") == "fully_analyzed"  # default packer_scanned=True
+
+
+def test_java_coverage_failed_packer_scan_never_upgrades():
+    # A failed scan is conservative-only: it can force fully_analyzed->partial, but
+    # never upgrades an already-degraded surface (parity with the packed=True path).
+    assert java_coverage("partial", "clear", packer_scanned=False) == "partial"
+    assert java_coverage("unknown", "clear", packer_scanned=False) == "unscannable"
+
+
 def test_native_coverage_empty_is_unscannable():
     assert native_coverage({}) == "unscannable"
 
@@ -315,3 +338,27 @@ def test_apply_attribution_degraded_java_propagates_to_categories():
     )
     assert category_is_confident_negative("root", cov) is False
     assert category_is_confident_negative("ssl", cov) is False
+
+
+def test_module_docstring_governing_sets_track_the_constant():
+    # COVDOC-GOVSET1: the module docstring states the per-category governing
+    # surface sets as an authoritative top-of-file summary of the
+    # confident-negative gate (the crux of ADR-0006). That prose MUST track
+    # GOVERNING_SURFACES - the drift this guards is the stale doc that read
+    # root->{java,native}, ssl->{java,native,manifest} for a while AFTER Gap-7
+    # added `js` to both, contradicting the constant 17 lines below it. Mirror of
+    # test_tier2_exclusion_note_names_every_governing_surface (report prose), one
+    # level up at the source module's own docstring, so a future surface can't be
+    # added to the gate without this authoritative summary tracking it.
+    from static import coverage as coverage_mod
+
+    doc = coverage_mod.__doc__ or ""
+    for category, surfaces in GOVERNING_SURFACES.items():
+        for surface in surfaces:
+            assert surface in doc, (
+                f"coverage.py module docstring must name governing surface "
+                f"'{surface}' (governs {category}); GOVERNING_SURFACES has it but "
+                f"the authoritative prose does not - stale docstring (COVDOC-GOVSET1)"
+            )
+    # belt-and-braces: the exact surface whose omission regressed
+    assert "js" in doc

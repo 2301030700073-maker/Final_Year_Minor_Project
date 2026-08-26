@@ -15,10 +15,13 @@ Combination rules encoded here (G2, G-C, G10, G-B, G6, N1):
   parse of the manifest + referenced resources is `fully_analyzed`, unless
   resource resolution is partial (G9).
 
-Per-category governing surface sets (G-A): `root -> {java, native}`,
-`ssl -> {java, native, manifest}`. A category's negative is confident only if
-EVERY governing surface is `fully_analyzed` - so a root check hiding in a
-stripped .so excludes the root category even when Java is complete.
+Per-category governing surface sets (G-A): `root -> {java, native, js}`,
+`ssl -> {java, native, manifest, js}` (GOVERNING_SURFACES below is the single
+source of truth for these; this prose must track it - Gap-7 added `js` for both).
+A category's negative is confident only if EVERY governing surface is
+`fully_analyzed` - so a root check hiding in a stripped .so excludes the root
+category even when Java is complete, and one hiding in a Hermes/RN `js` bundle
+excludes it even when Java and native are complete.
 """
 
 from __future__ import annotations
@@ -50,7 +53,8 @@ def _min_coverage(states: list[Coverage]) -> Coverage:
 
 
 def java_coverage(
-    decompile_completeness: str, obfuscation_level: str, packed: bool = False
+    decompile_completeness: str, obfuscation_level: str, packed: bool = False,
+    packer_scanned: bool = True,
 ) -> Coverage:
     """G2/G-C/N1/Gap-2: Java surface = decompile completeness, forced to partial
     under heavy obfuscation OR a detected packer. A complete decompile of a
@@ -59,10 +63,21 @@ def java_coverage(
     NEITHER must not certify as a confident TN). A packed target's real DEX is
     hidden behind a loader, so its surface is partial the same way - even a
     'complete' decompile only sees the loader stub, never the real code
-    (ADR-0006)."""
+    (ADR-0006).
+
+    PACK1: `packer_scanned=False` means the packer scan did NOT complete (the
+    stage failed / androguard could not read the APK), so we have NO evidence
+    the DEX is un-packed. That is the exact input a packer detector exists to
+    catch - a cleanly-packed app hides its real DEX as an encrypted asset and
+    jadx decompiles only the small loader stub to exit-0 `complete`, so `packed`
+    is the SOLE gate and a failed scan must NOT leave java at fully_analyzed
+    (that would certify a confident negative over hidden code, ADR-0006). Unlike
+    `packed=True` this is not a positive packing claim - the report still says no
+    packer was detected - only a refusal to certify absence we did not verify. A
+    successful scan that found nothing keeps the default (packer_scanned=True)."""
     base = {"complete": "fully_analyzed", "partial": "partial", "unknown": "unscannable"}
     state = base.get(decompile_completeness, "unscannable")
-    if obfuscation_level == "heavy" or packed:
+    if obfuscation_level == "heavy" or packed or not packer_scanned:
         return "partial" if state == "fully_analyzed" else state
     return state
 
@@ -91,6 +106,7 @@ def per_surface_coverage(
     manifest_parsed: bool,
     resources_complete: bool,
     packed: bool = False,
+    packer_scanned: bool = True,
 ) -> dict[str, Coverage]:
     """The per-surface map for the toolchain-derived surfaces: returns
     java/native/manifest (the ones computable from its parameters). The `js`
@@ -100,9 +116,12 @@ def per_surface_coverage(
     feeding it to category_is_confident_negative. A surface with no evidence
     source reports unscannable so it never certifies a confident negative.
     `packed` (a detected packer) forces the Java surface to partial - the real
-    DEX is hidden."""
+    DEX is hidden. `packer_scanned=False` (the packer stage failed, so packing
+    was never ruled out) forces it the same way (PACK1) - a failed scan must not
+    leave a cleanly-packed app's stub-only `complete` decompile certifying a
+    confident negative."""
     return {
-        "java": java_coverage(decompile_completeness, obfuscation_level, packed),
+        "java": java_coverage(decompile_completeness, obfuscation_level, packed, packer_scanned),
         "native": native_coverage(abi_coverage),
         "manifest": manifest_coverage(manifest_parsed, resources_complete),
     }
@@ -224,12 +243,22 @@ def apply_attribution_degraded_java(
 
 def category_is_confident_negative(
     category: str,
-    coverage: dict[str, Coverage],
+    coverage: dict[str, Coverage] | None,
 ) -> bool:
     """F2/G-A: a category's NEITHER is a confident negative only if EVERY one of
     its governing surfaces is fully_analyzed. If any governing surface is
     partial/unscannable, the negative is not proof of absence and calibration
-    must exclude it (returned False). Unknown category => never confident."""
+    must exclude it (returned False). Unknown category => never confident.
+
+    No coverage map at all (None/empty) => every governing surface is effectively
+    unscannable (nothing was analyzed), so the negative is never confident. This
+    lives HERE, in the one function that owns the confident-negative decision, so
+    no caller can drift by forgetting the guard (cf. SIG1): apply_coverage_bound
+    then correctly marks such a run coverage_limited on every category instead of
+    crashing on None.get, and the calibration/report layers get the same
+    conservative default they document (types.py:46-48, report.py) for free."""
+    if not coverage:
+        return False
     surfaces = GOVERNING_SURFACES.get(category)
     if surfaces is None:
         return False

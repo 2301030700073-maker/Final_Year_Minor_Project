@@ -164,6 +164,48 @@ def _count_java_files(jadx_dir: Path) -> int:
     return sum(1 for p in jadx_dir.rglob("*.java") if p.is_file())
 
 
+def _count_top_level_smali(apktool_dir: Path) -> int:
+    """Count top-level classes in apktool's smali output (G1 denominator).
+
+    apktool writes one .smali file per class, so inner classes (Foo$Inner.smali)
+    are SEPARATE files; we count only stems with no '$' so the number is
+    comparable to jadx's one-.java-per-top-level-class output. apktool decodes at
+    the bytecode level and is far more robust than jadx, so its class count is a
+    reasonable proxy for the app's true class total. Multi-dex apps split across
+    smali/, smali_classes2/, ... - all are counted. If apktool itself only
+    partially decoded, this denominator is itself a lower bound, which is exactly
+    why the report labels the derived ratio approximate."""
+    if not apktool_dir.exists():
+        return 0
+    total = 0
+    for smali_root in apktool_dir.glob("smali*"):
+        if not smali_root.is_dir():
+            continue
+        total += sum(1 for p in smali_root.rglob("*.smali")
+                     if p.is_file() and "$" not in p.stem)
+    return total
+
+
+def _class_recovery(jadx_file_count: int, apktool_dir: Path) -> dict:
+    """Approximate top-level class recovery (G1): jadx top-level .java classes
+    over apktool top-level .smali classes. Returns the denominator and a ratio,
+    or a None ratio when the denominator is 0 - unknown, never a fabricated 0/0.
+
+    This quantifies HOW partial a partial decompile is; it is deliberately not
+    presented as a precise coverage percentage, because jadx and apktool
+    enumerate synthetic/resource classes slightly differently and a partial
+    apktool decode lowers the denominator too (ADR-0006: measured, not
+    overclaimed). Computed from the on-disk output, so a cache hit reports it
+    too - no sidecar threading required."""
+    smali_top = _count_top_level_smali(apktool_dir)
+    if smali_top <= 0:
+        return {"smali_top_level_classes": smali_top, "class_recovery_ratio": None}
+    return {
+        "smali_top_level_classes": smali_top,
+        "class_recovery_ratio": round(jadx_file_count / smali_top, 3),
+    }
+
+
 def _has_real_cached_content(jadx_dir: Path, apktool_dir: Path) -> bool:
     """A cache hit needs more than the directories existing - confirmed real
     bug: jadx_dir/apktool_dir can exist as a hollow shell (contents gone,
@@ -528,6 +570,39 @@ def _run_dex_fallback(dex_file: Path, target_dir: Path, log_path: Path) -> dict:
 _RECOVERY_COVERAGE_RATIO = 0.5
 
 
+def _jadx_covered(
+    per_dex: bool, jadx_returncode: int, fallback: dict, jadx_file_count: int,
+) -> bool:
+    """Whether the jadx (Java) surface counts as COVERED for the completeness
+    label. Extracted so the per-DEX vs whole-APK distinction is testable.
+
+    A clean jadx (rc == 0) is always covered.
+
+    Per-DEX path: _decompile_dexes ALREADY decided coverage per DEX - folding
+    each DEX's own secondary-recovery into a per-DEX covered flag and returning
+    jadx_returncode != 0 iff at least one DEX is a real unrecovered hole. So the
+    per-DEX verdict is trusted verbatim: rc != 0 means partial. Re-deriving from
+    the AGGREGATE recovery count here would let one heavily-recovered DEX mask an
+    unrecovered sibling (sum_recovered >= 0.5*total_files can hold while a sibling
+    DEX contributed nothing), laundering a partial into 'complete' - a confident
+    negative over a DEX that was never read (ADR-0006). Removing that clause can
+    only make a per-DEX run's completeness worse-or-equal: the safe direction.
+
+    Whole-APK path: a single jadx exit 1 can still be rescued by a secondary
+    engine that independently re-read the WHOLE APK with comparable output (>=
+    _RECOVERY_COVERAGE_RATIO of the .java jadx wrote) - the same measured rule,
+    correctly applied to the one run there is on this path."""
+    if jadx_returncode == 0:
+        return True
+    if per_dex:
+        return False
+    return (
+        bool(fallback.get("fallback_recovered"))
+        and fallback.get("fallback_file_count", 0)
+        >= _RECOVERY_COVERAGE_RATIO * max(jadx_file_count, 1)
+    )
+
+
 def _decompile_dexes(
     apk_path: Path, target_dir: Path, dex_entries: list[dict], jadx: str,
 ) -> tuple[int, int, list[dict], dict]:
@@ -828,14 +903,15 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         apktool_has_manifest = (apktool_dir / "AndroidManifest.xml").exists()
 
         # A failure on either side degrades the whole run to partial (D2);
-        # only when both exit 0 is the decompile complete. On the whole-APK path
-        # a jadx exit 1 can be rescued by a secondary engine that independently
-        # re-read the APK with comparable output - the same covered-after-recovery
-        # rule the per-DEX path applies (ADR-0006 - measured, never overclaimed).
-        jadx_covered = (jadx_returncode == 0) or (
-            bool(fallback.get("fallback_recovered"))
-            and fallback.get("fallback_file_count", 0)
-            >= _RECOVERY_COVERAGE_RATIO * max(jadx_file_count, 1))
+        # only when both exit 0 is the decompile complete. jadx coverage is
+        # decided by _jadx_covered: on the per-DEX path the per-DEX verdict is
+        # authoritative (its rc already folds in per-DEX recovery), and on the
+        # whole-APK path a jadx exit 1 can be rescued by a secondary engine that
+        # independently re-read the APK with comparable output. Deciding it in
+        # one place stops the aggregate-recovery rescue from laundering a per-DEX
+        # hole into 'complete' (ADR-0006 - measured, never overclaimed).
+        jadx_covered = _jadx_covered(
+            per_dex_units is not None, jadx_returncode, fallback, jadx_file_count)
         completeness = (
             "complete"
             if (apktool_has_manifest and jadx_covered and apktool_returncode == 0)
@@ -898,6 +974,9 @@ def _result(
             "jadx_exit_code": jadx_exit_code,
             "apktool_exit_code": apktool_exit_code,
             "jadx_file_count": jadx_file_count,
+            # G1: approximate top-level class recovery, recomputed from the
+            # on-disk output so a cache hit reports it too (no sidecar threading).
+            **_class_recovery(jadx_file_count, apktool_dir),
             "recovered_from_hollow_cache": recovered_from_hollow_cache,
             "jadx_error_tail": jadx_error_tail,
         },
@@ -930,7 +1009,7 @@ def _cached_result(start: float, jadx_dir: Path, apktool_dir: Path, status_sidec
         except (json.JSONDecodeError, OSError):
             pass  # Sidecar unreadable - fall through. The decompiled output
             # itself is untouched and valid; a bookkeeping glitch alone
-            # isn't reason to halt the pipeline (falls back to "complete"
+            # isn't reason to halt the pipeline (falls back to "unknown"
             # below, same as the no-sidecar case).
     # No sidecar at all: the completeness of the cached output is not provable
     # from the output alone (jadx leaves no exit code behind once the process

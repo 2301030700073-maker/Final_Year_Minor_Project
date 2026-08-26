@@ -1,0 +1,38 @@
+name: unit-tests
+
+# Toolchain-free unit suite - the deterministic core (signature matcher, decision
+# engine, confidence scoring, manifest/report logic). This IS the project's pytest
+# record per the testing philosophy, and it runs anywhere with no Android toolchain.
+#
+# What this deliberately does NOT do (ADR-0007): it does not exercise the dynamic /
+# Frida / adb / mitmproxy / jadx-apktool side. That half is validated on the
+# reference WSL2 environment via each phase's real handoff bundle, never mocked.
+# CI must never imply coverage it does not have, so it is scoped to tests/unit only.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      # --locked fails loudly if uv.lock has drifted from pyproject.toml, matching
+      # the project's no-silent-failure discipline (a stale lock is a real problem).
+      - name: Sync dependencies (locked)
+        run: uv sync --locked
+
+      - name: Run unit suite
+        run: uv run pytest tests/unit -q

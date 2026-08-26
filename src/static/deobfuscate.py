@@ -113,5 +113,16 @@ def deobfuscate_source(source: str, mapping: MappingTable) -> str:
     for obf, orig in ordered:
         if len(obf) < 1:
             continue
-        out = re.sub(rf"\b{re.escape(obf)}\b", orig, out)
+        # `orig` is inserted LITERALLY via a callable replacement. As a string
+        # template, re.sub interprets backslash escapes and \1 group refs inside
+        # the replacement - so a crafted mapping.txt whose ORIGINAL name carries
+        # `\q` (bad escape) or `\1` (group ref) would raise re.error and abort the
+        # whole signature scan over an untrusted, attacker-shipped mapping (the
+        # deobfuscate call in signatures.scan() sits past the per-file OSError
+        # guard, so the raise escapes the entire stage). A real Java identifier
+        # never contains a backslash, so the callable form is byte-identical for
+        # every genuine mapping; it only converts that crash into a safe verbatim
+        # substitution - honoring this module's "a malformed line must not abort
+        # deobfuscation" intent and ADR-0006 (degrade conservatively, never crash).
+        out = re.sub(rf"\b{re.escape(obf)}\b", lambda m, o=orig: o, out)
     return out

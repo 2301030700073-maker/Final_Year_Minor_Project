@@ -114,3 +114,48 @@ def test_deobfuscate_source_skips_empty_obfuscated_key(tmp_path):
     # the real non-empty key still restored its mapping.
     assert "Whatever" not in out
     assert "public class Main { }" in out
+
+
+def test_deobfuscate_source_literal_replacement_does_not_raise_on_backslash_escape():
+    # Confirmed crash: as a string template, re.sub interprets backslash escapes
+    # in the REPLACEMENT, so an original name carrying `\q` raised
+    # `re.error: bad escape \q`. That call in signatures.scan() sits past the
+    # per-file OSError guard, so the raise escaped the whole signature stage - a
+    # denial-of-analysis on an attacker-shipped mapping.txt. It must now insert
+    # the name verbatim, never raise.
+    t = parse_mapping("Foo\\qux -> a:\n")
+    assert t.obfuscated_to_original == {"a": "Foo\\qux"}
+    assert deobfuscate_source("return a;", t) == "return Foo\\qux;"
+
+
+def test_deobfuscate_source_literal_replacement_does_not_raise_on_group_ref():
+    # The other template hazard: a `\1` in the original name was read as a group
+    # backreference -> `re.error: invalid group reference 1`. Same escape route,
+    # same abort. Literal insertion must keep the backslash-digit verbatim.
+    t = parse_mapping("x\\1y -> a:\n")
+    assert deobfuscate_source("return a;", t) == "return x\\1y;"
+
+
+def test_deobfuscate_source_backslash_hazard_is_reachable_end_to_end(tmp_path):
+    # Reachability through the real consumer surface: a bundled mapping.txt whose
+    # class line carries a backslash-escape must not abort the deobfuscated view.
+    # Pre-fix, scanning the file below raised out of scan(); it must now complete
+    # and the deobfuscated view is simply the verbatim-substituted text.
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "mapping.txt").write_text("Foo\\qux -> a:\n")
+    found = find_mapping_file(tmp_path)
+    assert found is not None
+    mapping = parse_mapping(found.read_text())
+    # Does not raise; the additive view carries the literal original name.
+    assert deobfuscate_source("class a {}", mapping) == "class Foo\\qux {}"
+
+
+def test_deobfuscate_source_real_mapping_output_unchanged_by_literal_fix():
+    # Regression: for every genuine Java identifier (no backslash), the literal
+    # callable replacement is byte-identical to the old template form. This pins
+    # that the hardening changed nothing for real R8/ProGuard mappings.
+    t = parse_mapping(
+        "com.example.MainActivity -> com.example.a:\n"
+        "    void onCreate(android.os.Bundle) -> b\n"
+    )
+    assert deobfuscate_source("class a { void b(){} }", t) == "class MainActivity { void onCreate(){} }"

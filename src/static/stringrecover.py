@@ -142,10 +142,16 @@ def _fold_int(expr: str, tables: dict[str, list[int]] | None = None) -> int | No
                 return a | b
             if op is ast.BitXor:
                 return a ^ b
-            if op is ast.RShift:
-                return a >> b
-            if op is ast.LShift:
-                return a << b
+            if op in (ast.RShift, ast.LShift):
+                # Bound the shift amount: real R8 base-N extractors shift by small
+                # amounts (<=~31). A negative shift raises ValueError in Python and
+                # a huge one builds a multi-megabyte int - a resource-exhaustion
+                # vector on an untrusted APK - so an out-of-range shift is treated as
+                # 'not a recoverable constant' (None), never computed. No real
+                # recovery shape exceeds this bound (ADR-0006).
+                if b < 0 or b > 64:
+                    return None
+                return a >> b if op is ast.RShift else a << b
             return None
         if t is ast.Subscript:
             # Boundary #3: `T[i]` where T is a PURE-NUMERIC literal sibling table
@@ -177,6 +183,21 @@ def _fold_int(expr: str, tables: dict[str, list[int]] | None = None) -> int | No
     return ev(tree.body)
 
 
+def _parse_int_literal(item: str) -> int | None:
+    """Parse one `_is_pure_numeric_literal`-shaped item to int, or None if it does
+    not parse. The gate accepts a bare ``\\d+`` run, which includes leading-zero
+    forms (``08``, ``0123``) that ``int(x, 0)`` rejects (base-0 treats a leading
+    zero as an octal prefix). Returning None - so the caller treats the item as
+    non-recoverable - keeps one odd literal from raising out of `recover_from_text`
+    and nuking recovery for EVERY file. Real R8 numeric tables have no leading-zero
+    literals, so no real recovery is affected; this only converts a latent crash
+    into a safe skip (ADR-0006: never crash, degrade conservatively)."""
+    try:
+        return int(_CAST.sub("", item).strip(), 0)
+    except ValueError:
+        return None
+
+
 def _extract_tables(text: str) -> dict[str, list[int]]:
     """Sibling `int[] name = {literal,...}` tables usable as a subscript source.
     Only a PURE-numeric literal table is a known constant (boundary #3); a
@@ -187,7 +208,12 @@ def _extract_tables(text: str) -> dict[str, list[int]]:
         name = m.group(1)
         items = _split_array_items(m.group(2))
         if items and all(_is_pure_numeric_literal(i) for i in items):
-            tables[name] = [int(_CAST.sub("", i).strip(), 0) for i in items]
+            parsed = [_parse_int_literal(i) for i in items]
+            # Skip a table with a gate-accepted-but-unparseable literal rather than
+            # raise out of recovery (contained, conservative - it simply isn't a
+            # usable constant-subscript source).
+            if all(v is not None for v in parsed):
+                tables[name] = [v for v in parsed if v is not None]
     return tables
 
 
@@ -209,7 +235,14 @@ def _decode_numeric_array(body: str, tables: dict[str, list[int]] | None = None)
     if not items:
         return ""
     if all(_is_pure_numeric_literal(i) for i in items):
-        vals = [int(_CAST.sub("", i).strip(), 0) for i in items]
+        # A gate-accepted literal that int() still can't parse (leading-zero forms
+        # like `08`/`0123` - `_is_pure_numeric_literal` allows a bare \\d+ run) makes
+        # the array non-recoverable, NOT an exception that aborts every file's
+        # recovery. Real R8 tables have no such literals, so no real decode changes.
+        parsed = [_parse_int_literal(i) for i in items]
+        if any(v is None for v in parsed):
+            return ""
+        vals = [v for v in parsed if v is not None]
     else:
         # Constant-fold the arithmetic family; any runtime-variable item -> None
         # -> the array is not statically recoverable, leave it.

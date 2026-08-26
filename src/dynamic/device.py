@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
 import socket
 import subprocess
@@ -285,6 +287,10 @@ def _ensure_frida_server(adb: str, serial: str) -> None:
         capture_output=True, text=True, timeout=20,
     )
     root_server_running = False
+    # DEV5: track whether we SIGTERM'd a wrong-state server here, so the restart
+    # below can wait for it to actually exit first (pkill returns when the signal
+    # is sent, not when the process has died and released the frida socket).
+    killed = False
     # adb can leave stdout/stderr None on some invocations; treat absent as "".
     ps_output = (running.stdout or "") + (running.stderr or "")
     for line in ps_output.splitlines():
@@ -297,6 +303,7 @@ def _ensure_frida_server(adb: str, serial: str) -> None:
                     [adb, "-s", serial, "shell", "pkill", "-f", "frida-server"],
                     capture_output=True, text=True, timeout=20,
                 )
+                killed = True
 
     # 2b. A running root server must also match the venv's frida major.minor.
     #     Frida won't talk to a mismatched server, and it would only fail later
@@ -336,6 +343,29 @@ def _ensure_frida_server(adb: str, serial: str) -> None:
         ):
             subprocess.run(cmd, capture_output=True, text=True,
                            check=True, timeout=120)
+
+    # DEV5: if we killed a wrong-state server above (shell-run at step 2, or a
+    # version-mismatch at step 2b -> reprovision), pkill only SENT SIGTERM - the
+    # old process may still hold the frida socket. Starting the new server now
+    # could race it and fail to bind, surfacing later as a cryptic
+    # enumerate_processes error. Wait (bounded) for every frida-server to exit
+    # before restarting, escalating to SIGKILL if a SIGTERM'd server lingers.
+    # Bounded to a few seconds, then proceeds - a genuinely stuck server is
+    # caught by the connection's own liveness check, never silently swallowed.
+    if killed or reprovision:
+        for _attempt in range(10):
+            _ps = subprocess.run(
+                [adb, "-s", serial, "shell", "ps", "-A"],
+                capture_output=True, text=True, timeout=20,
+            )
+            if "frida-server" not in ((_ps.stdout or "") + (_ps.stderr or "")):
+                break
+            if _attempt == 4:
+                subprocess.run(
+                    [adb, "-s", serial, "shell", "pkill", "-9", "-f", "frida-server"],
+                    capture_output=True, text=True, timeout=20,
+                )
+            time.sleep(0.5)
 
     # 4. Start it. adbd is now root, so the nohup'd server runs as root.
     subprocess.run(
@@ -391,7 +421,13 @@ def discover_device(serial: str | None = None) -> str:
         if line.strip() and "\tdevice" in line
     ]
     if serial:
-        if not any(line.startswith(serial) for line in lines):
+        # Match the serial as the exact first tab-separated field of an
+        # `adb devices` line (the same extraction used below at the multi-device
+        # and single-device returns), not a loose whole-line prefix: startswith
+        # would treat serial 'emulator-555' as present when only 'emulator-5554'
+        # is connected. A security tool must resolve the exact device it was told
+        # to analyze, never a prefix-colliding neighbor.
+        if not any(line.split("\t")[0] == serial for line in lines):
             raise RuntimeError(f"requested device serial '{serial}' not found among connected devices")
         return serial
     if not lines:
@@ -461,6 +497,94 @@ def verify_installed(serial: str, package_name: str) -> bool:
         if line.startswith("package:") and line[8:] == package_name:
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# G13: AVD screen-resolution guard - integration brittleness made loud, not silent
+# ---------------------------------------------------------------------------
+#
+# Known-target dynamic scans drive the app's UI with HARDCODED tap coordinates
+# (e.g. the AndroGoat flow in tests/unit/test_frida_runner.py) that were live-
+# validated at ONE emulator resolution. If the reference AVD is recreated at a
+# different size those taps land in the wrong place, the app's root/SSL check
+# never fires, and the run reports a false "inconclusive" that no unit test can
+# catch (they mock the UI). This guard reads the live resolution so any drift
+# from the validated size is loud at preflight instead of a silent mid-scan
+# regression. It never invents an expected value: with EXPECTED_AVD_RESOLUTION
+# unset it only *reports* the detected size; set it (WxH, e.g. "1080x1920") to
+# turn the guard into an active mismatch check.
+
+_WM_SIZE_RE = re.compile(r"(?:Physical|Override)\s+size:\s*(\d+x\d+)", re.IGNORECASE)
+
+
+def screen_resolution_check(serial: str, expected: str | None = None) -> dict:
+    """Report the device screen resolution and, when an expected value is known,
+    whether it matches - so hardcoded known-target UI coordinates validated at
+    one resolution don't silently miss at another.
+
+    Advisory guard, never a gate: it returns a structured result rather than
+    raising for a merely-different or unreadable resolution (a broken adb
+    transport still raises via _require_adb, as everywhere else in this module).
+      status "ok"       expected known and the effective size matches
+             "mismatch" expected known and the effective size differs (LOUD)
+             "unset"    no expected value to compare (reports the detected size)
+             "unknown"  `adb shell wm size` could not be read/parsed (LOUD)
+    The effective size is the Override size when the framework reports one (a
+    resized/scaled AVD), else the Physical size - taps hit the override."""
+    if expected is None:
+        expected = os.environ.get("EXPECTED_AVD_RESOLUTION") or None
+
+    adb = _require_adb()
+    try:
+        proc = subprocess.run(
+            [adb, "-s", serial, "shell", "wm", "size"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"status": "unknown", "detected": None, "physical": None,
+                "override": None, "expected": expected,
+                "message": f"could not run `adb shell wm size`: {exc}"}
+
+    if proc.returncode != 0:
+        return {"status": "unknown", "detected": None, "physical": None,
+                "override": None, "expected": expected,
+                "message": (f"`adb shell wm size` failed (exit {proc.returncode}): "
+                            f"{(proc.stderr or proc.stdout).strip() or '(no output)'}")}
+
+    physical = override = None
+    for line in proc.stdout.splitlines():
+        match = _WM_SIZE_RE.search(line)
+        if match is None:
+            continue
+        if "override" in line.lower():
+            override = match.group(1)
+        else:
+            physical = match.group(1)
+
+    effective = override or physical
+    if effective is None:
+        return {"status": "unknown", "detected": None, "physical": None,
+                "override": None, "expected": expected,
+                "message": ("could not parse a resolution from `wm size` output: "
+                            f"{proc.stdout.strip() or '(empty)'}")}
+
+    result = {"detected": effective, "physical": physical,
+              "override": override, "expected": expected}
+    if expected is None:
+        result["status"] = "unset"
+        result["message"] = (
+            f"screen resolution {effective} (set EXPECTED_AVD_RESOLUTION to lock "
+            "the known-target coordinate guard)")
+    elif effective == expected:
+        result["status"] = "ok"
+        result["message"] = f"screen resolution {effective} matches expected"
+    else:
+        result["status"] = "mismatch"
+        result["message"] = (
+            f"screen resolution {effective} != expected {expected} - hardcoded "
+            f"known-target UI coordinates were validated at {expected} and may "
+            f"not fire at {effective}")
+    return result
 
 
 def capture_logcat(serial: str, timeout_seconds: int = 15) -> str:

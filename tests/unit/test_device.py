@@ -26,6 +26,69 @@ def test_find_windows_user_fails_loudly_when_only_special_entries_exist(tmp_path
         _find_windows_user(users_dir=users_dir)
 
 
+# ---------------------------------------------------------------------------
+# G13: screen-resolution guard - integration brittleness surfaced, not silent
+# ---------------------------------------------------------------------------
+
+
+def _patch_wm_size(monkeypatch, *, stdout="", returncode=0):
+    monkeypatch.setattr(device, "_require_adb", lambda: "adb")
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(device.subprocess, "run", fake_run)
+
+
+def test_screen_resolution_unset_reports_detected_physical(monkeypatch):
+    monkeypatch.delenv("EXPECTED_AVD_RESOLUTION", raising=False)
+    _patch_wm_size(monkeypatch, stdout="Physical size: 1080x1920\n")
+    res = device.screen_resolution_check("emulator-5554", expected=None)
+    assert res["status"] == "unset"
+    assert res["detected"] == "1080x1920"
+    assert res["physical"] == "1080x1920" and res["override"] is None
+
+
+def test_screen_resolution_override_is_the_effective_size(monkeypatch):
+    # A resized/scaled AVD reports both; the Override size is what taps hit.
+    _patch_wm_size(
+        monkeypatch,
+        stdout="Physical size: 1080x1920\nOverride size: 720x1280\n",
+    )
+    res = device.screen_resolution_check("emulator-5554", expected="720x1280")
+    assert res["status"] == "ok"
+    assert res["detected"] == "720x1280"
+    assert res["physical"] == "1080x1920" and res["override"] == "720x1280"
+
+
+def test_screen_resolution_mismatch_is_flagged_loudly(monkeypatch):
+    _patch_wm_size(monkeypatch, stdout="Physical size: 720x1280\n")
+    res = device.screen_resolution_check("emulator-5554", expected="1080x1920")
+    assert res["status"] == "mismatch"
+    assert "720x1280" in res["message"] and "1080x1920" in res["message"]
+
+
+def test_screen_resolution_env_supplies_expected(monkeypatch):
+    monkeypatch.setenv("EXPECTED_AVD_RESOLUTION", "1080x1920")
+    _patch_wm_size(monkeypatch, stdout="Physical size: 1080x1920\n")
+    res = device.screen_resolution_check("emulator-5554")
+    assert res["status"] == "ok" and res["expected"] == "1080x1920"
+
+
+def test_screen_resolution_adb_nonzero_is_unknown_not_silent(monkeypatch):
+    _patch_wm_size(monkeypatch, returncode=1, stdout="")
+    res = device.screen_resolution_check("emulator-5554", expected="1080x1920")
+    assert res["status"] == "unknown"
+    assert res["detected"] is None and "failed" in res["message"]
+
+
+def test_screen_resolution_unparseable_output_is_unknown(monkeypatch):
+    _patch_wm_size(monkeypatch, stdout="wm: not found\n")
+    res = device.screen_resolution_check("emulator-5554", expected="1080x1920")
+    assert res["status"] == "unknown"
+    assert "could not parse" in res["message"]
+
+
 def test_find_windows_user_returns_first_real_user_directory(tmp_path):
     users_dir = tmp_path / "Users"
     (users_dir / "Public").mkdir(parents=True)
@@ -368,7 +431,10 @@ def test_ensure_frida_server_restarts_shell_run_server_as_root(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0)  # nohup start (as root)
     monkeypatch.setattr(subprocess, "run", fake_run)
     _ensure_frida_server("adb", "emulator-5554")
-    assert seq["n"] == 5  # root + ps + pkill + ls + start
+    # DEV5: root + ps + pkill + ls + (wait-for-gone ps) + start. The extra ps is
+    # the bounded wait that lets the SIGTERM'd shell server exit before the root
+    # restart, so the new server never races the old one for the frida socket.
+    assert seq["n"] == 6
 
 
 def test_ensure_frida_server_starts_when_present_but_not_running(monkeypatch):
@@ -671,17 +737,24 @@ def _frida_server_fake_run(version_stdout, *, root_line=True, binary_present=Tru
     _ensure_frida_server. `version_stdout` is what `frida-server --version`
     prints on the device; root_line controls whether ps reports a root server."""
     calls = []
+    state = {"killed": False}
 
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
         if "root" in cmd and "shell" not in cmd:
             return subprocess.CompletedProcess(cmd, 0, stdout="restarting adbd as root\n")
         if cmd[-2:] == ["shell", "ps", "-A"] or ("ps" in cmd and "-A" in cmd):
+            # DEV5: once the server has been SIGTERM'd, a real device's ps shows
+            # it GONE. Model that so the restart's bounded wait-for-gone poll
+            # observes the exit in one poll instead of spinning its full timeout.
+            if state["killed"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="")
             body = "root   frida-server\n" if root_line else "shell  frida-server\n"
             return subprocess.CompletedProcess(cmd, 0, stdout=body)
         if "--version" in cmd:
             return subprocess.CompletedProcess(cmd, 0, stdout=version_stdout)
         if "pkill" in cmd:
+            state["killed"] = True
             return subprocess.CompletedProcess(cmd, 0, stdout="")
         if "ls" in cmd:
             rc = 0 if binary_present else 1

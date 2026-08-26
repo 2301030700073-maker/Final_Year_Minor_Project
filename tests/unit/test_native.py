@@ -545,6 +545,29 @@ def test_compute_degradation_healthy_is_fully_analyzed():
     assert compute_degradation([lib])["arm64-v8a"] == "fully_analyzed"
 
 
+def test_compute_degradation_worst_wins_within_abi_partial_not_masked():
+    # Two libs in ONE ABI: a stripped (partial) lib and a healthy one. Old
+    # last-write-wins let whichever lib was processed LAST set the ABI state, so a
+    # healthy lib analyzed after a stripped one falsely certified the ABI
+    # fully_analyzed - a confident negative over the unexamined stripped lib
+    # (ADR-0006). In a single-ABI app (arm64-only) there is no other ABI for
+    # native_coverage's cross-ABI _min_coverage to drag it down, so the masking is
+    # live. Worst-wins keeps the ABI partial regardless of order.
+    stripped = NativeLibrary(abi="arm64-v8a", name="liba_stripped.so", stripped=True)
+    healthy = NativeLibrary(abi="arm64-v8a", name="libz_healthy.so", exports=["foo"], strings=["hello"])
+    assert compute_degradation([stripped, healthy])["arm64-v8a"] == "partial"
+    assert compute_degradation([healthy, stripped])["arm64-v8a"] == "partial"
+
+
+def test_compute_degradation_worst_wins_within_abi_unscannable_not_masked():
+    # unscannable is the worst state (a tool failed - we read nothing) and must
+    # never be masked by a healthy sibling in the same ABI, in either order.
+    unscannable = NativeLibrary(abi="arm64-v8a", name="liba.so", unscannable=True, scan_error="readelf exited 1")
+    healthy = NativeLibrary(abi="arm64-v8a", name="libz.so", exports=["foo"], strings=["hello"])
+    assert compute_degradation([unscannable, healthy])["arm64-v8a"] == "unscannable"
+    assert compute_degradation([healthy, unscannable])["arm64-v8a"] == "unscannable"
+
+
 def test_load_native_signatures_rejects_java_only_pattern_type(tmp_path):
     # G3b: a native rule authoring export_symbol|embedded_string only - a Java-only
     # type (string_literal) must fail loudly at load, not silently no-op.
@@ -1246,3 +1269,67 @@ def test_run_tool_returns_stdout_and_raises_on_failure(monkeypatch):
     monkeypatch.setattr(_sp, "run", timeout_run)
     with pytest.raises(NativeToolError, match="timed out after 30s"):
         _run_tool(["ghidra", "lib.so"], 30, "ghidra")
+
+
+# --- G9: Ghidra toolchain version folded into the native analyze-cache key ------
+
+
+def test_ghidra_fingerprint_reads_version_from_install_path(monkeypatch):
+    # The pinned tools/ghidra/ghidra_<ver>/ segment is the version token - read it
+    # straight from the discovered analyzeHeadless path, no extra subprocess.
+    from static import native as native_mod
+    monkeypatch.setattr(
+        native_mod, "_find_ghidra_headless",
+        lambda: "/opt/tools/ghidra/ghidra_11.3.2_PUBLIC/support/analyzeHeadless",
+    )
+    assert native_mod._ghidra_fingerprint() == "ghidra_11.3.2_PUBLIC"
+
+
+def test_ghidra_fingerprint_absent_is_a_distinct_token(monkeypatch):
+    # No Ghidra is itself a fingerprint: a no-body-decomp result must never be
+    # served from a cache entry built when Ghidra was present, or vice versa.
+    from static import native as native_mod
+    monkeypatch.setattr(native_mod, "_find_ghidra_headless", lambda: None)
+    assert native_mod._ghidra_fingerprint() == "no-ghidra"
+
+
+def test_analyze_cache_version_composes_logic_tag_and_tool_fingerprint(monkeypatch):
+    from static import native as native_mod
+    monkeypatch.setattr(
+        native_mod, "_find_ghidra_headless",
+        lambda: "/opt/tools/ghidra/ghidra_11.4_PUBLIC/support/analyzeHeadless",
+    )
+    version = native_mod._analyze_cache_version()
+    assert version.startswith(native_mod._ANALYZE_CACHE_VERSION)
+    assert "ghidra_11.4_PUBLIC" in version
+
+
+def test_analyze_so_threads_ghidra_fingerprint_into_cache_key(monkeypatch, tmp_path):
+    # G9 wiring: analyze_so must key BOTH the cache load and the cache save on the
+    # fingerprinted version, so a Ghidra upgrade auto-invalidates stale entries
+    # instead of silently serving results a different decompiler version produced.
+    from static import native as native_mod
+    so = tmp_path / "libx.so"
+    so.write_bytes(b"\x7fELF fake native lib bytes")
+    captured = {}
+
+    def fake_load(cache_dir, so_hash, version, trigger_key):
+        captured["load_version"] = version
+        return None  # force a miss so the uncached path + save both run
+
+    def fake_save(cache_dir, so_hash, version, trigger_key, lib):
+        captured["save_version"] = version
+
+    monkeypatch.setattr(native_mod, "_analyze_so_uncached", lambda p, t=None: "LIB")
+    monkeypatch.setattr(native_mod, "_load_analyze_cache", fake_load)
+    monkeypatch.setattr(native_mod, "_save_analyze_cache", fake_save)
+    monkeypatch.setattr(
+        native_mod, "_find_ghidra_headless",
+        lambda: "/opt/tools/ghidra/ghidra_11.9_PUBLIC/support/analyzeHeadless",
+    )
+
+    result = native_mod.analyze_so(so, cache_dir=tmp_path / "cache")
+    assert result == "LIB"
+    assert "ghidra_11.9_PUBLIC" in captured["load_version"]
+    # load and save MUST agree, or a write under one key could never be read back
+    assert captured["save_version"] == captured["load_version"]

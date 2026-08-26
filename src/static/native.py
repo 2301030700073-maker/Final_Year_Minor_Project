@@ -29,6 +29,7 @@ from pathlib import Path
 import yaml
 
 from common import CATEGORIES, KNOWN_NATIVE_LIBS, Evidence, atomic_json_write, load_json_cache, load_yaml_entries, sha256_file, require_tool, read_text_ignore
+from static.coverage import _min_coverage
 from static.indicators import find_native_indicator_categories
 from static.signatures import (
     _validate_bool_flag,
@@ -364,6 +365,7 @@ def match_native(
                 file=path,
                 line_or_offset=f"symbol[{idx}]" if idx >= 0 else "decompiled-body",
                 matched_text=hit_pattern,
+                evidence_type=sig.evidence_type,  # G11: carry provenance (native_symbol/...)
             )
             if sig.category == "root":
                 result.root_evidence.append(item)
@@ -401,59 +403,93 @@ def match_native(
     return result
 
 
+def _lib_coverage(lib: NativeLibrary) -> str:
+    """Coverage state for ONE library (G10 + G-B + G6), decided in precedence
+    order so a genuinely-examined body wins over a bare symbol-layer verdict:
+
+      1. Ghidra decompiled real bodies (and NOT truncated) -> `fully_analyzed`
+         even for a stripped/obfuscated lib: the code WAS read at the body level.
+      2. Ghidra hit its per-lib function cap (ghidra_truncated) -> `partial`: only
+         a bounded prefix of the bodies was examined, so the tail stays unread.
+      3. capstone fully disassembled the executable sections (body_scanned) AND
+         the lib is neither obfuscated nor packed -> `fully_analyzed`: a stripped
+         lib whose whole call+string detection surface was read (Fix-2).
+         Obfuscated/packed libs are EXCLUDED here and fall through to `partial`.
+      4. a tool failed on the lib (H1/H4, unscannable) -> `unscannable`: we could
+         not read it at all, so it can't certify a negative.
+      5. stripped/obfuscated/packed with NO body upgrade above -> `partial`
+         (never a silent clean; matches Gap-2's packed -> java=partial).
+      6. parsed but empty (no exports, no strings) -> `unscannable` (had nothing;
+         not proof of absence).
+      7. otherwise a healthy lib -> `fully_analyzed`.
+
+    NATDOC-COV1: this contract MUST track the branch order below. The
+    fully_analyzed cases (1, 3, 7) are the confident-negative-critical paths - a
+    stripped lib CAN reach `fully_analyzed` via 1 or 3 - so they are enumerated
+    here rather than hidden behind a flat "stripped/obfuscated/packed -> partial"
+    summary that a maintainer would read as "a stripped lib can never certify a
+    negative" (it can, and exactly here is where an over-eager upgrade would
+    create a false negative, ADR-0006)."""
+    if lib.ghidra_decompiled and not lib.ghidra_truncated:
+        # L-M6: Ghidra decompiled real function bodies, so whatever
+        # readelf/strings missed (stripped, obfuscated, even a tool failure),
+        # the code was scanned at the function-body level - the surface is
+        # genuinely scanned. This is NOT a silent upgrade: ghidra_decompiled
+        # is only True on actual decompilation; a failed run keeps
+        # ghidra_error set and ghidra_decompiled False, so coverage stays
+        # partial/unscannable rather than falsely certified scanned.
+        return "fully_analyzed"
+    elif lib.ghidra_truncated:
+        # Item #3 / time: the per-lib body-dump hit its cap, so only a
+        # bounded subset of this lib's functions was examined. The unexamined
+        # tail could hold a technique, so the lib reads `partial`
+        # (coverage-limited, ADR-0006) - a native NEITHER over it is never a
+        # confident negative. Honest cap: bounds the pathological giant-lib
+        # case without falsely certifying an unexamined tail as scanned.
+        return "partial"
+    elif lib.body_scanned and not lib.obfuscated and not lib.packed:
+        # Fix-2: capstone genuinely disassembled this lib's executable code
+        # (a complete instruction-level scan - body_scanned is only True on
+        # actual disassembly). Root/SSL detection is call+string based: an
+        # artifact check is a libc call (access/fopen/openat) + a path string,
+        # pinning is a verify call + cert bytes. So a fully-disassembled,
+        # non-obfuscated, non-packed stripped lib's entire detection surface
+        # has been examined (symbols + embedded strings + every call/branch
+        # target), which is the same honest "scanned" claim Ghidra makes - a
+        # stripped lib whose code was read reads fully_analyzed. Obfuscated or
+        # packed libs are excluded below and stay partial: inline/encrypted
+        # logic is a genuine limit a call-surface scan cannot see through
+        # (ADR-0006), so a confident negative over one is never certified.
+        return "fully_analyzed"
+    elif lib.unscannable:
+        return "unscannable"
+    elif lib.stripped or lib.obfuscated or lib.packed:
+        # Gap-4: a packed (UPX) lib's real code is behind a stub - unless we
+        # unpacked it (in which case ghidra/symbols read the real code and
+        # the fully_analyzed branch above fired), it reads partial, matching
+        # Gap-2's packed->java=partial. Never a silent clean.
+        return "partial"
+    elif not lib.exports and not lib.strings:
+        return "unscannable"
+    else:
+        return "fully_analyzed"
+
+
 def compute_degradation(libs: list[NativeLibrary]) -> dict[str, str]:
-    """Per-ABI coverage state (G10 + G-B + G6). A lib a tool failed on (H1/H4) is
-    `unscannable` - we could not read it at all, so it can't certify a negative.
-    A lib that is stripped or obfuscated maps to `partial`; an empty (no exports,
-    no strings) lib is `unscannable` (we parsed it, it had nothing - that's not
-    proof of absence); a healthy lib is `fully_analyzed`. Per-ABI so a device-only
-    scan can't silently under-cover (G6)."""
-    coverage: dict[str, str] = {}
+    """Per-ABI coverage state (G10 + G-B + G6), worst-wins within each ABI.
+
+    Multiple libs normally share one ABI, so an ABI's state is the WORST
+    (severity-min via coverage._min_coverage) among that ABI's libs - never
+    last-write-wins. Otherwise a stripped/unscannable lib would be masked by a
+    healthy lib analyzed later in the SAME ABI, falsely certifying the ABI
+    `fully_analyzed`; a single-ABI app (now common - arm64-only) has no other ABI
+    for native_coverage()'s cross-ABI _min_coverage to drag the surface down with,
+    so that masking would be a live confident negative over an unexamined lib
+    (ADR-0006). Per-ABI so a device-only scan can't silently under-cover (G6)."""
+    by_abi: dict[str, list[str]] = {}
     for lib in libs:
-        if lib.ghidra_decompiled and not lib.ghidra_truncated:
-            # L-M6: Ghidra decompiled real function bodies, so whatever
-            # readelf/strings missed (stripped, obfuscated, even a tool failure),
-            # the code was scanned at the function-body level - the surface is
-            # genuinely scanned. This is NOT a silent upgrade: ghidra_decompiled
-            # is only True on actual decompilation; a failed run keeps
-            # ghidra_error set and ghidra_decompiled False, so coverage stays
-            # partial/unscannable rather than falsely certified scanned.
-            coverage[lib.abi] = "fully_analyzed"
-        elif lib.ghidra_truncated:
-            # Item #3 / time: the per-lib body-dump hit its cap, so only a
-            # bounded subset of this lib's functions was examined. The unexamined
-            # tail could hold a technique, so the lib reads `partial`
-            # (coverage-limited, ADR-0006) - a native NEITHER over it is never a
-            # confident negative. Honest cap: bounds the pathological giant-lib
-            # case without falsely certifying an unexamined tail as scanned.
-            coverage[lib.abi] = "partial"
-        elif lib.body_scanned and not lib.obfuscated and not lib.packed:
-            # Fix-2: capstone genuinely disassembled this lib's executable code
-            # (a complete instruction-level scan - body_scanned is only True on
-            # actual disassembly). Root/SSL detection is call+string based: an
-            # artifact check is a libc call (access/fopen/openat) + a path string,
-            # pinning is a verify call + cert bytes. So a fully-disassembled,
-            # non-obfuscated, non-packed stripped lib's entire detection surface
-            # has been examined (symbols + embedded strings + every call/branch
-            # target), which is the same honest "scanned" claim Ghidra makes - a
-            # stripped lib whose code was read reads fully_analyzed. Obfuscated or
-            # packed libs are excluded below and stay partial: inline/encrypted
-            # logic is a genuine limit a call-surface scan cannot see through
-            # (ADR-0006), so a confident negative over one is never certified.
-            coverage[lib.abi] = "fully_analyzed"
-        elif lib.unscannable:
-            coverage[lib.abi] = "unscannable"
-        elif lib.stripped or lib.obfuscated or lib.packed:
-            # Gap-4: a packed (UPX) lib's real code is behind a stub - unless we
-            # unpacked it (in which case ghidra/symbols read the real code and
-            # the fully_analyzed branch above fired), it reads partial, matching
-            # Gap-2's packed->java=partial. Never a silent clean.
-            coverage[lib.abi] = "partial"
-        elif not lib.exports and not lib.strings:
-            coverage[lib.abi] = "unscannable"
-        else:
-            coverage[lib.abi] = "fully_analyzed"
-    return coverage
+        by_abi.setdefault(lib.abi, []).append(_lib_coverage(lib))
+    return {abi: _min_coverage(states) for abi, states in by_abi.items()}
 
 
 # --- toolchain-gated (reference environment only) ----------------------------
@@ -877,6 +913,38 @@ def _should_decompile_body(
 _ANALYZE_CACHE_VERSION = "native-analyze-v2"
 
 
+def _ghidra_fingerprint() -> str:
+    """Version token for the discovered Ghidra headless install, folded into the
+    analyze-cache key (G9).
+
+    A native lib's analysis result depends on the Ghidra version that decompiled
+    its bodies (ghidra_decompiled bodies, and thus native coverage, differ across
+    versions). The manual `_ANALYZE_CACHE_VERSION` tag only invalidates on an
+    explicit rule/logic bump - a silent Ghidra *upgrade* would otherwise keep
+    serving stale entries a different decompiler produced (this is exactly the
+    kind of staleness that caused an observed multi-minute native stall). Folding
+    the tool version in makes tool drift auto-invalidate too.
+
+    Absence is itself a distinct fingerprint: a lib analyzed with no body-decomp
+    must not be served from an entry built when Ghidra was present, or vice versa.
+    The version is read from the pinned tools/ghidra/ghidra_<ver>/ install path,
+    so no extra subprocess is spawned."""
+    headless = _find_ghidra_headless()
+    if headless is None:
+        return "no-ghidra"
+    for part in Path(headless).parts:
+        if part.startswith("ghidra_"):
+            return part
+    return "ghidra-unknown-version"
+
+
+def _analyze_cache_version() -> str:
+    """Full analyze-cache version key: the manual analysis-logic tag PLUS the live
+    Ghidra toolchain fingerprint (G9), so BOTH an explicit rule/logic bump and a
+    silent toolchain upgrade invalidate stale entries - not just manual bumps."""
+    return f"{_ANALYZE_CACHE_VERSION}+{_ghidra_fingerprint()}"
+
+
 def _trigger_key(security_triggers: set[str] | None) -> str:
     """Deterministic key for the security-trigger set. _analyze_so_uncached's
     behavior - above all the Gap-1 Ghidra body gate (_should_decompile_body) -
@@ -915,11 +983,12 @@ def analyze_so(so_path: Path, security_triggers: set[str] | None = None, cache_d
         return _analyze_so_uncached(so_path, security_triggers)
     so_hash = sha256_file(so_path)
     trigger_key = _trigger_key(security_triggers)
-    cached = _load_analyze_cache(cache_dir, so_hash, _ANALYZE_CACHE_VERSION, trigger_key)
+    version = _analyze_cache_version()
+    cached = _load_analyze_cache(cache_dir, so_hash, version, trigger_key)
     if cached is not None:
         return cached
     lib = _analyze_so_uncached(so_path, security_triggers)
-    _save_analyze_cache(cache_dir, so_hash, _ANALYZE_CACHE_VERSION, trigger_key, lib)
+    _save_analyze_cache(cache_dir, so_hash, version, trigger_key, lib)
     return lib
 
 

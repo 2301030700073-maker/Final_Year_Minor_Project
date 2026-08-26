@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from jinja2 import Template
+from jinja2 import Environment
 
 from calibration.report import CalibrationReport
 from common import ClassificationResult, CorrelationResult, StageResult, VerificationResult
@@ -13,7 +13,30 @@ from report import attribution as attribution_module
 from static.coverage import confidence_bound
 from static.manifest import ManifestInfo
 
-TEMPLATE = Template("""\
+
+def _md(value) -> str:
+    """Escape a value for safe inline Markdown so an adversarial APK-derived
+    string (matched_text, host, path, ...) cannot break the report's structure:
+    a newline injects a new table row / list item, a `|` a new table column, and
+    a backtick closes the code span the value is rendered inside. Newlines become
+    spaces and pipes are backslash-escaped (exact text preserved); a literal
+    backtick - essentially never present in a real matched token - is shown as an
+    apostrophe so the surrounding code span stays intact. A documented display
+    substitution, never a silent drop (ADR-0006)."""
+    s = "" if value is None else str(value)
+    s = s.replace("\r", " ").replace("\n", " ")
+    s = s.replace("|", "\\|")
+    s = s.replace("`", "'")
+    return s
+
+
+# Markdown output, not HTML: autoescape stays off (the template hand-escapes the
+# few literal angle-bracket strings it needs). We instead neutralize the specific
+# structure-breaking characters in untrusted values via the `md` filter above.
+_env = Environment()
+_env.filters["md"] = _md
+
+TEMPLATE = _env.from_string("""\
 # Analysis Report
 
 **Run ID:** {{ run_id }}
@@ -33,7 +56,7 @@ TEMPLATE = Template("""\
 {% endif %}
 {% if metadata.signer and metadata.signer.signer_count is not none and metadata.signer.signer_count > 1 -%}
 **All signers ({{ metadata.signer.signer_count }} total):**
-{% for s in metadata.signer.signers -%}
+{% for s in metadata.signer.signers or [] -%}
 - {{ s.dn or "?" }} — {{ s.sha256 or "?" }}
 {% endfor %}
 {% endif %}
@@ -47,6 +70,12 @@ TEMPLATE = Template("""\
 **Package:** {{ manifest.package_name or "unknown" }}
 **Allow backup:** {{ "yes" if manifest.allow_backup else ("no" if manifest.allow_backup is false else "unset") }}
 **Cleartext permitted (effective):** {{ "yes" if manifest.cleartext_permitted else ("no" if manifest.cleartext_permitted is false else "unset (platform default)") }}
+{% if manifest.cleartext_domains -%}
+**Cleartext-permitted domains ({{ manifest.cleartext_domains | length }}):** {% for d in manifest.cleartext_domains %}`{{ d }}`{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif -%}
+{% if expired_pin_sets -%}
+**NSC pin-set EXPIRED:** the network-security-config declares certificate pinning whose expiration ({{ expired_pin_sets | join(", ") }}) precedes this run - Android stops enforcing an expired pin-set and falls back to normal CA validation, so this NSC-declared pinning is **not active at runtime** (any other pinning mechanism is unaffected; confirm dynamically). Declared pinning is still reported above - this only flags that the framework will not enforce it.
+{% endif -%}
 **Permissions{% if manifest.permissions %} ({{ manifest.permissions | length }}){% endif %}:** {{ manifest.permissions | join(", ") if manifest.permissions else "none" }}
 {% set _exported = manifest.exported_components | selectattr("exported") | list -%}
 {% if _exported -%}
@@ -61,7 +90,7 @@ TEMPLATE = Template("""\
 ### {{ heading }}
 - Confidence: {{ confidence_bound(cat, classification[cat], coverage) }} -> {{ "DETECTED" if classification[cat].detected else "Inconclusive" }}{% if attr and attr.all_third_party and classification[cat].detected %} (**bundled SDK only** - none of these {{ noun }} matches are in the app's own package){% endif %}
 {% for e in classification[cat].evidence -%}
-- `{{ e.signature_id }}` at {{ e.file }}:{{ e.line_or_offset }} - `{{ e.matched_text }}`
+- `{{ e.signature_id }}` ({{ e.evidence_type }}) at {{ e.file }}:{{ e.line_or_offset }} - `{{ e.matched_text | md }}`
 {% endfor %}
 {% if attr and attr.all_third_party and classification[cat].detected -%}
 > **Attribution:** all {{ attr.third_party }} {{ noun }} matches are in bundled third-party libraries ({{ attr.vendors | join(', ') }}), none in the app's own package (`{{ attr.app_package }}`) - {{ vendor_note }}
@@ -94,7 +123,7 @@ Per-surface bound of this scan - a `partial`/`unscannable` surface is a lower bo
 {% if coverage.get("js") == "partial" -%}
 > **JS:** partial means the app ships a binary Hermes/bytecode bundle whose control flow can't be read (React Native release bundle) - we recover only its string constants, so a js root/SSL NEITHER is not proof a root/SSL check in the bundle is absent. Mirrors the native callout above.
 {% endif %}
-{% if obfuscation_level == "heavy" -%}
+{# COV-HEAVY-JAVA1: gate on the ACTUAL java state, not `obfuscation_level` alone. Under heavy obfuscation java_coverage() returns `partial` from a complete/partial decompile but `unscannable` from an unknown-completeness (cached/regenerated) run (coverage.py). Firing on `heavy` alone printed "the Java surface is `partial`" beneath a coverage table showing java=`unscannable` - a false specific fact. The heavy+unknown case is already carried by the decompile-completeness=="unknown" Limitations branch; here the caveat fires only where its own assertion is true. #}{% if obfuscation_level == "heavy" and coverage.get("java") == "partial" -%}
 > **Heavy obfuscation:** the Java surface is `partial` even on a complete decompile - encrypted/unreachable strings mean a clean Java NEITHER is not proof of absence (N1/G-C).
 {% endif %}
 {% else -%}
@@ -183,7 +212,7 @@ runtime (Frida, Phase 5+) view can confirm the surrounding logic.
 | Signature | Matched constant | File |
 |---|---|---|
 {% for sig_id, _cat, matched_text, bundle_file in js_evidence -%}
-| `{{ sig_id }}` | `{{ matched_text }}` | `{{ bundle_file }}` |
+| `{{ sig_id }}` | `{{ matched_text | md }}` | `{{ bundle_file | md }}` |
 {% endfor %}
 {% endif %}
 {% if dart_aot_libs -%}
@@ -239,8 +268,8 @@ string in this APK; only its *ownership* is unverified.
 {% endif %}
 ## Dynamic Verification
 
-- Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}attempted, bypass not verified (no target-specific success check){% endif %}{% endif %}
-- SSL bypassed: {% if verification %}{% if verification.ssl_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.ssl_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}attempted, bypass not verified (no target-specific success check){% endif %}{% endif %}
+- Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}bypass not verified (see stage status and evidence below){% endif %}{% endif %}
+- SSL bypassed: {% if verification %}{% if verification.ssl_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.ssl_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}bypass not verified (see stage status and evidence below){% endif %}{% endif %}
 {% if verification -%}
 {% for key, value in verification.evidence_lines.items() -%}
 - {{ key }}: `{{ value }}`
@@ -296,13 +325,15 @@ The app accepted proxy-decrypted HTTPS flows through the capture proxy (`{{ capt
 | Host | Method | Path | Status |
 |---|---|---|---|
 {% for f in capture_flows -%}
-| {{ f.host }} | {{ f.method }} | {{ f.path }} | {{ f.status }} |
+| {{ f.host | md }} | {{ f.method | md }} | {{ f.path | md }} | {{ f.status | md }} |
 {% endfor %}
 
 Raw flow file: `{{ capture_flows_path }}`
 {% else -%}
 {% if manifest and "android.permission.INTERNET" not in (manifest.permissions or []) -%}
 No traffic was captured. The app declares **no `android.permission.INTERNET` permission**, so it cannot open a network socket — the empty capture is expected regardless of proxy state (capture stage reason: {{ capture_reason or "reason not recorded" }}). The capture stage is honest: a failed capture is reported here, never a fabricated flow list.
+{% elif manifest and "android.permission.INTERNET" in manifest.permissions -%}
+No traffic was captured ({{ capture_reason or "reason not recorded" }}). The app **declares `android.permission.INTERNET`**, so it can open network sockets — the absence of captured flows is a **coverage limitation of this run** (the app may not have exercised the network, or a pinned endpoint refused the proxy CA), not evidence that the app makes no network calls. The capture stage is honest: a failed capture is reported here, never a fabricated flow list.
 {% else -%}
 No traffic was captured ({{ capture_reason or "reason not recorded" }}). The capture stage is honest: a failed capture is reported here, never a fabricated flow list.
 {% endif -%}
@@ -317,15 +348,35 @@ This report is produced by a deterministic, signature-based pipeline (ADR-0001) 
 **Decompilation is not guaranteed to succeed.** jadx has failed outright on some real-world APKs tested against this pipeline - F-Droid, Root Checker, and the Nexus Launcher system app all failed to decompile - and larger/heavily-obfuscated production apps typically only partial-decompile rather than failing cleanly (e.g. PropertyGuru, 151MB React Native, exits with status 1 after producing ~27,720 source files). The partial-output-tolerance path keeps whatever jadx did produce instead of discarding it, but a partial run is a lower bound, not a definitive scan. See `docs/execution_changes/phase-1-changes-and-lessons.md`.
 
 {% if decompile_completeness == "partial" -%}
-**This run's decompilation was INCOMPLETE.** jadx exited with status {{ jadx_exit_code }} after producing {{ jadx_file_count }} real source files - the static scan above only examined those files, not the full APK. A NEITHER/Inconclusive verdict here reflects the subset actually decompiled, not a confirmed absence across the whole app. Treat this run's findings as a lower bound, not a definitive negative.
+**This run's decompilation was INCOMPLETE.** jadx exited with status {{ jadx_exit_code }} after producing {{ jadx_file_count }} real source files - the static scan above only examined those files, not the full APK. A NEITHER/Inconclusive verdict here reflects the subset actually decompiled, not a confirmed absence across the whole app. Treat this run's findings as a lower bound, not a definitive negative.{% if class_recovery_pct is not none %} Quantified: jadx recovered Java source for approximately {{ class_recovery_pct }}% of the app's top-level classes ({{ jadx_file_count }} jadx top-level `.java` classes vs ~{{ smali_top_level_classes }} apktool top-level `.smali` classes). This is an approximate class-count proxy, not a precise bytecode-coverage figure: jadx and apktool enumerate synthetic/resource classes differently, and if apktool itself only partially decoded, this denominator is a lower bound too.{% endif %}
 {% elif decompile_completeness == "unknown" -%}
 **This run's decompile completeness could not be determined** (missing or unreadable completeness record from a cached run) - treat any NEITHER/Inconclusive verdict with the same caution as a partial run.
 {% else -%}
 This run's decompilation completed successfully ({{ jadx_file_count }} source files) - static findings reflect a full scan of the decompiled output.
 {% endif %}
 
+**Decompiler(s) used this run:** {{ decompiler_used }}. Recorded from the decompile stage's own evidence so this run's Java-side coverage is reproducible - the secondary CFR pass is discovered per-machine (ADR-0007), and naming whether it ran is what explains a coverage difference between two environments rather than leaving it silent.
+
 **Dynamic bypass attempts unseen apps, but engagement is not confirmation.** The three UnCrackable targets use a hand-authored Frida script. For any unknown real app with no such script, the deterministic bypass synthesizer composes a findings-specific Frida bypass from the same signatures that drove static detection (L-M2), never supplemented by the vendored third-party universal while a synthesized bypass is loaded: live verification on a real target (AndroGoat via a trusted mitmproxy CA) proved the vendor's second script load suppresses the synthesized bypass's observers on both root and SSL regardless of whether their slot methods are disjoint (root/BOTH: root_bypassed=True synth-only vs 0 probeHits synth+vendor; SSL: ssl_bypassed=True synth-only vs 0 observer messages synth+vendor) - so the synthesized bypass, made comprehensive with native libc path-hiding + exec-su for root and a native BoringSSL hook + OkHttp pinner neutralizer + conscrypt trust-manager observer for SSL, is loaded alone - so a real app always gets a real attempt, never a silent "no script available" skip. That synthesized bypass is "hooks engaged" evidence, not a confirmed bypass: only a live target-specific success check (or interactive verification) can confirm the app's own root/SSL check was actually defeated. Engagement is reported as a distinct, lower tier and never blended into a dynamically-confirmed verdict (ADR-0006).
 
+{% if hooks_audit_present -%}
+**Bypass hooks engaged (auditable, this run).** Reconstructed from the dynamic stage's own Frida message stream so engagement traces back to the signatures that drove it (G10), not an opaque yes/no. Every count below is a real delivered message:
+{% if hooks_driving_signatures -%}
+- Driven by static signatures: {% for s in hooks_driving_signatures %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}.
+{% endif -%}
+{% if hooks_handauthored_scripts -%}
+- Hand-authored script(s): {% for s in hooks_handauthored_scripts %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}.
+{% endif -%}
+- Readiness checkpoints delivered: {% if hooks_checkpoints_fired %}{% for c in hooks_checkpoints_fired %}`{{ c }}`{% if not loop.last %}, {% endif %}{% endfor %}{% else %}none observed{% endif %}.
+- Behavioral engagement (the app's own check hitting a hook): {{ hooks_root_probe_hits }} root probeHit(s){% if hooks_ssl_effects %}; SSL effects {% for k, v in hooks_ssl_effects.items() %}`{{ k }}`={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}; 0 SSL effects{% endif %}. A probeHit is not attributed to a single signature - the union hooks serve many signatures at once, so a 1:1 claim would be fabricated.
+{% if hooks_loaded_not_engaged -%}
+- Loaded but readiness not observed this run: {% for s in hooks_loaded_not_engaged %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %} (the hook was attached; the app's own check may simply not have exercised it - engagement is a lower bound, not a confirmed absence).
+{% endif -%}
+{% if not hooks_engaged_any -%}
+- No engagement signal was delivered at all this run: hooks were loaded but neither a readiness checkpoint nor a behavioral signal came back. This is un-exercised (or a suppressed message stream), NOT a failed bypass - the distinction the earlier "engagement showed none" result could not make.
+{% endif -%}
+
+{% endif -%}
 **"Zero false positives" is not a claim this system makes.** Confidence is measured and reported, never asserted as unconditional (ADR-0006).
 """)
 
@@ -375,9 +426,11 @@ def generate_report(
         root_attribution=_category_attribution(metadata, classification, "root"),
         ssl_attribution=_category_attribution(metadata, classification, "ssl"),
         **_decompile_summary(stage_results),
+        **_hooks_engaged(stage_results),
         **(_capture := _capture_summary(stage_results)),
         handshake_capture_note=_handshake_capture_note(verification, _capture),
         manifest=manifest,
+        expired_pin_sets=_expired_pin_sets(manifest, timestamp),
         coverage=coverage,
         obfuscation_level=obfuscation_level,
         operator=operator,
@@ -422,6 +475,29 @@ def _category_attribution(
     return attribution_module.attribute_root_evidence(package_name, evidence)
 
 
+def _decompiler_used(evidence: dict) -> str:
+    """Human-readable record of which decompiler(s) actually produced this run's
+    sources, derived from the decompile stage's own fallback evidence (G2).
+
+    The CFR secondary decompiler is discovered per-machine (present on the
+    reference WSL2 env, potentially absent elsewhere - ADR-0007), so two machines
+    can recover different class sets from the same APK. A report that never says
+    whether CFR ran cannot explain that difference. Naming the decompiler(s) - or
+    stating plainly that the secondary was unavailable - is what makes this run's
+    coverage reproducible instead of silently environment-dependent."""
+    recovered = evidence.get("fallback_recovered")
+    count = evidence.get("fallback_file_count") or 0
+    if recovered:
+        return f"jadx + CFR (CFR recovered {count} source file(s) jadx alone missed)"
+    if evidence.get("fallback_unavailable"):
+        return ("jadx only - the CFR secondary decompiler was unavailable in this "
+                "environment; coverage is jadx's alone and a machine with CFR "
+                "installed may recover additional classes")
+    if recovered is False:
+        return "jadx + CFR (CFR ran but recovered no additional files over jadx)"
+    return "jadx"
+
+
 def _decompile_summary(stage_results: list[StageResult]) -> dict:
     """Pulled from the decompile stage's own real evidence (never guessed) -
     this is what lets the Limitations section say plainly when a report is
@@ -430,14 +506,155 @@ def _decompile_summary(stage_results: list[StageResult]) -> dict:
     if decompile_stage is None:
         # Only reachable from a unit test passing stage_results=[] - a real
         # run always halts before generate_report() if decompile failed.
-        return {"decompile_completeness": "unknown", "jadx_exit_code": None, "jadx_file_count": None}
+        return {"decompile_completeness": "unknown", "jadx_exit_code": None,
+                "jadx_file_count": None, "decompiler_used": "unknown",
+                "class_recovery_ratio": None, "class_recovery_pct": None,
+                "smali_top_level_classes": None}
     evidence = decompile_stage.evidence or {}
     completeness = evidence.get("decompile_completeness") or ("complete" if decompile_stage.status == "success" else "unknown")
     return {
         "decompile_completeness": completeness,
         "jadx_exit_code": evidence.get("jadx_exit_code"),
         "jadx_file_count": evidence.get("jadx_file_count"),
+        # G2: name the decompiler(s) that produced these sources so coverage is
+        # reproducible across machines, not silently CFR-availability-dependent.
+        "decompiler_used": _decompiler_used(evidence),
+        # G1: quantify HOW partial a partial decompile is (approximate top-level
+        # class recovery). pct is derived here so the template stays declarative;
+        # 0.0 is a real value (jadx got nothing, apktool has classes) - guard on
+        # `is not None`, never truthiness.
+        "class_recovery_ratio": evidence.get("class_recovery_ratio"),
+        "class_recovery_pct": (round(evidence["class_recovery_ratio"] * 100, 1)
+                               if evidence.get("class_recovery_ratio") is not None else None),
+        "smali_top_level_classes": evidence.get("smali_top_level_classes"),
     }
+
+
+def _hooks_engaged(stage_results: list[StageResult]) -> dict:
+    """Auditable "bypass hooks engaged" summary derived from the dynamic stage's
+    OWN Frida message stream, so engagement is attributable to the signatures
+    that drove it instead of reported as an opaque yes/no (G10).
+
+    Threads driving signature -> injected probe -> emitted message -> report:
+    the static signatures that composed the synthesized bypass are carried in
+    `scripts_applied`; every hook emits a `send({hook: <technique_id>})` readiness
+    checkpoint; the app's own check, when it actually hits a hook, emits the
+    behavioral `probeHit` (root) / `bypassEffect` (SSL). Every count here comes
+    from a real delivered message - nothing is inferred. A probeHit is NOT
+    back-attributed to a single signature: the union hooks deliberately hide the
+    full artifact set for many signatures at once, so a 1:1 claim would be
+    fabricated (ADR-0006). This is the structural fix for the "engagement showed
+    none" result on a real target whose message stream was simply never audited."""
+    dynamic_stage = next((s for s in stage_results if s.stage == "dynamic"), None)
+    absent = {
+        "hooks_audit_present": False, "hooks_engaged_any": False,
+        "hooks_checkpoints_fired": [], "hooks_driving_signatures": [],
+        "hooks_handauthored_scripts": [], "hooks_loaded_not_engaged": [],
+        "hooks_root_probe_hits": 0, "hooks_ssl_effects": {},
+    }
+    if dynamic_stage is None:
+        return absent
+    evidence = dynamic_stage.evidence or {}
+    if "frida_messages" not in evidence:
+        # A skipped dynamic stage carries only a reason (surfaced elsewhere) and
+        # no message stream - there is nothing to audit, so render no block
+        # rather than an empty one that would read as "ran, engaged nothing".
+        return absent
+
+    checkpoints: set[str] = set()
+    # ENGAGE-PROBE-ROOT1 (decider-owns-its-guard + AG-SC1): root_probe_hits counts
+    # ONLY probeHits whose VALUE is "root", so the report's "N root probeHit(s)" line
+    # is accurate to its label no matter what the emitter sends. The success-check
+    # layer already matches the probeHit value precisely (androgoat.py:_ROOT_PROBE_RE)
+    # exactly because "a probeHit of some OTHER type" must not read as root; this layer
+    # is the one place that still counted any probeHit as root and relied on the
+    # emitter only ever sending `root`. probe_hits_any counts a behavioral probeHit of
+    # ANY value so `engaged_any` still reflects its exact claim ("a behavioral signal
+    # came back") rather than dropping a non-root hit into "no engagement at all".
+    # Today every synthesized probeHit is `root` (synthesizer.py), so on every real run
+    # probe_hits_any == root_probe_hits and this changes no current output - it closes
+    # the latent label gap in the safe (EXTEND) direction, reversing nothing.
+    root_probe_hits = 0
+    probe_hits_any = 0
+    ssl_effects: dict[str, int] = {}
+    for m in evidence.get("frida_messages") or []:
+        payload = m.get("payload") if isinstance(m, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        if isinstance(payload.get("hook"), str):
+            checkpoints.add(payload["hook"])
+        if "probeHit" in payload:
+            probe_hits_any += 1
+            if payload.get("probeHit") == "root":
+                root_probe_hits += 1
+        effect = payload.get("bypassEffect")
+        if isinstance(effect, str):
+            ssl_effects[effect] = ssl_effects.get(effect, 0) + 1
+
+    # scripts_applied mixes the scaffolding label ("synthesized"), per-lib native
+    # envelope labels ("synthesized:<lib>"), hand-authored .js filenames, and the
+    # real driving technique ids. Separate them so the audit names the actual
+    # signatures without the internal scaffolding leaking into the report.
+    driving: list[str] = []
+    handauthored: list[str] = []
+    for label in evidence.get("scripts_applied") or []:
+        if not isinstance(label, str):
+            continue
+        if label == "synthesized" or label.startswith("synthesized:"):
+            continue
+        if label.endswith(".js"):
+            handauthored.append(label)
+        else:
+            driving.append(label)
+
+    # A driving signature is "engaged" when its own readiness checkpoint was
+    # delivered. No checkpoint = the hook was loaded but its readiness was not
+    # observed this run (honest: attached is not exercised - a lower bound).
+    loaded_not_engaged = sorted(s for s in set(driving) if s not in checkpoints)
+    engaged_any = bool(checkpoints) or probe_hits_any > 0 or bool(ssl_effects)
+    return {
+        "hooks_audit_present": True,
+        "hooks_engaged_any": engaged_any,
+        "hooks_checkpoints_fired": sorted(checkpoints),
+        "hooks_driving_signatures": sorted(set(driving)),
+        "hooks_handauthored_scripts": sorted(set(handauthored)),
+        "hooks_loaded_not_engaged": loaded_not_engaged,
+        "hooks_root_probe_hits": root_probe_hits,
+        "hooks_ssl_effects": dict(sorted(ssl_effects.items())),
+    }
+
+
+def _is_iso_date(s: str) -> bool:
+    """True for a plausible zero-padded ISO calendar date YYYY-MM-DD (the NSC
+    pin-set expiration format): correct shape AND month 01-12, day 01-31. Such
+    dates compare lexicographically, so expiry needs no datetime parsing or clock -
+    only a run date to compare against. Range-checking month/day stops a malformed
+    value like "2018-13-40" from being mistaken for a real (expired) date - we
+    never flag an expiry we cannot actually validate."""
+    if not (
+        len(s) == 10 and s[4] == "-" and s[7] == "-"
+        and s[:4].isdigit() and s[5:7].isdigit() and s[8:10].isdigit()
+    ):
+        return False
+    return 1 <= int(s[5:7]) <= 12 and 1 <= int(s[8:10]) <= 31
+
+
+def _expired_pin_sets(manifest, timestamp: str) -> list[str]:
+    """NSC <pin-set> expiration dates that precede the run date - certificate
+    pinning Android no longer enforces (it falls back to normal CA validation).
+    Compared against the RUN's own timestamp (deterministic, not a live clock);
+    ISO dates compare lexicographically so no datetime import is needed. Malformed
+    dates and a run timestamp that is not a clean ISO date are skipped, never
+    flagged (conservative - we never invent an expiry we cannot compute)."""
+    if manifest is None:
+        return []
+    run_date = (timestamp or "")[:10]
+    if not _is_iso_date(run_date):
+        return []
+    return [
+        exp for exp in (getattr(manifest, "pin_set_expirations", None) or [])
+        if _is_iso_date(exp) and exp < run_date
+    ]
 
 
 def _capture_summary(stage_results: list[StageResult]) -> dict:
@@ -499,7 +716,7 @@ def _handshake_capture_note(verification, capture_summary: dict) -> str | None:
     )
 
 
-CALIBRATION_TEMPLATE = Template("""\
+CALIBRATION_TEMPLATE = _env.from_string("""\
 # Calibration Report
 
 **Generated:** {{ report.generated_at }}
@@ -512,7 +729,7 @@ CALIBRATION_TEMPLATE = Template("""\
 {% endif -%}
 ## Tier 1 - Confirmation Rate (pipeline self-consistency, no ground truth needed)
 
-Among runs where a category was predicted detected AND dynamic verification actually ran, what fraction got a genuine bypass confirmation? "Not confirmed" is never relabeled "false positive" - it's ambiguous between "wasn't really there" and "the bypass technique just failed" (see `src/calibration/outcomes.py`).
+Among runs where a category was predicted detected AND dynamic verification actually ran, what fraction got a genuine bypass confirmation? "Not confirmed" is never relabeled "false positive" - it's ambiguous between "wasn't really there" and "the bypass technique just failed" (see `src/calibration/outcomes.py`). Because a "not confirmed" lumps a genuinely-detected technique whose bypass merely failed together with a possible false positive, **this confirmation rate is a lower bound on precision, not precision itself** - the Tier 2 table below, built from independent ground truth rather than the bypass outcome, is the actual precision measurement (G18).
 
 | Category | Confirmed | Not Confirmed | Unverified | N/A (not predicted) | Confirmation Rate |
 |---|---|---|---|---|---|
@@ -529,9 +746,9 @@ Built from the *static* detected verdict against `config/ground_truth.yaml` - ne
 | {{ category }} | {{ t2.true_positive }} | {{ t2.false_positive }} | {{ t2.false_negative }} | {{ t2.true_negative }} | {{ "%.2f"|format(t2.precision.rate) if t2.precision.rate is not none else "N/A" }} | {{ "%.2f"|format(t2.recall.rate) if t2.recall.rate is not none else "N/A" }} | {{ "%.2f"|format(t2.f1) if t2.f1 is not none else "N/A" }} | {{ t2.n }} |
 {% endfor %}
 Excluded from Tier 2 (no ground-truth entry for that APK): root={{ report.excluded_no_ground_truth.root }}, ssl={{ report.excluded_no_ground_truth.ssl }}
-Excluded from Tier 2 (partial/unknown decompile - a negative isn't proof of absence): root={{ report.excluded_partial_decompile.root }}, ssl={{ report.excluded_partial_decompile.ssl }}
-{% for category, t2 in report.tier2.items() %}{% if t2.true_negative == 0 %}
-- **{{ category }} has TN=0: the 1.00 precision/recall is a tautology, not a measurement.** Every ground-truthed {{ category }} case is a positive, so the FP/FN direction has never been tested - a false positive would be structurally invisible here. The 1.00 holds only because no negative control (e.g. a stock app) is included in this category's Tier-2 corpus. Do not read it as validated precision until a true negative is added and the loop re-measured (ADR-0006).
+Excluded from Tier 2 (partial/unknown decompile OR under-covered governing surface - native/manifest/js - so a negative isn't proof of absence): root={{ report.excluded_partial_decompile.root }}, ssl={{ report.excluded_partial_decompile.ssl }}
+{% for category, t2 in report.tier2.items() %}{# CALIB-TN0-LABEL: fire ONLY when precision genuinely reads 1.00 on a positive-only Tier-2 corpus (TP>0, FP=0, TN=0), so every clause below is true. A bare `TN==0` also fired when n=0 (precision renders N/A, not 1.00 - e.g. a category fully coverage-excluded, as ssl is in the paired test) and when FP>0 (a mis-detected negative control DOES exist and precision is <1.00), rendering a self-contradictory caveat under an N/A-or-<1.00 cell plus a false "no negative control" claim. #}{% if t2.true_negative == 0 and t2.false_positive == 0 and t2.true_positive > 0 %}
+- **{{ category }} has TN=0: the 1.00 precision is a tautology, not a measurement.** Every ground-truthed {{ category }} case in Tier 2 is a positive, so the false-positive direction has never been tested - a false positive would be structurally invisible here. The 1.00 holds only because no negative control (e.g. a stock app) is included in this category's Tier-2 corpus. Do not read it as validated precision until a true negative is added and the loop re-measured (ADR-0006).
 {% endif %}{% endfor %}
 ## Confidence-Calibration Curve
 
@@ -552,7 +769,7 @@ Bucket edges always include the real decision threshold explicitly - the one bou
 - SSL bypass verification is PARTIAL: `success_checks/androgoat.py` implements it for its target (okhttp `CertificatePinner.check` hook -> `ssl_bypassed=True` on fire) and, for UNKNOWN targets, the technology-level check confirms SSL when the app's own Java pin-check runs without rejecting AND a TLS handshake completes (its pin logic accepted a connection it would otherwise reject). ROOT bypass for UNKNOWN targets is auto-confirmed by the same technology-level check when the app's own root-check probes a root artifact and is answered-false (its root logic received the not-rooted result). The three UnCrackable checks hardcode `ssl_bypassed=None`, and a category stays inconclusive when its check was never exercised in the run (a flow-triggered check not reached). A thin/zero Tier 1 count for those targets means "not verified," not "0% success rate."
 {% endif -%}
 - Tier-2 "complete" is exit-code-derived (jadx and apktool both exit 0). A decompile that exits 0 on a truncated or heavily-obfuscated corpus is therefore counted as complete for Tier-2 even when it produced few files - the report's low-corpus caveat (RESID-4C) is not mirrored as a separate Tier-2 exclusion. This is a deliberate conservative-simple choice to avoid over-excluding real observations, not an oversight; a low-corpus-but-exit-0 run inflates n slightly rather than being silently dropped.
-- Per-surface coverage (ADR-0008, F2/G-A): a category's NEITHER is excluded from Tier 2 when any of its governing surfaces (root->{java,native}, ssl->{java,native,manifest}) is partial/unscannable. A run with no coverage map (recorded before per-surface coverage existed) scanned only Java, so all other governing surfaces are unscannable and its negative is not certified as a confident TN - it is excluded from Tier 2 like any under-covered negative (types.py:46-48). This is deliberately stricter than the pre-ADR-0008 Java-only gate: a NEITHER from a surface that was never scanned must not read as a verified negative.
+- Per-surface coverage (ADR-0008, F2/G-A): a category's NEITHER is excluded from Tier 2 when any of its governing surfaces (root->{java,native,js}, ssl->{java,native,manifest,js}) is partial/unscannable. A run with no coverage map (recorded before per-surface coverage existed) scanned only Java, so all other governing surfaces are unscannable and its negative is not certified as a confident TN - it is excluded from Tier 2 like any under-covered negative (types.py:46-48). This is deliberately stricter than the pre-ADR-0008 Java-only gate: a NEITHER from a surface that was never scanned must not read as a verified negative.
 - "Zero false positives" is not a claim this system makes (ADR-0006) - these numbers are measured, improving, and only as reliable as the sample size shown above.
 """)
 
@@ -562,6 +779,15 @@ def generate_calibration_report(report: CalibrationReport, output_dir: Path) -> 
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     report_path = output_dir / f"{timestamp}.md"
+    # Second-granularity timestamps collide when two calibration reports are
+    # generated within the same second (a fast test loop, or a re-run) - the
+    # later render would silently overwrite the earlier file. Refuse to
+    # overwrite: fall back to a suffixed name so both are preserved. The common
+    # case (no collision) keeps the exact YYYYMMDDTHHMMSSZ.md name.
+    counter = 1
+    while report_path.exists():
+        report_path = output_dir / f"{timestamp}-{counter}.md"
+        counter += 1
     report_path.write_text(CALIBRATION_TEMPLATE.render(report=report), encoding="utf-8")
     return report_path
 

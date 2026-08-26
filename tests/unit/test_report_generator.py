@@ -215,11 +215,15 @@ def test_generate_report_distinguishes_neither_auto_skip_from_operator_skip(tmp_
 
 
 def test_generate_report_ran_but_unverified_when_no_skip_reason(tmp_path):
-    # verification=None with no dynamic_skip_reason means the dynamic stage RAN
-    # (synthesized bypass injected) but no success-check confirmed it - e.g. an
-    # unknown target with no target-specific SuccessCheck. The report must say
-    # "attempted, not verified", never "not run (reason unknown)" - the machinery
-    # did run, and "not run" would be a false statement.
+    # verification=None with no dynamic_skip_reason: the dynamic stage was NOT skipped
+    # yet produced no verification to report. Reachable via a known target whose success
+    # check was inconclusive/raised, a logcat-capture failure, or a FAILED dynamic stage
+    # (setup/install/frida). The report must NOT say "not run" (the stage was not
+    # skipped) and must NOT assert a specific cause it cannot verify: the old text
+    # hardcoded "(no target-specific success check)", false on every reaching path - the
+    # one case where that cause IS true (an unknown target with no SuccessCheck) sets
+    # verification to the tech-check result (non-None) and never reaches this branch.
+    # A cause-neutral pointer to the Stage Results table (real status/error) renders.
     report_path = generate_report(
         run_id="run3",
         apk_hash="ghi789",
@@ -233,7 +237,9 @@ def test_generate_report_ran_but_unverified_when_no_skip_reason(tmp_path):
     )
 
     content = report_path.read_text(encoding="utf-8")
-    assert "attempted, bypass not verified (no target-specific success check)" in content
+    assert "bypass not verified (see stage status and evidence below)" in content
+    # the old hardcoded cause was false on every reaching path - it must be gone
+    assert "no target-specific success check" not in content
     assert "not run" not in content
     assert "reason unknown" not in content
 
@@ -418,6 +424,43 @@ def test_generate_report_annotates_obfuscation_level(tmp_path):
     )
     content = report_path.read_text(encoding="utf-8")
     assert "Obfuscation: **heavy**" in content
+
+
+def test_heavy_obfuscation_caveat_gated_on_actual_java_state_not_just_obfuscation(tmp_path):
+    # COV-HEAVY-JAVA1 (caveat-gate-matches-its-text): the "Heavy obfuscation: the
+    # Java surface is `partial`" caveat asserts a fact about coverage["java"], but
+    # was gated on `obfuscation_level == "heavy"` alone. Under heavy obfuscation
+    # java_coverage() returns `partial` from a complete/partial decompile yet
+    # `unscannable` from an unknown-completeness (cached/regenerated) run - so the
+    # bare gate printed "the Java surface is `partial`" directly beneath a coverage
+    # table row showing java=unscannable, a false specific fact. Pin BOTH directions:
+    # fires when java IS partial (its assertion true), suppressed - and NOT
+    # contradicting the table - when heavy but java is unscannable.
+    common = dict(
+        classification=_classification(), verification=None, correlation=None,
+        obfuscation_level="heavy", stage_results=[], output_dir=tmp_path,
+    )
+    # (a) heavy AND java partial -> caveat fires (assertion is true)
+    fires = generate_report(
+        run_id="hvy-p", apk_hash="hvy001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "hvy001"}, "package": {"package_name": "com.example.app"}},
+        coverage={"java": "partial", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed"},
+        **common,
+    ).read_text(encoding="utf-8")
+    assert "**Heavy obfuscation:**" in fires
+    assert "the Java surface is `partial`" in fires
+
+    # (b) heavy BUT java unscannable -> caveat suppressed; the table states the real
+    # bound and the caveat must not assert the contradictory "partial"
+    suppressed = generate_report(
+        run_id="hvy-u", apk_hash="hvy002", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "hvy002"}, "package": {"package_name": "com.example.app"}},
+        coverage={"java": "unscannable", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed"},
+        **common,
+    ).read_text(encoding="utf-8")
+    assert "| java | unscannable |" in suppressed          # table states the real bound
+    assert "**Heavy obfuscation:**" not in suppressed       # caveat does NOT assert "partial"
+    assert "the Java surface is `partial`" not in suppressed
 
 
 def test_generate_report_lists_exported_components(tmp_path):
@@ -1057,6 +1100,9 @@ def test_decompile_summary_all_branches():
     # no decompile stage at all
     assert _decompile_summary([]) == {
         "decompile_completeness": "unknown", "jadx_exit_code": None, "jadx_file_count": None,
+        "decompiler_used": "unknown",
+        "class_recovery_ratio": None, "class_recovery_pct": None,
+        "smali_top_level_classes": None,
     }
     # completeness carried in the stage evidence
     s_ev = StageResult(stage="decompile", status="success",
@@ -1067,6 +1113,12 @@ def test_decompile_summary_all_branches():
     # no evidence completeness, but status success -> complete
     s_ok = StageResult(stage="decompile", status="success", evidence={"jadx_file_count": 1})
     assert _decompile_summary([s_ok])["decompile_completeness"] == "complete"
+    # G2: which decompiler(s) ran is threaded through from the fallback evidence
+    assert _decompile_summary([s_ok])["decompiler_used"] == "jadx"
+    s_cfr = StageResult(stage="decompile", status="success",
+                        evidence={"jadx_file_count": 9, "fallback_recovered": True,
+                                  "fallback_file_count": 9})
+    assert "CFR" in _decompile_summary([s_cfr])["decompiler_used"]
     # no evidence completeness and status not success -> unknown
     s_fail = StageResult(stage="decompile", status="failed", evidence={})
     out = _decompile_summary([s_fail])
@@ -1378,3 +1430,254 @@ def test_handshake_line_reconciles_captured_flows(tmp_path):
     )
     dict_text = dict_note.read_text(encoding="utf-8")
     assert "hosts: api.propertyguru.com" in dict_text
+
+
+# --- G2: report names which decompiler(s) actually produced the sources --------
+
+
+def test_decompiler_used_reports_cfr_recovery_with_count():
+    from report.generator import _decompiler_used
+    label = _decompiler_used({"fallback_recovered": True, "fallback_file_count": 42})
+    assert "jadx + CFR" in label and "42" in label
+
+
+def test_decompiler_used_reports_cfr_unavailable_environment():
+    from report.generator import _decompiler_used
+    label = _decompiler_used({"fallback_unavailable": True})
+    assert "jadx only" in label and "unavailable" in label
+
+
+def test_decompiler_used_reports_cfr_ran_but_recovered_nothing():
+    from report.generator import _decompiler_used
+    label = _decompiler_used({"fallback_recovered": False})
+    assert "CFR ran but recovered no additional" in label
+
+
+def test_decompiler_used_defaults_to_jadx_when_no_fallback_evidence():
+    from report.generator import _decompiler_used
+    assert _decompiler_used({}) == "jadx"
+
+
+def test_generate_report_names_decompiler_when_cfr_recovered_classes(tmp_path):
+    # G2 end-to-end: when the CFR secondary recovered classes jadx missed, the
+    # rendered report must say so - coverage that depends on a per-machine tool
+    # must be reproducible, not silently environment-dependent (ADR-0007).
+    stage_results = [StageResult(
+        stage="decompile", status="success",
+        evidence={"decompile_completeness": "complete", "jadx_exit_code": 0,
+                  "jadx_file_count": 51, "fallback_recovered": True,
+                  "fallback_file_count": 9},
+        duration_ms=500,
+    )]
+    report_path = generate_report(
+        run_id="g2", apk_hash="g2hash", timestamp="2026-08-22T12:00:00",
+        metadata={"hashes": {"sha256": "g2hash"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=stage_results, output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Decompiler(s) used this run:" in content
+    assert "jadx + CFR" in content and "9 source file(s)" in content
+
+
+def test_generate_report_quantifies_partial_class_recovery(tmp_path):
+    # G1 end-to-end: a partial decompile must say HOW partial (approximate
+    # top-level class recovery), not merely "partial" - with the honest caveat
+    # that it is an approximate class-count proxy, not a coverage percentage.
+    stage_results = [StageResult(
+        stage="decompile", status="success",
+        evidence={"decompile_completeness": "partial", "jadx_exit_code": 1,
+                  "jadx_file_count": 30, "class_recovery_ratio": 0.25,
+                  "smali_top_level_classes": 120},
+        duration_ms=500,
+    )]
+    report_path = generate_report(
+        run_id="g1", apk_hash="g1hash", timestamp="2026-08-22T12:00:00",
+        metadata={"hashes": {"sha256": "g1hash"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=stage_results, output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "approximately 25.0% of the app's top-level classes" in content
+    assert "30 jadx top-level" in content and "~120 apktool top-level" in content
+    assert "approximate class-count proxy" in content
+
+
+def test_hooks_engaged_absent_without_dynamic_stage():
+    # G10: no dynamic stage -> no audit block (the full absent shape, so the
+    # render spread never leaves a template var undefined).
+    from report.generator import _hooks_engaged
+    out = _hooks_engaged([])
+    assert out == {
+        "hooks_audit_present": False, "hooks_engaged_any": False,
+        "hooks_checkpoints_fired": [], "hooks_driving_signatures": [],
+        "hooks_handauthored_scripts": [], "hooks_loaded_not_engaged": [],
+        "hooks_root_probe_hits": 0, "hooks_ssl_effects": {},
+    }
+
+
+def test_hooks_engaged_absent_when_dynamic_skipped():
+    # A skipped dynamic stage carries a reason but no message stream - there is
+    # nothing to audit, so no block (never an empty "engaged nothing" block).
+    from report.generator import _hooks_engaged
+    skipped = StageResult(stage="dynamic", status="skipped",
+                          evidence={"reason": "no bypass script available"})
+    assert _hooks_engaged([skipped])["hooks_audit_present"] is False
+
+
+def test_hooks_engaged_correlates_signatures_checkpoints_and_effects():
+    # G10 core: driving signature -> readiness checkpoint -> behavioral message,
+    # each count from a real delivered message. A driving signature with no
+    # checkpoint is surfaced as loaded-but-not-engaged (a lower bound, honest).
+    from report.generator import _hooks_engaged
+    dynamic = StageResult(
+        stage="dynamic", status="success",
+        evidence={
+            "scripts_applied": [
+                "synthesized", "root_su_binary_paths",
+                "custom_trustmanager_checkservertrusted", "synthesized:libfoo.so",
+            ],
+            "frida_messages": [
+                {"type": "send", "payload": {"hook": "root_su_binary_paths"}},
+                {"type": "send", "payload": {"hook": "universal:ssl"}},
+                {"type": "send", "payload": {"probeHit": "root", "path": "/system/bin/su"}},
+                {"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}},
+                {"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}},
+                {"type": "send", "payload": {"bypassEffect": "ssl-handshake"}},
+                {"type": "send", "payload": {}},   # non-signal message ignored
+                "not-a-dict",                        # robustness: skipped
+            ],
+        },
+    )
+    out = _hooks_engaged([dynamic])
+    assert out["hooks_audit_present"] is True
+    assert out["hooks_engaged_any"] is True
+    assert out["hooks_checkpoints_fired"] == ["root_su_binary_paths", "universal:ssl"]
+    # "synthesized" and "synthesized:libfoo.so" are scaffolding, filtered out
+    assert out["hooks_driving_signatures"] == [
+        "custom_trustmanager_checkservertrusted", "root_su_binary_paths"]
+    assert out["hooks_handauthored_scripts"] == []
+    assert out["hooks_root_probe_hits"] == 1
+    assert out["hooks_ssl_effects"] == {"ssl-handshake": 1, "ssl-pin-check": 2}
+    # driving sig with a delivered checkpoint is engaged; the other is not
+    assert out["hooks_loaded_not_engaged"] == ["custom_trustmanager_checkservertrusted"]
+
+
+def test_hooks_engaged_root_probe_count_matches_its_label_not_any_probehit():
+    # ENGAGE-PROBE-ROOT1 (decider-owns-its-guard + AG-SC1): the "N root probeHit(s)"
+    # line counts ONLY probeHits whose VALUE is "root". A probeHit of some OTHER type
+    # must not inflate the root count (that would print a false "root" fact), yet it IS
+    # still a behavioral signal, so engaged_any must stay True - dropping a non-root hit
+    # into "no engagement at all" would be a different false statement. The success-check
+    # layer already matches the probeHit value precisely (androgoat.py:_ROOT_PROBE_RE);
+    # this pins the same precision in the report audit. Both directions + the corner
+    # where the ONLY signal is a non-root probeHit.
+    from report.generator import _hooks_engaged
+    mixed = StageResult(
+        stage="dynamic", status="success",
+        evidence={"scripts_applied": ["synthesized"],
+                  "frida_messages": [
+                      {"type": "send", "payload": {"probeHit": "root", "path": "/system/bin/su"}},
+                      {"type": "send", "payload": {"probeHit": "emulator", "path": "goldfish"}},
+                      {"type": "send", "payload": {"probeHit": "debugger"}}]},
+    )
+    out = _hooks_engaged([mixed])
+    assert out["hooks_root_probe_hits"] == 1        # only the value=="root" hit
+    assert out["hooks_engaged_any"] is True         # non-root hits still engage
+
+    # Corner: the ONLY behavioral signal is a non-root probeHit (no checkpoint/effect).
+    only_nonroot = StageResult(
+        stage="dynamic", status="success",
+        evidence={"scripts_applied": ["synthesized"],
+                  "frida_messages": [{"type": "send", "payload": {"probeHit": "emulator"}}]},
+    )
+    out2 = _hooks_engaged([only_nonroot])
+    assert out2["hooks_root_probe_hits"] == 0       # never a fabricated root count
+    assert out2["hooks_engaged_any"] is True         # engaged (a signal came back)
+
+
+def test_hooks_engaged_no_signal_is_unexercised_not_failure():
+    # RS_CertPinning class: hooks loaded, message stream empty -> engaged_any
+    # False, every driving sig loaded-but-not-engaged. Must be distinguishable
+    # from a failed bypass (the whole point of the audit).
+    from report.generator import _hooks_engaged
+    dynamic = StageResult(
+        stage="dynamic", status="success",
+        evidence={"scripts_applied": ["synthesized", "root_su_binary_paths"],
+                  "frida_messages": []},
+    )
+    out = _hooks_engaged([dynamic])
+    assert out["hooks_audit_present"] is True
+    assert out["hooks_engaged_any"] is False
+    assert out["hooks_checkpoints_fired"] == []
+    assert out["hooks_loaded_not_engaged"] == ["root_su_binary_paths"]
+
+
+def test_hooks_engaged_labels_handauthored_scripts():
+    # Hand-authored .js targets are named as scripts, not mistaken for signatures.
+    from report.generator import _hooks_engaged
+    dynamic = StageResult(
+        stage="dynamic", status="success",
+        evidence={"scripts_applied": ["uncrackable1.js"],
+                  "frida_messages": [{"type": "send", "payload": {"hook": "OkHttp CertificatePinner"}}]},
+    )
+    out = _hooks_engaged([dynamic])
+    assert out["hooks_handauthored_scripts"] == ["uncrackable1.js"]
+    assert out["hooks_driving_signatures"] == []
+    assert out["hooks_checkpoints_fired"] == ["OkHttp CertificatePinner"]
+
+
+def test_generate_report_renders_hooks_engaged_audit(tmp_path):
+    # G10 end-to-end: the audit block appears in the rendered report, tracing
+    # engagement to the driving signature and reporting real message counts.
+    stage_results = [StageResult(
+        stage="dynamic", status="success",
+        evidence={
+            "scripts_applied": ["synthesized", "root_su_binary_paths",
+                                "custom_trustmanager_checkservertrusted"],
+            "frida_messages": [
+                {"type": "send", "payload": {"hook": "root_su_binary_paths"}},
+                {"type": "send", "payload": {"probeHit": "root", "path": "/system/bin/su"}},
+                {"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}},
+                {"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}},
+            ],
+        },
+        duration_ms=500,
+    )]
+    report_path = generate_report(
+        run_id="g10", apk_hash="g10hash", timestamp="2026-08-23T12:00:00",
+        metadata={"hashes": {"sha256": "g10hash"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=stage_results, output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Bypass hooks engaged (auditable, this run)" in content
+    assert "`root_su_binary_paths`" in content            # driving signature named
+    assert "1 root probeHit(s)" in content                # real behavioral count
+    assert "`ssl-pin-check`=2" in content                 # real effect count
+    # the driving sig with no checkpoint is surfaced as loaded-but-not-engaged
+    assert "Loaded but readiness not observed this run" in content
+    assert "`custom_trustmanager_checkservertrusted`" in content
+
+
+def test_generate_report_shows_evidence_provenance(tmp_path):
+    # G11: each evidence row names its provenance (evidence_type) so a reader
+    # sees HOW a finding was detected - bytecode_string vs resource_xml vs source
+    # vs native_symbol - not merely that it matched. Wires a previously dead field.
+    root = CategoryVerdict(
+        confidence=0.8, detected=True,
+        evidence=[Evidence(signature_id="root_su_binary_paths", file="Main.java",
+                           line_or_offset=42, matched_text="/system/bin/su",
+                           evidence_type="bytecode_string")],
+    )
+    ssl = CategoryVerdict(confidence=0.0, detected=False, evidence=[])
+    classification = ClassificationResult(action=Action.ROOT_ONLY, root=root, ssl=ssl)
+    report_path = generate_report(
+        run_id="g11", apk_hash="g11hash", timestamp="2026-08-23T12:00:00",
+        metadata={"hashes": {"sha256": "g11hash"}, "package": {"package_name": "test.app"}},
+        classification=classification, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "(bytecode_string)" in content
+    assert "`root_su_binary_paths` (bytecode_string) at Main.java:42" in content

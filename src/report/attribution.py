@@ -93,7 +93,7 @@ def _is_dotted_reference(text: str) -> bool:
     return True
 
 
-def _string_vendor(matched_text) -> str | None:
+def _string_vendor(matched_text, app_package: str = "") -> str | None:
     """The vendor a fully-qualified MATCHED STRING references, or None.
 
     Boundary #5: dex-string evidence is attributed by its FILE namespace, but the
@@ -109,6 +109,15 @@ def _string_vendor(matched_text) -> str | None:
     if not matched_text:
         return None
     text = matched_text.strip()
+    # Bug-B parity with the file-namespace side (step 2 in attribute_root_evidence):
+    # a matched string that is a dotted reference into the app's OWN package
+    # subtree names the app's own class, never a bundled SDK - even when the app
+    # package shares a vendor prefix (e.g. com.google.mybankapp). Guard before the
+    # vendor check so such a reference is never asserted third-party (ADR-0006). A
+    # genuine SDK reference like 'com.google.android.gms...SafetyNetApi' is NOT
+    # under the app package, so boundary #5 is preserved.
+    if is_under_package(text, app_package):
+        return None
     if not _is_dotted_reference(text):
         return None
     if not is_known_third_party(text):
@@ -182,7 +191,7 @@ def attribute_root_evidence(app_package: str, evidence: list) -> dict | None:
         #     Conservative: only fires when the string is a fully-qualified
         #     reference into a known vendor (see _string_vendor), never on a bare
         #     token or a path, so the app's own code is never mislabeled.
-        sv = _string_vendor(matched)
+        sv = _string_vendor(matched, app_package)
         if sv:
             third_party += 1
             vendors.add(sv)

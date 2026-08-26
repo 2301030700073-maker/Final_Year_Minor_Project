@@ -68,6 +68,39 @@ def test_dex_string_cache_stale_version_is_a_miss(tmp_path, monkeypatch):
     assert len(calls) == 1  # stale entry ignored -> re-parsed
 
 
+def test_dex_string_cache_androguard_version_change_is_a_miss(tmp_path, monkeypatch):
+    # AG2: the cached payload (the app string pool) is produced by androguard's
+    # AnalyzeAPK, so an androguard UPGRADE can change what gets extracted. The
+    # manual _DEX_STRING_CACHE_VERSION bump only tracks THIS module's logic and
+    # cannot know androguard changed underneath it. The androguard version is
+    # therefore folded into the effective cache key: an entry written under one
+    # androguard version must be a MISS (re-parse) under another, never served.
+    apk = tmp_path / "app.apk"
+    apk.write_bytes(b"APK-BYTES-001")
+    cache_dir = tmp_path / "cache"
+
+    calls = []
+    monkeypatch.setattr(ags, "_extract_strings", lambda p: calls.append(p) or ("com.example.app", {"sensitive-root-path"}, False))
+    sigs = [type("S", (), {"id": "root_sig", "patterns": ["sensitive"], "pattern_type": "string_literal", "case_sensitive": True})()]
+
+    # First scan under androguard "9.9.9-a": misses, parses, writes an entry whose
+    # stored version embeds that androguard version.
+    monkeypatch.setattr(ags, "_androguard_version", lambda: "9.9.9-a")
+    ags.scan_dex_strings(apk, sigs, cache_dir=cache_dir)
+    assert len(calls) == 1
+
+    # Same APK bytes, but androguard has been upgraded: the effective key differs,
+    # so the prior entry must NOT be served - it re-parses.
+    monkeypatch.setattr(ags, "_androguard_version", lambda: "9.9.9-b")
+    ags.scan_dex_strings(apk, sigs, cache_dir=cache_dir)
+    assert len(calls) == 2  # androguard version is part of the key -> miss
+
+    # A repeat at the SAME (upgraded) version hits again: the key is stable within
+    # a version; only crossing a version boundary invalidates.
+    ags.scan_dex_strings(apk, sigs, cache_dir=cache_dir)
+    assert len(calls) == 2  # served from the entry written under 9.9.9-b
+
+
 def test_dex_string_cache_none_is_always_fresh(tmp_path, monkeypatch):
     # cache_dir=None (the test default) must keep the old always-parse behavior.
     apk = tmp_path / "app.apk"

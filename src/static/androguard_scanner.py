@@ -161,9 +161,38 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> tuple[set[str],
 _DEX_STRING_CACHE_VERSION = "dex-string-v2"
 
 
+def _androguard_version() -> str:
+    """The installed androguard version, or 'unknown' when it cannot be read.
+    Folded into the cache key (`_effective_cache_version`) so upgrading androguard
+    - which can change how the APK string pool is extracted - invalidates a cache
+    written by the previous version instead of serving its now-stale strings. The
+    manual `_DEX_STRING_CACHE_VERSION` bump only tracks changes to THIS module's
+    logic; it cannot know androguard changed underneath it, which is exactly the
+    stale-cache path this closes. Read from distribution metadata first (cheap, no
+    heavy import) and fall back to the module attribute. A miss just re-parses (the
+    safe direction), never a wrong answer."""
+    try:
+        from importlib.metadata import version
+        return version("androguard")
+    except Exception:
+        pass
+    try:
+        import androguard
+        return getattr(androguard, "__version__", None) or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _effective_cache_version() -> str:
+    """The full cache-version token: this module's schema version AND the
+    androguard version that produced the payload. Load and save both route through
+    here so the written and compared tokens cannot drift apart."""
+    return f"{_DEX_STRING_CACHE_VERSION}+androguard-{_androguard_version()}"
+
+
 def _load_string_cache(cache_dir: Path, apk_sha256: str) -> dict | None:
     data = load_json_cache(cache_dir, apk_sha256)
-    if data is None or data.get("version") != _DEX_STRING_CACHE_VERSION:
+    if data is None or data.get("version") != _effective_cache_version():
         return None
     payload = data["payload"]
     payload["app_strings"] = set(payload["app_strings"])  # stored as a list, restored to a set
@@ -173,7 +202,7 @@ def _load_string_cache(cache_dir: Path, apk_sha256: str) -> dict | None:
 def _save_string_cache(cache_dir: Path, apk_sha256: str, payload: dict) -> None:
     """Persist the string payload via the shared atomic write (a corrupt cache
     is a miss, never a wrong result)."""
-    atomic_json_write(cache_dir, apk_sha256, {"version": _DEX_STRING_CACHE_VERSION, "payload": payload})
+    atomic_json_write(cache_dir, apk_sha256, {"version": _effective_cache_version(), "payload": payload})
 
 
 

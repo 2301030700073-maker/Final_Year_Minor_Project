@@ -115,6 +115,12 @@ def load_yaml_entries(path: Path, validate, ctor):
     signature loaders - they differ only in the validator fn and dataclass."""
     with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or []
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"{path}: expected a top-level YAML list of signature entries, "
+            f"got {type(raw).__name__} - a malformed signature file must fail "
+            "loudly, never be silently iterated character-by-character"
+        )
     entries = []
     for entry in raw:
         validate(entry, path)
@@ -272,6 +278,26 @@ def is_known_third_party(ns: str | None) -> bool:
     return any(ns == p or ns.startswith(p + ".") for p in KNOWN_VENDOR_PREFIXES)
 
 
+def is_third_party_file(ns: str | None, app_package: str | None) -> bool:
+    """True when a decompiled file's namespace is a bundled SDK to be excluded
+    from the app's own detection evidence.
+
+    This is the single Bug-B-correct definition, shared by the primary source
+    scan (signatures.scan) and the DEX scan (androguard_scanner) so they cannot
+    drift: a namespace is third-party ONLY when it is a recognized vendor AND it
+    does NOT sit under the app's own declared package. An app whose own package
+    shares a vendor prefix (Cash App is com.squareup.cash; a Google first-party
+    app is com.google.android.apps.*) keeps its own code app-owned - excluding it
+    would drop the app's own root/SSL logic from the primary scan and let a
+    confident NEITHER be certified over unscanned app code (ADR-0006/ADR-0001).
+
+    app_package None/empty reduces this to the plain vendor check
+    (is_under_package returns False), so a caller without a known package keeps
+    the historical behavior exactly - the safe direction (more app code scanned,
+    never less)."""
+    return is_known_third_party(ns) and not is_under_package(ns, app_package)
+
+
 @dataclass
 class StageResult:
     stage: str
@@ -287,6 +313,14 @@ class Evidence:
     file: str
     line_or_offset: int | str
     matched_text: str
+    # G11: forensic provenance of the match - what KIND of artifact it came from
+    # (bytecode_string, bytecode_class, resource_xml, source, native_symbol),
+    # a different axis from the signature's pattern_type (the matching mechanism:
+    # regex/string_literal/export_symbol/...). Stamped from the driving signature's
+    # evidence_type so a report reader can see HOW each finding was detected, not
+    # only that it was. The default keeps every Evidence constructed without it
+    # (older callers, fixtures, stored rows) valid and unchanged.
+    evidence_type: str = "unspecified"
     # principle 2 / ADR-0001: every finding carries its verification tier.
     # All evidence this engine produces is deterministic_matched by
     # construction - it comes from signature matching, never from an AI/LLM
@@ -350,7 +384,7 @@ class CategoryVerdict:
     detected: bool
     evidence: list[Evidence]
     # L-M4/L-M3: True when at least one of this category's governing surfaces
-    # (root -> {java,native}, ssl -> {java,native,manifest}) was NOT fully
+    # (root -> {java,native,js}, ssl -> {java,native,manifest,js}) was NOT fully
     # analyzed. The confidence is then an upper bound, not a point estimate, and
     # a `detected=False` here is "unknown, not absent" - never a confident
     # negative. Set by coverage.apply_coverage_bound, which also records the

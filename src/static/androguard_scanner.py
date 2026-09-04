@@ -75,6 +75,41 @@ def _class_namespace(class_name: str) -> str | None:
     return ".".join(parts[:-1])
 
 
+def _xref_class_desc(xref_entry) -> str | None:
+    """Class descriptor ('Lcom/foo/Bar;') for one get_xref_from() entry, or None.
+
+    androguard 4.x's StringAnalysis.get_xref_from() yields (ClassAnalysis,
+    MethodAnalysis) TUPLES, and ClassAnalysis exposes its descriptor as `.name`
+    (it has no get_class_name()). Earlier code iterated the result as if each
+    entry were itself a class object with .get_class_name(), so the walk raised
+    AttributeError on the first real string and the caller silently fell back to
+    the whole constant pool (attribution_degraded=True) on EVERY real APK - the
+    unit fixtures encoded that wrong shape (a dict keyed by class objects), so
+    the tests stayed green over a code path that never once ran on real data.
+    We unpack the tuple and prefer `.name`, keeping get_class_name()/
+    get_vm_class().get_name() as cross-version/fixture fallbacks. Any failure
+    returns None (that one xref is simply unattributable) instead of raising, so
+    a single odd entry can no longer collapse the whole scan to the degraded path.
+    """
+    cls = xref_entry[0] if isinstance(xref_entry, tuple) else xref_entry
+    name = getattr(cls, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    for attr in ("get_class_name", "get_name"):
+        fn = getattr(cls, attr, None)
+        if callable(fn):
+            try:
+                v = fn()
+                if isinstance(v, str) and v:
+                    return v
+            except Exception:
+                pass
+    try:
+        return cls.get_vm_class().get_name()
+    except Exception:
+        return None
+
+
 def _app_owned(ns: str, app_package: str | None) -> bool:
     """A class is app-owned when it sits under the APK's own package tree (even
     if that package shares a vendor prefix - Bug B), or is not a known vendor."""
@@ -121,8 +156,9 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> tuple[set[str],
                 app_strings.add(val)
                 continue
             keep = False
-            for m in (s_analysis.get_xref_from() or {}):
-                ns = _class_namespace(m.get_class_name())
+            for xref in (s_analysis.get_xref_from() or ()):
+                cn = _xref_class_desc(xref)
+                ns = _class_namespace(cn) if cn else None
                 if ns is not None and ns in app_ns:
                     keep = True
                     break
@@ -158,7 +194,7 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> tuple[set[str],
 # jadx DEX cache). A stale/wrong-version entry is a miss, never a wrong answer.
 # ---------------------------------------------------------------------------
 
-_DEX_STRING_CACHE_VERSION = "dex-string-v2"
+_DEX_STRING_CACHE_VERSION = "dex-string-v3"  # v3: real per-string xref attribution now runs (v2 and earlier silently degraded to the whole pool on every real APK)
 
 
 def _androguard_version() -> str:

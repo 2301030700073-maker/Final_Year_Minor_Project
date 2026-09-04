@@ -160,6 +160,9 @@ KNOWN_VENDOR_PREFIXES = (
     "com.crittercism",    # Crittercism
     "androidx.work",      # AndroidX WorkManager (RootedDevice check)
     "okhttp3",            # OkHttp
+    "com.android.volley", # Volley HTTP client (Google) - a HurlStack /
+                          # setSSLSocketFactory match inside Volley's own code is
+                          # library plumbing, not the app configuring pinning
     "com.squareup",       # Square ecosystem
     "com.reactnativecommunity",  # React Native community modules
     "com.RNFetchBlob",    # ReactNativeBlobUtil (legacy)
@@ -181,6 +184,8 @@ KNOWN_VENDOR_PREFIXES = (
     "com.paypal",         # PayPal
     "com.braintreepayments",  # Braintree
     "com.intercom",       # Intercom
+    "com.braze",          # Braze (customer engagement / messaging SDK)
+    "com.appboy",         # Braze legacy package name (Appboy)
     "com.zendesk",        # Zendesk
     "com.mapbox",         # Mapbox
     "org.telegram",       # Telegram
@@ -190,7 +195,135 @@ KNOWN_VENDOR_PREFIXES = (
     "io.socket",          # Socket.IO
     "retrofit2",          # Retrofit
     "com.github.bumptech.glide",  # Glide image loader
+    "com.bumptech.glide",         # Glide's ACTUAL package. The entry above is
+                          # Glide's Maven groupId (com.github.bumptech:glide),
+                          # not its package namespace, so it never matched a
+                          # decompiled path - verified against the real Glide
+                          # classes on disk (cfr/com/bumptech/glide/...). Kept
+                          # both: the groupId form is harmless and removing it
+                          # would silently change behavior for any app that does
+                          # ship that package.
     "coil",                       # Coil image loader
+    # --- platform/toolchain libraries every Android build bundles (VENDOR-BASE1).
+    # These are shipped by Google and JetBrains, never the app's own code, and
+    # they were the dominant residual source of vendor code being read as
+    # app-owned: `androidx` alone contributed most of the Class.forName sites that
+    # degraded the java surface to `partial` on essentially every app in the
+    # corpus (holding the registered negative control out of Tier-2 calibration),
+    # and only the single `androidx.work` leaf was excluded before. All verified
+    # present as real decompiled package roots in this corpus. Bug-B parity still
+    # protects the pathological app that declares one of these as its own package.
+    "androidx",           # AndroidX / Jetpack (supersedes the androidx.work leaf)
+    "android.support",    # legacy Android Support Library
+    "kotlin",             # Kotlin stdlib
+    "kotlinx",            # Kotlin coroutines / serialization
+    "okio",               # Okio (OkHttp's I/O layer)
+    # VENDOR-ARCH1. The same oversight as `androidx` above, one generation
+    # earlier, and it was the SOLE remaining reason a clean app could not
+    # certify a confident negative. `android.arch.*` is Android Architecture
+    # Components - the pre-AndroidX namespace of the very same Google
+    # lifecycle/room/paging libraries whose successor `androidx` is already
+    # excluded here - so an app built against the support-library-era artifacts
+    # ships `android/arch/lifecycle/Lifecycling.java`, which does
+    # `Class.forName(str).getDeclaredConstructor(...)` to instantiate generated
+    # lifecycle adapters. That is Google framework plumbing on a generated class
+    # name, not the app loading a hidden payload, but with `android.arch` absent
+    # from this tuple `find_dynamic_loading` read it as the APP's own dynamic
+    # class loading and `apply_dynamic_loads` degraded the java surface to
+    # `partial`. java governs BOTH categories, so every verdict became
+    # coverage-limited and every NEITHER was excluded from Tier-2 calibration as
+    # under-covered - which is the whole reason true_negative stayed 0 and
+    # precision was a positive-only tautology. Verified on the AndroGoat run of
+    # 2026-09-03: all THREE reported dynamic-load call sites were this one Google
+    # file (once via jadx, twice via CFR at lines 96 and 104), obfuscation
+    # `clear`, decompile `complete`, jadx exit 0 - nothing about the app itself.
+    "android.arch",       # Android Architecture Components (pre-AndroidX)
+    # Toolchain artifacts every Kotlin/D8 build emits, same class as `kotlin`:
+    # JetBrains/IntelliJ annotation jars (@NotNull/@Nullable/@Language) and the
+    # D8 desugared-JDK backport (`j$.util.stream`, `j$.time`). Present as real
+    # decompiled package roots in 4, 4 and 3 unrelated APKs of this corpus
+    # respectively; none is ever an app's own code.
+    "org.jetbrains",      # JetBrains annotations (bundled by every Kotlin build)
+    "org.intellij",       # IntelliJ annotations (ships with the same artifact)
+    "j$",                 # D8/R8 desugared JDK backport
+    # --- VENDOR-PLATFORM1: the core-library reserved namespaces. A survey of
+    # every namespace in the corpus that held classes and was NOT recognized as a
+    # vendor put `android.*` at the TOP by app count - android.app, android.view,
+    # android.window, android.graphics, android.text, android.os, android.util,
+    # android.media, android.location, android.telephony, android.print,
+    # android.hardware.biometrics, android.view.translation across 4 unrelated
+    # APKs - plus java.util.function and javax.annotation/javax.inject. These are
+    # platform stubs and desugared/JSR shims the build bundles; `android.support`
+    # and `android.arch` were already excluded but their PARENT never was, so the
+    # rest of the platform tree read as the app's own code.
+    #
+    # This is the GAP-1/Paytm direction and the platform tree is its worst case:
+    # android.security.net.config.* IS the framework's network-security-config
+    # (pin sets, trust anchors) and android.net.http.X509TrustManagerExtensions /
+    # android.webkit carry the platform's own TLS and WebView cert handling. A
+    # bundled shim of any of those would have scored as the app's pinning.
+    #
+    # Safe to state `android`/`dalvik` as whole-tree prefixes: every subpackage
+    # observed is platform code (app/view/window/graphics/text/os/util/media/
+    # location/telephony/print/hardware.biometrics/view.translation) and the tree
+    # exists to hold the framework, not app classes. `java`/`javax` are NOT taken
+    # whole, deliberately: test_dynload's VENDOR-ARCH1 test encodes the rule that
+    # `javax.net.ssl` must stay app-owned, because that is exactly where a
+    # VENDORED custom TrustManager would be rendered, and skipping it would turn a
+    # real app-owned pinning class into a confident false negative (ADR-0006's safe
+    # direction). So only the shim leaves the survey actually observed are listed.
+    # Measured cost of the whole group: ZERO - a corpus-wide re-scan found no
+    # signature match under any of them, so this closes the false-positive
+    # direction without dropping a single existing match.
+    "android",            # Android platform stubs/shims (parent of support+arch)
+    "dalvik",             # Dalvik/ART runtime classes
+    "java.util.function", # desugared JDK functional interfaces (observed)
+    "javax.inject",       # JSR-330 annotations (observed)
+    "javax.annotation",   # JSR-305 annotations (observed)
+    # --- VENDOR-OSS1: bundled open-source libraries found by the same survey,
+    # each observed as a real decompiled package root in this corpus. Two of
+    # these were measured to be dropping REAL matches that were being read as the
+    # app's own logic:
+    #   org.webrtc  - emulator_detection fired on `const-string v1, "goldfish"`
+    #                 in org/webrtc/voiceengine/WebRtcAudioUtils.smali (a7b9f37f).
+    #                 WebRTC probes for the emulator to work around its broken
+    #                 audio path; that is a compatibility check, not the app's
+    #                 anti-tampering. A measured false positive, now excluded.
+    #   org.slf4j / io.noties - ktor_tls_pinning fired on the jadx `import
+    #                 io.ktor.client.plugins...` line inside slf4j's Util.java
+    #                 and markwon's RegistryImpl.java (7093fe4e/jerboa). The
+    #                 weight is unaffected (that weak-tier ID also matches the
+    #                 app's own networking), but the EVIDENCE pointed at two
+    #                 logging/markdown libraries as if jerboa pinned there.
+    # org.chromium/org.conscrypt/org.webrtc are listed for the same reason
+    # androidx is: they are the ones that actually contain TLS and certificate
+    # code (Cronet's addPublicKeyPins, Conscrypt's X509TrustManager, WebRTC's
+    # DTLS), so leaving them app-owned is the highest-value FP left. The app's
+    # own call INTO them still scores - only the library's implementation stops
+    # counting as the app's.
+    "org.slf4j",          # SLF4J logging facade
+    "org.apache",         # Apache Commons / HttpClient shims
+    "org.json",           # org.json reference implementation
+    "com.fasterxml",      # Jackson
+    "io.reactivex",       # RxJava 2/3 (NOT bare `rx`: R8 can emit a 2-char
+                          # namespace, so excluding `rx` risks skipping app code)
+    "org.jsoup",          # jsoup HTML parser
+    "org.commonmark",     # commonmark-java
+    "org.chromium",       # Chromium/Cronet/WebView boundary (TLS + pinning API)
+    "org.conscrypt",      # Conscrypt - Google's TLS provider (X509TrustManager)
+    "org.webrtc",         # WebRTC (DTLS, and the "goldfish" audio workaround)
+    "net.sqlcipher",      # SQLCipher
+    "dagger",             # Dagger/Hilt DI
+    "freemarker",         # FreeMarker templates
+    "ezvcard",            # ez-vcard
+    "org.mp4parser",      # mp4parser
+    "com.caverock",       # AndroidSVG
+    "com.swmansion",      # React Native Reanimated / gesture-handler / screens
+    "com.th3rdwave",      # react-native-safe-area-context
+    "io.noties",          # Markwon markdown renderer
+    "bolts",              # Facebook Bolts-Android
+    "third_party",        # vendored third-party tree (Chromium convention)
+    "arrow.core",         # Arrow functional library (Kotlin)
 )
 # Bundled NATIVE SDK libraries (boundary-4): a root/SSL check that matches
 # inside one of these .so files is a bundled-SDK signal, not the app's own
@@ -436,6 +569,25 @@ class ClassificationResult:
     # every detected category was fully_analyzed (a true confident negative is
     # possible).
     unknown_uncovered: list[str] = field(default_factory=list)
+    # UNCOV-CAUSE1: WHY each entry of unknown_uncovered is there. Two structurally
+    # independent mechanisms write that list and the remediation for them is
+    # opposite, but the list itself records only the category, so neither the
+    # stored classification_json nor the report could say which fired:
+    #   "incomplete_coverage"     coverage.apply_coverage_bound - a governing
+    #                             SURFACE was not fully analyzed (packed dex,
+    #                             heavy obfuscation, an unanalyzable .so, an
+    #                             unaccounted System.load, remote JS). Fix =
+    #                             analyze more of the app.
+    #   "unattributed_indicator"  coverage.apply_unattributed_indicators -
+    #                             coverage was fine and detection-shaped CODE was
+    #                             read, but it matched no signature (ADR-0001's
+    #                             signature-bounded hole). Fix = author a
+    #                             signature, not more decompilation.
+    # A category can carry BOTH. Maps category -> the causes that applied, in the
+    # order the pipeline applied them (coverage bound first, then indicators).
+    # Empty dict for a fully-covered clean scan, and for any row recorded before
+    # this field existed - so absence never fabricates a cause.
+    unknown_uncovered_causes: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass

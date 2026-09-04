@@ -560,3 +560,90 @@ def test_attribute_evidence_without_file_counts_app_owned():
     assert result is not None
     assert result["app_owned"] == 1
     assert result["third_party"] == 0
+
+
+def test_vendor_platform1_android_platform_tree_is_vendor_not_app_code():
+    # VENDOR-PLATFORM1. A corpus-wide survey of every namespace holding classes
+    # that was NOT recognized as a vendor put the `android.*` tree at the top by
+    # app count (android.app/view/window/graphics/text/os/util/media/location/
+    # telephony/print/hardware.biometrics/view.translation across 4 unrelated
+    # APKs). `android.support` and `android.arch` were already excluded but their
+    # PARENT never was, so the rest of the platform tree was read as the app's
+    # own code - the GAP-1/Paytm false-positive direction, whose worst case is
+    # that android.security.net.config IS the framework's network-security-config
+    # (pin sets, trust anchors) and android.net.http.X509TrustManagerExtensions /
+    # android.webkit carry the platform's TLS and WebView cert handling.
+    for ns in ("android.app", "android.view", "android.window", "android.os",
+               "android.security.net.config", "android.net.http", "android.webkit",
+               "dalvik.system"):
+        assert attribution.is_known_third_party(ns) is True, ns
+    # Already-excluded leaves keep working through the new parent.
+    assert attribution.is_known_third_party("android.support.v4.app") is True
+    assert attribution.is_known_third_party("android.arch.lifecycle") is True
+    # `androidx` is a DIFFERENT namespace, not a child of `android` - the prefix
+    # test is `ns == p or ns.startswith(p + ".")`, so this must hold on its own
+    # entry rather than by accident.
+    assert attribution.is_known_third_party("androidx.work") is True
+
+
+def test_vendor_platform1_leaves_javax_net_ssl_app_owned_on_purpose():
+    # The deliberate boundary on VENDOR-PLATFORM1: `java`/`javax` are NOT taken as
+    # whole trees. javax.net.ssl is exactly where a VENDORED custom TrustManager
+    # gets rendered, so excluding it would convert a real app-owned pinning class
+    # into a confident false negative - ADR-0006's unsafe direction. Only the shim
+    # leaves the survey actually observed are vendor. (test_dynload's VENDOR-ARCH1
+    # test encodes the same rule from the dynamic-loading side; this pins it at the
+    # taxonomy level so a future "just add bare javax" edit fails here first.)
+    assert attribution.is_known_third_party("javax.net.ssl") is False
+    assert attribution.is_known_third_party("java.security") is False
+    assert attribution.is_known_third_party("javax.inject") is True
+    assert attribution.is_known_third_party("javax.annotation.meta") is True
+    assert attribution.is_known_third_party("java.util.function") is True
+    # com.android.* stays app-owned: com.android.insecurebankv2 is a real app in
+    # this corpus, and com.android.contacts is the registered negative control.
+    assert attribution.is_known_third_party("com.android") is False
+    assert attribution.is_known_third_party("com.android.insecurebankv2") is False
+
+
+def test_vendor_oss1_measured_false_positive_namespaces_are_vendor():
+    # VENDOR-OSS1. These two were not speculative additions - each was measured
+    # to be feeding a scored match that read as the app's own logic:
+    #   org.webrtc  - root's emulator_detection matched `const-string v1,
+    #                 "goldfish"` in org/webrtc/voiceengine/WebRtcAudioUtils.smali.
+    #                 WebRTC probes for the emulator to route around its broken
+    #                 audio path; a compatibility check, not anti-tampering.
+    #   org.slf4j / io.noties - ssl's weak-tier ktor_tls_pinning matched the jadx
+    #                 `import io.ktor.client.plugins...` line inside slf4j's
+    #                 Util.java and markwon's RegistryImpl.java, pointing the
+    #                 evidence at a logging and a markdown library.
+    for ns in ("org.webrtc.voiceengine", "org.slf4j.helpers", "io.noties.markwon"):
+        assert attribution.is_known_third_party(ns) is True, ns
+    # The TLS-bearing libraries are the highest-value part: their cert code must
+    # not read as the app's pinning. The app's own call INTO them still scores.
+    for ns in ("org.chromium.net", "org.conscrypt", "org.apache.http", "com.fasterxml.jackson"):
+        assert attribution.is_known_third_party(ns) is True, ns
+
+
+def test_vendor_oss1_rejects_short_r8_namespaces_to_avoid_skipping_app_code():
+    # The R8-collision guard that shaped the list. Marking a namespace vendor
+    # makes signatures.scan SKIP the file, so a prefix that an obfuscator could
+    # emit would silently drop app code from the primary scan (Bug-B's confident
+    # false negative). RxJava 1's real package is the 2-char `rx`, which R8 can
+    # and does generate - so `io.reactivex` is listed and bare `rx` deliberately
+    # is not. Every short obfuscated namespace observed in this corpus must stay
+    # app-owned.
+    assert attribution.is_known_third_party("io.reactivex.rxjava3") is True
+    for ns in ("rx", "rx.exceptions", "ga", "ha", "y9", "a", "b0", "za"):
+        assert attribution.is_known_third_party(ns) is False, ns
+
+
+def test_vendor_additions_still_honor_the_app_package_override():
+    # Bug-B parity: a namespace is third-party only when it is a recognized vendor
+    # AND is not under the app's own declared package. Every prefix added here
+    # inherits that, so the pathological app that declares one as its own package
+    # keeps its own code scanned.
+    from common import is_third_party_file
+    assert is_third_party_file("org.webrtc.internal", None) is True
+    assert is_third_party_file("org.webrtc.internal", "org.webrtc") is False
+    assert is_third_party_file("android.foo", "android.foo") is False
+    assert is_third_party_file("dagger.internal", "dagger") is False

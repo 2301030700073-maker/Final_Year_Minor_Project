@@ -349,3 +349,41 @@ def test_app_owned_strings_whole_pool_on_xref_walk_failure():
     # F4: a failed xref walk means the whole pool was substituted - the caller
     # must learn attribution was lost, or a whole-pool scan reads as attributed.
     assert degraded is True  # xref walk failed -> whole-pool fallback
+
+
+class _FakeCA:
+    """A ClassAnalysis-faithful double. Real androguard ClassAnalysis exposes its
+    descriptor as `.name` and has NO get_class_name() - using this (not _FakeClass)
+    is the whole point of the test below: it encodes the shape the production walk
+    actually receives, which the dict-keyed-by-class fixtures never did."""
+
+    def __init__(self, name):
+        self.name = name
+
+
+def test_app_owned_strings_real_androguard_xref_shape():
+    # Regression for the attribution-degrade bug. Real StringAnalysis.get_xref_from()
+    # returns a SET of (ClassAnalysis, MethodAnalysis) TUPLES, and ClassAnalysis
+    # exposes its descriptor via `.name`, not get_class_name(). The old walk did
+    # `for m in get_xref_from(): m.get_class_name()`, which AttributeError'd on the
+    # tuple, so the caller degraded to the whole constant pool on EVERY real APK -
+    # vendor strings leaked into detection evidence with attribution_degraded left
+    # reading as a plain scan. That is exactly the jerboa Root=1.00 confident false
+    # positive (RootBeer su-path strings living in the coil.util vendor namespace).
+    # The prior fixtures returned a dict keyed by class objects, whose iteration
+    # happened to yield objects with .get_class_name(), so the tests stayed green
+    # over a path that never once executed on real androguard output. This asserts
+    # the REAL shape: an app-referenced string is kept, a vendor-only string is
+    # dropped, and attribution is reported as applied (not degraded).
+    app_ca = _FakeCA("Lcom/example/app/Main;")
+    vendor_ca = _FakeCA("Lokhttp3/OkHttpClient;")
+    app_string = _FakeString("com.android.insecurebankv2", {(app_ca, object())})
+    vendor_string = _FakeString("test-keys", {(vendor_ca, object())})
+    dexs = [_FakeDex([_FakeClass("Lcom/example/app/Main;")])]
+    dx = _FakeDx([app_string, vendor_string])
+
+    result, degraded = _app_owned_strings(dexs, dx, "com.example.app")
+
+    assert "com.android.insecurebankv2" in result  # referenced by an app class -> kept
+    assert "test-keys" not in result               # referenced only by okhttp3 -> dropped
+    assert degraded is False                        # per-string attribution actually ran

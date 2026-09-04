@@ -10,7 +10,7 @@ from jinja2 import Environment
 from calibration.report import CalibrationReport
 from common import ClassificationResult, CorrelationResult, StageResult, VerificationResult
 from report import attribution as attribution_module
-from static.coverage import confidence_bound
+from static.coverage import confidence_bound, verdict_label
 from static.manifest import ManifestInfo
 
 
@@ -88,7 +88,7 @@ TEMPLATE = _env.from_string("""\
 
 {% macro category_section(cat, classification, attr, coverage, heading, noun, vendor_note) -%}
 ### {{ heading }}
-- Confidence: {{ confidence_bound(cat, classification[cat], coverage) }} -> {{ "DETECTED" if classification[cat].detected else "Inconclusive" }}{% if attr and attr.all_third_party and classification[cat].detected %} (**bundled SDK only** - none of these {{ noun }} matches are in the app's own package){% endif %}
+- Confidence: {{ confidence_bound(cat, classification[cat], coverage) }} -> {{ verdict_label(cat, classification[cat], coverage) }}{% if attr and attr.all_third_party and classification[cat].detected %} (**bundled SDK only** - none of these {{ noun }} matches are in the app's own package){% endif %}
 {% for e in classification[cat].evidence -%}
 - `{{ e.signature_id }}` ({{ e.evidence_type }}) at {{ e.file }}:{{ e.line_or_offset }} - `{{ e.matched_text | md }}`
 {% endfor %}
@@ -100,7 +100,7 @@ TEMPLATE = _env.from_string("""\
 {% endmacro -%}
 ## Classification
 
-**Decision:** {{ classification.action.value }} (root threshold {{ classification.root_threshold }}, ssl threshold {{ classification.ssl_threshold }}){% if decompile_completeness == "partial" %} - **CAUTION: based on a PARTIAL decompile ({{ jadx_file_count }} files, jadx exit {{ jadx_exit_code }}) - see Limitations**{% endif %}{% if classification.unknown_uncovered %} - **Coverage-limited (unknown, not absent): {{ classification.unknown_uncovered | join(', ') }} - a NEITHER here is a lower bound, not a confident negative (governing surface not fully analyzed, or detection-shaped code matched no signature)**{% endif %}
+**Decision:** {{ classification.action.value }} (root threshold {{ classification.root_threshold }}, ssl threshold {{ classification.ssl_threshold }}){% if decompile_completeness == "partial" %} - **CAUTION: based on a PARTIAL decompile ({{ jadx_file_count }} files, jadx exit {{ jadx_exit_code }}) - see Limitations**{% endif %}{% if classification.unknown_uncovered %} - **Coverage-limited (unknown, not absent): {% for cat in classification.unknown_uncovered %}{{ cat }} ({% if classification.unknown_uncovered_causes.get(cat) %}{% for c in classification.unknown_uncovered_causes[cat] %}{{ "governing surface not fully analyzed" if c == "incomplete_coverage" else ("detection-shaped code matched no signature" if c == "unattributed_indicator" else c) }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}governing surface not fully analyzed, or detection-shaped code matched no signature{% endif %}){% if not loop.last %}; {% endif %}{% endfor %} - a NEITHER here is a lower bound, not a confident negative**{% endif %}
 **Files scanned:** {{ classification.scanned_file_count }} (RESID-4C: a low count means this verdict is based on a small corpus - a NEITHER is not proof of absence){% if classification.unreadable_file_count %}{{ " " }}**CAUTION: {{ classification.unreadable_file_count }} candidate file(s) could not be read (OSError): {% for f in classification.unreadable_files %}`{{ f }}`{% if not loop.last %}, {% endif %}{% endfor %} - treat any NEITHER/Inconclusive verdict as degraded, not a full-scan clean.**{% endif %}
 {{ category_section("root", classification, root_attribution, coverage, "Root-detection", "root-detection", "consistent with SDK telemetry/fraud-detection root-checks, not necessarily the app's own anti-tampering logic.") }}
 {{ category_section("ssl", classification, ssl_attribution, coverage, "SSL-pinning", "SSL-pinning", "consistent with bundled SDK pinning (e.g. OkHttp's CertificatePinner), not the app's own certificate-pinning logic.") }}
@@ -444,6 +444,7 @@ def generate_report(
         dex_attribution_degraded=dex_attribution_degraded,
         regenerated_from_stored_data=regenerated_from_stored_data,
         confidence_bound=confidence_bound,
+        verdict_label=verdict_label,
     )
     report_path.write_text(content, encoding="utf-8")
     return report_path
@@ -740,6 +741,8 @@ Among runs where a category was predicted detected AND dynamic verification actu
 
 Built from the *static* detected verdict against `config/ground_truth.yaml` - never from the dynamic bypass outcome (that would structurally be unable to produce a false negative or a reliable true negative). Every rate reports "N/A" rather than 0 when its denominator is zero (ADR-0006).
 
+One datapoint per APK - its most recent run (CALIB-WEIGHT1). Tier 1 above counts every run because each bypass attempt is its own empirical observation (FR-9.1), but precision/recall of the static detector is a property of an APK, not of how many times that APK was re-analyzed: counting every row would weight the measurement by re-run frequency and would keep counting stale verdicts from superseded engine versions, so a fixed false positive could never leave the metric.
+
 | Category | TP | FP | FN | TN | Precision | Recall | F1 | n |
 |---|---|---|---|---|---|---|---|---|
 {% for category, t2 in report.tier2.items() -%}
@@ -747,6 +750,9 @@ Built from the *static* detected verdict against `config/ground_truth.yaml` - ne
 {% endfor %}
 Excluded from Tier 2 (no ground-truth entry for that APK): root={{ report.excluded_no_ground_truth.root }}, ssl={{ report.excluded_no_ground_truth.ssl }}
 Excluded from Tier 2 (partial/unknown decompile OR under-covered governing surface - native/manifest/js - so a negative isn't proof of absence): root={{ report.excluded_partial_decompile.root }}, ssl={{ report.excluded_partial_decompile.ssl }}
+{% for category, hashes in report.excluded_missed_positives.items() %}{% if hashes %}
+- **{{ category }}: {{ hashes|length }} of those excluded {{ category }} negatives is a KNOWN MISS, not just an uncertifiable one.** Independently-sourced ground truth says {{ category }}-detection IS present in {{ hashes|join(', ') }}, the prediction was NEITHER, and the exclusion above means it is NOT counted as a false negative - so it does not depress the recall reported in this table. That exclusion is correct (an under-covered negative is not proof of absence, ADR-0006/ADR-0008) but it is not the same thing as having found the detection: read this category's recall as measured over the certifiable subset only.
+{% endif %}{% endfor %}
 {% for category, t2 in report.tier2.items() %}{# CALIB-TN0-LABEL: fire ONLY when precision genuinely reads 1.00 on a positive-only Tier-2 corpus (TP>0, FP=0, TN=0), so every clause below is true. A bare `TN==0` also fired when n=0 (precision renders N/A, not 1.00 - e.g. a category fully coverage-excluded, as ssl is in the paired test) and when FP>0 (a mis-detected negative control DOES exist and precision is <1.00), rendering a self-contradictory caveat under an N/A-or-<1.00 cell plus a false "no negative control" claim. #}{% if t2.true_negative == 0 and t2.false_positive == 0 and t2.true_positive > 0 %}
 - **{{ category }} has TN=0: the 1.00 precision is a tautology, not a measurement.** Every ground-truthed {{ category }} case in Tier 2 is a positive, so the false-positive direction has never been tested - a false positive would be structurally invisible here. The 1.00 holds only because no negative control (e.g. a stock app) is included in this category's Tier-2 corpus. Do not read it as validated precision until a true negative is added and the loop re-measured (ADR-0006).
 {% endif %}{% endfor %}

@@ -76,6 +76,7 @@ from static.coverage import (
     apply_coverage_bound,
     apply_unattributed_indicators,
     apply_dynamic_loading_java,
+    apply_unreadable_files_java,
     apply_unresolved_native,
     dart_aot_coverage,
     is_dart_aot_lib,
@@ -83,6 +84,7 @@ from static.coverage import (
     coverage_bound_line,
     js_surface_coverage,
     per_surface_coverage,
+    verdict_label,
 )
 from static.dynload import find_dynamic_loading
 from static.hermes import is_binary_bundle, is_bundle_candidate, scan_bundle
@@ -240,7 +242,24 @@ def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
     native_dir = Path(analysis_root) / apk_hash / "native"
     so_files = extract_native_libs(apk_path, native_dir)
     if not so_files:
-        return NativeScanResult(libraries=[], abi_coverage={})
+        # CALIB-NATIVE-VACUOUS: the APK was enumerated and ships zero .so, so
+        # there is no native surface for a root/pinning check to hide in and the
+        # native coverage state is vacuously fully_analyzed rather than
+        # unscannable. That is only sound if the "loads a lib we never read"
+        # escape hatch is still checked, so unaccounted_loads is computed on this
+        # path too: an app with no bundled .so that calls
+        # System.load("/data/local/tmp/x.so") has a real unexamined native
+        # surface and must still degrade to partial. Returning early without this
+        # would have turned the vacuous-coverage upgrade into a false negative.
+        return NativeScanResult(
+            libraries=[],
+            abi_coverage={},
+            native_libs_absent=True,
+            unaccounted_loads=unaccounted_native_loads(
+                find_external_native_loads(java_files) if java_files else [],
+                set(),
+            ),
+        )
     # Load signatures BEFORE the scan so the Gap-1 body-decompilation gate can be
     # driven by the actual detection corpus: a stripped lib whose exports/strings
     # overlap a signature pattern gets its bodies decompiled even with no Java_*
@@ -443,8 +462,21 @@ def _scan_binary_bundles(roots):
             # change today (plain is unreachable past the gate); this closes the
             # cross-module coupling so the decider owns its own contract.
             has_binary_bundle = has_binary_bundle or res["kind"] != "plain"
+            # JS-PATH-REL1: report the path RELATIVE to the root it was found
+            # under, exactly like the text signature engine
+            # (`signatures.scan` -> `file_path.relative_to(root)`). An absolute
+            # `outputs/analysis/<sha256>/apktool/assets/index.android.bundle`
+            # leaked the local layout into stored evidence and, worse, could not be
+            # anchored by `derive_namespace` in `report/attribution.py`, so the
+            # namespace read as `outputs.analysis.<sha>.apktool.assets...` and
+            # matched no vendor prefix - the same anchoring failure as CFR-NS1. A
+            # bundle shipped under a bundled SDK's resource subtree was therefore
+            # always counted app-owned. Relative paths anchor correctly and make
+            # this evidence source consistent with every other one.
             for sig_id, category, matched_text in res["matches"]:
-                js_matches.append((sig_id, category, matched_text, str(bundle)))
+                js_matches.append(
+                    (sig_id, category, matched_text, str(bundle.relative_to(root_path)))
+                )
     return has_binary_bundle, js_matches
 
 
@@ -1223,7 +1255,15 @@ def run(
     # corpus; when present we degrade the java surface to partial so a java
     # NEITHER is never a confident negative over the dynamically-hidden payload
     # (ADR-0006). Mirrors the boundary-4 unaccounted-loads handling, java surface.
-    dynamic_loads = find_dynamic_loading(native_java_files) if native_java_files else []
+    dynamic_loads = (
+        find_dynamic_loading(
+            native_java_files,
+            # DYNLOAD-VENDOR1: same app_package the source and DEX scans get, so
+            # the three share one third-party definition (Bug-B parity).
+            app_package=ingest_result.evidence["package"]["package_name"],
+        )
+        if native_java_files else []
+    )
     # Coverage-limited: WebView JS bridge (gap A2). A WebView that loads JS via
     # addJavascriptInterface / evaluateJavascript / loadUrl("javascript:") /
     # loadDataWithBaseURL may run root/SSL checks in JS. Local HTML/JS containers
@@ -1362,6 +1402,12 @@ def run(
             native_evidence.abi_coverage
             if native_evidence is not None else {}
         ),
+        # CALIB-NATIVE-VACUOUS: only the native scan can prove the APK ships zero
+        # .so. A missing native_evidence (stage did not run) leaves this False, so
+        # its empty abi_coverage still reads as unscannable.
+        native_libs_absent=bool(
+            native_evidence is not None and native_evidence.native_libs_absent
+        ),
         manifest_parsed=manifest_stage.status == "success",
         # H3: resources_complete comes from the real read (a declared NSC that's
         # missing/unparseable degrades the manifest surface to partial), not a
@@ -1416,6 +1462,16 @@ def run(
     # NEITHER over it reads as "unknown, not absent" (ADR-0006). Same additive,
     # downgrade-only semantics as the cases above; the evidence found is kept.
     coverage_map = apply_attribution_degraded_java(coverage_map, _dex_attribution_degraded)
+    # UNREAD1: the scan enumerated candidate files it could not READ (OSError).
+    # Those bytes were never matched against any signature, so the java surface is
+    # not the complete one `fully_analyzed` claims. This CAUTION already reached the
+    # console (below) and the report, but never the coverage map - so a NEITHER over
+    # unread files could still certify as a confident negative, and the calibration
+    # layer (which reads the map, not the CAUTION) would count it as a Tier-2 true
+    # negative. Same additive, downgrade-only semantics as the cases above.
+    coverage_map = apply_unreadable_files_java(
+        coverage_map, static_evidence.unreadable_file_count
+    )
     # Real-world gap A1: a Hermes/binary JS bundle present degrades the `js` surface
     # to partial - we recover its string constants, not full JS control flow, so a
     # js/root/ssl NEITHER is never a confident negative over bundle-hidden logic
@@ -1471,11 +1527,30 @@ def run(
     # Same degradation-class as the unreadable-files / partial-decompile CAUTIONs
     # below; the report carries it, the console must too.
     if classification.unknown_uncovered:
+        # UNCOV-CAUSE1: name WHICH mechanism flagged each category. "surface not
+        # fully analyzed, or code matched no signature" left the operator unable
+        # to act - the two have opposite remediations (analyze more of the app vs.
+        # author a signature) and a category can carry both at once.
+        causes = classification.unknown_uncovered_causes
+        _CAUSE_TEXT = {
+            "incomplete_coverage": "governing surface not fully analyzed",
+            "unattributed_indicator": "detection-shaped code matched no signature",
+        }
+        parts = []
+        for cat in classification.unknown_uncovered:
+            why = [_CAUSE_TEXT.get(c, c) for c in causes.get(cat, [])]
+            # No recorded cause means a row/path predating UNCOV-CAUSE1, where
+            # either mechanism could have fired - keep the honest or-clause rather
+            # than silently dropping the reason or inventing a specific one.
+            if not why:
+                why = ["governing surface not fully analyzed, or detection-shaped "
+                       "code matched no signature"]
+            parts.append(f"{cat} ({', '.join(why)})")
+        detail = "; ".join(parts)
         console.print(
             f"[bold yellow]Coverage-limited (unknown, not absent): "
-            f"{', '.join(classification.unknown_uncovered)} - a NEITHER here is "
-            "a lower bound, not a confident negative (governing surface not fully "
-            "analyzed, or detection-shaped code matched no signature); see "
+            f"{detail} - a NEITHER here is "
+            "a lower bound, not a confident negative; see "
             "Limitations.[/bold yellow]"
         )
     # Finding J: surface the scan degradation live, not just in the rendered
@@ -1511,13 +1586,19 @@ def run(
     # estimate on a coverage-limited category. confidence_bound appends the
     # "(upper bound: ...)" annotation only when that verdict is coverage-limited;
     # a fully-analyzed category prints the plain number, identical to the report.
+    # LABEL1: the label comes from verdict_label, the same helper the report uses,
+    # so the console can no longer print "Inconclusive" on a verdict the coverage
+    # line two rows up calls a confident negative (and that calibration counts as a
+    # certified true negative). It splits on verdict.coverage_limited - the same
+    # field confidence_bound gates its "(upper bound: ...)" annotation on - so both
+    # halves of each line below always agree.
     console.print(
         f"  Root: {confidence_bound('root', classification.root, coverage_map)} -> "
-        f"{'DETECTED' if classification.root.detected else 'Inconclusive'}"
+        f"{verdict_label('root', classification.root, coverage_map)}"
     )
     console.print(
         f"  SSL : {confidence_bound('ssl', classification.ssl, coverage_map)} -> "
-        f"{'DETECTED' if classification.ssl.detected else 'Inconclusive'}"
+        f"{verdict_label('ssl', classification.ssl, coverage_map)}"
     )
 
     # --- machine-readable ownership caveat (report-only attribution was the gap) ---
@@ -2043,13 +2124,21 @@ def _calibration_table(report) -> tuple[list[str], list[list[str]]]:
     silently. Renders both Tier-2 exclusion counts - no-GT, and the
     negative-not-proof-of-absence count (which covers BOTH partial decompiles
     and under-covered governing surfaces) - for parity with the generated
-    report's two "Excluded from Tier 2..." lines."""
+    report's two "Excluded from Tier 2..." lines.
+
+    CALIB-EXCL-MISS1: also renders the KNOWN-MISS subset of that exclusion -
+    APKs whose ground truth says the category IS present, whose prediction was
+    NEITHER, and which were excluded anyway because coverage couldn't certify
+    the negative. They are correctly not false negatives, so they do not
+    depress the recall in this very table; a non-zero count here is the only
+    thing on the console that stops "recall 1.00" from reading as unqualified.
+    The count alone can't discharge that - the caller prints the hashes."""
     def _fmt(rate: float | None) -> str:
         return f"{rate:.2f}" if rate is not None else "N/A"
 
     columns = [
         "Category", "Tier 1 confirmation", "Tier 2 precision", "Tier 2 recall",
-        "Tier 2 F1", "n", "Excl no-GT", "Excl partial",
+        "Tier 2 F1", "n", "Excl no-GT", "Excl partial", "Excl known-miss",
     ]
     rows: list[list[str]] = []
     for category in CATEGORIES:
@@ -2060,6 +2149,7 @@ def _calibration_table(report) -> tuple[list[str], list[list[str]]]:
             _fmt(t2.precision.rate), _fmt(t2.recall.rate), _fmt(t2.f1), str(t2.n),
             str(report.excluded_no_ground_truth.get(category, 0)),
             str(report.excluded_partial_decompile.get(category, 0)),
+            str(len(report.excluded_missed_positives.get(category, []))),
         ])
     return columns, rows
 
@@ -2098,6 +2188,27 @@ def calibration_report(
     console.print(table)
     if report.skeleton_warning:
         console.print(f"[yellow]{report.skeleton_warning}[/yellow]")
+
+    # CALIB-EXCL-MISS1: name the known misses, don't just count them. The
+    # "Excl known-miss" column says how many, but a reader of this table's
+    # "recall 1.00" needs to know WHICH APK we know we missed - the whole
+    # hazard is that this case is honestly excluded from Tier 2 (an
+    # uncertifiable negative is not proof of absence, ADR-0006/ADR-0008) and
+    # therefore never depresses recall, so a bare count folded in next to
+    # "Excl partial" is indistinguishable from an ordinary uncertifiable
+    # negative. Printed as its own red line, above the N/A note, because it
+    # qualifies a number the operator has already read.
+    for category in CATEGORIES:
+        missed = report.excluded_missed_positives.get(category, [])
+        if missed:
+            console.print(
+                f"[bold red]Known miss: {len(missed)} excluded {category} negative(s) "
+                f"is/are NOT merely uncertifiable - ground truth says {category}-detection "
+                f"IS present in {', '.join(missed)}, the prediction was NEITHER, and the "
+                f"exclusion means it is not counted as a false negative. The "
+                f"{category} recall above is therefore measured over the certifiable "
+                f"subset only, not over every known {category}-positive target.[/bold red]"
+            )
 
     # A bare "N/A" Tier 2 reads like a missing computation, but here it is the
     # honest result of a negative-direction exclusion (report.py): a detected=False
@@ -2420,6 +2531,14 @@ def _classification_from_json(cj: dict) -> ClassificationResult:
         # Default [] matches the dataclass, so a genuinely-covered (or pre-field)
         # row stays empty rather than fabricating a caveat.
         unknown_uncovered=cj.get("unknown_uncovered", []),
+        # UNCOV-CAUSE1, and REGEN-FIELDLOSS1 discipline: restore the per-category
+        # CAUSE alongside the list itself. Dropping it would re-render a
+        # regenerated report without the "why" line while still printing the
+        # caveat - the reader would see "coverage-limited" with no way to tell
+        # whether to decompile more or author a signature. Default {} matches the
+        # dataclass, so a row stored before this field existed reports no cause
+        # rather than guessing one.
+        unknown_uncovered_causes=cj.get("unknown_uncovered_causes", {}),
         # RESID-4F: restore the per-signature truncation counts so the regenerated
         # report keeps its "Evidence truncated (N signatures matched >50x)"
         # disclosure instead of silently implying the shown 50 rows were the whole

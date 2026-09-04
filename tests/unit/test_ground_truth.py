@@ -20,12 +20,23 @@ def test_load_ground_truth_reads_real_yaml_with_all_four_known_targets():
     assert contacts.root is False
     assert contacts.ssl is False
 
-    # RS_Vapour (com.redshift.rs_vapourtraining) - SSL/root negative control,
-    # independently verified (apktool --no-res dump read directly, not this
-    # pipeline's prediction). Root registered False (no app-owned root indicators
-    # across 72 app-owned classes, no native .so present).
+    # RS_Vapour (com.redshift.rs_vapourtraining) - SSL negative control, root
+    # POSITIVE. Root was registered False until 2026-09-03 on a verification that
+    # grepped for full su-path literals ("no su paths ... Runtime.exec su"); the
+    # app's own Login.java builds each path at runtime instead - findBinary walks a
+    # bare-directory array with `new File(where + binaryName).exists()` and
+    # isRooted() calls findBinary("su") - so no "/system/xbin/su"-shaped string
+    # exists anywhere in its DEX and the check was missed. Corrected against the
+    # real APK: all eight directory literals and the standalone "su" are exact DEX
+    # string constants xref'd to Lcom/redshift/rs_vapourtraining/Login;, the app's
+    # OWN class. This label is what makes the residual false negative measurable -
+    # the app has exactly ONE root technique, so it scores 0.30 and stays NEITHER
+    # (see test_signatures test_sudir1_bare_su_search_directories...). Do not
+    # "restore" root False to make recall look better.
     rs_vapour = entries["1c747b27b3547a8a8798a03128a7edd903a88e02dbcc5b1b2dbf14db69d7e212"]
-    assert rs_vapour.root is False
+    assert rs_vapour.root is True
+    # SSL absence still holds, independently re-confirmed the same way: of 111
+    # app-owned string constants, zero are SSL-shaped.
     assert rs_vapour.ssl is False
     assert rs_vapour.source
 

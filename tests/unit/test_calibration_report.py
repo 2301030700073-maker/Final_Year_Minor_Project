@@ -9,13 +9,14 @@ from static.decision_engine import DEFAULT_THRESHOLD
 def _run(apk_hash, run_id, action, root_confidence, root_detected, root_bypassed,
          ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
          decompile_completeness="complete", coverage=None,
-         root_all_third_party=False, ssl_all_third_party=False):
+         root_all_third_party=False, ssl_all_third_party=False, timestamp=None):
     return RunRow(
         apk_hash=apk_hash, run_id=run_id, action=action,
         root_confidence=root_confidence, root_detected=root_detected, root_bypassed=root_bypassed,
         ssl_confidence=ssl_confidence, ssl_detected=ssl_detected, ssl_bypassed=ssl_bypassed,
         decompile_completeness=decompile_completeness, coverage=coverage,
         root_all_third_party=root_all_third_party, ssl_all_third_party=ssl_all_third_party,
+        timestamp=timestamp,
     )
 
 
@@ -444,3 +445,142 @@ def test_bucket_index_default_edges_placement_unchanged():
     assert _bucket_index(0.7, e) == 7                # [0.7,0.8)
     assert _bucket_index(0.95, e) == 9               # [0.9,1.0)
     assert _bucket_index(1.0, e) == len(e) - 2       # top edge -> top bucket [0.9,1.0)
+
+
+def test_tier2_keeps_one_datapoint_per_apk_latest_run_only():
+    # CALIB-WEIGHT1: Tier 1 counts every run (FR-9.1 - each bypass attempt is its
+    # own empirical observation), but Tier 2 measures the precision/recall of the
+    # static detector, which is a property of an APK rather than of how many times
+    # that APK was re-analyzed. Counting every row (a) weighted the measurement by
+    # re-run frequency, so one heavily re-run APK dominated the corpus, and (b)
+    # kept counting stale verdicts from superseded engine versions, so a false
+    # positive fixed in the code could never leave the metric.
+    gt = {"apk": GroundTruthEntry(apk_hash="apk", root=False, ssl=None, source="manual")}
+    # three stale FP runs, then the corrected run that is now the detector's answer
+    runs = [
+        _run("apk", f"old{i}", "ROOT_ONLY", 0.9, True, None,
+             coverage=FULLY_ANALYZED, timestamp=f"2026-09-01T00:0{i}:00Z")
+        for i in range(3)
+    ] + [
+        _run("apk", "new", "NEITHER", 0.0, False, None,
+             coverage=FULLY_ANALYZED, timestamp="2026-09-01T00:09:00Z"),
+    ]
+
+    report = compute_calibration_report(
+        runs, gt, generated_at="now", ground_truth_commit="abc",
+    )
+    t2 = report.tier2["root"]
+    assert (t2.true_positive, t2.false_positive, t2.false_negative, t2.true_negative) == (0, 0, 0, 1)
+    assert t2.n == 1
+    # Tier 1 still sees all four runs.
+    t1 = report.tier1["root"]
+    assert t1.confirmed + t1.not_confirmed + t1.unverified + t1.not_applicable == 4
+
+
+def test_tier2_latest_run_per_apk_prefers_timestamp_over_list_order():
+    # An out-of-order corpus must still resolve to the newest run, and an
+    # untimestamped legacy row must never outrank a real timestamped one.
+    gt = {"apk": GroundTruthEntry(apk_hash="apk", root=True, ssl=None, source="manual")}
+    newest = _run("apk", "newest", "ROOT_ONLY", 0.9, True, None,
+                  coverage=FULLY_ANALYZED, timestamp="2026-09-01T10:00:00Z")
+    older = _run("apk", "older", "NEITHER", 0.0, False, None,
+                 coverage=FULLY_ANALYZED, timestamp="2026-08-01T10:00:00Z")
+    legacy = _run("apk", "legacy", "NEITHER", 0.0, False, None, coverage=FULLY_ANALYZED)
+
+    report = compute_calibration_report(
+        [newest, older, legacy], gt, generated_at="now", ground_truth_commit="abc",
+    )
+    t2 = report.tier2["root"]
+    assert (t2.true_positive, t2.false_negative, t2.n) == (1, 0, 1)
+
+
+def test_excluded_known_miss_named_at_the_coverage_gate_not_just_counted():
+    # CALIB-EXCL-MISS1, the real case that motivated the field (RS_Vapour): the
+    # engine said NEITHER, independent ground truth says root-detection IS
+    # present, and a governing surface was under-covered - so the observation is
+    # excluded from Tier 2. That exclusion is correct (an uncertifiable negative
+    # is not proof of absence, ADR-0006/ADR-0008) and it means the miss is NOT an
+    # FN, so it does not depress recall. It therefore has to be NAMED: folded
+    # into a bare "excluded: N" it is indistinguishable from an honestly
+    # uncertifiable negative, and a reader of "recall 1.00" cannot tell that we
+    # know we missed one.
+    cov = {**FULLY_ANALYZED, "native": "partial"}
+    runs = [
+        _run("known_miss_hash", "r1", "NEITHER", 0.30, False, None,
+             decompile_completeness="complete", coverage=cov),
+    ]
+    ground_truth = {
+        "known_miss_hash": GroundTruthEntry("known_miss_hash", root=True, ssl=False, source="DEX-verified"),
+    }
+
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-09-03T00:00:00", ground_truth_commit="abc123",
+    )
+
+    assert report.excluded_partial_decompile["root"] == 1          # still counted as excluded
+    assert report.excluded_missed_positives["root"] == ["known_miss_hash"]
+    # The whole point: it is NOT laundered into a metric. Tier 2 sees nothing.
+    t2 = report.tier2["root"]
+    assert (t2.true_positive, t2.false_positive, t2.false_negative, t2.true_negative, t2.n) == (0, 0, 0, 0, 0)
+    assert t2.recall.rate is None  # no certifiable observation to measure against
+    # ssl is genuinely absent here and also under-covered -> excluded too, but it
+    # is NOT a known miss (gt says absent), so its list stays empty. This is what
+    # separates "we missed a real detection" from "we could not certify a clean
+    # scan" - the two must never share a bucket.
+    assert report.excluded_partial_decompile["ssl"] == 1
+    assert report.excluded_missed_positives["ssl"] == []
+
+
+def test_excluded_known_miss_named_at_the_partial_decompile_gate_too():
+    # The other exclusion gate (partial/unknown decompile, the legacy Java-only
+    # one) must name its known misses identically - the two gates are mutually
+    # exclusive, so a field wired into only one of them would silently report
+    # zero known misses for every partial-decompile corpus.
+    runs = [
+        _run("partial_miss_hash", "r1", "NEITHER", 0.00, False, None,
+             decompile_completeness="partial"),
+    ]
+    ground_truth = {
+        "partial_miss_hash": GroundTruthEntry("partial_miss_hash", root=True, ssl=None, source="manual review"),
+    }
+
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-09-03T00:00:00", ground_truth_commit="abc123",
+    )
+
+    assert report.excluded_partial_decompile["root"] == 1
+    assert report.excluded_missed_positives["root"] == ["partial_miss_hash"]
+    assert report.tier2["root"].n == 0
+    # ssl ground truth is None (not established) - an unknown label is not a
+    # known miss, so it must not be named as one.
+    assert report.excluded_missed_positives["ssl"] == []
+
+
+def test_excluded_known_miss_empty_means_no_such_case_not_unchecked():
+    # The complement, and the guard against the field reading as decoration: a
+    # corpus with a genuine confident TN, a counted FN, and an excluded negative
+    # whose ground truth says ABSENT must report an EMPTY known-miss list for
+    # every category. Empty here is a measured "no such case", so it can only
+    # stay trustworthy if the populated cases above are the only ones that fill it.
+    runs = [
+        # A real FN: full coverage, gt present -> counted in Tier 2, NOT a
+        # "known miss" in this sense (recall already reflects it).
+        _run("counted_fn", "r1", "NEITHER", 0.00, False, None, coverage=FULLY_ANALYZED),
+        # An excluded negative whose gt says absent -> uncertifiable, not a miss.
+        _run("uncertifiable", "r2", "NEITHER", 0.00, False, None,
+             coverage={**FULLY_ANALYZED, "js": "unscannable"}),
+    ]
+    ground_truth = {
+        "counted_fn": GroundTruthEntry("counted_fn", root=True, ssl=False, source="manual review"),
+        "uncertifiable": GroundTruthEntry("uncertifiable", root=False, ssl=False, source="manual review"),
+    }
+
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-09-03T00:00:00", ground_truth_commit="abc123",
+    )
+
+    assert report.tier2["root"].false_negative == 1      # the real FN still depresses recall
+    assert report.tier2["root"].recall.rate == 0.0
+    assert report.excluded_partial_decompile["root"] == 1  # the uncertifiable one
+    assert report.excluded_missed_positives == {"root": [], "ssl": []}
+

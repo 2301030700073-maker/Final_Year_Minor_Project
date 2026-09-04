@@ -301,3 +301,55 @@ def test_tier2_exclusion_line_names_both_decompile_and_coverage_causes():
         f"Tier-2 exclusion line must also name the under-covered-surface cause, "
         f"not the decompile alone:\n{exclusion_line}"
     )
+
+
+def test_known_miss_caveat_names_the_apk_and_qualifies_recall():
+    # CALIB-EXCL-MISS1 (RS_Vapour): recall 1.00 in the Tier-2 table is computed
+    # over the CERTIFIABLE subset. A known miss - ground truth says present,
+    # prediction NEITHER, excluded because coverage couldn't certify the negative
+    # - is correctly not an FN, so it never depresses that 1.00. Folded into
+    # "Excluded from Tier 2: root=2" it becomes indistinguishable from an
+    # honestly uncertifiable negative, and the report reads as unqualified
+    # perfect recall. The caveat must name the APK and say which subset the
+    # recall covers.
+    fully = {"java": "fully_analyzed", "native": "fully_analyzed",
+             "manifest": "fully_analyzed", "js": "fully_analyzed"}
+    runs = [
+        RunRow(
+            apk_hash="tp_hash", run_id="r1", action="ROOT_ONLY",
+            root_confidence=0.9, root_detected=True, root_bypassed=True,
+            ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+            decompile_completeness="complete", coverage=fully,
+        ),
+        RunRow(
+            apk_hash="vapour_hash", run_id="r2", action="NEITHER",
+            root_confidence=0.3, root_detected=False, root_bypassed=None,
+            ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+            decompile_completeness="complete", coverage={**fully, "java": "partial"},
+        ),
+    ]
+    ground_truth = {
+        "tp_hash": GroundTruthEntry("tp_hash", root=True, ssl=False, source="manual review"),
+        "vapour_hash": GroundTruthEntry("vapour_hash", root=True, ssl=False, source="DEX-verified"),
+    }
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-09-03T00:00:00", ground_truth_commit="abc123",
+    )
+    # preconditions: recall reads a clean 1.00 and the miss is genuinely excluded
+    assert report.tier2["root"].recall.rate == 1.0
+    assert report.excluded_missed_positives["root"] == ["vapour_hash"]
+
+    from report.generator import CALIBRATION_TEMPLATE
+    content = CALIBRATION_TEMPLATE.render(report=report)
+
+    caveat = next(
+        (ln for ln in content.splitlines() if "KNOWN MISS" in ln),
+        None,
+    )
+    assert caveat is not None, f"known-miss caveat missing from rendered report:\n{content}"
+    assert "vapour_hash" in caveat, f"caveat must name the missed APK:\n{caveat}"
+    assert "certifiable subset" in caveat
+    assert "NOT counted as a false negative" in caveat
+    # ssl has no known miss -> exactly one caveat, never a blanket one per category.
+    assert len([ln for ln in content.splitlines() if "KNOWN MISS" in ln]) == 1
+    assert "ssl-detection IS present" not in content

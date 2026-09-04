@@ -111,6 +111,17 @@ class CalibrationReport:
     # `continue`s first), so this stays a single, non-double-counted total; every
     # consumer must describe both causes, never the decompile alone.
     excluded_partial_decompile: dict[Category, int] = field(default_factory=dict)
+    # CALIB-EXCL-MISS1: the subset of the above that is a KNOWN MISS - APK hashes
+    # whose prediction for this category was NEITHER, whose independently-sourced
+    # ground truth says the category IS present, and which were nonetheless
+    # excluded because coverage could not certify the negative. They are not
+    # counted as false negatives (correctly: an uncertifiable negative is not
+    # proof of absence, ADR-0006/ADR-0008), so they do NOT depress recall - which
+    # is exactly why they have to be named. Folded into a bare "excluded: N"
+    # count, a reader of "recall 1.00" cannot tell an honestly-uncertifiable
+    # negative apart from a case where independent ground truth says a real
+    # detection was missed. Empty list = no such case, never "not checked".
+    excluded_missed_positives: dict[Category, list[str]] = field(default_factory=dict)
     # Manually maintained, not derived from run data - whether every
     # success_checks/*.py module implements real SSL bypass verification is
     # a fact about the current codebase, not something a run's data can
@@ -147,6 +158,24 @@ def _bucket_index(confidence: float, edges: list[float]) -> int:
     return len(edges) - 2  # confidence >= edges[-1] (e.g. exactly 1.0) -> top bucket
 
 
+def _latest_run_per_apk(runs: list[RunRow]) -> list[RunRow]:
+    """One row per APK - the most recent run, by `timestamp`.
+
+    Rows with no timestamp (pre-column history) sort as oldest, so a real
+    timestamped run always wins over them; among untimestamped rows the last
+    one in list order wins (the loader's insertion order). Ties on an identical
+    timestamp resolve to the later list position for the same reason. Input
+    order of the surviving rows is preserved so downstream counting is stable.
+    """
+    best: dict[str, tuple[tuple[int, str], int, RunRow]] = {}
+    for position, run in enumerate(runs):
+        key = ((0, "") if run.timestamp is None else (1, run.timestamp), position)
+        current = best.get(run.apk_hash)
+        if current is None or key >= (current[0], current[1]):
+            best[run.apk_hash] = (key[0], position, run)
+    return [entry[2] for entry in sorted(best.values(), key=lambda e: e[1])]
+
+
 def compute_calibration_report(
     runs: list[RunRow],
     ground_truth: dict[str, GroundTruthEntry],
@@ -175,6 +204,21 @@ def compute_calibration_report(
     curve: dict[Category, list[CalibrationCurveBucket]] = {}
     excluded_no_gt: dict[Category, int] = {}
     excluded_partial: dict[Category, int] = {}
+    excluded_missed: dict[Category, list[str]] = {}
+
+    # CALIB-WEIGHT1: Tier 1 is per-run by requirement (FR-9.1: "every
+    # dynamically-verified run records ... into the calibration dataset") - each
+    # bypass attempt is its own empirical observation. Tier 2 is not: it is the
+    # precision/recall of the STATIC DETECTOR against independent ground truth,
+    # and that is a property of an APK, not of how many times an APK happened to
+    # be re-analyzed. Counting every row made the measurement (a) weighted by
+    # re-run frequency - one APK in this corpus has 36 rows while others have 1,
+    # so it silently dominated - and (b) permanently polluted by stale
+    # predictions from superseded engine versions: a false positive fixed in the
+    # code could never leave the metric, since its old row is still counted.
+    # Tier 2 and the calibration curve therefore keep exactly one datapoint per
+    # APK - its most recent run, i.e. the current detector's verdict.
+    tier2_runs = _latest_run_per_apk(runs)
 
     for category in CATEGORIES:
         confidence_field, detected_field, bypassed_field = _field_names(category)
@@ -183,6 +227,9 @@ def compute_calibration_report(
         tier2_counts = {outcome: 0 for outcome in Tier2Outcome}
         no_gt_count = 0
         partial_count = 0
+        # CALIB-EXCL-MISS1: hashes excluded below whose ground truth says the
+        # category IS present - a known miss that recall never sees.
+        missed_positives: list[str] = []
         # Finding D: the decision boundary for each run is the threshold it was
         # actually classified under, which may differ across the corpus once
         # per-category tuning moves thresholds. Merge every run's own threshold
@@ -190,18 +237,19 @@ def compute_calibration_report(
         # each run, rather than one current threshold over all of history.
         # None (pre-threshold runs) falls back to the current engine default.
         per_run_thresholds = {
-            getattr(run, threshold_field) for run in runs
+            getattr(run, threshold_field) for run in tier2_runs
             if getattr(run, threshold_field) is not None
         }
         edges = sorted(set(base_edges) | {thresholds[category]} | per_run_thresholds)
         bucket_hits: list[list[bool]] = [[] for _ in range(len(edges) - 1)]  # per-bucket list of ground_truth booleans
 
         for run in runs:
+            # Tier 1 only - every run, per FR-9.1.
+            tier1_counts[classify_tier1(getattr(run, detected_field), getattr(run, bypassed_field))] += 1
+
+        for run in tier2_runs:
             confidence = getattr(run, confidence_field)
             detected = getattr(run, detected_field)
-            bypassed = getattr(run, bypassed_field)
-
-            tier1_counts[classify_tier1(detected, bypassed)] += 1
 
             gt_entry = ground_truth.get(run.apk_hash)
             gt_value = getattr(gt_entry, category) if gt_entry else None
@@ -224,6 +272,8 @@ def compute_calibration_report(
                 # "Excluded from Tier 2" lines sum to every excluded run instead
                 # of a partial-and-GT-less run silently dropping from both.
                 partial_count += 1
+                if gt_value is True:
+                    missed_positives.append(run.apk_hash)
                 continue
 
             # ADR-0008 (F2/G-A): the legacy decompile_completeness gate above is
@@ -240,6 +290,8 @@ def compute_calibration_report(
                 # An under-covered negative is not proof of absence - excluded from
                 # Tier 2 and the curve exactly like a partial-decompile negative.
                 partial_count += 1
+                if gt_value is True:
+                    missed_positives.append(run.apk_hash)
                 continue
 
             tier2_counts[classify_tier2(detected, gt_value)] += 1
@@ -262,6 +314,7 @@ def compute_calibration_report(
         )
         excluded_no_gt[category] = no_gt_count
         excluded_partial[category] = partial_count
+        excluded_missed[category] = missed_positives
         curve[category] = [
             CalibrationCurveBucket(
                 range_low=edges[i], range_high=edges[i + 1], count=len(hits),
@@ -287,5 +340,6 @@ def compute_calibration_report(
         calibration_curve=curve,
         excluded_no_ground_truth=excluded_no_gt,
         excluded_partial_decompile=excluded_partial,
+        excluded_missed_positives=excluded_missed,
         skeleton_warning=skeleton_warning,
     )

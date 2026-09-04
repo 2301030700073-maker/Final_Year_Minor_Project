@@ -213,6 +213,7 @@ def load_runs_for_calibration(analysis_root: Path) -> list[RunRow]:
                 coverage=r.coverage,
                 root_threshold=r.threshold,
                 ssl_threshold=r.ssl_threshold,
+                timestamp=r.timestamp,
             )
             for r in records
         ]

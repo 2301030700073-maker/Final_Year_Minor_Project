@@ -61,6 +61,13 @@ class RunRow:
     # the engine default.
     root_threshold: float | None = None
     ssl_threshold: float | None = None
+    # CALIB-WEIGHT1: ISO-8601 UTC timestamp of the run. Tier 2 measures the
+    # precision/recall of the CURRENT detector, so it keeps one datapoint per
+    # APK - the most recent run - and this is the ordering key for "most
+    # recent". Tier 1 deliberately still counts every run (FR-9.1 is explicitly
+    # per dynamically-verified run). None on rows that predate the column ->
+    # ordered last-in-list, i.e. treated as oldest.
+    timestamp: str | None = None
 
 
 @dataclass(frozen=True)

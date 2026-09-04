@@ -90,16 +90,102 @@ bea63726d7025d2bb8f81bf7f94fa096a9f86090d724086f3640c3957536f232:  # com.redshif
     certificate pinning is not confirmed. Evidence bundle:
     docs/plans/handoff/bundles/20260731T122254Z.
 
-1c747b27b3547a8a8798a03128a7edd903a88e02dbcc5b1b2dbf14db69d7e212:  # com.redshift.rs_vapourtraining (RS_Vapour training app - SSL/root negative control)
+1c747b27b3547a8a8798a03128a7edd903a88e02dbcc5b1b2dbf14db69d7e212:  # com.redshift.rs_vapourtraining (RS_Vapour training app - SSL negative control, root positive)
+  root: true
+  ssl: false
+  source: >
+    CORRECTED 2026-09-03 (was root:false). Root: true - Login.java does real
+    app-owned root detection. findBinary(String) walks an 8-entry directory
+    array {"/sbin/", "/system/bin/", "/system/xbin/", "/data/local/xbin/",
+    "/data/local/bin/", "/system/sd/xbin/", "/system/bin/failsafe/",
+    "/data/local/"} testing `new File(where + binaryName).exists()`, and
+    isRooted() calls findBinary("su"); Login(View) gates login on it and
+    Toasts "Phone is rooted, Please uninstall application.". Verified in the
+    real APK, not from decompiled text alone: all 8 directory literals plus
+    the standalone "su" are exact DEX string constants whose get_xref_from()
+    resolves to Lcom/redshift/rs_vapourtraining/Login; - the app's own class.
+    The original 2026-08-16 root:false verification was wrong because it
+    grepped for FULL su-path literals ("no su paths ... Runtime.exec su"),
+    and this app builds each path by concatenating a bare directory with the
+    binary name at runtime, so no "/system/xbin/su"-shaped string exists
+    anywhere in the DEX (confirmed absent, along with Superuser.apk,
+    test-keys and Magisk). The signature corpus had the identical blind spot
+    - see root_su_search_directories in config/signatures/root_detection.yaml.
+    SSL: false stands, independently re-confirmed the same way - of 111
+    app-owned string constants, ZERO are SSL-shaped (no pin/TrustManager/
+    X509/HostnameVerifier/SSLContext/certificate/keystore/sha256/ literal
+    xref'd to any com.redshift.rs_vapourtraining class). AndroidManifest.xml
+    has no networkSecurityConfig; the only OkHttp classes are the bundled
+    library (203 smali under okhttp3/, vendor-excluded - a bundled lib is not
+    app-owned pinning). No native .so present in the APK. Still the SSL
+    negative control alongside RS_CertPinning (ssl:true); no longer a root
+    negative control.
+
+5cefc51fce9bd760b92ab2340477f4dda84b4ae0c5d04a8c9493e4fe34fab7c5:  # jakhar.aseem.diva (DIVA - root AND ssl negative control)
   root: false
   ssl: false
   source: >
-    Independently verified 2026-08-16 (apktool --no-res dump read directly,
-    not this pipeline's prediction). AndroidManifest.xml has no
-    networkSecurityConfig. The only OkHttp classes are the bundled library
-    (203 smali under okhttp3/, vendor-excluded - bundled lib is not
-    app-owned pinning); zero app-owned references to CertificatePinner,
-    TrustManager, HostnameVerifier, or NSC. No app-owned root indicators
-    (no su paths, Superuser.apk, test-keys, Magisk, Runtime.exec su) across
-    72 app-owned classes. No native .so present in the APK. Registered as
-    the SSL (and root) negative control alongside RS_CertPinning (ssl:true).
+    Added 2026-09-04 to give the root side a measurable NEGATIVE. Before this
+    entry every root label belonging to an analysable APK was `true`, so root
+    TN was structurally 0, no root false positive could ever be observed, and
+    root precision was uncertifiable - the only other root:false entry
+    (com.android.contacts / 5fc85732) is not on disk and has no run.
+    DIVA is the documented "Damn Insecure and Vulnerable App" training target;
+    its published challenge set covers insecure logging, hardcoding, insecure
+    data storage, input validation, access control and a JNI challenge, and
+    contains no root-detection and no certificate-pinning challenge. That
+    published scope is corroborating context only. The label rests on direct
+    verification of the real APK - deliberately NOT on this pipeline's own
+    classification - using the DEX-string-xref method that caught the earlier
+    WRONG RS_Vapour root:false (see 1c747b27 above): of the 84 string constants
+    whose androguard get_xref_from() resolves to an Ljakhar/aseem/diva class,
+    ZERO are root-shaped and ZERO are SSL-shaped. The runtime-concatenation
+    blind spot that broke that earlier verification is covered explicitly this
+    time: the bare directory literals ("/sbin/", "/system/bin", "/system/xbin",
+    "/data/local", "xbin") and a standalone "su" are absent too, as are
+    busybox / Superuser / SuperSU / Magisk / test-keys / ro.build.tags /
+    ro.secure and every RootBeer / RootTools / RootShell / Stericson package.
+    No app-owned class calls Runtime.exec, ProcessBuilder.start or File.exists
+    at all. AndroidManifest.xml declares no networkSecurityConfig.
+    Native: the APK ships ONE distinct library (libdivajni.so, 7 ABI copies)
+    and it is not stripped, so its export list is complete and exhaustible -
+    JNI_OnLoad plus exactly two app JNI methods
+    (Java_jakhar_aseem_diva_DivaJni_access and
+    Java_jakhar_aseem_diva_DivaJni_initiateLaunchSequence, both DIVA challenge
+    functions), everything else being libc/unwind runtime symbols. Its strings
+    contain no root or TLS idiom; the single grep hit "/system/bin/linker" is
+    the ELF interpreter path present in every Android ELF, not a root check.
+    Caveat recorded deliberately: the pipeline scores this APK 0.00/0.00 but
+    reports coverage java=partial, native=partial, so ITS verdict here is a
+    lower bound, not a confident negative. This label does not inherit that
+    bound, because the independent check above is exhaustive over what the APK
+    actually contains (84 app-owned DEX constants, one small unstripped .so)
+    rather than over whatever jadx managed to decompile.
+
+08e94c06794791f7cf40e50b26dac4c4c8dd561b10c7dd4ce5c1dd8ae93acb7d:  # com.allproperty.android.consumer.my (PropertyGuru - real production app)
+  root: true
+  ssl: null
+  source: >
+    Added 2026-09-04. Root: true on the strongest tier this file accepts - a
+    genuine root_bypassed=True from real dynamic runs against the app on a
+    rooted device, reproduced across 11 runs (2026-08-20T11:50:11 ..
+    2026-08-21T19:25:33). The stored basis is behavioural, not a restatement of
+    the static verdict: "the app's own root-check probed a root artifact and was
+    answered-false (on the rooted test device that probe would otherwise have
+    returned rooted); its root logic received the not-rooted result" - with the
+    probed artifacts recorded individually, /system/app/Superuser.apk,
+    /system/xbin/su, /sbin/su, /system/bin/su, /system/xbin/daemonsu. Code that
+    probes those paths at runtime IS root detection, and the app survived the
+    settle window rather than self-terminating.
+    This entry deliberately records a MEASURED FALSE NEGATIVE. The static engine
+    scores this APK root=0.20 - below the 0.70 threshold - because the checks
+    live in the React Native Hermes bundle rather than in Java the signature
+    corpus can attribute (only js_root_su fires). Adding it therefore LOWERS
+    root recall. It is added anyway: a calibration corpus that quietly omits a
+    known miss reports a recall it has not earned.
+    SSL: null - deliberately NOT established. The static engine reports
+    ssl=1.00 for this APK, but promoting that to ground truth is precisely the
+    circularity this file forbids, and there is no ssl_bypassed=True run for it
+    (dynamic SSL was never confirmed on this target). Establishing it would
+    require reading the app's own pinning implementation directly, which has not
+    been done - so the field stays null rather than being forced.

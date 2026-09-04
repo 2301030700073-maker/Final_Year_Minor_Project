@@ -464,6 +464,65 @@ def test_calibration_table_header_cell_parity_and_exclusion_counts():
     root_row = dict(zip(columns, rows[0]))
     assert root_row["Excl no-GT"] == "1"
     assert root_row["Excl partial"] == "1"
+    # CALIB-EXCL-MISS1: h2 is an excluded negative with NO ground-truth entry, so
+    # it is uncertifiable but not a known miss - the known-miss cell must read 0
+    # rather than inheriting the partial count.
+    assert root_row["Excl known-miss"] == "0"
+
+
+def test_calibration_table_surfaces_known_miss_count_separately_from_partial():
+    # CALIB-EXCL-MISS1 console parity: the markdown report names the excluded
+    # known misses, and _calibration_table's docstring promises parity with its
+    # "Excluded from Tier 2..." lines. Without its own cell, a known miss is
+    # invisible on the console - indistinguishable from an ordinary
+    # uncertifiable negative inside "Excl partial", next to a recall it does not
+    # depress.
+    from calibration.report import compute_calibration_report
+    from calibration.types import GroundTruthEntry, RunRow
+    from cli import _calibration_table
+
+    fully_analyzed = {
+        "java": "fully_analyzed", "native": "fully_analyzed",
+        "manifest": "fully_analyzed", "js": "fully_analyzed",
+    }
+    runs = [
+        # A certifiable TP so root recall is a real 1.00 - the number the
+        # known-miss line has to qualify.
+        RunRow(
+            apk_hash="tp", run_id="r1", action="ROOT_ONLY",
+            root_confidence=0.9, root_detected=True, root_bypassed=True,
+            ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+            decompile_completeness="complete", coverage=fully_analyzed,
+        ),
+        # The known miss: NEITHER, ground truth says root IS present, excluded
+        # because a governing surface is under-covered.
+        RunRow(
+            apk_hash="vapour", run_id="r2", action="NEITHER",
+            root_confidence=0.3, root_detected=False, root_bypassed=None,
+            ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+            decompile_completeness="complete",
+            coverage={**fully_analyzed, "java": "partial"},
+        ),
+    ]
+    report = compute_calibration_report(
+        runs,
+        ground_truth={
+            "tp": GroundTruthEntry("tp", root=True, ssl=False, source="manual"),
+            "vapour": GroundTruthEntry("vapour", root=True, ssl=False, source="DEX-verified"),
+        },
+        generated_at="t", ground_truth_commit="c",
+    )
+
+    columns, rows = _calibration_table(report)
+    for row in rows:  # parity holds with the added column
+        assert len(row) == len(columns)
+    root_row = dict(zip(columns, rows[0]))
+    assert root_row["Tier 2 recall"] == "1.00"        # undepressed by the miss
+    assert root_row["Excl partial"] == "1"
+    assert root_row["Excl known-miss"] == "1"         # ...and the miss is still visible
+    ssl_row = dict(zip(columns, rows[1]))
+    assert ssl_row["Excl known-miss"] == "0"          # absent-in-gt exclusion isn't a miss
+
 
 
 def test_canonical_target_resolves_androgoat_case_insensitively():

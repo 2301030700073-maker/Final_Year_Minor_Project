@@ -82,12 +82,29 @@ def java_coverage(
     return state
 
 
-def native_coverage(abi_coverage: dict[str, str]) -> Coverage:
+def native_coverage(abi_coverage: dict[str, str], native_libs_absent: bool = False) -> Coverage:
     """G6: native surface = the worst per-ABI state. A device-only scan that
     under-covers one ABI shows partial/unscannable overall, so it can't silently
-    under-cover. Empty dict (no .so present) => unscannable, not fully_analyzed."""
+    under-cover.
+
+    An empty `abi_coverage` is ambiguous on its own - it means either "the APK
+    genuinely ships no `.so`" or "the native scan produced nothing" - so it
+    defaults to `unscannable`, never a silent `fully_analyzed`.
+
+    CALIB-NATIVE-VACUOUS: `native_libs_absent=True` resolves that ambiguity from
+    the caller, which enumerated the APK and found zero `.so` entries. There is
+    then no native surface for a root check or a pinning check to hide in, so the
+    surface is vacuously fully analyzed. Without this the negative direction was
+    unmeasurable for every pure-Java app: its NEITHER was permanently excluded
+    from Tier-2 calibration as "under-covered", which is why the only registered
+    SSL/root negative control could never become a true negative and precision
+    stayed a positive-only tautology. This does NOT weaken the runtime-loaded
+    case - a `System.load`/`loadLibrary` of a library that was never
+    extracted+analyzed is carried by `unaccounted_loads` into
+    `apply_unresolved_native`, which still degrades this surface to `partial`.
+    """
     if not abi_coverage:
-        return "unscannable"
+        return "fully_analyzed" if native_libs_absent else "unscannable"
     return _min_coverage(list(abi_coverage.values()))
 
 
@@ -107,6 +124,7 @@ def per_surface_coverage(
     resources_complete: bool,
     packed: bool = False,
     packer_scanned: bool = True,
+    native_libs_absent: bool = False,
 ) -> dict[str, Coverage]:
     """The per-surface map for the toolchain-derived surfaces: returns
     java/native/manifest (the ones computable from its parameters). The `js`
@@ -119,10 +137,13 @@ def per_surface_coverage(
     DEX is hidden. `packer_scanned=False` (the packer stage failed, so packing
     was never ruled out) forces it the same way (PACK1) - a failed scan must not
     leave a cleanly-packed app's stub-only `complete` decompile certifying a
-    confident negative."""
+    confident negative. `native_libs_absent=True` (the caller enumerated the APK
+    and found zero `.so`) makes the native surface vacuously fully_analyzed - see
+    `native_coverage`; it defaults False so an unset caller keeps the
+    conservative `unscannable`."""
     return {
         "java": java_coverage(decompile_completeness, obfuscation_level, packed, packer_scanned),
-        "native": native_coverage(abi_coverage),
+        "native": native_coverage(abi_coverage, native_libs_absent=native_libs_absent),
         "manifest": manifest_coverage(manifest_parsed, resources_complete),
     }
 
@@ -241,6 +262,40 @@ def apply_attribution_degraded_java(
     return coverage
 
 
+def apply_unreadable_files_java(
+    coverage: dict[str, Coverage],
+    unreadable_file_count: int,
+) -> dict[str, Coverage]:
+    """UNREAD1 (2026-09-04): downgrade the java surface to `partial` when the
+    signature scan enumerated candidate files it then could not READ (OSError -
+    signatures.py increments `unreadable_file_count` and records the path).
+
+    Until this existed, `unreadable_files` reached the console and the report as a
+    CAUTION - "treat any NEITHER/Inconclusive verdict as degraded, not a full-scan
+    clean" - but never reached the coverage map, so `java` could stay
+    `fully_analyzed` and license a confident negative over files that were
+    demonstrably not read. Two surfaces of the same run then said opposite things
+    about the same verdict, and the calibration layer believed the coverage map:
+    such a NEITHER counted as a certified Tier-2 true negative.
+
+    Not hypothetical. Run 2026-08-15T12:34:25 of
+    08e94c06...(com.allproperty.android.consumer.my) recorded java=fully_analyzed
+    with 5 unreadable candidates, one of them `assets/index.android.bundle` - the
+    React Native bundle that is exactly where that app's root detection lives
+    (ground_truth.yaml records it as this project's known root miss). That run was
+    root_detected=1 so no false clean was certified, but the mechanism is the one
+    that would certify it.
+
+    Same contract as the degraders above: pure, returns a new dict, only ever
+    downgrades fully_analyzed -> partial (never upgrades, never touches the
+    evidence found), so it composes with them in any order (ADR-0006)."""
+    if unreadable_file_count <= 0:
+        return coverage
+    if coverage.get("java") == "fully_analyzed":
+        return {**coverage, "java": "partial"}
+    return coverage
+
+
 def category_is_confident_negative(
     category: str,
     coverage: dict[str, Coverage] | None,
@@ -263,6 +318,58 @@ def category_is_confident_negative(
     if surfaces is None:
         return False
     return all(coverage.get(s) == "fully_analyzed" for s in surfaces)
+
+
+def verdict_label(category: str, verdict, coverage: dict[str, Coverage] | None) -> str:
+    """LABEL1 (2026-09-04): the per-category verdict label, honouring the same
+    confident-negative decision the rest of the pipeline makes.
+
+    The label used to be a bare `"DETECTED" if verdict.detected else
+    "Inconclusive"`, which made a fully-covered run contradict itself in its own
+    output: DIVA printed
+
+        root: NEITHER is a confident negative (java=fully_analyzed, native=..., js=...)
+        Root: 0.00 -> Inconclusive
+
+    on adjacent lines, and the calibration layer - reading the coverage map, not
+    the label - counted that same verdict as a certified Tier-2 TRUE NEGATIVE. A
+    reader had no way to tell which of the three layers to believe.
+
+    So the negative case is certified only when BOTH bounds agree it is clean:
+
+    - detected                            -> "DETECTED"
+    - not detected, no bound at all       -> "NOT DETECTED (confident negative)"
+    - not detected, either bound applies  -> "Inconclusive"
+
+    Both are required because neither knows what the other knows.
+    `verdict.coverage_limited` is the union of the governing-surface bound
+    (apply_coverage_bound) AND unattributed detection indicators
+    (apply_unattributed_indicators, Boundary-1) - the latter binds the verdict
+    without changing the map, so gating on the map alone would print "confident
+    negative" in the very same line that annotates the confidence as an upper
+    bound. `category_is_confident_negative` covers the converse: a verdict that
+    never went through apply_coverage_bound at all carries coverage_limited=False
+    by dataclass default, so the flag alone would certify a clean over a run with
+    NO coverage information - which is how the first version of this function
+    relabelled a coverage-map-less report as a confident negative
+    (tests/unit/test_report_generator.py caught it). The deciding function owns its
+    own guard rather than trusting every caller to have applied the bound first.
+
+    `Inconclusive` is kept for exactly the case it was always right for - a
+    negative whose governing surfaces were not all fully analyzed, or over which
+    detection-shaped code matched no signature, which IS a lower bound rather
+    than a finding (ADR-0006). What changes is that a negative the system is
+    willing to certify no longer renders as though it weren't.
+
+    Pure string builder (fixture-testable); console (cli.py) and report
+    (generator.py) both call it, so the two can no longer drift."""
+    if verdict.detected:
+        return "DETECTED"
+    if getattr(verdict, "coverage_limited", False):
+        return "Inconclusive"
+    if not category_is_confident_negative(category, coverage):
+        return "Inconclusive"
+    return "NOT DETECTED (confident negative)"
 
 
 def coverage_bound_line(coverage: dict[str, Coverage]) -> str:
@@ -323,6 +430,13 @@ def apply_coverage_bound(
     classification_json as a confident negative (NFR-7). Fully-analyzed
     categories are untouched, so this is additive: a clean, fully-covered scan
     yields unknown_uncovered == []. Pure (no I/O), returns a new ClassificationResult.
+
+    Also records the CAUSE (UNCOV-CAUSE1): every category flagged here is flagged
+    for scan COMPLETENESS, so each gets `unknown_uncovered_causes[cat] ==
+    ["incomplete_coverage"]`. Causes are RECOMPUTED, not merged, for the same
+    reason unknown_uncovered is: this function derives its answer from the coverage
+    map alone, so a stale cause from an earlier call must not survive a coverage
+    map that no longer supports it.
     """
     limited = [
         cat for cat in GOVERNING_SURFACES
@@ -333,6 +447,7 @@ def apply_coverage_bound(
         root=replace(classification.root, coverage_limited="root" in limited),
         ssl=replace(classification.ssl, coverage_limited="ssl" in limited),
         unknown_uncovered=limited,
+        unknown_uncovered_causes={cat: ["incomplete_coverage"] for cat in limited},
     )
 
 
@@ -348,12 +463,19 @@ def apply_unattributed_indicators(
     CONTENT, closing the signature-bounded hole where a complete, clear decompile
     still hides a technique the corpus doesn't encode (ADR-0001). Only ever
     downgrades (coverage_limited already True from completeness stays True) and
-    never touches confidence. Pure, additive: returns a new ClassificationResult."""
+    never touches confidence. Pure, additive: returns a new ClassificationResult.
+
+    Records its own CAUSE (UNCOV-CAUSE1) by APPENDING "unattributed_indicator" to
+    unknown_uncovered_causes[cat]. Appending (not replacing) is load-bearing: a
+    category can be coverage-limited for BOTH reasons at once, and collapsing the
+    two would hide that fixing the decompile still leaves an unmatched technique
+    behind - the opposite remediation from authoring a signature."""
     if not unattributed:
         return classification
     root = classification.root
     ssl = classification.ssl
     unknown = list(classification.unknown_uncovered)
+    causes = {cat: list(v) for cat, v in classification.unknown_uncovered_causes.items()}
     for cat, present in unattributed.items():
         # Honor the bool VALUE, not merely the key: the dict[str, bool] contract
         # allows a False (indicator considered and found absent), which must NOT
@@ -368,4 +490,10 @@ def apply_unattributed_indicators(
             ssl = replace(ssl, coverage_limited=True)
         if cat not in unknown:
             unknown.append(cat)
-    return replace(classification, root=root, ssl=ssl, unknown_uncovered=unknown)
+        cat_causes = causes.setdefault(cat, [])
+        if "unattributed_indicator" not in cat_causes:
+            cat_causes.append("unattributed_indicator")
+    return replace(
+        classification, root=root, ssl=ssl,
+        unknown_uncovered=unknown, unknown_uncovered_causes=causes,
+    )

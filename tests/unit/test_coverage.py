@@ -78,6 +78,33 @@ def test_native_coverage_empty_is_unscannable():
     assert native_coverage({}) == "unscannable"
 
 
+def test_native_coverage_empty_is_fully_analyzed_when_apk_ships_no_so():
+    # CALIB-NATIVE-VACUOUS: an empty abi_coverage is ambiguous on its own, so it
+    # defaults to unscannable. When the caller proved the APK contains zero .so
+    # there is no native surface a root/pinning check could hide in, so it is
+    # vacuously fully analyzed. Without this, every pure-Java app's NEITHER was
+    # permanently excluded from Tier-2 calibration as under-covered, which kept
+    # the only registered negative control out of the corpus and left precision a
+    # positive-only tautology.
+    assert native_coverage({}, native_libs_absent=True) == "fully_analyzed"
+    # the flag never overrides real per-ABI evidence
+    assert native_coverage({"arm64-v8a": "partial"}, native_libs_absent=True) == "partial"
+
+
+def test_per_surface_coverage_native_absent_flag_is_threaded_and_defaults_conservative():
+    from static.coverage import per_surface_coverage
+
+    kwargs = dict(
+        decompile_completeness="complete",
+        obfuscation_level="none",
+        abi_coverage={},
+        manifest_parsed=True,
+        resources_complete=True,
+    )
+    assert per_surface_coverage(**kwargs)["native"] == "unscannable"
+    assert per_surface_coverage(**kwargs, native_libs_absent=True)["native"] == "fully_analyzed"
+
+
 def test_native_coverage_worst_abi_wins():
     # G6: one partial ABI under-covers the whole native surface.
     assert native_coverage({"arm64-v8a": "fully_analyzed", "x86_64": "partial"}) == "partial"

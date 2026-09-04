@@ -214,3 +214,81 @@ def test_no_coverage_map_marks_every_category_coverage_limited():
         assert out.root.coverage_limited is True
         assert out.ssl.coverage_limited is True
         assert out.unknown_uncovered == ["root", "ssl"]
+
+
+def test_uncov_cause1_records_which_mechanism_flagged_each_category():
+    """UNCOV-CAUSE1. Two structurally independent mechanisms write into
+    unknown_uncovered and their remediations are OPPOSITE - apply_coverage_bound
+    fires on scan COMPLETENESS (fix: analyze more of the app), while
+    apply_unattributed_indicators fires on CONTENT that matched no signature (fix:
+    author a signature, more decompilation changes nothing). The list recorded
+    only the category, so neither the persisted classification_json nor the report
+    could say which one fired, and an operator reading "root is coverage-limited"
+    had no way to know what to do about it.
+    """
+    # Completeness path alone -> incomplete_coverage, on exactly the bound cats.
+    out = apply_coverage_bound(_cls(), {**_FULL, "manifest": "partial"})
+    assert out.unknown_uncovered == ["ssl"]
+    assert out.unknown_uncovered_causes == {"ssl": ["incomplete_coverage"]}
+
+    # Content path alone, over a fully-analyzed corpus -> unattributed_indicator.
+    covered = apply_coverage_bound(_cls(), _FULL)
+    assert covered.unknown_uncovered_causes == {}
+    out = apply_unattributed_indicators(covered, {"root": True})
+    assert out.unknown_uncovered == ["root"]
+    assert out.unknown_uncovered_causes == {"root": ["unattributed_indicator"]}
+    # A considered-and-absent indicator contributes no cause (bool VALUE honored).
+    assert apply_unattributed_indicators(covered, {"ssl": False}).unknown_uncovered_causes == {}
+
+    # BOTH causes on one category - the case a single-cause field would hide.
+    # Order follows the pipeline: coverage bound first, then indicators.
+    both = apply_unattributed_indicators(
+        apply_coverage_bound(_cls(), {**_FULL, "java": "partial"}),
+        {"root": True, "ssl": True},
+    )
+    assert both.unknown_uncovered == ["root", "ssl"]
+    for cat in ("root", "ssl"):
+        assert both.unknown_uncovered_causes[cat] == [
+            "incomplete_coverage", "unattributed_indicator"
+        ], cat
+
+    # Causes are RECOMPUTED by the completeness pass, never merged - same reason
+    # unknown_uncovered is: its answer derives from the coverage map alone, so a
+    # stale cause must not outlive a map that no longer supports it.
+    from dataclasses import replace
+    stale = replace(_cls(), unknown_uncovered=["ssl"],
+                    unknown_uncovered_causes={"ssl": ["incomplete_coverage"]})
+    assert apply_coverage_bound(stale, _FULL).unknown_uncovered_causes == {}
+
+    # And it survives asdict() (what save_run persists), so the machine-readable
+    # consumer sees the cause too, not just the console line.
+    from dataclasses import asdict
+    assert asdict(both)["unknown_uncovered_causes"] == {
+        "root": ["incomplete_coverage", "unattributed_indicator"],
+        "ssl": ["incomplete_coverage", "unattributed_indicator"],
+    }
+
+
+def test_uncov_cause1_round_trips_through_regeneration():
+    # REGEN-FIELDLOSS1 discipline: a regenerated report must not lose the cause.
+    # Dropping it would still print the coverage-limited caveat but with no way to
+    # tell whether to decompile more or author a signature - the same class of
+    # field-loss bug as dropping unknown_uncovered itself, which had re-rendered a
+    # coverage-bound NEITHER as a confident negative.
+    from dataclasses import asdict
+    from cli import _classification_from_json
+
+    original = apply_unattributed_indicators(
+        apply_coverage_bound(_cls(), {**_FULL, "native": "partial"}),
+        {"root": True},
+    )
+    rebuilt = _classification_from_json(asdict(original))
+    assert rebuilt.unknown_uncovered == original.unknown_uncovered
+    assert rebuilt.unknown_uncovered_causes == original.unknown_uncovered_causes
+    assert rebuilt.unknown_uncovered_causes["root"] == [
+        "incomplete_coverage", "unattributed_indicator"
+    ]
+    # A row stored before the field existed reports NO cause rather than a guess.
+    legacy = asdict(original)
+    legacy.pop("unknown_uncovered_causes")
+    assert _classification_from_json(legacy).unknown_uncovered_causes == {}

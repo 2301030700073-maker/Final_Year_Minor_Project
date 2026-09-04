@@ -554,6 +554,10 @@ def verify_audit_log(audit_log_path: Path) -> dict:
     # per file - a missing archive now shows up as a prev_hash break in the next
     # file's first record.
     prev_hash: str | None = None
+    # Every record_hash seen so far, so a chain break can be classified: a prev_hash
+    # that re-points to an EARLIER record (a fork - a concurrent write onto a stale
+    # tail) reads differently from one that matches nothing seen (insert/delete).
+    seen_hashes: set[str] = set()
     # M2-hardening: legacy (record_hash-less) records can only legitimately form
     # the PREFIX of the log - they were written before hashing existed. Once any
     # hashed record appears, a later record without record_hash is provably a
@@ -601,8 +605,25 @@ def verify_audit_log(audit_log_path: Path) -> dict:
                 if hashlib.sha256(_canonical(rec).encode()).hexdigest() != record_hash:
                     errors.append(f"{file.name} line {lineno}: record_hash mismatch (record edited)")
                 if prev != prev_hash:
-                    errors.append(f"{file.name} line {lineno}: prev_hash breaks the chain (record inserted/deleted)")
+                    if prev in seen_hashes:
+                        # Fork: this record chained onto an EARLIER record's hash
+                        # rather than the on-disk tail - the signature of two runs
+                        # appending concurrently where one wrote onto a stale cached
+                        # tail (the bug _append_audit_record fixed by reading the
+                        # tail under flock). Still a broken chain and still fails the
+                        # check; the cause is named accurately instead of mislabeled
+                        # "inserted/deleted" when nothing was inserted or deleted.
+                        errors.append(
+                            f"{file.name} line {lineno}: prev_hash forks the chain - points to an "
+                            "earlier record, not the tail (likely a concurrent write onto a stale tail)"
+                        )
+                    else:
+                        errors.append(
+                            f"{file.name} line {lineno}: prev_hash breaks the chain "
+                            "(record inserted, deleted, or reordered)"
+                        )
                 prev_hash = record_hash
+                seen_hashes.add(record_hash)
 
                 # Semantic pairing (RESID-2A) - only for hashed, current-schema
                 # records that carry a run_id. Authorizations accumulate across

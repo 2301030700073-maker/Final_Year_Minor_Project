@@ -326,6 +326,38 @@ def test_verify_audit_log_does_not_treat_record_hash_without_prev_as_legacy(tmp_
     assert any("prev_hash breaks the chain" in e for e in result["errors"])
 
 
+def test_verify_audit_log_classifies_a_concurrent_write_fork_distinctly(tmp_path):
+    # The real 2026-08-17 incident, reproduced: two runs appended concurrently and
+    # one chained its record onto an EARLIER record's hash (its own run_authorized)
+    # instead of the on-disk tail, under the stale-tail-cache bug _append_audit_record
+    # has since fixed (it now reads the tail under flock). Such a fork must still fail
+    # the check, but nothing was inserted or deleted - so it is reported as a fork,
+    # not mislabeled "inserted/deleted". The record itself is internally valid (its
+    # record_hash is recomputed over the stale prev_hash), exactly as the real forked
+    # write was, so the ONLY error is the fork - not a record_hash mismatch.
+    import hashlib
+    from audit.attestation import _canonical
+
+    log_path = tmp_path / "audit_log.jsonl"
+    record_authorization(log_path, "OWN_APP", "hashA", "op", "c1", run_id="run-A")
+    record_authorization(log_path, "OWN_APP", "hashB", "op", "c1", run_id="run-B")
+    record_authorization(log_path, "OWN_APP", "hashC", "op", "c1", run_id="run-C")
+
+    recs = [json.loads(l) for l in log_path.read_text(encoding="utf-8").splitlines()]
+    recs[2]["prev_hash"] = recs[0]["record_hash"]          # fork onto the first record
+    recs[2]["record_hash"] = hashlib.sha256(_canonical(recs[2]).encode()).hexdigest()
+    log_path.write_text(
+        "\n".join(json.dumps(r, sort_keys=True) for r in recs) + "\n", encoding="utf-8"
+    )
+
+    result = verify_audit_log(log_path)
+    assert result["valid"] is False
+    assert result["chained"] == 3
+    assert any("forks the chain" in e for e in result["errors"])
+    assert not any("record_hash mismatch" in e for e in result["errors"])   # hash is valid
+    assert not any("breaks the chain" in e for e in result["errors"])       # not the generic label
+
+
 def test_verify_audit_log_flags_missing_current_when_archives_present(tmp_path, monkeypatch):
     # L6: deleting the current log (tail truncation) while archives survive must
     # NOT short-circuit to valid=True and skip the archives - the truncation is

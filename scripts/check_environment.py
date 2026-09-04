@@ -41,6 +41,10 @@ def run(cmd, timeout=15, **kwargs):
         return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **kwargs)
     except FileNotFoundError:
         return None
+    except subprocess.TimeoutExpired:
+        # A long-running check is a failed check, not a crashed script (principle 3):
+        # return None so the caller records a clean failure and the run continues.
+        return None
 
 
 def _find_windows_adb():
@@ -91,7 +95,10 @@ def _ensure_windows_adb_server(win_adb):
     # Not reachable — restart with -a
     if win_adb:
         print(f"       Starting Windows ADB server with -a...")
-        subprocess.run([win_adb, "kill-server"], capture_output=True, text=True, timeout=10)
+        try:
+            subprocess.run([win_adb, "kill-server"], capture_output=True, text=True, timeout=10)
+        except subprocess.TimeoutExpired:
+            pass  # a wedged kill-server must not crash the checker before the summary
         subprocess.Popen([win_adb, "-a", "nodaemon", "server"],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(3)
@@ -232,13 +239,18 @@ if not wsl:
     check("Frida ADB device", frida_ok, r.stdout.strip() if r else "")
 else:
     env = {**os.environ, "PYTHONPATH": "src"}
-    r = subprocess.run(
-        ["uv", "run", "python", "-c",
-         "from dynamic.device import setup_frida_connection, discover_device; "
-         "d=setup_frida_connection(discover_device()); "
-         "p=d.enumerate_processes(); print(f'{d.id}:{len(p)} processes')"],
-        capture_output=True, text=True, timeout=25, env=env,
-    )
+    try:
+        r = subprocess.run(
+            ["uv", "run", "python", "-c",
+             "from dynamic.device import setup_frida_connection, discover_device; "
+             "d=setup_frida_connection(discover_device()); "
+             "p=d.enumerate_processes(); print(f'{d.id}:{len(p)} processes')"],
+            capture_output=True, text=True, timeout=25, env=env,
+        )
+    except subprocess.TimeoutExpired:
+        # A hung relay is a failed check, not a crashed script (principle 3) - keep
+        # going so the [6/6] summary still prints. Mirrors run()'s timeout handling.
+        r = None
     frida_ok = r and r.returncode == 0
     out = r.stdout.strip() if r else ""
     err = r.stderr.strip() if r else ""
@@ -249,13 +261,16 @@ else:
             # Retry once (relay auto-starts on call)
             print("       Retrying Frida connection...")
             time.sleep(3)
-            r = subprocess.run(
-                ["uv", "run", "python", "-c",
-                 "from dynamic.device import setup_frida_connection, discover_device; "
-                 "d=setup_frida_connection(discover_device()); "
-                 "p=d.enumerate_processes(); print(f'{d.id}:{len(p)} processes')"],
-                capture_output=True, text=True, timeout=25, env=env,
-            )
+            try:
+                r = subprocess.run(
+                    ["uv", "run", "python", "-c",
+                     "from dynamic.device import setup_frida_connection, discover_device; "
+                     "d=setup_frida_connection(discover_device()); "
+                     "p=d.enumerate_processes(); print(f'{d.id}:{len(p)} processes')"],
+                    capture_output=True, text=True, timeout=25, env=env,
+                )
+            except subprocess.TimeoutExpired:
+                r = None
             frida_ok = r and r.returncode == 0
             out = r.stdout.strip() if r else ""
             fix("Frida via WSL relay", frida_ok, out if frida_ok else (r.stderr.strip()[:60] if r else ""))
@@ -265,8 +280,11 @@ else:
 # ── 6. Project components ─────────────────────
 print("\n[6/6] Project components")
 
-r = run(["uv", "run", "pytest", "tests/unit", "-q"])
-check("Unit tests (40/40)", r and r.returncode == 0)
+# The suite is ~1400 tests (~30s on the reference box); the default 15s timeout
+# guaranteed a false failure and, being uncaught, crashed the whole script - give
+# the one genuinely long check real headroom (run() now also survives a timeout).
+r = run(["uv", "run", "pytest", "tests/unit", "-q"], timeout=300)
+check("Unit tests", r and r.returncode == 0)
 
 r = run(["uv", "run", "python", "-c",
          "from static.signatures import load_signatures; "
@@ -281,11 +299,24 @@ r = run(["uv", "run", "python", "-m", "cli", "--help"],
         env={**os.environ, "PYTHONPATH": "src"})
 check("CLI entrypoint", r and r.returncode == 0)
 
+# Smoke-test the real report path with correctly-typed inputs. `classification`
+# is a ClassificationResult (not a dict) - passing a dict here was the stale bug
+# this check masked while [6/6] was crashing. Renders into a temp dir it cleans up,
+# so a passing check leaves nothing in outputs/reports.
 r = run(["uv", "run", "python", "-c",
-         "from report.generator import generate_report; "
-         "p=generate_report('v','h','n',{},{'action':'T','root':{'confidence':0,'detected':0},"
-         "'ssl':{'confidence':0,'detected':0},'threshold':0.7},None,None,[],output_dir='outputs/reports'); "
-         "print('ok')"],
+         "import tempfile, shutil\n"
+         "from report.generator import generate_report\n"
+         "from common import ClassificationResult, CategoryVerdict, Action\n"
+         "d = tempfile.mkdtemp()\n"
+         "try:\n"
+         "    c = ClassificationResult(action=Action.NEITHER,\n"
+         "                             root=CategoryVerdict(0.0, False, []),\n"
+         "                             ssl=CategoryVerdict(0.0, False, []))\n"
+         "    p = generate_report('smoketest','smokehash','2026-09-04T00:00:00Z',{},c,None,None,[],output_dir=d)\n"
+         "    assert p.exists() and p.read_text().strip()\n"
+         "    print('ok')\n"
+         "finally:\n"
+         "    shutil.rmtree(d, ignore_errors=True)\n"],
         env={**os.environ, "PYTHONPATH": "src"})
 check("Report generator", r and r.returncode == 0 and "ok" in (r.stdout or ""))
 

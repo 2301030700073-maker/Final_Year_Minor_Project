@@ -514,12 +514,21 @@
     - "app.cash.paraphrase"
   evidence_type: bytecode_string
 
-# Ktor client TLS config - modern Kotlin/Compose apps pin via io.ktor.client
-# engine/TLS config. Only the io.ktor.client namespace markers are used (tight,
-# avoids the generic "trustManager"/"ServerConfig" false positives).
+# Ktor HTTP-client surface (WEAK tier - not pinning evidence). Ktor has no
+# first-class certificate-pinning API, so the io.ktor.client.* package markers
+# only prove the Ktor client is present, not that pinning is configured. The
+# earlier comment claimed these were "tight"; empirically they are not - they
+# matched 174x in a benign Lemmy client (jerboa) that merely uses Ktor for
+# ordinary HTTPS, and together with apollo_graphql_okhttp summed to exactly the
+# 0.70 threshold -> a false SSL-pinning DETECTED (verified 2026-08-27). Reweighted
+# to a low "networking-surface present" hint that surfaces the surface for
+# scrutiny but cannot alone cross the threshold. Genuine Ktor pinning (a custom
+# X509TrustManager, or the OkHttp engine + CertificatePinner) is still caught by
+# the strong tier (okhttp_certificate_pinner / custom_trustmanager_checkservertrusted),
+# so this downgrade removes the false positive without creating a false negative.
 - id: ktor_tls_pinning
   category: ssl
-  weight: 0.4
+  weight: 0.15
   pattern_type: string_literal
   patterns:
     - "io.ktor.client.engine"
@@ -559,22 +568,34 @@
   weight: 0.3
   pattern_type: string_literal
   patterns:
-    - "debug-overrides"
-    - "cleartextTrafficPermitted"
-    - "base-config"
+    # XML element/attribute forms only. Network Security Config syntax occurs
+    # solely inside real res/xml NSC documents. The bare element names
+    # ("base-config" / "debug-overrides") and the bare attribute name
+    # ("cleartextTrafficPermitted") were matching ordinary prose in plain-text
+    # APK assets - e.g. "base-config" inside a Sentry module list - a false
+    # positive with no NSC behind it. Anchoring to the opening "<" and the
+    # attribute "=" keeps every genuine apktool-decoded NSC match while dropping
+    # the coincidental word hits.
+    - "<base-config"
+    - "<debug-overrides"
+    - 'cleartextTrafficPermitted="'
   evidence_type: bytecode_string
 
-# Apollo GraphQL clients route through OkHttp; an app that configures a custom
-# OkHttp client on ApolloClient is the site where pinning is applied. Flags
-# GraphQL-over-OkHttp apps for pinning scrutiny.
+# Apollo GraphQL client surface (WEAK tier - not pinning evidence). An ApolloClient
+# routes through OkHttp, but its mere presence does not mean a CertificatePinner is
+# configured. The bare "okHttpClient" token was the worst offender - it matches an
+# ordinary OkHttp variable in essentially every networked app - so it is removed.
+# The Apollo package/builder markers are kept only as a low-weight "networking-
+# surface present" hint that cannot alone cross the threshold; actual pinning on
+# that client is caught by the strong tier (okhttp_certificate_pinner). See the
+# ktor_tls_pinning note for the empirical jerboa false positive this tiering fixes.
 - id: apollo_graphql_okhttp
   category: ssl
-  weight: 0.3
+  weight: 0.15
   pattern_type: string_literal
   patterns:
     - "com.apollographql.apollo.ApolloClient"
     - "ApolloClient.builder"
-    - "okHttpClient"
   evidence_type: bytecode_string
 
 # Custom PKIX trust anchor: an app that builds a CertPathValidator over its own
@@ -627,4 +648,37 @@
     - "NetworkingModule"
     - "CustomClientBuilder"
     - "OkHttpClientFactory"
+  evidence_type: bytecode_string
+
+# Wultra SSL Pinning (com.wultra.android.sslpinning, Maven coordinate
+# com.wultra.android.sslpinning:wultra-ssl-pinning) - a dedicated dynamic
+# certificate-pinning SDK from the banking/fintech world: the app ships a signed
+# fingerprint list, CertStore validates the server chain against it, and
+# SSLPinningIntegration.createSSLPinningSocketFactory / SSLPinningX509TrustManager
+# are the wiring points that put that validation in the TLS path. Same class of
+# signal as trustkit_pinning: the package's presence means pinning is enforced
+# through this library's evaluator, so it carries the same weight.
+#
+# Every pattern here was read off the library's own source/README before being
+# added, and the block deliberately omits three things:
+#  - bare "CertStore": it is also java.security.cert.CertStore, a JDK type.
+#    Measured on the real corpus, "java/security/cert/CertStore" is present in
+#    PropertyGuru, Netflix and WhatsApp - a bare match would be a guaranteed
+#    false positive on production apps that have nothing to do with Wultra.
+#  - "SSLSocketIntegration": appears once in the README next to the
+#    SSLPinningIntegration spelling and looks like a documentation slip. Not
+#    corroborated in source, so not asserted here.
+#  - "validateFingerprint" alone: a plausible method name in unrelated code.
+# The four retained patterns measure 0 hits across all 14 APKs on disk, i.e. no
+# false positive is introduced by adding them.
+- id: pin_wultra_ssl_pinning
+  category: ssl
+  weight: 0.45
+  pattern_type: class_reference
+  case_sensitive: false
+  patterns:
+    - 'com.wultra.android.sslpinning'
+    - 'SSLPinningIntegration'
+    - 'SSLPinningX509TrustManager'
+    - 'PowerAuthSslPinningValidationStrategy'
   evidence_type: bytecode_string

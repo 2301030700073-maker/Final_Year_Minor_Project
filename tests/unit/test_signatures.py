@@ -32,6 +32,151 @@ def test_load_signatures_reads_real_root_detection_yaml():
     assert all(0 < s.weight <= 1.0 for s in signatures)
 
 
+def test_nsc_debug_overrides_matches_real_xml_not_plain_text(tmp_path):
+    # Precision fix (PropertyGuru confident false positive). nsc_debug_overrides
+    # used to match the BARE words "base-config" / "debug-overrides" /
+    # "cleartextTrafficPermitted" as plain substrings, so any plain-text APK
+    # asset that merely contained one of those words scored SSL-pinning evidence
+    # with no Network Security Config behind it. PropertyGuru's
+    # assets/sentry-external-modules.txt (a Sentry module listing) matched on the
+    # word "base-config". The patterns are now anchored to real NSC XML syntax
+    # ("<base-config", "<debug-overrides", 'cleartextTrafficPermitted="'), which
+    # still matches every genuine apktool-decoded NSC document.
+    signatures = load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")
+
+    good = tmp_path / "good" / "res" / "xml"
+    good.mkdir(parents=True)
+    (good / "network_security_config.xml").write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        "<network-security-config>\n"
+        '    <base-config cleartextTrafficPermitted="false">\n'
+        '        <trust-anchors><certificates src="system" /></trust-anchors>\n'
+        "    </base-config>\n"
+        "    <debug-overrides>\n"
+        '        <trust-anchors><certificates src="user" /></trust-anchors>\n'
+        "    </debug-overrides>\n"
+        "</network-security-config>\n",
+        encoding="utf-8",
+    )
+    ev_good = scan(tmp_path / "good", signatures)
+    assert any(e.signature_id == "nsc_debug_overrides" for e in ev_good.ssl_evidence)
+
+    bad = tmp_path / "bad" / "assets"
+    bad.mkdir(parents=True)
+    (bad / "sentry-external-modules.txt").write_text(
+        "base-config\ndebug-overrides\ncleartextTrafficPermitted\nsome.other.module\n",
+        encoding="utf-8",
+    )
+    ev_bad = scan(tmp_path / "bad", signatures)
+    assert not any(e.signature_id == "nsc_debug_overrides" for e in ev_bad.ssl_evidence)
+
+
+def test_collect_files_excludes_cfr_summary_but_keeps_java_and_assets(tmp_path):
+    # Precision fix (PropertyGuru confident false positive). CFR emits a
+    # top-level summary.txt index listing every class it decompiled. Because .txt
+    # is a scanned suffix (for genuine plain-text APK assets), that decompiler
+    # metadata was being fed to the code/config signatures - custom_pkix_trust_
+    # anchor matched the token "CertPathValidator" inside the class list, a pure
+    # false positive with no app code behind it. The .java CFR actually produces
+    # must still be scanned, and a real APK asset named summary.txt (under
+    # assets/) must still be scanned - only the decompiler's own index is cut.
+    from static.signatures import _collect_files
+
+    cfr = tmp_path / "cfr"
+    (cfr / "com" / "app").mkdir(parents=True)
+    (cfr / "summary.txt").write_text("Decompiled classes: CertPathValidator\n", encoding="utf-8")
+    (cfr / "com" / "app" / "Real.java").write_text("class Real {}\n", encoding="utf-8")
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "summary.txt").write_text("release notes\n", encoding="utf-8")
+
+    # (a) whole analysis dir as scan root: cfr/summary.txt sits one level down
+    got = {p.relative_to(tmp_path).as_posix() for p, _ in _collect_files([tmp_path])}
+    assert "cfr/com/app/Real.java" in got    # CFR .java still scanned
+    assert "assets/summary.txt" in got       # real plain-text asset still scanned
+    assert "cfr/summary.txt" not in got      # decompiler index excluded
+
+    # (b) the cfr output dir itself as scan root: summary.txt sits at its top
+    got_top = {p.relative_to(cfr).as_posix() for p, _ in _collect_files([cfr])}
+    assert "com/app/Real.java" in got_top
+    assert "summary.txt" not in got_top
+
+
+def test_braze_appboy_recognized_as_bundled_sdk():
+    # Precision fix (PropertyGuru confident false positive). The Braze engagement
+    # SDK (current package com.braze, legacy com.appboy) ships its own
+    # SSLContext/SSLSocketFactory plumbing (com/braze/communication/*.java). With
+    # Braze absent from the vendor taxonomy that code counted as the app's own,
+    # so its generic TLS plumbing scored app-owned SSL-pinning evidence. Braze is
+    # now a recognized bundled SDK; its code is excluded from the app's detection
+    # surface, while an app whose OWN package legitimately began with com.braze
+    # would still keep its own subtree app-owned (Bug-B parity).
+    from common import is_known_third_party, is_third_party_file
+
+    assert is_known_third_party("com.braze.communication.f")
+    assert is_known_third_party("com.appboy.ui.AppboyFeedActivity")
+    assert is_third_party_file(
+        "com.braze.communication.g", app_package="com.allproperty.android.consumer.my"
+    )
+    # the analyzed app's own code is never misattributed to Braze
+    assert not is_third_party_file(
+        "com.allproperty.android.consumer.my.MainActivity",
+        app_package="com.allproperty.android.consumer.my",
+    )
+
+
+def test_volley_recognized_as_bundled_sdk():
+    # Precision fix (RS_vapour SSL false positive). Volley's HurlStack calls
+    # setSSLSocketFactory as part of its own HTTP transport plumbing. Every
+    # HurlStack/setSSLSocketFactory match in that target lived under
+    # com/android/volley with no SSL/TLS code at all under the app's own
+    # com/redshift namespace - library plumbing, not the app configuring
+    # pinning. Volley is now a recognized bundled SDK.
+    from common import is_known_third_party, is_third_party_file
+
+    assert is_known_third_party("com.android.volley.toolbox.HurlStack")
+    assert is_third_party_file(
+        "com.android.volley.toolbox.HurlStack",
+        app_package="com.redshift.rs_vapourtraining",
+    )
+    assert not is_third_party_file(
+        "com.redshift.rs_vapourtraining.MainActivity",
+        app_package="com.redshift.rs_vapourtraining",
+    )
+
+
+def test_no_single_signature_can_self_trigger_detection():
+    """Structural anti-false-positive invariant (verified 2026-08-27).
+
+    Detection fires at root/ssl_confidence >= DEFAULT_THRESHOLD, and confidence
+    is the (capped) SUM of matched signature weights. If any single signature
+    carried weight >= DEFAULT_THRESHOLD it could alone trip DETECTED - so one
+    stray match on a benign app would be a false positive with no corroboration.
+    The corpus is deliberately built so even the strongest indicators
+    (CertificatePinner.Builder, <pin-set>, the RootBeer class) top out at 0.50:
+    a DETECTED verdict always requires at least two independent signals. This is
+    the structural defense the ktor/apollo presence-marker false positive (see
+    test_ssl_library_presence_signals_cannot_alone_detect) slipped past by
+    SUMMING two low-specificity markers to exactly the threshold.
+
+    This pins that invariant across both shipped corpora. It is a
+    conscious-decision gate, not a ban: if a genuinely unambiguous future
+    signature ever warrants weight >= threshold, this assertion must be updated
+    deliberately, with justification - never relaxed silently, which is exactly
+    the review friction an over-confident single signature should meet."""
+    from static.decision_engine import DEFAULT_THRESHOLD
+
+    for yaml_name in ("root_detection.yaml", "ssl_pinning.yaml"):
+        sigs = load_signatures(REPO_ROOT / "config/signatures" / yaml_name)
+        offenders = [(s.id, s.weight) for s in sigs if s.weight >= DEFAULT_THRESHOLD]
+        assert not offenders, (
+            f"{yaml_name}: signature(s) {offenders} carry weight >= the "
+            f"{DEFAULT_THRESHOLD} detection threshold and could alone trigger a "
+            f"DETECTED verdict with no corroboration - the single-match false-"
+            f"positive shape. Cap at < {DEFAULT_THRESHOLD} so detection needs "
+            f">= 2 independent signals, or update this gate deliberately."
+        )
+
+
 def test_root_corpus_includes_magisk_kernelsu_zygisk_era_signatures():
     # Phase 4 web-grounded expansion: the seven original signatures describe
     # the 2015 SuperSU root model. A 2026 root-detection engine must also probe
@@ -1630,7 +1775,7 @@ def test_2026_corpus_broadening_round2_additions_loaded():
     ssl_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")}
     for sig_id, marker in {
         "trustkit_android_api": "TrustKitBuilder",
-        "nsc_debug_overrides": "debug-overrides",
+        "nsc_debug_overrides": "<debug-overrides",
         "apollo_graphql_okhttp": "com.apollographql.apollo.ApolloClient",
         "custom_pkix_trust_anchor": "setTrustAnchors",
     }.items():
@@ -1657,6 +1802,45 @@ def test_2026_corpus_broadening_round3_webgrounded_additions_loaded():
     assert "TSKPinningValidator" in ssl_sigs["trustkit_tsession_pinning_validator"].patterns
 
 
+def test_ssl_library_presence_signals_cannot_alone_detect():
+    """Regression guard for the jerboa false positive (verified 2026-08-27).
+
+    ktor_tls_pinning + apollo_graphql_okhttp are HTTP-client *presence* signals,
+    not pinning *configuration*. Before the fix they weighted 0.4 + 0.3 = 0.70 -
+    exactly the SSL threshold - so a benign Lemmy client (jerboa) that merely uses
+    Ktor + OkHttp for ordinary HTTPS scored SSL-pinning DETECTED. They are now a
+    weak 'networking-surface present' tier that cannot alone cross the threshold,
+    while the strong pinning-API tier (a real CertificatePinner / NSC <pin-set>)
+    still crosses it - so the fix removes the false positive without creating a
+    false negative. Confidence aggregates as min(1.0, sum(weights)) (signatures.py);
+    threshold = 0.7 (decision_engine.DEFAULT_THRESHOLD).
+    """
+    THRESHOLD = 0.7  # decision_engine.DEFAULT_THRESHOLD
+    ssl = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/ssl_pinning.yaml")}
+
+    # The exact set that fired on jerboa - HTTP-client presence only - must no
+    # longer be able to reach DETECTED on its own.
+    presence_only = ssl["ktor_tls_pinning"].weight + ssl["apollo_graphql_okhttp"].weight
+    assert presence_only < THRESHOLD, (
+        f"library-presence signals sum to {presence_only} >= {THRESHOLD}: a plain "
+        f"networked app would falsely read SSL-pinning DETECTED (jerboa regression)"
+    )
+
+    # The bare OkHttp variable token that matched every OkHttp user is gone.
+    assert "okHttpClient" not in ssl["apollo_graphql_okhttp"].patterns
+
+    # A genuine pinning app must still cross the threshold via the strong tier,
+    # so the tightening above cannot manufacture a false negative.
+    strong_pinning = (
+        ssl["okhttp_certificate_pinner"].weight
+        + ssl["network_security_config_pinset"].weight
+    )
+    assert strong_pinning >= THRESHOLD, (
+        f"strong pinning-API tier sums to {strong_pinning} < {THRESHOLD}: real "
+        f"pinning could be missed"
+    )
+
+
 def test_2026_corpus_broadening_round4_additions_loaded():
     # Round 4 (web-grounded): Play Integrity remediation (root; the Standard
     # flow itself is already covered by play_integrity_standard_attestation, so
@@ -1676,6 +1860,35 @@ def test_2026_corpus_broadening_round4_additions_loaded():
     }.items():
         assert sig_id in ssl_sigs, f"missing ssl sig {sig_id}"
         assert marker in ssl_sigs[sig_id].patterns, (sig_id, marker)
+
+
+def test_supath_harvest1_missing_su_literals_extend_existing_signature(tmp_path):
+    # SUPATH-HARVEST1. Every su-shaped path literal actually present in the
+    # analysed corpus was harvested from decoded DEX and diffed against this
+    # file's lists; ten occur for real and these two were the only misses, both
+    # standard RootBeer/Sentry `suPaths` entries seen in app-owned detection code
+    # (AndroGoat RootDetectionActivity) as well as vendor RootCheckers.
+    root_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")}
+    sig = root_sigs["su_alternate_binary_paths"]
+    assert "/system/bin/failsafe/su" in sig.patterns
+    assert "/system/sd/xbin/su" in sig.patterns
+    # Recall-only: they extend an EXISTING id, so no new weight enters any
+    # confidence sum and the anti-FP invariant (no single signature >= the 0.70
+    # threshold) is untouched.
+    assert sig.weight == 0.3
+    assert not [s for s in root_sigs.values() if "failsafe" in s.id or "sd_xbin" in s.id]
+    # And they are reachable through the scanner, not merely present in YAML.
+    src = tmp_path / "sources" / "com" / "app"
+    src.mkdir(parents=True)
+    (src / "RootCheck.java").write_text(
+        'boolean r = new File("/system/bin/failsafe/su").exists()\n'
+        '    || new File("/system/sd/xbin/su").exists();\n'
+    )
+    evidence = scan([tmp_path], [sig], app_package="com.app")
+    assert {e.matched_text for e in evidence.root_evidence} == {
+        "/system/bin/failsafe/su",
+        "/system/sd/xbin/su",
+    }
 
 
 def test_evidence_default_provenance_is_unspecified():
@@ -1700,3 +1913,271 @@ def test_scan_stamps_evidence_type_from_signature(tmp_path):
     hits = [e for e in evidence.root_evidence if e.signature_id == "t_root_su"]
     assert hits, "signature did not match"
     assert all(e.evidence_type == "bytecode_string" for e in hits)
+
+
+def test_emu_recall1_missing_emulator_values_close_measured_false_negative(tmp_path):
+    """EMU-RECALL1. A MEASURED false negative, not a theoretical one.
+
+    InsecureBankv2 (ground truth `root: true`) carries a real, app-owned
+    `checkIfDeviceIsEmulator()` in com/android/insecurebankv2/PostLogin.java, but
+    it is built from emulator values `emulator_detection` did not list - and NONE
+    of that signature's seven original patterns exists anywhere in that APK's DEX.
+    So a genuine emulator probe in the app's own class scored zero and the run
+    landed root=0.60 on `java/native/manifest/js = fully_analyzed` with
+    `unknown_uncovered: []`: a fully-covered, confidently-wrong NEITHER, 0.10
+    under threshold, which showed up as Tier-2 root recall 0.80.
+
+    Each added literal was verified in a real APK before being added, not taken
+    from an emulator-detection article: `google_sdk`, `Genymotion` and
+    "Android SDK built for x86" are exact DEX string constants in
+    APK_Test/InsecureBankv2.apk whose get_xref_from() resolves to
+    Lcom/android/insecurebankv2/PostLogin; - the app's OWN class, so this is not
+    bundled-SDK plumbing - and `ranchu` (QEMU's modern machine type, successor to
+    the already-listed `goldfish`) and `vbox86` (Genymotion's VirtualBox ABI,
+    shipping as `vbox86p`) are real literals in aves' app-owned defpackage
+    classes.
+    """
+    from static.decision_engine import classify
+
+    root_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")}
+    sig = root_sigs["emulator_detection"]
+    for pattern in ("google_sdk", "Genymotion", "Android SDK built for x86",
+                    "ranchu", "vbox86"):
+        assert pattern in sig.patterns, pattern
+    # Recall-only, and that is the whole point: they extend an EXISTING id, so no
+    # new weight enters any confidence sum. Weight untouched at 0.25 and still far
+    # under the 0.70 threshold, so the anti-FP invariant holds - this signature
+    # can never decide a verdict alone.
+    assert sig.weight == 0.25
+    assert not [s for s in root_sigs.values() if "genymotion" in s.id or "google_sdk" in s.id]
+    # No padding: real product names that do NOT appear in app-owned code anywhere
+    # in the analysed corpus stay out, and `nox`/`memu` would be FP-prone besides.
+    for unverified in ("emu64", "bluestacks", "nox", "ldplayer", "memu",
+                       "windows_subsystem"):
+        assert not [p for p in sig.patterns if unverified in p.lower()], unverified
+
+    # End-to-end through the real scorer, on PostLogin.java's three real idioms.
+    src = tmp_path / "sources" / "com" / "android" / "insecurebankv2"
+    src.mkdir(parents=True)
+    (src / "PostLogin.java").write_text(
+        'private Boolean checkIfDeviceIsEmulator() {\n'
+        '    if (Build.MODEL.contains("google_sdk") || Build.MODEL.contains("Android SDK built for x86")\n'
+        '            || Build.MANUFACTURER.contains("Genymotion")) { return true; }\n'
+        '    return false;\n'
+        '}\n'
+        'void showRootStatus() {\n'
+        '    boolean isrooted = doesSuperuserApkExist("/system/app/Superuser.apk") || doesSUexist();\n'
+        '}\n'
+        'private boolean doesSUexist() {\n'
+        '    process = Runtime.getRuntime().exec(new String[]{"/system/bin/which", "su"});\n'
+        '}\n'
+        'private boolean doesSuperuserApkExist(String s) {\n'
+        '    File rootFile = new File("/system/app/Superuser.apk");\n'
+        '    return Boolean.valueOf(rootFile.exists()).booleanValue();\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    evidence = scan([tmp_path], list(root_sigs.values()),
+                    app_package="com.android.insecurebankv2")
+    matched = {e.signature_id for e in evidence.root_evidence}
+    assert "emulator_detection" in matched
+    # The two signatures that already fired on the real run are still the other
+    # contributors - the fix adds recall, it does not replace existing evidence.
+    assert {"root_known_indicator_files", "root_runtime_exec_su"} <= matched
+
+    result = classify(evidence)
+    assert result.root.detected is True, (result.root.confidence, sorted(matched))
+    assert result.root.confidence >= 0.70
+
+    # And the new patterns are load-bearing for THIS verdict: drop this one
+    # signature id and the same corpus falls back under the threshold, which is
+    # exactly the 0.60 the real run reported.
+    without = sum(
+        {root_sigs[i].weight for i in matched if i != "emulator_detection"}
+    )
+    assert without < 0.70, without
+
+
+def test_sudir1_bare_su_search_directories_are_matched_and_non_colliding(tmp_path):
+    """SUDIR1. The most-copied root check on the internet was invisible here.
+
+    A hardcoded array of su SEARCH DIRECTORIES walked with the binary name
+    concatenated on at runtime - `for (String where : places) if (new File(where +
+    binaryName).exists())`, `isRooted() { return findBinary("su"); }` - leaves only
+    bare directories with a trailing slash plus a standalone "su" in the bytecode.
+    Every su-path signature needs a FULL path literal and
+    root_su_via_path_env_check needs the two-arg `new File(dir, "su")` form, so
+    this idiom matched nothing.
+
+    Measured, not theoretical: RS_Vapour (com.redshift.rs_vapourtraining) scored
+    root 0.00 while its own Login.java gates login on isRooted() and Toasts
+    "Phone is rooted, Please uninstall application.". DEX-verified in
+    APK_Test/RS_Vapour.apk - all eight directory literals and the standalone "su"
+    are exact string constants whose get_xref_from() resolves to
+    Lcom/redshift/rs_vapourtraining/Login;, the app's OWN class, while
+    "/system/bin/su", "/system/xbin/su", "/sbin/su", "/data/local/xbin/su",
+    "/system/app/Superuser.apk", "test-keys" and "magisk" are all absent. The
+    same blind spot had also produced a wrong ground-truth label (that APK was
+    registered root:false by a verification that grepped full su paths); the
+    CORRECTED entry in config/ground_truth.yaml is pinned by
+    test_calibration_report's ground-truth tests.
+    """
+    from static.decision_engine import classify
+
+    root_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")}
+    sig = root_sigs["root_su_search_directories"]
+    # Same weight as the three other su-path probes: this is one more variant of
+    # "look for the su binary on disk", not a stronger signal.
+    assert sig.weight == 0.3
+    assert sig.pattern_type == "regex"
+    # No padding: only directories actually present in a real APK's app-owned
+    # detection code are listed. These three are standard RootBeer suPaths entries
+    # but occur zero times in bare-directory form anywhere in the analysed corpus.
+    joined = " ".join(sig.patterns)
+    for unverified in ("/su/bin/", "/system/bin/.ext/", "/system/usr/we-need-root/"):
+        assert unverified not in joined, unverified
+    # Deliberately excluded as too generic to attribute to a su-binary probe:
+    # "/system/bin/" is Telegram's org/telegram/messenger/EmuDetector (emulator
+    # detection, would be mislabeled), and all three occur only INSIDE RS_Vapour's
+    # own array, so excluding them costs zero recall.
+    for generic in ("/system/bin/", "/sbin/", "/data/local/"):
+        assert rf"{generic}(?![\w.])" not in sig.patterns, generic
+
+    # The load-bearing property. string_literal matching is substring-based, so a
+    # bare "/system/xbin/" pattern would also match "/system/xbin/daemonsu"
+    # (root_known_indicator_files), "/system/xbin/busybox" (busybox_binary_paths)
+    # and "/system/xbin/sudo" (su_alternate_binary_paths) - three OTHER signature
+    # ids. Confidence sums distinct ids, so that would silently inflate every
+    # already-detected app by 0.3 for one technique counted twice. The (?![\w.])
+    # boundary requires the literal to END at the directory slash. Do NOT "simplify"
+    # this to a string_literal list: it is a cross-signature double-count bug, not
+    # a style preference.
+    for owned_elsewhere in ('    - "/system/xbin/daemonsu"',
+                            'new File("/system/xbin/busybox")',
+                            '"/system/xbin/sudo"',
+                            '"/system/xbin/su"',
+                            '"/data/local/xbin/su"',
+                            'new File("/system/bin/failsafe/su")'):
+        assert _line_matches(owned_elsewhere, sig) is None, owned_elsewhere
+    # Works on all three scan surfaces, not just jadx/CFR Java: apktool smali
+    # const-string, and a raw DEX string with nothing around it at all.
+    for surface in ('const-string v0, "/system/xbin/"', "/system/xbin/"):
+        assert _line_matches(surface, sig) == "/system/xbin/", surface
+
+    # End-to-end through the real scorer, on Login.java's actual code.
+    src = tmp_path / "sources" / "com" / "redshift" / "rs_vapourtraining"
+    src.mkdir(parents=True)
+    (src / "Login.java").write_text(
+        'public static boolean findBinary(String binaryName) {\n'
+        '    String[] places = {"/sbin/", "/system/bin/", "/system/xbin/", '
+        '"/data/local/xbin/", "/data/local/bin/", "/system/sd/xbin/", '
+        '"/system/bin/failsafe/", "/data/local/"};\n'
+        '    for (String where : places) {\n'
+        '        if (new File(where + binaryName).exists()) {\n'
+        '            return true;\n'
+        '        }\n'
+        '    }\n'
+        '    return false;\n'
+        '}\n'
+        'private static boolean isRooted() {\n'
+        '    return findBinary("su");\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    evidence = scan([tmp_path], list(root_sigs.values()),
+                    app_package="com.redshift.rs_vapourtraining")
+    matched = {e.signature_id for e in evidence.root_evidence}
+    assert matched == {"root_su_search_directories"}, sorted(matched)
+    assert all(e.verification_state == "deterministic_matched"
+               for e in evidence.root_evidence)
+
+    # The honest bound, pinned so nobody "finishes" this fix by inflating it.
+    # RS_Vapour's app-owned root surface is ONE technique, and one matched
+    # signature at 0.3 cannot reach the 0.70 threshold - no single signature may
+    # ever carry >= 0.70 (the structural anti-FP invariant, asserted below). So
+    # this moves a silent 0.00 to a 0.30 backed by real evidence rows naming the
+    # app's own class, and the verdict stays NEITHER: correctly reported as
+    # coverage-limited "unknown, not absent" by the indicator layer, never as a
+    # confident negative. It remains a measured false negative against the
+    # corrected ground truth, and saying so is the point.
+    result = classify(evidence)
+    assert result.root.confidence == 0.3
+    assert result.root.detected is False
+    assert result.ssl.confidence == 0.0
+    assert not [s for s in root_sigs.values() if s.weight >= 0.70]
+
+
+
+def test_execrecv1_cached_runtime_receiver_exec_su_matched_on_the_same_signature_id(tmp_path):
+    # EXEC-RECV1 (measured 2026-09-03). root_runtime_exec_su hard-required the
+    # INLINE receiver `Runtime.getRuntime().exec(`, so a Runtime cached in a
+    # field or local was invisible. Sentry's shipped RootChecker does exactly
+    # that: `private final Runtime runtime` injected as Runtime.getRuntime(),
+    # then `this.runtime.exec(new String[]{"/system/xbin/which", "su"})`. Of the
+    # four techniques in that purpose-built root checker, only this exec probe
+    # scored nothing - and only because of how the receiver was spelled.
+    # DEX-verified: "/system/xbin/which" and the RootChecker class descriptor
+    # are both string constants in the shipped classes5.dex of the analyzed APK.
+    from static.decision_engine import classify
+    from static.signatures import _line_matches, load_signatures, scan
+
+    root_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")}
+    sig = root_sigs["root_runtime_exec_su"]
+
+    # An ADDED PATTERN on the existing id, never a new id: confidence sums
+    # DISTINCT ids, so a new id would double-count this one technique in every
+    # app that already matches the inline form.
+    assert sig.weight == 0.3
+    assert sig.pattern_type == "regex"
+    assert len(sig.patterns) == 2, sig.patterns
+    assert r'Runtime\.getRuntime\(\)\.exec\([^)]*su' in sig.patterns  # the original stays
+
+    # Every form measured in the real corpus, plus the two receiver spellings
+    # that motivated the fix. The first line is verbatim from the decompiled
+    # Sentry RootChecker.
+    for real in (
+        'Process processExec = this.runtime.exec(new String[]{"/system/xbin/which", "su"});',
+        'var4_7 = this.runtime.exec(new String[]{"/system/xbin/which", "su"});',
+        'Runtime.getRuntime().exec(new String[]{"/system/bin/which", "su"});',
+        'Runtime.getRuntime().exec(new String[]{"su", "ls /data/data/"});',
+        'Runtime.getRuntime().exec("su");',
+        'Process p = rt.exec("su -c id");',
+    ):
+        assert _line_matches(real, sig) is not None, real
+
+    # FP bound, by measurement not assertion: across every *.java in the
+    # decompiled corpus EVERY `.exec(` whose args contain "su" is a root check
+    # (14 hits, 0 FPs), so the receiver carries no discriminating power. What
+    # keeps that true is the quote+boundary - su must be a QUOTED command token.
+    # A bare [^)]*su would match every line below.
+    for benign in (
+        'db.exec("subscribe");',
+        'x.exec("summary of su");',
+        'sh.exec("success");',
+        'this.engine.exec(pattern);',
+        'runtime.exec(new String[]{"ping", "-c", "1"});',
+    ):
+        assert _line_matches(benign, sig) is None, benign
+
+    # End-to-end, and the load-bearing anti-double-count property: a class using
+    # BOTH receiver spellings is still ONE technique worth 0.3 total, not 0.6.
+    src = tmp_path / "sources" / "com" / "example" / "app"
+    src.mkdir(parents=True)
+    (src / "RootChecker.java").write_text(
+        'private final Runtime runtime;\n'
+        'private boolean checkSUExist() {\n'
+        '    Process processExec = this.runtime.exec(new String[]{"/system/xbin/which", "su"});\n'
+        '    return new BufferedReader(new InputStreamReader(processExec.getInputStream())).readLine() != null;\n'
+        '}\n'
+        'private boolean alsoInline() {\n'
+        '    return Runtime.getRuntime().exec("su") != null;\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    evidence = scan([tmp_path], list(root_sigs.values()), app_package="com.example.app")
+    matched = {e.signature_id for e in evidence.root_evidence}
+    assert matched == {"root_runtime_exec_su"}, sorted(matched)
+    result = classify(evidence)
+    assert result.root.confidence == 0.3   # one id, counted once
+    assert result.root.detected is False   # and one technique still cannot reach 0.70
+    assert not [s for s in root_sigs.values() if s.weight >= 0.70]

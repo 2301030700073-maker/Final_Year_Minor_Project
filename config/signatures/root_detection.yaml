@@ -83,6 +83,40 @@
     # this to exec\(\s*"[^"]*su: it drops the new String[] forms (the leading
     # token is 'new', not a quote) and would be a regression, not a fix.
     - 'Runtime\.getRuntime\(\)\.exec\([^)]*su'
+    # EXEC-RECV1 (measured 2026-09-03): the pattern above hard-requires the
+    # INLINE receiver, so a Runtime cached in a field or local is invisible.
+    # Sentry's own root checker does exactly that - RootChecker holds
+    # `private final Runtime runtime` (injected in the constructor as
+    # Runtime.getRuntime()) and checkSUExist() calls
+    # `this.runtime.exec(new String[]{"/system/xbin/which", "su"})`. That is a
+    # textbook `which su` probe inside a commercially shipped, purpose-built
+    # root checker, and it scored NOTHING: of the four techniques that class
+    # implements, test-keys (root_build_tags_test_keys), its 12-entry su-path
+    # array (root_su_binary_paths / su_alternate_binary_paths /
+    # root_known_indicator_files) and its root-package list
+    # (su_management_apps / root_cloaking_detection) all matched - only the exec
+    # probe was missed, purely because of how the receiver was spelled.
+    #
+    # Receiver-agnostic by design, and FP-bounded by measurement rather than by
+    # assertion: across every *.java in the decompiled corpus, EVERY `.exec(`
+    # call whose argument list contains "su" is a root check - 10x
+    # {"/system/xbin/which","su"}, 1x {"/system/bin/which","su"}, 2x
+    # {"su","ls /data/data/"}, 1x exec("su"). Fourteen hits, zero false
+    # positives, so the receiver adds no discriminating power while excluding
+    # real detections.
+    #
+    # The quote+boundary is what keeps it that way: '"su(?:"|\s)' requires su to
+    # be a QUOTED command token (closing quote, or a space as in "su -c id").
+    # A bare [^)]*su would match .exec("subscribe")/("summary"); requiring the
+    # opening quote alone would still match "subscribe". Linear like its sibling
+    # (one [^)]* then literals) so the ReDoS hardening documented above holds.
+    #
+    # This is an ADDED PATTERN on the EXISTING id, never a new id: confidence
+    # sums DISTINCT signature ids, so extending the list is recall-only. A new
+    # id here would double-count the same technique in every app that already
+    # matches the inline form (all 4 UnCrackable/AndroGoat-class targets), which
+    # is how an anti-FP invariant gets eroded by an apparent recall win.
+    - '\.exec\([^)]*"su(?:"|\s)'
   evidence_type: bytecode_string
 
 - id: rootbeer_framework
@@ -135,6 +169,89 @@
   pattern_type: regex
   patterns:
     - 'new File\([^,]+,\s*"su"\)\.exists\(\)'
+  evidence_type: bytecode_string
+
+# SUDIR1 (2026-09-03). The corpus could not see the single most-copied root
+# check on the internet: a hardcoded array of su SEARCH DIRECTORIES, walked
+# with the binary name concatenated on at runtime -
+#   String[] places = {"/sbin/", "/system/bin/", "/system/xbin/", ...};
+#   for (String where : places) if (new File(where + binaryName).exists()) ...
+#   isRooted() { return findBinary("su"); }
+# Every su-path signature above needs a FULL path literal ("/system/xbin/su"),
+# and root_su_via_path_env_check needs the two-arg `new File(dir, "su")` form.
+# This idiom produces neither: the only literals in the bytecode are bare
+# directories with a trailing slash, plus a standalone "su".
+#
+# Found by scanning for app-owned files where the indicator layer fires but no
+# signature matches. Measured, real false negative: RS_Vapour
+# (com.redshift.rs_vapourtraining, 1c747b27) scored root 0.00 while its own
+# Login.java gates login on isRooted() and Toasts "Phone is rooted, Please
+# uninstall application.". DEX-verified in APK_Test/RS_Vapour.apk - all eight
+# directory literals and the standalone "su" are exact DEX string constants
+# whose get_xref_from() resolves to Lcom/redshift/rs_vapourtraining/Login;,
+# the app's OWN class - while "/system/bin/su", "/system/xbin/su", "/sbin/su",
+# "/data/local/xbin/su", "/system/app/Superuser.apk", "test-keys" and "magisk"
+# are all ABSENT (no path-like string containing "su" exists in the whole DEX).
+# The same blind spot had also produced a WRONG ground-truth label: that APK
+# was registered root:false on a verification that grepped full su paths. Both
+# are fixed - see the CORRECTED entry in config/ground_truth.yaml.
+#
+# Why regex, not string_literal: string_literal matching is substring-based
+# (signatures.py _match_line), so a bare "/system/xbin/" pattern would also
+# match "/system/xbin/daemonsu" (root_known_indicator_files),
+# "/system/xbin/busybox" (busybox_binary_paths) and "/system/xbin/sudo"
+# (su_alternate_binary_paths) - three OTHER signature IDs. Since confidence
+# sums distinct IDs, that would silently inflate every already-detected app
+# by 0.3 for one technique counted twice. The (?![\w.]) boundary requires the
+# literal to END at the directory slash, which is what actually distinguishes
+# this idiom, and makes the pattern non-colliding by construction. It also
+# works on all three scan surfaces (jadx/CFR Java, smali, raw DEX strings)
+# rather than depending on the source quoting, and is linear - a literal
+# prefix plus a zero-width single-char lookahead, no backtracking.
+#
+# False-positive measurement (not asserted - grepped, whole analysed corpus,
+# every *.java and *.smali under outputs/analysis): the bare-directory form
+# occurs in exactly TWO code sites. RS_Vapour's Login (all eight, app-owned
+# root check) and Telegram's org/telegram/messenger/EmuDetector (only
+# "/system/bin/"). Nothing else in the corpus contains any of them, so ZERO
+# already-detected app gains weight from this signature and no app can double
+# count it against a full-path signature.
+#
+# Deliberately EXCLUDED, measured: "/system/bin/", "/sbin/" and "/data/local/"
+# are generic enough to appear outside a root check - "/system/bin/" is
+# Telegram's EmuDetector, which is emulator detection, and scoring it as a
+# su-binary-path probe would mislabel it. All three occur only INSIDE
+# RS_Vapour's array anyway, so excluding them costs zero recall. "/su/bin/",
+# "/system/bin/.ext/" and "/system/usr/we-need-root/" are standard RootBeer
+# suPaths entries but occur ZERO times in bare-directory form anywhere in the
+# corpus, so they are not added - five verified additions, not eight.
+#
+# Honest bound on what this fixes: RS_Vapour's app-owned root surface is ONE
+# technique (of its 111 app-owned string constants, the only root-shaped ones
+# are these directories, "su", and the Toast text). One matched signature at
+# 0.3 cannot reach the 0.70 DETECTED threshold, and no single signature may
+# ever carry >= 0.70 (the structural anti-FP invariant). So this signature
+# moves RS_Vapour from a silent 0.00 to 0.30 with real Evidence rows naming
+# its own Login class, but the verdict stays NEITHER - correctly reported as
+# coverage-limited "unknown, not absent" by the indicator layer, not as a
+# confident negative. It remains a measured false negative against the
+# corrected label. A user-facing "Phone is rooted" string was considered as a
+# second signal and REJECTED: that is evidence of intent, not a detection
+# technique, and scoring it would blend evidence classes and inflate every
+# already-detected app (UnCrackable1/2, AndroGoat, InsecureBankv2 all ship
+# one) to manufacture a threshold crossing. Same reasoning that keeps
+# UnCrackable2's anti-debug poll and UnCrackable3's CRC32 check out of this
+# file.
+- id: root_su_search_directories
+  category: root
+  weight: 0.3
+  pattern_type: regex
+  patterns:
+    - '/system/xbin/(?![\w.])'
+    - '/data/local/xbin/(?![\w.])'
+    - '/data/local/bin/(?![\w.])'
+    - '/system/sd/xbin/(?![\w.])'
+    - '/system/bin/failsafe/(?![\w.])'
   evidence_type: bytecode_string
 
 - id: root_known_indicator_files
@@ -210,6 +327,24 @@
     # /data/adb/ksud is a strict substring of /data/adb/ksu (matching already
     # covers it), so it would add zero distinct matches - dropped as redundant.
     - "/data/adb/ksu"
+    # SUSFS (susfs4ksu, the 2025-26 kernel-side hiding layer for KernelSU) ships
+    # two userspace helpers that its own module README states are installed "into
+    # /data/adb/ksu": ksu_susfs and sus_su. Only the first is listed here, for two
+    # separate reasons:
+    #  - it is NOT redundant with the directory literal above. An app that probes
+    #    the full path /data/adb/ksu/ksu_susfs already matches on the directory,
+    #    but one that looks up the bare helper name (a PATH/which-style probe, or
+    #    a /proc or mount-table string comparison) carries no /data/adb/ksu
+    #    substring at all, so the directory pattern cannot reach it.
+    #  - "sus_su" is deliberately NOT added: as a substring it is reachable from
+    #    ordinary English compounds - "census_survey" and "consensus_subset" both
+    #    contain sus_su - so a bare literal would be a false-positive vector in
+    #    analytics/localization strings, and the only safe spelling
+    #    (/data/adb/ksu/sus_su) is already subsumed by the directory literal.
+    # /data/adb/susfs* is not listed either: the module's documentation does not
+    # state any such path, and this corpus does not assert identifiers it has not
+    # read from the source.
+    - "ksu_susfs"
   evidence_type: bytecode_string
 
 - id: zygisk_artifact_paths
@@ -247,6 +382,15 @@
   category: root
   weight: 0.3
   pattern_type: string_literal
+  # case_sensitive: false (2026-09-04). The per-spelling note below found that a
+  # mixed-case display literal misses the lowercase spelling an app actually
+  # probes - and then fixed it for RootCloak alone. The same hole was open for
+  # every other literal here: "Shamiko" did not match `shamiko`, which is exactly
+  # how the module is spelled on disk (/data/adb/modules/shamiko), and the same
+  # applies to MagiskHide/HideMyRoot. Folding case fixes the whole class instead
+  # of one spelling at a time, and costs nothing: none of these literals is an
+  # English word, so a case-insensitive match cannot reach benign text.
+  case_sensitive: false
   patterns:
     - "MagiskHide"
     - "Shamiko"
@@ -254,11 +398,11 @@
     - "HideMyRoot"
     - "suhide"
     # RootCloak is probed for by its Xposed module PACKAGE names, not the
-    # display string "RootCloak" above - and that literal is case-sensitive, so
-    # it does not catch the lowercase package. Verified 2026-08 by DEX
-    # extraction: PropertyGuru (2026.5.4) embeds both package constants below and
-    # zero occurrences of mixed-case "RootCloak", so the existing literal misses
-    # this real probe; these package forms close that gap.
+    # display string "RootCloak" above - a different string, not just a different
+    # casing, so folding case does not make these redundant. Verified 2026-08 by
+    # DEX extraction: PropertyGuru (2026.5.4) embeds both package constants below
+    # and zero occurrences of mixed-case "RootCloak", so the display literal
+    # misses this real probe; these package forms close that gap.
     - "com.devadvance.rootcloak"
     - "com.devadvance.rootcloakplus"
   evidence_type: bytecode_string
@@ -362,9 +506,14 @@
   weight: 0.3
   pattern_type: string_literal
   patterns:
-    - "/data/adb/apd"
-    - "/data/adb/ap/bin"
-    - "/data/adb/ap/package_config"
+    # The base directory, not the three sub-paths this list used to name
+    # (/data/adb/apd, /data/adb/ap/bin, /data/adb/ap/package_config). Measured
+    # 2026-09-04: an app probing the APatch ROOT directory - the natural
+    # File("/data/adb/ap").exists() check - matched none of them, because every
+    # pattern was longer than the string being searched for. The base path is a
+    # strict prefix of all three, so it subsumes them (same convention as
+    # /data/adb/ksud vs /data/adb/ksu above) while also reaching the bare probe.
+    - "/data/adb/ap"
   evidence_type: bytecode_string
 
 - id: apatch_manager_package
@@ -473,6 +622,22 @@
     - "/data/local/bin/su"
     - "/data/local/xbin/su"
     - "/system/xbin/sudo"
+    # SUPATH-HARVEST1 (2026-09-02). Not taken from the RootBeer README: every
+    # su-shaped path literal actually present in the analysed corpus was
+    # harvested from the decoded DEX and diffed against this file's lists. Ten
+    # distinct literals occur for real; eight were already covered and these two
+    # were the only genuine misses. Both are standard entries of the RootBeer /
+    # Sentry `suPaths` array and are unambiguous su binary locations, so they
+    # extend an existing signature ID rather than adding a new weight: recall
+    # only, no change to any confidence sum, no new false-positive surface.
+    # Verified in three real APKs each, including APP-OWNED detection code:
+    #   AndroGoat  smali/owasp/sat/agoat/RootDetectionActivity.smali (app-owned)
+    #   kisoku     smali_classes2/coil/util/-SvgUtils.smali (R8 moved a shaded
+    #              RootBeer string array into a coil class; vendor namespace)
+    #   PropertyGuru smali_classes5/io/sentry/android/core/internal/util/
+    #              RootChecker.smali (vendor)
+    - "/system/bin/failsafe/su"
+    - "/system/sd/xbin/su"
   evidence_type: bytecode_string
 
 - id: setenforce_permissive
@@ -496,6 +661,27 @@
   patterns:
     - "com.stericson.RootTools"
     - "com.stericson.roottools"
+    # RootShell is the lower-level Stericson library RootTools is built on, and
+    # it is also shipped STANDALONE - the two artifacts are published
+    # separately, so an app can carry RootShell with no RootTools class in the
+    # DEX at all. Verified 2026-09-04 by corpus extraction: org.fossify
+    # .filemanager (9e97d2fa...) contains 54 files referencing
+    # com.stericson/RootShell and calls isRootAvailable() 9 times, yet matched
+    # NO root signature and scored 0.00 - the RootTools-only pattern list above
+    # missed it. isRootAvailable() is the same root-availability query that
+    # earns RootTools its weight here, so it belongs to this ID rather than a
+    # new one (extending a pattern list is recall-only and cannot double-count).
+    - "com.stericson.RootShell"
+    - "com.stericson.rootshell"
+    # Smali form. Verified 2026-09-04 on the same target: apktool's smali carries
+    # ONLY the slash spelling (269x Lcom/stericson/RootShell/execution/g), while
+    # the dotted spelling above appears only in jadx/cfr output. Since .smali is
+    # in SCANNED_SUFFIXES, a target whose java decompilation failed would match
+    # nothing on the dotted patterns alone. The pin_* signatures in
+    # ssl_pinning.yaml already use this smali spelling, so it is the file's
+    # convention rather than a new one.
+    - "com/stericson/RootShell"
+    - "com/stericson/RootTools"
   evidence_type: bytecode_class
 
 # --- Frida / Cydia Substrate hook-detection era (2026, web-grounded) ---
@@ -582,6 +768,44 @@
 # device. Absence is NOT evidence of a physical device. Deliberately OMITS bare
 # `Build.FINGERPRINT`/`Build.MODEL`/`isEmulator` alone (too generic - read by
 # benign device-ID analytics), keeping only the emulator-specific values.
+#
+# EMU-RECALL1 - the five literals below were missing, and their absence produced
+# a MEASURED false negative rather than a theoretical one. InsecureBankv2
+# (ground truth root: true) carries a real app-owned `checkIfDeviceIsEmulator()`
+# in com/android/insecurebankv2/PostLogin.java built entirely from values this
+# list did not have; NONE of the seven patterns above exist anywhere in that
+# APK's DEX, so a genuine emulator probe in the app's own class scored zero. The
+# run left root at 0.60 (root_known_indicator_files 0.30 + root_runtime_exec_su
+# 0.30) on `java/native/manifest/js = fully_analyzed` with `unknown_uncovered:
+# []` - i.e. a fully-covered, confidently-wrong NEITHER, 0.10 under threshold.
+#
+# Verified before adding, per-pattern, in real APKs (never from an emulator-
+# detection blog list):
+#   google_sdk, Genymotion, "Android SDK built for x86"
+#       exact DEX string constants in APK_Test/InsecureBankv2.apk, each with
+#       get_xref_from() resolving to Lcom/android/insecurebankv2/PostLogin; -
+#       the app's OWN class, not a bundled SDK - and again in aves'
+#       defpackage/jt0.java + tl0.java.
+#   ranchu   QEMU's modern machine type, the direct successor to `goldfish`
+#            which is already above (the same generation gap as android.arch ->
+#            androidx in the vendor taxonomy). Real literal in aves.
+#   vbox86   Genymotion's VirtualBox ABI; ships as `vbox86p` in aves, so the
+#            prefix covers vbox86/vbox86p/vbox86_64.
+#
+# Deliberately NOT added: emu64, bluestacks, nox, ldplayer, memu,
+# windows_subsystem. Each is a real product name, but none appears in app-owned
+# code anywhere in this corpus, and an unverified pattern is padding (`nox`/
+# `memu` are also FP-prone as substrings). Five verified additions, not eleven.
+#
+# Recall-only by construction, and this was measured rather than assumed: every
+# other APK in the analysed corpus that owns these literals (aves 0.45,
+# uptodown 1.00, AndroGoat 1.00) ALREADY matches `emulator_detection` through
+# `goldfish`, so extending this one signature ID cannot move their confidence
+# sums - a sum counts distinct signature IDs, not patterns. The only verdict in
+# the corpus that changes is the false negative: 0.30 + 0.30 + 0.25 = 0.85.
+# Weight left at 0.25, deliberately: no existing weight is touched, because a
+# speculative weight bump risks a false negative elsewhere while a missing
+# pattern is a pure recall defect.
 - id: emulator_detection
   category: root
   weight: 0.25
@@ -594,6 +818,11 @@
     - "generic_x86"
     - "generic_arm64"
     - "Build.HARDWARE"
+    - "google_sdk"
+    - "Genymotion"
+    - "Android SDK built for x86"
+    - "ranchu"
+    - "vbox86"
   evidence_type: bytecode_string
 
 # --- General build-props probe (2026) ---
@@ -746,3 +975,99 @@
     - "INTEGRITY_TOKEN_PROVIDER_INVALID"
     - "CLIENT_TRANSIENT_ERROR"
   evidence_type: bytecode_string
+
+# --- Commercial RASP / app-shielding SDKs (2026) ---
+#
+# WHY THIS BLOCK EXISTS. Every root check above is one an app's own developers
+# hand-wrote (su paths, Build tags, RootBeer/RootTools, Play Integrity). A
+# hardened production app - a bank, a fintech, a streaming service - frequently
+# writes none of them: it links a commercial RASP SDK and lets the vendor own
+# root detection. With no entry for those SDKs the engine sees an app whose root
+# detection is entirely real and entirely invisible, and certifies a confident
+# NEITHER over it. That is the boundary-1 failure mode (detection-shaped code
+# matching no signature), not a corpus-currency nicety.
+#
+# PROVENANCE, AND HOW IT DIFFERS FROM THE REST OF THIS FILE. Every other
+# signature here was verified by extracting its literal from a real APK in the
+# analysed corpus. These two could not be: a 2026-09-04 sweep of all 17 analysed
+# apps for promon|guardsquare|appdome|aheaditec|talsec|approov|criticalblue|
+# zimperium|build38|arxan|verimatrix|onespan|dexprotector|whitecryption returned
+# ZERO hits, because no hardened commercial app is in the corpus (the closest,
+# PropertyGuru, hand-rolls its checks). So each literal below is instead quoted
+# from the SDK vendor's own current integration documentation, cited inline. That
+# is the same evidentiary tier the file already accepts for pin_ibm_worklight,
+# pin_appcelerator_https, pin_cwac_netsecurity, pin_boye_abstractverifier,
+# trustkit_pinning and rn_ssl_pinning_library - all of which are likewise absent
+# from the corpus (measured: 0 files each). It is a weaker tier than DEX
+# extraction and is labelled as such rather than described as verified.
+#
+# WHAT IS DELIBERATELY *NOT* HERE, AND WHY. DexGuard, Appdome and Digital.ai
+# App Protection were considered and rejected. They do not expose a package the
+# app imports; they INJECT their checks at build time and polymorphically rename
+# them - Guardsquare's own product page states DexGuard "automatically injects
+# endless variations of integrity checks" and that "no two protected builds ever
+# look the same". A com.guardsquare.* class-reference pattern therefore cannot
+# fire on a shipping DexGuard-protected app. Adding one would grow the corpus
+# count while detecting nothing, which is the exact failure already documented
+# for the scored OpenSSL/BoringSSL export-symbol SSL signatures. Injection-based
+# shielding is a real limitation of static detection, not a signature we are
+# missing; it belongs in the limitations doc, not here.
+#
+# These SDKs must NOT be added to KNOWN_VENDOR_PREFIXES in src/common.py.
+# Vendor classification SKIPS the file, so a prefix would make these signatures
+# unfirable. The rule that makes GMS a vendor - "the app did not choose to ship
+# an X509TrustManager, Google did" - inverts here: linking a RASP SDK IS the
+# app's own anti-tampering decision, which is precisely what we are detecting.
+- id: promon_shield_rasp
+  category: root
+  weight: 0.4
+  pattern_type: class_reference
+  # Promon SHIELD - the app-shielding engine behind, among others, OneSpan's
+  # Mobile Security Suite. The app's own code subclasses the SHIELD callback
+  # types to react to a detected threat, so this package survives in the app's
+  # DEX even though SHIELD's native blob is renamed per build.
+  # Source: OneSpan integration guide, "Callbacks on Android" - "These inherited
+  # classes reside in the no.promon.shield.callbacks package and have a ...Data
+  # suffix, for example RootingData or RepackagingData."
+  # (docs.onespan.com/mobile/docs/oapps-iga-callbacks-on-android-8-2-1)
+  # Corroborated by public reversing of a SHIELD-protected Android app, which
+  # identifies the shipped native library as libshield.so
+  # (github.com/KiFilterFiberContext/promon-reversal).
+  patterns:
+    - "no.promon.shield"
+    - "no/promon/shield"
+  evidence_type: bytecode_class
+
+- id: talsec_freerasp_sdk
+  category: root
+  weight: 0.4
+  pattern_type: class_reference
+  # Talsec freeRASP - the most widely integrated free RASP SDK on Android, with
+  # first-party Flutter / React Native / Capacitor / Cordova / Unity wrappers, so
+  # it appears in cross-platform production apps that ship no hand-written root
+  # check at all. Its detector covers su, Magisk, KernelSU, Shamiko,
+  # HideMyApplist, Frida and LSPosed; the app calls Talsec.start(...) and
+  # implements ThreatListener.
+  #
+  # BOTH package forms are required, and this is the reason verifying beat
+  # recalling: the current integration guide (freeRASP 19.2.1, read 2026-09-04)
+  # states plainly that "the Maven group com.aheaditec.talsec.security differs
+  # from the runtime package", which is app.talsec.rasp.security.api. A signature
+  # carrying only the Maven-group form - the name the SDK is universally known by
+  # - would silently miss every current integration, while one carrying only the
+  # new runtime package would miss the many shipped apps still on the older SDK.
+  # The Maven coordinate string also survives into build metadata.
+  # Sources (verbatim): Gradle line "implementation 'com.aheaditec.talsec
+  # .security:TalsecSecurity-Community:19.2.1'" and imports
+  # "app.talsec.rasp.security.api.{Talsec,TalsecConfig,ThreatListener}"
+  # (docs.talsec.app/freerasp/freerasp/integration/android.md).
+  #
+  # The bare type names (Talsec, ThreatListener, TalsecMode) are deliberately
+  # excluded: ThreatListener is generic enough to collide with unrelated app
+  # code, and the package prefixes already match every file that references them.
+  patterns:
+    - "app.talsec.rasp.security.api"
+    - "com.aheaditec.talsec.security"
+    - "app/talsec/rasp/security/api"
+    - "com/aheaditec/talsec/security"
+  evidence_type: bytecode_class

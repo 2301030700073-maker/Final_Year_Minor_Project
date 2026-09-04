@@ -182,6 +182,31 @@ def load_signatures(path: Path) -> list[Signature]:
     return load_yaml_entries(path, _validate_signature_entry, Signature)
 
 
+def _is_dotted_package_pattern(pattern: str) -> bool:
+    """True for a pattern written as a dotted Java package/class name.
+
+    SMALI-SPELL1 (2026-09-04): the corpus writes library markers the way source
+    does - `com.datatheorem.android.trustkit` - but `.smali` is in
+    SCANNED_SUFFIXES and apktool's smali tree IS scanned (decompile.py), and
+    smali/DEX spell the very same type as `Lcom/datatheorem/android/trustkit/...;`.
+    A dotted-only pattern therefore cannot fire on the smali corpus at all. That
+    matters most in exactly the population where it hurts: an app whose jadx
+    decompile was incomplete (`java=partial`) is the one whose only remaining
+    evidence for that class is smali.
+
+    Measured before the fix: 32 package-form patterns across root_detection.yaml
+    and ssl_pinning.yaml had no slash twin (24 root + 8 ssl), while
+    `root_tools_library` carried both spellings by hand - so the intent was
+    always "match this type however it is spelled", and 32 patterns silently
+    missed half of it.
+
+    The guard is deliberately narrow: at least two dots, no slash, no whitespace.
+    That admits package/class names and dotted system properties (`ro.build.type`)
+    and excludes path patterns (`/data/adb/ksu`), regexes, and prose fragments.
+    """
+    return pattern.count(".") >= 2 and "/" not in pattern and " " not in pattern
+
+
 def _line_matches(line: str, signature: Signature) -> str | None:
     """Return the matched text if this line matches the signature, else None.
 
@@ -190,17 +215,37 @@ def _line_matches(line: str, signature: Signature) -> str | None:
     folded case and regex patterns compile with re.IGNORECASE, so mixed-case
     variants of a known technique (e.g. "Test-Keys" or "Su") stop silently
     escaping detection. Default (case_sensitive=True) is byte-exact current
-    behavior."""
+    behavior.
+
+    SMALI-SPELL1: a dotted-package pattern is additionally matched against a
+    slash->dot normalized copy of the line, so the smali/DEX spelling of the same
+    type matches too. Purely additive - the raw line is always tried first, so
+    slash-bearing patterns (`/data/adb/ksu`) are unaffected - and the only strings
+    the extra surface can newly match are the slash spellings of those same
+    dotted names. See _is_dotted_package_pattern.
+    """
     if signature.pattern_type in ("string_literal", "class_reference"):
+        normalized: str | None = None
         if not signature.case_sensitive:
             folded_line = line.casefold()
             for pattern in signature.patterns:
-                if pattern.casefold() in folded_line:
+                folded = pattern.casefold()
+                if folded in folded_line:
                     return pattern
+                if _is_dotted_package_pattern(pattern):
+                    if normalized is None:
+                        normalized = folded_line.replace("/", ".")
+                    if folded in normalized:
+                        return pattern
             return None
         for pattern in signature.patterns:
             if pattern in line:
                 return pattern
+            if _is_dotted_package_pattern(pattern):
+                if normalized is None:
+                    normalized = line.replace("/", ".")
+                if pattern in normalized:
+                    return pattern
         return None
     if signature.pattern_type == "regex":
         flags = re.IGNORECASE if not signature.case_sensitive else 0
@@ -229,7 +274,20 @@ def _collect_files(roots: list[Path]) -> list[tuple[Path, Path]]:
         for p in root.rglob("*"):
             if not p.is_file() or p.suffix not in SCANNED_SUFFIXES:
                 continue
-            if "original" in p.relative_to(root).parts:
+            rel_parts = p.relative_to(root).parts
+            if "original" in rel_parts:
+                continue
+            # Skip CFR's generated decompilation index (`<cfr-root>/summary.txt`):
+            # a class-listing metadata file the CFR decompiler emits alongside the
+            # .java it produces - not decompiled app code, and not an app asset.
+            # Because `.txt` is a scanned suffix (for genuine plain-text APK
+            # assets), this index was being matched by code/config signatures -
+            # e.g. `custom_pkix_trust_anchor` hitting the token "CertPathValidator"
+            # in the class list - a pure false positive with no app code behind it.
+            # A real APK asset named summary.txt lives under assets/ (parent
+            # basename != "cfr", and not at a root top), so only the decompiler's
+            # own artifact is excluded here.
+            if p.name == "summary.txt" and (len(rel_parts) == 1 or p.parent.name == "cfr"):
                 continue
             files.append((p, root))
     return files

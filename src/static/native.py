@@ -210,6 +210,15 @@ class NativeScanResult:
     # coverage to partial so a native NEITHER never certifies a confident
     # negative over a lib that actually ran but was never read (ADR-0006).
     unaccounted_loads: list[str] = field(default_factory=list)
+    # CALIB-NATIVE-VACUOUS: True only when the APK was successfully enumerated
+    # and genuinely contains zero `.so` entries. Distinguishes that provable
+    # absence from the other reason `abi_coverage` can be empty (the scan did not
+    # run, or produced nothing), which must stay `unscannable`. With no native
+    # surface in the APK there is nowhere for a native root/pinning check to
+    # hide, so coverage.native_coverage treats it as vacuously fully_analyzed.
+    # Defaults False so any path that does not set it keeps the conservative
+    # unscannable answer.
+    native_libs_absent: bool = False
 
 
 # --- pure parsing (fixture-testable, no toolchain) ---------------------------
@@ -292,17 +301,95 @@ def _classify_obfuscated(exports: list[str], strings: list[str]) -> bool:
     return mangle > len(exports) * 0.5
 
 
-def _corpus_contains(corpus: list[str], ghidra_functions: list[str], pattern: str) -> bool:
+def _jni_export_matches(symbol: str, pattern: str) -> bool:
+    """True when `symbol` is a JNI-mangled export whose Java *method* component is
+    exactly `pattern`.
+
+    Why this exists: export_symbol matching is exact membership (see
+    _corpus_contains), and a real JNI export is never the bare method name - the
+    JNI spec mangles it to `Java_<pkg>_<Class>_<method>`. So a signature pattern
+    of `isRooted` could only ever fire on a library exporting a plain C function
+    with that literal name, while `Java_com_foo_A_isRooted` - the form an actual
+    Android app ships - matched nothing. native_detection.yaml's header has always
+    claimed export_symbol "matches symbol names, incl. Java_* JNI exports"; before
+    this helper that claim was false, and the gap was a silent false negative for
+    exactly the JNI root check that native_jni_root_check is named after.
+
+    Deliberately NOT a plain substring test: substring would make
+    `my_verify_certificate_helper` match `verify_certificate`, which is the false
+    positive the exact-membership design exists to prevent (ADR-0006). Anchoring
+    on the `Java_` prefix AND the trailing method component keeps that guarantee -
+    a JNI method genuinely named `isRooted` in any package IS a root check.
+
+    Handles the overload form too: an overloaded native method mangles to
+    `Java_<pkg>_<Class>_<method>__<argsig>`, so the method component is followed
+    by `__` rather than ending the symbol.
+
+    Handles the `_1` escape as well, which matters for every pattern containing an
+    underscore. The JNI spec escapes `_` in a Java identifier to `_1`, so a native
+    method declared `verify_certificate` does NOT export as
+    `..._verify_certificate` - it exports as `..._verify_1certificate`, and a
+    pattern-vs-symbol comparison that skips the transform misses it. This is not
+    hypothetical: measured 2026-09-04 over the 952 .so files in the analysed
+    corpus, 382 of 6269 Java_* symbols (6.1%) carry a `_1` escape - e.g. Telegram's
+    `Java_org_telegram_messenger_voip_ConferenceCall_call_1get_1verification_1state`
+    (method `call_get_verification_state`). Two of this project's export patterns
+    contain underscores (`verify_certificate`, `SSL_CTX_set_cert_verify_callback`),
+    i.e. exactly the native SSL surface where a miss is most costly.
+    The other JNI escapes need no handling and implementing them would be dead
+    code: `_2`/`_3` encode `;`/`[`, which cannot occur in a method name (only in
+    the post-`__` argument signature), and `_0xxxx` encodes non-ASCII identifiers,
+    which no pattern here contains.
+
+    Both the escaped and the raw spelling are accepted. The escaped form is what
+    the spec mandates; the raw form costs nothing in precision (the `Java_` anchor
+    and the component boundary still hold) and covers hand-written `Java_*` exports
+    for natives wired up through RegisterNatives, which are not obliged to follow
+    the mangling rules at all.
+    """
+    if not pattern or not symbol.startswith("Java_"):
+        return False
+    candidates = {pattern, pattern.replace("_", "_1")}
+    return any(
+        symbol.endswith("_" + p) or ("_" + p + "__") in symbol for p in candidates
+    )
+
+
+def _matched_symbol(corpus: list[str], pattern: str, jni_aware: bool) -> str | None:
+    """The actual corpus entry a pattern matched, so Evidence.matched_text can
+    report the real exported symbol (`Java_com_foo_A_isRooted`) rather than the
+    signature's technique-level pattern (`isRooted`)."""
+    if pattern in corpus:
+        return pattern
+    if jni_aware:
+        return next((s for s in corpus if _jni_export_matches(s, pattern)), None)
+    return None
+
+
+def _corpus_contains(
+    corpus: list[str],
+    ghidra_functions: list[str],
+    pattern: str,
+    jni_aware: bool = False,
+) -> bool:
     """Exact membership on the symbol/string corpus, plus substring search over
     Ghidra-decompiled function bodies. Decompiled bodies are multi-line C, so a
     technique-level call (`ptrace(...)`, `fork()`), a JNI root-check dispatch, or
     an opaque symbol readelf only sees inside a function is matched against the
     decompiled text. Body search is applied only to export_symbol signatures
     (behavioral); string-literal signatures keep exact membership so a substring
-    of a benign symbol never false-positives (ADR-0006)."""
+    of a benign symbol never false-positives (ADR-0006).
+
+    `jni_aware` additionally accepts a JNI-mangled export whose method component
+    is the pattern (see _jni_export_matches). It is passed only for symbol
+    corpora - embedded_string signatures keep pure exact membership, since their
+    patterns are path/string literals for which the JNI form is meaningless."""
     if pattern in corpus:
         return True
+    if jni_aware and any(_jni_export_matches(s, pattern) for s in corpus):
+        return True
     return bool(ghidra_functions) and any(pattern in body for body in ghidra_functions)
+
 
 
 def _is_stripped(exports: list[str], text_symbols: str) -> bool:
@@ -340,16 +427,17 @@ def match_native(
             # hidden inside a function body is matched even where no decompiler
             # ran (machine-independent capstone recovery, see _recover_body_calls).
             body_fns = (lib.ghidra_functions + lib.body_calls) if sig.pattern_type != "embedded_string" else []
+            jni_aware = sig.pattern_type != "embedded_string"
             if sig.require_all:
                 # AND semantics (native anti-debug combo): every pattern must be
                 # present. Otherwise `ptrace` alone would fire on any app that
                 # imports libc's ptrace for a benign reason (ADR-0006).
-                if not all(_corpus_contains(this_corpus, body_fns, p) for p in sig.patterns):
+                if not all(_corpus_contains(this_corpus, body_fns, p, jni_aware) for p in sig.patterns):
                     continue
                 hit_pattern = sig.patterns[0]
             else:
                 hit_pattern = next(
-                    (p for p in sig.patterns if _corpus_contains(this_corpus, body_fns, p)),
+                    (p for p in sig.patterns if _corpus_contains(this_corpus, body_fns, p, jni_aware)),
                     None,
                 )
                 if hit_pattern is None:
@@ -359,12 +447,17 @@ def match_native(
                 continue  # already credited this (sig, lib)
             matched.add(key)
             matched_confidence.add(sig.id)
-            idx = this_corpus.index(hit_pattern) if hit_pattern in this_corpus else -1
+            # Report the REAL symbol that matched, not the technique-level pattern:
+            # for a JNI export the pattern is `isRooted` while the shipped symbol is
+            # `Java_com_foo_A_isRooted`, and the evidence row has to be the thing an
+            # analyst can look up in readelf output.
+            real_symbol = _matched_symbol(this_corpus, hit_pattern, jni_aware)
+            idx = this_corpus.index(real_symbol) if real_symbol is not None else -1
             item = Evidence(
                 signature_id=sig.id,
                 file=path,
                 line_or_offset=f"symbol[{idx}]" if idx >= 0 else "decompiled-body",
-                matched_text=hit_pattern,
+                matched_text=real_symbol if real_symbol is not None else hit_pattern,
                 evidence_type=sig.evidence_type,  # G11: carry provenance (native_symbol/...)
             )
             if sig.category == "root":
@@ -513,6 +606,185 @@ _GHIDRA_FUNC_RE = re.compile(r"^FUNC (\S+)$", re.MULTILINE)
 
 SHF_EXECINSTR = 0x4
 
+# Direct branch/call mnemonics across the disassembled arches: ARM/ARM64 bl/blx/b,
+# x86 call/jmp, MIPS jal/bal/j. Register-indirect forms (bx lr, br x8, jalr $t9,
+# `call rax`) are not listed as exclusions because _branch_target already rejects
+# any operand that is not a bare absolute immediate.
+_BRANCH_MNEMONICS = frozenset({"call", "bl", "blx", "b", "br", "jal", "bal", "j", "jmp"})
+
+_ABS_IMM_RE = re.compile(r"^#?(0x[0-9a-fA-F]+|\d+)$")
+
+# Minimum fraction of a lib's executable bytes a linear sweep must actually decode
+# before `scanned` may be reported True. Set from measurement, not taste (all
+# figures 2026-09-04, real corpus, resyncing sweep in the winning mode):
+# libdivajni.so mips 1.0000 / mips64 1.0000, libhermes.so arm64 1.0000,
+# libhermes.so armeabi-v7a 0.9960, libsentry.so armeabi-v7a 0.9944,
+# libc++_shared.so armeabi-v7a 0.9959, libtmessages.49.so armeabi-v7a 0.9656
+# (14.8 MB, the corpus's largest - literal pools and jump tables in .text are why
+# a real lib never reaches exactly 1.0). 0.90 clears every one of those with
+# margin while rejecting the pre-fix behaviour, which reported scanned=True on
+# ratios of 0.000-0.025.
+_MIN_DECODE_RATIO = 0.90
+
+# Bytes of the largest executable section used to pick between candidate encodings
+# (ARM vs Thumb). 256 KiB is far more than needed to separate them - the measured
+# margin is ~0.25 absolute - and keeps the probe cost negligible next to the full
+# sweep it selects the mode for.
+_MODE_PROBE_BYTES = 256 * 1024
+
+# Bytes handed to capstone per resync. See the measurement in _linear_sweep - this
+# is a 44x wall-clock difference on a large lib with the same decoded bytes.
+_SWEEP_WINDOW_BYTES = 64 * 1024
+
+
+def _branch_target(op_str: str) -> int | None:
+    """Absolute target address of a DIRECT branch, or None when the operand is not
+    a bare address. capstone renders a resolved direct branch as `#0x1234`
+    (ARM/ARM64) or `0x1234` (x86/MIPS); anything else - `bx lr`, `br x8`,
+    `call rax`, `call qword ptr [rip + 0x8]`, `jalr $t9` - is indirect, and its
+    target is not knowable without dataflow, so it is skipped rather than guessed."""
+    match = _ABS_IMM_RE.match(op_str.strip())
+    if match is None:
+        return None
+    token = match.group(1)
+    return int(token, 16) if token.startswith("0x") else int(token)
+
+
+def _linear_sweep(md, data: bytes, base: int, align: int) -> tuple[int, set[int]]:
+    """Resyncing linear sweep of one executable section. Decode until capstone
+    stops, step `align` bytes past the byte it choked on, and continue to the end
+    of the section. Returns (bytes decoded, direct-branch target addresses).
+
+    The resync is the point. capstone's generator stops at the FIRST undecodable
+    byte, so a plain `for ins in md.disasm(data, base)` examines only the prefix
+    before the first literal pool, jump table or alignment pad - while the old
+    code still reported scanned=True for the whole lib. Measured 2026-09-04 across
+    120 sampled corpus libs: 43 of them claimed a complete instruction-level scan
+    after decoding under 2.5% of their executable bytes, several after decoding
+    0.0%. That is a coverage over-claim in the false-negative direction, because
+    _lib_coverage branch 3 promotes a stripped-but-body_scanned lib to
+    fully_analyzed, which is what licenses a confident negative for the APK."""
+    decoded = 0
+    targets: set[int] = set()
+    offset = 0
+    total = len(data)
+    # memoryview, not `data[offset:]`: capstone accepts any buffer, and slicing a
+    # memoryview is O(1) while slicing bytes copies the remainder.
+    #
+    # The window matters far more than the copy. cs_disasm keeps decoding until it
+    # hits an invalid instruction, so handing it the whole remaining buffer on every
+    # resync makes each restart proportional to the bytes LEFT, not the bytes it
+    # actually decodes. Measured on the corpus's largest lib (libtmessages.49.so,
+    # 14.8 MB .text, 385,227 resyncs): 158 s handing over the full remainder vs
+    # 3.6 s with a 64 KiB window, for a byte-identical decode ratio (0.9479) and the
+    # same restart count. 64 KiB also keeps window boundaries rare (~226 across that
+    # section), so the handful of instructions a boundary can split is noise rather
+    # than a systematic loss.
+    view = memoryview(data)
+    while offset < total:
+        reached = offset
+        end = min(total, offset + _SWEEP_WINDOW_BYTES)
+        for addr, size, mnemonic, op_str in md.disasm_lite(view[offset:end], base + offset):
+            decoded += size
+            reached = addr - base + size
+            if mnemonic in _BRANCH_MNEMONICS:
+                target = _branch_target(op_str)
+                if target is not None:
+                    targets.add(target)
+        # capstone stopped for one of two reasons, and they need opposite handling.
+        # If it reached the end of the window (or the section) it stopped because it
+        # ran out of bytes, so the next pass must resume exactly there - adding
+        # `align` in that case silently skips one whole instruction per window, and
+        # with it any branch target that instruction carried. If it stopped short of
+        # the window end it choked on the byte at `reached`, so step one instruction
+        # slot past that byte. `align` is never 0, so this always terminates.
+        if reached >= end:
+            offset = reached
+        else:
+            offset = max(reached, offset) + align
+    return decoded, targets
+
+
+def _pick_mode(
+    candidates: list[tuple[int, int, int]], data: bytes, base: int
+) -> tuple[int, int, int]:
+    """Choose the candidate encoding whose resyncing sweep decodes the most of
+    `data`, probing at most _MODE_PROBE_BYTES of it.
+
+    Only a machine with an ambiguous encoding pays for this; a single candidate is
+    returned untouched. EM_ARM is the case that matters - the NDK builds
+    armeabi-v7a as Thumb-2, and disassembling Thumb-2 in ARM mode decoded 0.0-2.5%
+    of .text on 43 of 120 sampled corpus libs while the old code still reported a
+    complete scan. Measured margin on real libs: Thumb 0.996 vs ARM 0.750 for
+    libhermes.so armeabi-v7a.
+
+    Honest bound on the probe: the ratio separates encodings on real compiled code,
+    where wrong-mode decoding hits invalid words often enough to show, but a 16-bit
+    or variable-length ISA will decode almost any byte pattern - measured, an
+    AArch64 nop buffer decodes 1.000 under ARM, Thumb AND MIPS32. Ties therefore
+    keep candidate order, which is why _cs_candidates lists Thumb first for
+    EM_ARM."""
+    if len(candidates) <= 1 or not data:
+        return candidates[0]
+    from capstone import Cs
+
+    probe = bytes(data[:_MODE_PROBE_BYTES])
+    best = candidates[0]
+    best_ratio = -1.0
+    for arch, mode, align in candidates:
+        decoded, _ = _linear_sweep(Cs(arch, mode), probe, base, align)
+        ratio = decoded / max(1, len(probe))
+        if ratio > best_ratio:
+            best_ratio, best = ratio, (arch, mode, align)
+    return best
+
+
+def _cs_candidates(machine: str, elfclass: int, little_endian: bool) -> list[tuple[int, int, int]]:
+    """(capstone arch, capstone mode, instruction alignment) candidates for an ELF
+    machine, most likely first. Empty list = this arch is not disassembled here, so
+    the caller must report "body calls not recovered", never absence.
+
+    More than one candidate means the machine does not imply the encoding and the
+    caller has to pick by measurement. EM_ARM is that case: the NDK builds
+    armeabi-v7a as Thumb-2, so Thumb leads, but ARM-mode armeabi libs exist and a
+    probe separates them (measured 2026-09-04 on real libs: Thumb 0.996 vs ARM 0.750
+    decoded on libhermes.so armeabi-v7a).
+
+    EM_MIPS covers both mips and mips64 - they share one e_machine, so the width
+    comes from the ELF class and the endianness from the header (Android shipped
+    mipsel, but derive it rather than assume). MIPS was wired up 2026-09-04: capstone
+    has always supported it (cs_support(CS_ARCH_MIPS) is True on the pinned 5.0.7),
+    this function's predecessor simply never listed it, so every mips .so returned
+    scanned=False and dragged its lib to `partial` via _lib_coverage branch 5. Since
+    native_coverage takes the MIN over ABIs, two unscannable mips copies of an
+    otherwise fully-scanned lib held an entire APK's native surface at partial and
+    blocked its confident negative. DIVA's mips and mips64 libdivajni.so both
+    disassemble at a 1.0000 ratio, so that was a wiring gap in this code, not a
+    tooling bound - and it is fixed by disassembling the arch, NOT by relaxing the
+    min-over-ABI coverage guard."""
+    try:
+        from capstone import (
+            CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_THUMB, CS_ARCH_ARM64,
+            CS_ARCH_X86, CS_MODE_32, CS_MODE_64,
+            CS_ARCH_MIPS, CS_MODE_MIPS32, CS_MODE_MIPS64, CS_MODE_BIG_ENDIAN,
+        )
+    except ImportError:
+        return []
+    if machine == "EM_ARM":
+        return [(CS_ARCH_ARM, CS_MODE_THUMB, 2), (CS_ARCH_ARM, CS_MODE_ARM, 4)]
+    if machine == "EM_AARCH64":
+        return [(CS_ARCH_ARM64, CS_MODE_ARM, 4)]
+    if machine == "EM_386":
+        return [(CS_ARCH_X86, CS_MODE_32, 1)]
+    if machine == "EM_X86_64":
+        return [(CS_ARCH_X86, CS_MODE_64, 1)]
+    if machine == "EM_MIPS":
+        mode = CS_MODE_MIPS64 if elfclass == 64 else CS_MODE_MIPS32
+        if not little_endian:
+            mode |= CS_MODE_BIG_ENDIAN
+        return [(CS_ARCH_MIPS, mode, 4)]
+    return []
+
 
 def _recover_body_calls(so_path: Path) -> tuple[bool, list[str]]:
     """Disassemble the .so's executable sections with capstone and recover the
@@ -523,37 +795,35 @@ def _recover_body_calls(so_path: Path) -> tuple[bool, list[str]]:
     signatures can't fire here" gap machine-independently). The recovered names
     join ghidra_functions in match_native's body search.
 
-    Returns (scanned, calls). `scanned` is True only when capstone genuinely
-    disassembled the executable sections (a complete instruction-level scan of
-    the lib's code) - it is the honest signal that a stripped lib's call surface
-    was examined, letting compute_degradation upgrade a stripped-but-not-
-    obfuscated lib to fully_analyzed. `calls` is the recovered call/branch
+    Returns (scanned, calls). `scanned` is True only when the resyncing sweep
+    actually decoded at least _MIN_DECODE_RATIO of the lib's executable bytes - it
+    is the honest signal that a stripped lib's call surface was examined, letting
+    compute_degradation upgrade a stripped-but-not-obfuscated lib to
+    fully_analyzed. Until 2026-09-04 it was returned unconditionally, so an ARM
+    lib whose Thumb-2 code capstone refused to decode in ARM mode reported a
+    complete scan after decoding none of it. `calls` is the recovered call/branch
     target symbol names (empty when none resolved). (False, []) when capstone/
     pyelftools is unavailable, the arch is unsupported, or the file is unreadable
     - read as "body calls not recovered", never as proof of absence."""
     try:
         from elftools.elf.elffile import ELFFile
-        from capstone import (
-            Cs, CS_ARCH_ARM, CS_MODE_ARM, CS_ARCH_ARM64,
-            CS_ARCH_X86, CS_MODE_32, CS_MODE_64, CS_OP_IMM,
-        )
-        _EM_TO_CS = {
-            "EM_ARM": (CS_ARCH_ARM, CS_MODE_ARM),
-            "EM_AARCH64": (CS_ARCH_ARM64, CS_MODE_ARM),
-            "EM_386": (CS_ARCH_X86, CS_MODE_32),
-            "EM_X86_64": (CS_ARCH_X86, CS_MODE_64),
-        }
+        from capstone import Cs
     except ImportError:
         return False, []
     try:
         so_path = Path(so_path)
         with so_path.open("rb") as f:
             elf = ELFFile(f)
-            pair = _EM_TO_CS.get(elf.header.e_machine)
-            if pair is None:
+            machine = elf.header.e_machine
+            candidates = _cs_candidates(machine, elf.elfclass, elf.little_endian)
+            if not candidates:
                 return False, []
-            cs_arch, cs_mode = pair
-            # Defined-symbol address -> name map for internal call-target resolution.
+            # Defined-symbol address -> name map for internal call-target
+            # resolution. On ARM the Thumb bit is bit 0 of a function symbol's
+            # st_value, while the branch immediate capstone reports is the even
+            # address, so each ARM symbol is indexed under BOTH spellings - without
+            # that, internal call resolution on armeabi-v7a resolves nothing at all
+            # even once the encoding is right.
             name_by_addr: dict[int, str] = {}
             for secname in (".dynsym", ".symtab"):
                 sec = elf.get_section_by_name(secname)
@@ -562,22 +832,30 @@ def _recover_body_calls(so_path: Path) -> tuple[bool, list[str]]:
                 for sym in sec.iter_symbols():
                     if sym["st_value"] and sym.name:
                         name_by_addr.setdefault(sym["st_value"], sym.name)
+                        if machine == "EM_ARM":
+                            name_by_addr.setdefault(sym["st_value"] & ~1, sym.name)
+            exec_sections = [
+                (sec.data(), sec["sh_addr"])
+                for sec in elf.iter_sections()
+                if int(sec["sh_flags"]) & SHF_EXECINSTR
+            ]
+            exec_bytes = sum(len(data) for data, _ in exec_sections)
+            # Pick the encoding by measurement when the machine allows more than one
+            # (see _pick_mode), probing the largest executable section.
+            arch, mode, align = candidates[0]
+            if exec_sections:
+                probe_data, probe_base = max(exec_sections, key=lambda s: len(s[0]))
+                arch, mode, align = _pick_mode(candidates, probe_data, probe_base)
+            md = Cs(arch, mode)
             calls: set[str] = set()
-            md = Cs(cs_arch, cs_mode)
-            md.detail = True
-            for sec in elf.iter_sections():
-                if not (int(sec["sh_flags"]) & SHF_EXECINSTR):
-                    continue
-                data = sec.data()
-                base = sec["sh_addr"]
-                for ins in md.disasm(data, base):
-                    if ins.mnemonic not in ("call", "bl", "blx", "b", "br"):
-                        continue
-                    for op in ins.operands:
-                        if op.type == CS_OP_IMM:
-                            name = name_by_addr.get(op.imm)
-                            if name:
-                                calls.add(name)
+            decoded_bytes = 0
+            for data, base in exec_sections:
+                decoded, targets = _linear_sweep(md, data, base, align)
+                decoded_bytes += decoded
+                for target in targets:
+                    name = name_by_addr.get(target)
+                    if name:
+                        calls.add(name)
             # External calls: every .rel.plt/.rela.plt relocation references an
             # imported function the code actually calls (e.g. libc's ptrace/fork).
             # Resolving a PLT stub back to its symbol is arch-specific, but the
@@ -598,7 +876,15 @@ def _recover_body_calls(so_path: Path) -> tuple[bool, list[str]]:
                         sym = dynsym.get_symbol(idx)
                         if sym is not None and sym.name:
                             calls.add(sym.name)
-            return True, sorted(calls)
+            # `scanned` now means what it says: the sweep decoded essentially all of
+            # this lib's executable bytes. A lib with no executable section at all
+            # has no body to hide a check in, so it counts as scanned (the same
+            # reasoning native_coverage already applies to an APK with no .so),
+            # but a lib whose code we could not actually decode reports False and
+            # stays `partial` rather than being promoted to a confident negative.
+            if exec_bytes == 0:
+                return True, sorted(calls)
+            return (decoded_bytes / exec_bytes) >= _MIN_DECODE_RATIO, sorted(calls)
     except Exception:
         return False, []
 
@@ -910,7 +1196,13 @@ def _should_decompile_body(
 # lib analyzed under different rules (ADR-0002, no silent staleness).
 # ---------------------------------------------------------------------------
 
-_ANALYZE_CACHE_VERSION = "native-analyze-v2"
+# v3 (2026-09-04): _recover_body_calls changed what it can scan AND what it claims.
+# It learned MIPS and armeabi-v7a Thumb-2, gained a resyncing sweep, and now gates
+# `scanned` on the decoded-byte ratio instead of returning True unconditionally. A
+# cached v2 entry therefore holds both stale body_calls (recovered under the wrong
+# encoding) and a stale body_scanned that over-claims coverage; without this bump
+# every already-analysed APK would keep serving them.
+_ANALYZE_CACHE_VERSION = "native-analyze-v3"
 
 
 def _ghidra_fingerprint() -> str:

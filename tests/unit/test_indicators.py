@@ -116,6 +116,46 @@ def test_native_root_and_ssl_indicators_independent():
     assert find_native_indicator_categories("/sbin/su\n/system/etc/security/cacerts") == {"root", "ssl"}
 
 
+def test_native_mbedtls_verify_control_is_ssl_indicator_not_scored_sig():
+    # MBEDTLS-IND1. The native SSL surface previously recognized only the
+    # OpenSSL/BoringSSL symbol namespace, so an NDK/curl/Unity/IoT component that
+    # controls certificate validation through mbedTLS was invisible and the SSL
+    # category could certify a clean negative over a TLS stack it never read.
+    # All four symbols below are `FUNC GLOBAL` exports of a real shipping library
+    # (aves' lib/x86_64/libmpv.so), which is exactly why they are indicators and
+    # not scored: static linking re-exports the whole mbedTLS API whether the app
+    # calls it or not, so scoring would repeat the bundled-SDK-plumbing false
+    # positive (Volley/HurlStack, OkHttp CertificateChainCleaner).
+    for symbol in (
+        "mbedtls_ssl_conf_verify",
+        "mbedtls_ssl_set_verify",
+        "mbedtls_ssl_conf_authmode",
+        "mbedtls_ssl_conf_ca_chain",
+        "mbedtls_ssl_set_hostname",
+        "mbedtls_x509_crt_verify",
+    ):
+        assert find_native_indicator_categories(symbol) == {"ssl"}, symbol
+    # Non-TLS mbedTLS crypto primitives must NOT flag the SSL surface: the same
+    # statically linked library exports hundreds of them (mbedtls_rsa_*,
+    # psa_verify_hash, mbedtls_ecdsa_verify), and treating "bundles a crypto
+    # library" as "controls certificate validation" would make every app with a
+    # media/networking .so permanently coverage-limited on SSL.
+    for benign in ("mbedtls_ecdsa_verify", "mbedtls_rsa_pkcs1_verify", "psa_verify_hash"):
+        assert find_native_indicator_categories(benign) == set(), benign
+    # Never a root indicator, and never promoted out of the indicator layer: the
+    # native signature corpus must carry no mbedTLS pattern.
+    assert "root" not in find_native_indicator_categories("mbedtls_ssl_conf_verify")
+    from pathlib import Path
+    from static.native import load_native_signatures
+
+    sigs = load_native_signatures(
+        Path(__file__).resolve().parents[2] / "config" / "signatures" / "native_detection.yaml"
+    )
+    assert not [
+        s for s in sigs for p in s.patterns if "mbedtls" in p.lower()
+    ], "mbedTLS verify-control must stay an indicator, never a scored signature"
+
+
 def test_compile_returns_cached_patterns():
     # _compile: compiles (and caches by raw string) the indicator regexes for a
     # category. Returns a tuple that actually matches; a repeat call reuses the

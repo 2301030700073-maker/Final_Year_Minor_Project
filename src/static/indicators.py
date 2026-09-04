@@ -140,6 +140,49 @@ NATIVE_SSL_INDICATORS: tuple[str, ...] = (
     r"mono_jit_init\b",
     r"mono_assembly_load\b",
     r"mono_register_bundled_assemblies\b",
+    # mbedTLS verify-control API (MBEDTLS-IND1). The OpenSSL/BoringSSL entries
+    # above cover only one of the two TLS stacks that ship in Android native
+    # code: an NDK/curl/Unity/IoT component built against mbedTLS performs the
+    # same certificate-validation control through a completely different symbol
+    # namespace, and was previously invisible on this surface - the native SSL
+    # category could certify a clean negative over an entire TLS
+    # implementation it had never looked at (ADR-0006).
+    #   mbedtls_ssl_conf_verify    - install a custom verify callback (the
+    #                                mbedTLS analogue of the pinning hook)
+    #   mbedtls_ssl_set_verify     - same, per-connection instead of per-config
+    #                                (analogue of SSL_set_custom_verify)
+    #   mbedtls_ssl_conf_authmode  - set/relax verification mode (the analogue
+    #                                of SSL_CTX_set_verify: also how validation
+    #                                is DISABLED, so it must never be scored)
+    #   mbedtls_ssl_conf_ca_chain  - install the trusted chain (analogue of
+    #                                SSL_CTX_load_verify_locations)
+    #   mbedtls_ssl_set_hostname   - the hostname the peer cert must match
+    #                                (analogue of SSL_set1_host)
+    #   mbedtls_x509_crt_verify    - the chain-verification entry point itself
+    # Verified 2026-09-02 on a real shipping library rather than added from the
+    # mbedTLS docs: outputs/analysis/1af7a8c5.../apktool/lib/x86_64/libmpv.so
+    # (deckers.thibault.aves.libre) exports all six as `FUNC GLOBAL` - e.g.
+    # mbedtls_ssl_conf_verify at 0x00d32220 - among 916 mbedtls dynamic symbols
+    # from a statically linked, re-exported mbedTLS. A symbol harvest over all
+    # 251 `.so` files in the analysed corpus found 896 distinct mbedtls_* FUNC
+    # exports and ZERO OpenSSL/BoringSSL `SSL_*`/`X509_*` C exports, so on this
+    # corpus mbedTLS is the only native TLS stack that is statically visible at
+    # all - the OpenSSL-shaped entries above are stripped in shipping builds
+    # (see the libcronet.so note) while mbedTLS ships its whole symbol table.
+    # Indicators, deliberately NOT scored signatures: that same evidence shows
+    # WHY. Static linking re-exports the whole mbedTLS API whether or not the
+    # app ever calls it, so an exported-symbol match proves "this .so contains
+    # mbedTLS", not "this app installs a custom verify callback". Scoring it
+    # would hand every mbedTLS-bundling app SSL confidence on no real evidence -
+    # the bundled-SDK-plumbing false positive (cf. Volley/HurlStack, OkHttp's
+    # CertificateChainCleaner). Coverage-limited "unknown native TLS capability"
+    # is the honest signal.
+    r"mbedtls_ssl_conf_verify\b",
+    r"mbedtls_ssl_set_verify\b",
+    r"mbedtls_ssl_conf_authmode\b",
+    r"mbedtls_ssl_conf_ca_chain\b",
+    r"mbedtls_ssl_set_hostname\b",
+    r"mbedtls_x509_crt_verify\b",
     r"X509_VERIFY_PARAM_set1_host\b",
     r"SSL_set1_host\b",
     r"SSL_load_verify_locations",

@@ -2,6 +2,21 @@
 # dynamic export symbols and embedded strings by src/static/native.py.
 # pattern_type: export_symbol (matches symbol names, incl. Java_* JNI exports)
 #               | embedded_string (matches strings extracted from the .so)
+# The "incl. Java_* JNI exports" half of that claim is enforced by
+# _jni_export_matches in src/static/native.py, added 2026-09-04. Before it,
+# export_symbol was pure exact membership, so a technique-level pattern such as
+# `isRooted` could only match a plain C export of that exact name - never the
+# `Java_<pkg>_<Class>_isRooted` form the JNI spec mangles a real Android native
+# method into. The header documented a capability the matcher did not have, and
+# the JNI root check this file's first signature is named after could not fire.
+# Substring matching was rejected as the fix: it would let
+# `my_verify_certificate_helper` match `verify_certificate` (ADR-0006).
+# Any pattern below that contains an underscore is compared in its JNI-escaped
+# spelling too (`_` -> `_1` per the JNI spec), because that is the only form a
+# Java-declared native of that name can export under. Measured 2026-09-04: 382 of
+# the 6269 Java_* symbols across this corpus's 952 .so files carry a `_1` escape,
+# so it is the common spelling, not an edge case - and two patterns here
+# (verify_certificate, SSL_CTX_set_cert_verify_callback) contain underscores.
 # A rule that only matches at the bytecode/string layer has no native analogue -
 # keep this file to techniques that actually show up in native exports/strings.
 
@@ -76,7 +91,26 @@
   weight: 0.5
   pattern_type: export_symbol
   patterns:
-    - "Java_com_example_verify_cert"
+    # `Java_com_example_verify_cert` was REMOVED here 2026-09-04 for the same
+    # reason the `Java_com_example_*` placeholders were removed from
+    # native_jni_root_check above: no real app ships the `com.example` package,
+    # and export_symbol matching is exact membership, so the pattern could never
+    # fire on anything. It was also malformed as JNI (a real export mangles to
+    # Java_<pkg>_<Class>_<method>). Measured before removal: 0 occurrences across
+    # all 952 .so files in the analysed corpus - dead weight that overclaimed
+    # native SSL detection surface, which is the same defect this project
+    # declines to introduce for injection-based shielding SDKs.
+    #
+    # The two technique-level names below are kept and are now reachable in BOTH
+    # forms: as a plain C export, and - via _jni_export_matches in native.py - as
+    # the JNI-mangled export a real app ships (Java_com_foo_Pinner_verify_certificate).
+    # Measured 2026-09-04: also 0/952 in this corpus, but unlike the placeholder
+    # these are names a real pinning implementation genuinely uses, so absence
+    # here is a corpus limitation, not an unfirable pattern. The corpus contains
+    # no root/tamper/pin-shaped JNI export at all (the only cert-shaped ones are
+    # WebRTC's nativeGenerateCertificate/nativeGetCertificate, which are DTLS
+    # certificate GENERATION, not verification) - so no further name can be added
+    # here on corpus evidence without inventing it.
     - "verify_certificate"
     - "checkCertificatePinning"
 

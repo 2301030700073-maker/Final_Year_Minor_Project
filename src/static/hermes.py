@@ -33,11 +33,39 @@ from pathlib import Path
 HERMES_MAGIC = b"\x1f\xbc\x0c\x00"
 
 # Root-detection idioms as they survive into a Hermes string table. Recall-biased:
-# a false "root logic present" just degrades js to partial (honest, ADR-0006),
-# whereas a missed idiom silently over-claims a confident negative over code we
-# never read. Versioned in-module (dynload precedent) rather than the Java
-# signature YAML, because these are JS-domain literals, not Java class/string
-# evidence; category drives which detection list the evidence lands in.
+# a missed idiom silently over-claims a confident negative over code we never
+# read, so the lists err toward matching. Versioned in-module (dynload precedent)
+# rather than the Java signature YAML, because these are JS-domain literals, not
+# Java class/string evidence; category drives which detection list the evidence
+# lands in.
+#
+# HERM-PRECISION1 - what a match here does and does NOT mean. A match both (a)
+# marks the js surface coverage-limited and (b) contributes SCORED evidence at its
+# signature weight. Two properties bound the false-positive cost of (b), and both
+# are load-bearing:
+#
+#   1. Hermes packs its string table contiguously with no separators, so an
+#      ASCII-run extractor returns giant concatenated blobs, not discrete
+#      identifiers (measured on the real PropertyGuru bundle: 11,904 recovered
+#      runs, median length 9 but max 1,750,695 chars). Word boundaries therefore
+#      do not exist in this corpus and `\b` would be inert - matching is
+#      unavoidably substring matching. Verified consequence: PropertyGuru's sole
+#      root evidence, `isRooted`, is really the substring of
+#      `_isRootedExperimentalAsync` - expo-device's root-check API, i.e. a
+#      BUNDLED SDK export present in the string table whether or not the app ever
+#      calls it. That is the same static-linking/bundled-plumbing artifact that
+#      keeps mbedTLS verify-control in the indicator layer (see
+#      static/indicators.py), and it is why no idiom here may carry a weight that
+#      could decide a verdict on its own.
+#   2. Every weight in these lists is far below the 0.70 decision threshold, and
+#      the structural anti-FP invariant (no single signature >= 0.70) holds here
+#      too, so a bundled-but-uncalled export can never by itself produce a
+#      DETECTED - it can only raise a sum that other, independent signatures
+#      already dominate, and it always says "coverage-limited" alongside.
+#
+# So the honest reading of a match is "this bundle references a root/pinning API",
+# not "this app performs a root check". Do not raise these weights without
+# empirical false-positive evidence from a real corpus.
 JS_ROOT_IDIOMS: list[tuple[str, str, re.Pattern[str]]] = [
     (
         "js_root_su",

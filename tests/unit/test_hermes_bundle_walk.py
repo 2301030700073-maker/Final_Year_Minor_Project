@@ -79,6 +79,28 @@ def test_scan_binary_bundles_ignores_non_bundle_binaries(tmp_path):
     assert matches == []
 
 
+def test_scan_binary_bundles_reports_root_relative_paths(tmp_path):
+    # JS-PATH-REL1: the reported path must be relative to the root it was found
+    # under, like signatures.scan's `file_path.relative_to(root)`. An absolute
+    # path leaked the local outputs/ layout into stored evidence AND could not be
+    # anchored by derive_namespace in report/attribution.py (same failure mode as
+    # CFR-NS1), so a bundle under a bundled SDK's resource subtree was always
+    # counted app-owned.
+    from common import derive_namespace, is_known_third_party
+
+    root = tmp_path / "outputs" / "analysis" / ("a" * 64) / "apktool"
+    vendor = root / "assets" / "com" / "braze" / "js"
+    vendor.mkdir(parents=True)
+    (vendor / "index.android.bundle").write_bytes(b"\x00isRooted\x00" + b"x" * 32)
+    _has, matches = _scan_binary_bundles([root])
+    files = {f for _sig, _cat, _txt, f in matches}
+    assert files == {"assets/com/braze/js/index.android.bundle"}
+    for f in files:
+        assert "outputs/analysis" not in f
+        # Anchoring now works: the vendor namespace is recoverable from the path.
+        assert is_known_third_party(derive_namespace(f.replace("assets/", "", 1)))
+
+
 def test_scan_binary_bundles_handles_missing_and_none_roots(tmp_path):
     # A None or non-existent root is skipped, not crashed on (defensive: cfr_output
     # is only appended when present, so the list can carry absent entries).

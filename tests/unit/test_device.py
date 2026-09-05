@@ -539,6 +539,7 @@ def test_setup_frida_connection_native_path_delegates_to_get_device(monkeypatch)
     ensured = {"n": 0}
     monkeypatch.setattr("dynamic.device._ensure_frida_server", lambda adb, serial: ensured.__setitem__("n", 1))
     monkeypatch.setattr("dynamic.device._in_wsl", lambda: False)
+    monkeypatch.setattr("dynamic.device._adb_wrapper_path", lambda: "adb")
     fake = object()
     monkeypatch.setattr(frida, "get_device", lambda serial, timeout=10: fake)
 
@@ -785,11 +786,17 @@ def test_ensure_frida_server_returns_when_root_server_version_matches(monkeypatc
     assert not any("nohup" in c for c in calls)
 
 
-def test_ensure_frida_server_reprovisions_on_version_mismatch(monkeypatch):
+def test_ensure_frida_server_reprovisions_on_version_mismatch(monkeypatch, tmp_path):
     # A root server running the WRONG major.minor (here 17.16 vs venv 16.7)
     # must be killed and the pinned tools/ binary re-pushed+restarted. Without
     # this, the mismatched server sails through and fails later at
     # enumerate_processes with "ensure that major versions match".
+    # The pinned binary is gitignored, so point _FRIDA_SERVER_LOCAL at a real
+    # temp file to keep this test toolchain-free (the re-push path checks
+    # .exists()); the push itself is mocked by _frida_server_fake_run.
+    local = tmp_path / "frida-server-16.7.19-x86_64"
+    local.write_bytes(b"frida-binary")
+    monkeypatch.setattr(device, "_FRIDA_SERVER_LOCAL", local)
     fake_run, calls = _frida_server_fake_run("17.16.4\n")
     monkeypatch.setattr(subprocess, "run", fake_run)
 

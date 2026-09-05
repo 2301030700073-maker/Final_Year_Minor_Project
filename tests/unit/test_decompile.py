@@ -19,6 +19,17 @@ from static.decompile import (
 )
 
 
+def _stub_jadx_lookup(monkeypatch):
+    # decompile() resolves the jadx binary on entry (to stamp/compare the sidecar
+    # jadx_version), which would raise "jadx not found on PATH" on a toolchain-free
+    # runner before the cache-reuse path is even reached. The reuse path never runs
+    # jadx; stubbing the lookup + version keeps these cache tests hermetic and
+    # runnable in CI (ADR-0007: the unit suite must not need the Android toolchain)
+    # without weakening what they assert about cache-completeness honesty.
+    monkeypatch.setattr("static.decompile._find_jadx", lambda: "/usr/bin/jadx")
+    monkeypatch.setattr("static.decompile._jadx_version", lambda jadx: "test-jadx")
+
+
 def test_decompile_surfaces_real_stderr_not_just_the_generic_exit_message(tmp_path, monkeypatch):
     # A real incident this pins down: jadx exited 1 on a large real-world
     # APK, but the report only ever showed Python's generic "returned
@@ -321,11 +332,15 @@ def test_cached_status_is_clean_requires_both_tools_zero(tmp_path):
     assert _cached_status_is_clean(tmp_path / "nope.json") is True
 
 
-def test_decompile_cache_hit_is_unknown_when_no_sidecar_exists(tmp_path):
+def test_decompile_cache_hit_is_unknown_when_no_sidecar_exists(tmp_path, monkeypatch):
     # RESID-3B: a cache hit with no sidecar must NOT be assumed "complete" -
     # the completeness of cached output is unprovable once the jadx process is
     # gone, and guessing "complete" would launder a partial decompile into
     # calibration as a full scan. Report "unknown" so calibration excludes it.
+    # decompile() resolves the jadx binary on entry (for the sidecar version
+    # check), so stub that lookup - the reuse path itself needs no real toolchain,
+    # which is the point, and this keeps the test hermetic on a toolchain-free CI.
+    _stub_jadx_lookup(monkeypatch)
     target_dir = tmp_path / "prephase4"
     (target_dir / "jadx").mkdir(parents=True)
     (target_dir / "jadx" / "SomeClass.java").write_text("class SomeClass {}")
@@ -339,9 +354,10 @@ def test_decompile_cache_hit_is_unknown_when_no_sidecar_exists(tmp_path):
     assert result.evidence["partial"] is True  # unknown != complete, so partial
 
 
-def test_decompile_cache_hit_is_unknown_when_sidecar_unparseable(tmp_path):
+def test_decompile_cache_hit_is_unknown_when_sidecar_unparseable(tmp_path, monkeypatch):
     # RESID-3B: an unreadable/corrupt sidecar is the same as a missing one -
     # completeness can't be proven, so it must be "unknown", not "complete".
+    _stub_jadx_lookup(monkeypatch)
     target_dir = tmp_path / "corrupt"
     (target_dir / "jadx").mkdir(parents=True)
     (target_dir / "jadx" / "SomeClass.java").write_text("class SomeClass {}")
@@ -355,7 +371,10 @@ def test_decompile_cache_hit_is_unknown_when_sidecar_unparseable(tmp_path):
     assert result.evidence["decompile_completeness"] == "unknown"
 
 
-def test_decompile_uses_cache_without_needing_toolchain(tmp_path):
+def test_decompile_uses_cache_without_needing_toolchain(tmp_path, monkeypatch):
+    # The reuse path must not re-run jadx/apktool; it does resolve the jadx binary
+    # for the version-staleness check, so stub only that lookup (not a real run).
+    _stub_jadx_lookup(monkeypatch)
     apk_hash = "deadbeef"
     target_dir = tmp_path / apk_hash
     (target_dir / "jadx").mkdir(parents=True)
@@ -598,12 +617,25 @@ def test_find_cfr_jar_prefers_cfr_jar_env(monkeypatch):
     assert _find_cfr_jar() == "/tmp/some-cfr.jar"
 
 
-def test_find_cfr_jar_discovers_tools_cfr(monkeypatch):
+def test_find_cfr_jar_discovers_tools_cfr(tmp_path, monkeypatch):
     # L-M1 fix: with no CFR_JAR env, the loader must still find the jar the
     # reference env installs under tools/cfr/ (mirroring Ghidra's tools/ghidra
     # discovery) - this is what makes the fallback work out-of-the-box instead
     # of degrading to fallback_unavailable on a default shell.
+    # The real tools/cfr/*.jar is gitignored (not on a CI runner), so build a
+    # fake tools/cfr layout under tmp and point the loader's repo-root resolution
+    # at it - this asserts the DISCOVERY LOGIC, not the presence of the vendored
+    # jar on this particular machine (ADR-0007 toolchain-free CI).
     monkeypatch.delenv("CFR_JAR", raising=False)
+    fake_repo = tmp_path / "repo"
+    (fake_repo / "src" / "static").mkdir(parents=True)
+    (fake_repo / "tools" / "cfr").mkdir(parents=True)
+    (fake_repo / "tools" / "cfr" / "cfr-0.152.jar").write_bytes(b"PK\x03\x04")
+    # decompile.__file__ resolves as <repo>/src/static/decompile.py; parents[2] is
+    # the repo root the loader globs tools/cfr under.
+    monkeypatch.setattr("static.decompile.__file__",
+                        str(fake_repo / "src" / "static" / "decompile.py"))
+
     jar = _find_cfr_jar()
     assert jar.endswith(".jar")
     assert "cfr" in Path(jar).parts and "tools" in Path(jar).parts
@@ -614,6 +646,12 @@ def test_secondary_fallback_recovers_classes_via_dex2jar_and_cfr(tmp_path, monke
     # classes it missed - dex2jar makes recovered.jar, CFR decompiles it to .java,
     # and the fallback reports the recovered output dir (which cli then scans).
     monkeypatch.setenv("CFR_JAR", "/opt/cfr.jar")
+    # d2j-dex2jar.sh is discovered via shutil.which; on a toolchain-free runner it
+    # is absent and the fallback short-circuits to fallback_unavailable before any
+    # (mocked) subprocess runs. Stub the lookup so this exercises the recovery path
+    # itself, not the runner's PATH (ADR-0007).
+    monkeypatch.setattr("static.decompile.shutil.which",
+                        lambda name: "/usr/bin/d2j-dex2jar.sh" if name == "d2j-dex2jar.sh" else None)
 
     def fake_run(cmd, stdout, stderr, timeout):
         import subprocess
@@ -641,6 +679,10 @@ def test_secondary_fallback_no_recovery_when_cfr_produces_nothing(tmp_path, monk
     # is still dex-only, which CFR cannot read) - that is an honest non-recovery,
     # not a fabricated one: fallback_recovered stays False with an error tail.
     monkeypatch.setenv("CFR_JAR", "/opt/cfr.jar")
+    # See sibling test: stub the d2j lookup so the recovery path runs even when the
+    # runner has no dex2jar on PATH (ADR-0007 toolchain-free CI).
+    monkeypatch.setattr("static.decompile.shutil.which",
+                        lambda name: "/usr/bin/d2j-dex2jar.sh" if name == "d2j-dex2jar.sh" else None)
 
     def fake_run(cmd, stdout, stderr, timeout):
         import subprocess

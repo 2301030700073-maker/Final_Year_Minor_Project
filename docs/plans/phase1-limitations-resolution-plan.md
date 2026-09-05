@@ -1,8 +1,27 @@
 # Phase 1 Limitations & Resolution Plan
 
+> **STATUS AS OF 2026-09-05 — this plan is DONE.** Every limitation below (L-M1…L-M11) has been driven to its minimum achievable bound and landed in the deterministic core, verified against the code and covered by the 1418-test unit suite. This document is now a **historical record of the resolution work**, not a list of open tasks. For the current-reality inventory (what works / what is a structural boundary today), see `project-limitations.md` (the authoritative companion). Per-item closure is marked inline as **[CLOSED]** below; the residual, structural boundaries are named in `project-limitations.md` §6 and are surfaced honestly (coverage-limited, never a confident negative) rather than "removed" — that distinction is the whole point of ADR-0006 / principle 4.
+
 **Scope:** the deterministic core (Phases 1-4) as it exists at HEAD. Every limitation below was either **proven live** during adversarial testing or is already documented in `project-limitations.md`. Each entry: the limitation → the proof/evidence → the root cause → the **best 2026 solution** (web-researched where it exists, designed where it does not) → target phase/effort.
 
 > **Honest framing first.** "Zero limitations" is not a claim this project makes (ADR-0006) and is not achievable for a deterministic signature engine on real-world Android. The goal here is to drive each limitation to its **minimum achievable bound** for the deterministic core, and to hand the genuinely irreducible ones (bypass synthesis, deobfuscation, native transpilation) to the documented AI-layer roadmap (ADR-0008 groups C/D, items 12-20). Nothing below promises a limitation will be "completely removed" — it promises the best verifiable reduction, and says plainly when one is structural.
+
+## Closure summary (2026-09-05)
+
+| Item | What it was | Closure |
+|---|---|---|
+| L-M1 | Decompile bottleneck on large apps | **[CLOSED]** multi-engine CFR fallback per-class in `decompile.py`; partial excluded from Tier 2; residual is structural (packed/Dart). |
+| L-M2 | Dynamic bypass doesn't generalize | **[CLOSED]** synthesized bypass for unknown targets (`synthesizer.py` `UNIVERSAL_ROOT`/`UNIVERSAL_SSL`); no-category targets degrade to honest `skipped`. |
+| L-M3 | Signature blind spots (12 patterns) | **[CLOSED]** 119 DEX-verified entries (48 root / 51 SSL / 12 native / 8 packers); unknown surfaced as coverage-limited, never silent-absent. |
+| L-M4 | `NEITHER` ≠ absence on small corpus | **[CLOSED]** confidence bound by coverage; RESID-4C warning + Tier-2 exclusion. |
+| L-M5 | SSL detection weak; no SSL Tier 2 GT | **[CLOSED]** RS_CertPinning added as `ssl:true` ground truth; NSC XML parsed as first-class SSL signal; SSL taxonomy expanded. |
+| L-M6 | Native `.so` unscannable | **[CLOSED]** `static.native` (ELF symbols + capstone bodies + UPX unpack); Dart-AOT/stripped-symbols named as structural in `project-limitations.md` §6. |
+| L-M7 | Console omits partial-decompile CAUTION | **[CLOSED]** CAUTION mirrored to console (cli.py:669). |
+| L-M8 | Per-file OSError degradation | **[CLOSED]** count + path persisted to analysis JSON and report. |
+| L-M9 | Single-line / case-sensitive regex | **[CLOSED]** case-fold default + multiline pass (`_line_matches`). |
+| L-M10 | Ingest / toolchain edge cases | **[CLOSED]** timeouts, tri-state signer, zip-truncation handled + tested. |
+| L-M11 | Remote attestation out of scope | **Structural non-goal** — kept as an explicit boundary; Play Integrity *verdict tokens* detected, attestation itself not defeated client-side. |
+| — | Empty-capture reachability disambiguation | **[CLOSED 2026-09-05]** device-side client-connection probe distinguishes app-silence from a real device→proxy failure. |
 
 ---
 

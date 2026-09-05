@@ -50,8 +50,10 @@ Practical consequence for how code gets written: pure-Python logic (signature ma
 
 Matches `docs/plans/architecture/low-level-design-core-phases-1-4.md`:
 ```
-src/{ingest, static, dynamic, report, storage, audit}/
-config/signatures/*.yaml
+src/{ingest, static, dynamic, report, storage, audit, calibration}/
+src/{cli.py, common.py}          # orchestrator + shared helpers (vendor/namespace attribution)
+config/signatures/*.yaml         # root_detection, ssl_pinning, native_detection, packers
+config/{settings.yaml, ground_truth.yaml}
 outputs/{apks, analysis, reports}/{hash}/
 tests/{unit, fixtures}/
 ```

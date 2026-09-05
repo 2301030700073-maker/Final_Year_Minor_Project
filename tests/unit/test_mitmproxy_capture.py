@@ -83,6 +83,49 @@ def test_parse_flow_detail_multiple_requests_one_response_keeps_order():
     assert flows[1].status == ""
 
 
+# --- reachability probe: @@CLIENT_CONNECT@@ marker counting --------------------
+
+def test_count_client_connections_counts_markers():
+    text = (
+        "@@CLIENT_CONNECT@@\n"
+        "127.0.0.1:1: GET https://a.example/ HTTP/2.0\n"
+        " << HTTP/2.0 200 OK 1b\n"
+        "@@CLIENT_CONNECT@@\n"
+    )
+    assert mitmproxy_capture._count_client_connections(text) == 2
+
+
+def test_count_client_connections_zero_when_absent():
+    # No connections reached the proxy -> 0 (the real-reachability-failure signal).
+    assert mitmproxy_capture._count_client_connections(FIXTURE_DETAIL) == 0
+    assert mitmproxy_capture._count_client_connections("") == 0
+
+
+def test_connect_marker_never_counted_as_a_flow():
+    # The reachability marker must be reachability-only: it carries no request
+    # line, so it must never surface as a decrypted flow (or it would fabricate
+    # a capture that never happened - principle 3).
+    text = (
+        "@@CLIENT_CONNECT@@\n"
+        "@@CLIENT_CONNECT@@\n"
+    )
+    assert mitmproxy_capture._parse_flow_detail(text) == []
+    assert mitmproxy_capture._count_client_connections(text) == 2
+
+
+def test_connect_markers_and_flows_coexist_independently():
+    # A run where the device connected twice and one request decrypted: 1 flow,
+    # 2 connections, counted independently and neither contaminating the other.
+    text = (
+        "@@CLIENT_CONNECT@@\n"
+        "127.0.0.1:1: GET https://a.example/ HTTP/2.0\n"
+        " << HTTP/2.0 200 OK 1b\n"
+        "@@CLIENT_CONNECT@@\n"
+    )
+    assert len(mitmproxy_capture._parse_flow_detail(text)) == 1
+    assert mitmproxy_capture._count_client_connections(text) == 2
+
+
 def test_run_capture_stage_fails_loudly_when_mitmdump_missing(monkeypatch, tmp_path):
     # NFR-7: no silent no-op. Missing mitmdump -> a failed StageResult carrying
     # the install guidance, not an empty success.

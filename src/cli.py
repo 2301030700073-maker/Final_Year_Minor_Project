@@ -736,10 +736,20 @@ def _reclassify_empty_capture(
          and means the app simply did not exercise its network path in a
          non-interactive window. -> skipped (app-silence, interactive capture needed).
 
+      3. INTERNET declared, no in-process signal available (dynamic skipped/failed/
+         absent), but the capture addon recorded >0 client connections to the proxy
+         -> the device DID reach mitmdump; zero flows then means the app was silent
+         or a pinned request refused the CA after connecting, not a device->proxy
+         wiring failure. This is the reachability probe that closes the last
+         previously-undisambiguable case. -> skipped (device reached proxy, app quiet).
+
     Anything else stays failed: INTERNET + bypassEffect>0 + 0 flows is a REAL
-    capture-path failure (the app made the request, nothing reached the proxy), and
-    INTERNET with no dynamic signal to disambiguate cannot rule a proxy problem out,
-    so it must remain loud. A non-empty (success) capture and a hard setup failure
+    capture-path failure (the app made the request, nothing reached the proxy);
+    INTERNET + 0 client connections is a genuine reachability failure (the device
+    never reached the proxy); and INTERNET with no dynamic signal AND no connection
+    count at all cannot rule a proxy problem out, so all remain loud. A missing
+    client_connections is treated as absent (not zero) - it never invents a
+    reachability verdict. A non-empty (success) capture and a hard setup failure
     (Windows mitmdump missing, no usable device) are returned untouched - only an
     empty-capture "failed" whose evidence carries a flow count of zero is a
     reclassification candidate (decider-owns-its-guard: this function alone decides,
@@ -784,6 +794,33 @@ def _reclassify_empty_capture(
                           "capture needed) - not a proxy failure"},
                 error=None, duration_ms=capture_stage.duration_ms,
             )
+
+    # Signal 3 (device-side reachability probe): the previously-undisambiguable case
+    # - INTERNET declared but NO in-process signal (dynamic skipped/failed/absent) -
+    # is now decidable by the capture addon's client-connection count, which is
+    # proxy-path-independent in the OTHER direction: it proves whether the device
+    # actually REACHED mitmdump at all. connections>0 + 0 flows => the device opened
+    # a connection to the proxy but no request produced a decrypted flow (app-silence,
+    # or a pinned request that refused the CA after connecting) - NOT a device->proxy
+    # wiring failure, so the loud "failed" would be a false alarm -> skipped. It is
+    # only consulted when Signals 1-2 did not already decide, and ONLY the >0 case
+    # downgrades: connections==0 means the device never reached the proxy, which is a
+    # genuine reachability failure and MUST stay loud (never downgrade a real break).
+    # A missing count (older addon / non-WSL2 path that didn't record it) is absent,
+    # not zero, so it never fabricates a reachability claim - stays failed.
+    client_connections = evidence.get("client_connections")
+    if has_internet and isinstance(client_connections, int) and client_connections > 0:
+        return StageResult(
+            stage="capture-traffic", status="skipped",
+            evidence={**evidence, "reclassified_from": "failed",
+                      "not_applicable_reason": (
+                          f"device reached the proxy ({client_connections} client "
+                          "connection(s)) but no request produced a decrypted flow - "
+                          "app-silence or a pinned request that refused the CA after "
+                          "connecting, not a device->proxy reachability failure "
+                          "(interactive capture needed)")},
+            error=None, duration_ms=capture_stage.duration_ms,
+        )
 
     # Otherwise: a real proxy-wiring failure (or undisambiguable) - stay loud.
     return capture_stage

@@ -153,3 +153,44 @@ def test_no_manifest_stays_failed():
     # positively-declared INTERNET permission -> stay loud rather than guess.
     out = _reclassify_empty_capture(_capture(), None, None)
     assert out.status == "failed"
+
+
+# --- Signal 3: device-side reachability probe (client connection count) --------
+
+def test_internet_client_connected_but_no_flow_is_skipped():
+    # The mitmproxy addon counted client connections: the device DID reach the
+    # proxy but no request decrypted -> app-silence / post-connect CA refusal,
+    # NOT a device->proxy reachability failure. Proxy-independent in the OTHER
+    # direction from the bypassEffect signal, so it disambiguates even with no
+    # usable dynamic stage.
+    out = _reclassify_empty_capture(
+        _capture(client_connections=2), _manifest(_INTERNET), None)
+    assert out.status == "skipped"
+    assert out.evidence["reclassified_from"] == "failed"
+    assert "reached the proxy" in out.evidence["not_applicable_reason"]
+    assert "2 client" in out.evidence["not_applicable_reason"]
+
+
+def test_internet_zero_client_connections_stays_failed():
+    # Device never reached the proxy -> a REAL reachability failure -> stay loud.
+    out = _reclassify_empty_capture(
+        _capture(client_connections=0), _manifest(_INTERNET), None)
+    assert out.status == "failed"
+
+
+def test_internet_client_connections_absent_stays_failed():
+    # No count recorded (older capture / probe absent) -> missing is treated as
+    # absent, NOT as zero AND not as a proven connection -> undisambiguable ->
+    # stays failed. Never fabricate a reachability verdict from a missing field.
+    out = _reclassify_empty_capture(
+        _capture(), _manifest(_INTERNET), None)
+    assert out.status == "failed"
+
+
+def test_client_connection_signal_needs_internet():
+    # Without a positively-declared INTERNET permission the connection count is
+    # moot (Signal 1 already covers no-INTERNET). A connection count on a
+    # no-manifest run must not by itself force a skip.
+    out = _reclassify_empty_capture(
+        _capture(client_connections=5), None, None)
+    assert out.status == "failed"

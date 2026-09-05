@@ -78,7 +78,43 @@ def response(flow):
 
 def error(flow):
     _emit(flow)
+
+
+def _mark_connect():
+    # Reachability probe: a client actually reached the proxy and opened a
+    # connection, independent of whether any request produced a decrypted flow.
+    # Counting these lets the WSL2 stage tell "device reached the proxy but the
+    # app was silent" (connections>0, flows==0 -> skipped/app-silence) apart from
+    # "device never reached the proxy" (connections==0, flows==0 -> real failure).
+    # A distinct marker token that _parse_flow_detail counts but never mistakes
+    # for a flow (it carries no " HTTP/" request line).
+    try:
+        with open(_LOG_PATH, "a", buffering=1) as f:
+            f.write("@@CLIENT_CONNECT@@\\n")
+    except Exception:
+        pass
+
+
+def client_connected(client):
+    # mitmproxy >=8 lifecycle hook: fires once per client TCP connection to the
+    # proxy. Present on the addon manager regardless of TLS outcome, so it fires
+    # even when the app later refuses the CA (pinned) - exactly the reachability
+    # signal we need. Older API name (clientconnect) is aliased below.
+    _mark_connect()
+
+
+def clientconnect(layer):
+    # Back-compat alias for mitmproxy <8 (the reference host pins 8.1.1, which has
+    # client_connected; this keeps the addon working if the host mitmproxy is
+    # older, rather than silently logging no connections).
+    _mark_connect()
 '''
+
+
+# Reachability marker the addon writes on each client TCP connection (see the
+# addon's client_connected hook). Counted by _count_client_connections and
+# skipped by _parse_flow_detail so it is never mistaken for a decrypted flow.
+_CLIENT_CONNECT_MARKER = "@@CLIENT_CONNECT@@"
 
 
 @dataclass
@@ -87,6 +123,16 @@ class FlowSummary:
     method: str
     path: str
     status: str
+
+
+def _count_client_connections(text: str) -> int:
+    """How many client TCP connections actually reached the proxy this run,
+    counted from the addon's @@CLIENT_CONNECT@@ markers. Proxy-independent
+    reachability signal: >0 with zero flows means the device reached mitmdump but
+    the app stayed silent (or refused the CA on a pinned request) - NOT a
+    device->proxy wiring failure. Pure, fixture-testable (no mitmproxy needed)."""
+    return sum(1 for raw in text.splitlines()
+               if raw.strip() == _CLIENT_CONNECT_MARKER)
 
 
 def _parse_flow_detail(text: str) -> list[FlowSummary]:
@@ -108,7 +154,10 @@ def _parse_flow_detail(text: str) -> list[FlowSummary]:
         line = raw.strip()
         if not line:
             continue
-        # Skip connection lifecycle noise.
+        # Skip connection lifecycle noise, including our own reachability marker
+        # (@@CLIENT_CONNECT@@ is counted by _count_client_connections, never a flow).
+        if line == _CLIENT_CONNECT_MARKER:
+            continue
         if ("client connect" in line or "client disconnect" in line
                 or "server connect" in line or "server disconnect" in line):
             continue
@@ -452,6 +501,7 @@ def run_capture_stage(
 
         flows = _parse_flow_detail(stdout_text or "")
         if not flows:
+            client_connections = _count_client_connections(stdout_text or "")
             result = StageResult(
                 stage="capture-traffic", status="failed",
                 evidence={
@@ -461,6 +511,11 @@ def run_capture_stage(
                     "flows_path": str(flows_path),
                     "bypass_script": bypass_script,
                     "bypass_applied": bypass_applied,
+                    # Reachability probe (device-side, proxy-independent): how many
+                    # client connections reached mitmdump. >0 with 0 flows => device
+                    # reached the proxy, app was silent (app-silence, not a wiring
+                    # failure); 0 => device never reached the proxy (real failure).
+                    "client_connections": client_connections,
                     "frida_messages": [
                         m.get("payload", m) for m in frida_messages
                     ],

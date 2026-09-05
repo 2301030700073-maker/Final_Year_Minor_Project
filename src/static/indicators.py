@@ -188,6 +188,38 @@ NATIVE_SSL_INDICATORS: tuple[str, ...] = (
     r"SSL_load_verify_locations",
     r"SSL_CTX_load_verify_locations",
     r"/system/etc/hosts",
+    # dart:io native TLS verify-control API (DART-IND1). A release Flutter app
+    # compiles its Dart HTTPS/pinning logic into the AOT snapshot (libapp.so) -
+    # an opaque blob to Ghidra/capstone, so it correctly bounds the native
+    # surface to `partial` (dart_aot_coverage). But the snapshot's `.rodata`
+    # retains the dart:io runtime's C-level TLS entrypoints as readable strings,
+    # and those are the exact places a Flutter app installs or relaxes cert
+    # validation - the Dart analogue of SSL_CTX_set_custom_verify. Without these
+    # the native SSL category saw ZERO indicators on a real Flutter libapp.so
+    # (verified: outputs/analysis/1af7a8c5.../native/lib/x86_64/libapp.so exposes
+    # SecureSocket_RegisterBadCertificateCallback + SecurityContext_TrustBuiltinRoots
+    # in .rodata), so a native NEITHER over a Flutter app looked cleaner than the
+    # evidence warrants. These live in the dart:io VM namespace and appear in NO
+    # non-Flutter lib in the corpus (verified 0 hits), so there is no bundled-
+    # plumbing cross-contamination. Indicators, deliberately NEVER scored: their
+    # mere presence proves "this snapshot links dart:io TLS", not "this app pins"
+    # (dart:io ships them whether or not the app registers a callback) - exactly
+    # the mbedTLS/BoringSSL bundled-symbol reasoning above. Coverage-limited
+    # "unknown native TLS capability" is the honest signal (ADR-0006), and it is
+    # the tightest reduction available for the Dart-AOT boundary: the snapshot
+    # body stays unreadable, but its TLS surface is no longer silently absent.
+    # Every pattern here was confirmed present in the real libapp.so by exact
+    # string match (the two Set*Bytes forms dart:io also defines were NOT in this
+    # build - 0 hits - so they are deliberately omitted rather than padded in):
+    #   SecureSocket_RegisterBadCertificateCallback - install the bad-cert hook
+    #     (where a Flutter app accepts/rejects a peer cert: the pinning decision)
+    #   SecurityContext_TrustBuiltinRoots           - opt in/out of the system
+    #     trust store (relaxing this is how validation is widened/disabled)
+    #   SecureSocket_MarkAsTrusted                  - explicitly trust a peer,
+    #     the dart:io trust-override entry point
+    r"SecureSocket_RegisterBadCertificateCallback\b",
+    r"SecurityContext_TrustBuiltinRoots\b",
+    r"SecureSocket_MarkAsTrusted\b",
 )
 
 _NATIVE_CATEGORY_TO_INDICATORS: dict[str, tuple[str, ...]] = {

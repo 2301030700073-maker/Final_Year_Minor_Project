@@ -135,6 +135,27 @@ def test_native_mbedtls_verify_control_is_ssl_indicator_not_scored_sig():
         "mbedtls_x509_crt_verify",
     ):
         assert find_native_indicator_categories(symbol) == {"ssl"}, symbol
+
+
+def test_native_dartio_tls_control_is_ssl_indicator_not_scored_sig():
+    # DART-IND1. A release Flutter app compiles its Dart HTTPS/pinning logic into
+    # the AOT snapshot (libapp.so), an opaque blob to Ghidra/capstone - so the
+    # native surface was correctly bounded to `partial`, but its dart:io TLS
+    # verify-control entrypoints (retained as readable .rodata strings) matched no
+    # indicator, and the native SSL category saw ZERO signal on a real Flutter
+    # libapp.so. All three symbols below were confirmed by exact match in that
+    # real snapshot (outputs/analysis/1af7a8c5.../native/lib/x86_64/libapp.so);
+    # the two Set*Bytes forms dart:io also defines were absent in that build and
+    # are deliberately not asserted here. They are indicators, never scored: the
+    # dart:io VM ships them whether or not the app registers a callback, so their
+    # presence proves "this snapshot links dart:io TLS", not "this app pins" -
+    # the same bundled-symbol reasoning as the mbedTLS/BoringSSL entries.
+    for symbol in (
+        "SecureSocket_RegisterBadCertificateCallback",
+        "SecurityContext_TrustBuiltinRoots",
+        "SecureSocket_MarkAsTrusted",
+    ):
+        assert find_native_indicator_categories(symbol) == {"ssl"}, symbol
     # Non-TLS mbedTLS crypto primitives must NOT flag the SSL surface: the same
     # statically linked library exports hundreds of them (mbedtls_rsa_*,
     # psa_verify_hash, mbedtls_ecdsa_verify), and treating "bundles a crypto

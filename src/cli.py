@@ -710,6 +710,85 @@ def _correlation_skip_reason_for_failed_stage(
     return None
 
 
+def _reclassify_empty_capture(
+    capture_stage: StageResult,
+    manifest_info,
+    dynamic_stage: StageResult | None,
+) -> StageResult:
+    """An empty traffic capture is only a FAILURE when a real proxy/wiring problem
+    is the plausible cause. When a proxy-INDEPENDENT signal already in hand proves
+    the empty capture was expected or inapplicable, a "failed" status is a false
+    alarm - it reads as "the tool broke" when nothing broke. Reclassify those to
+    "skipped" with the definitive reason, and leave a genuine proxy failure "failed".
+
+    This mirrors the report body's capture cross-reference (report/generator.py) so
+    the CLI stage line and the report agree on the cause instead of the stage line
+    saying FAILED while the report explains it was expected. The two disambiguating
+    signals, both independent of the mitmproxy path:
+
+      1. Manifest declares NO android.permission.INTERNET -> the app cannot open a
+         socket, so zero flows is guaranteed regardless of proxy state. Sound
+         invariant (no INTERNET => no traffic). -> skipped (not applicable).
+      2. INTERNET declared, dynamic stage RAN, and its in-process Frida TLS observer
+         recorded 0 SSL bypassEffect messages -> the app's own pinned request never
+         executed. That observer is in-process, so a proxy the device could not reach
+         would still let it fire; its silence rules out a proxy-reachability failure
+         and means the app simply did not exercise its network path in a
+         non-interactive window. -> skipped (app-silence, interactive capture needed).
+
+    Anything else stays failed: INTERNET + bypassEffect>0 + 0 flows is a REAL
+    capture-path failure (the app made the request, nothing reached the proxy), and
+    INTERNET with no dynamic signal to disambiguate cannot rule a proxy problem out,
+    so it must remain loud. A non-empty (success) capture and a hard setup failure
+    (Windows mitmdump missing, no usable device) are returned untouched - only an
+    empty-capture "failed" whose evidence carries a flow count of zero is a
+    reclassification candidate (decider-owns-its-guard: this function alone decides,
+    so no caller can drift)."""
+    if capture_stage.status != "failed":
+        return capture_stage
+    evidence = capture_stage.evidence or {}
+    # Only the "no flows captured" outcome is a candidate. A hard setup failure
+    # (mitmdump/device missing) carries a different reason and must stay failed -
+    # that IS a broken run, not an expected-empty one.
+    reason = evidence.get("reason")
+    if reason not in ("no flows captured", "no traffic captured"):
+        return capture_stage
+
+    permissions = getattr(manifest_info, "permissions", None) or []
+    has_internet = "android.permission.INTERNET" in permissions
+
+    # Signal 1: no INTERNET -> capture is inapplicable, empty is guaranteed.
+    if manifest_info is not None and not has_internet:
+        return StageResult(
+            stage="capture-traffic", status="skipped",
+            evidence={**evidence, "reclassified_from": "failed",
+                      "not_applicable_reason": "no INTERNET permission"},
+            error=None, duration_ms=capture_stage.duration_ms,
+        )
+
+    # Signal 2: INTERNET + dynamic ran + 0 in-process SSL bypassEffect -> app-silence.
+    if has_internet and dynamic_stage is not None and dynamic_stage.status == "success":
+        dyn_ev = dynamic_stage.evidence or {}
+        frida_messages = dyn_ev.get("frida_messages") or []
+        ssl_effects = 0
+        for m in frida_messages:
+            payload = m.get("payload") if isinstance(m, dict) else None
+            if isinstance(payload, dict) and isinstance(payload.get("bypassEffect"), str):
+                ssl_effects += 1
+        if ssl_effects == 0:
+            return StageResult(
+                stage="capture-traffic", status="skipped",
+                evidence={**evidence, "reclassified_from": "failed",
+                          "not_applicable_reason": "app did not exercise its "
+                          "network/SSL path (0 in-process bypassEffect; interactive "
+                          "capture needed) - not a proxy failure"},
+                error=None, duration_ms=capture_stage.duration_ms,
+            )
+
+    # Otherwise: a real proxy-wiring failure (or undisambiguable) - stay loud.
+    return capture_stage
+
+
 def _wrap_stage(stage_name: str, fn, *args, **kwargs):
     """For pure functions that don't return a StageResult themselves - always
     produces one, so failures here are as loud as everywhere else (NFR-1)."""
@@ -1953,6 +2032,7 @@ def run(
     # so it still works under --skip-dynamic.
     capture_failed = False
     if capture_traffic:
+        capture_start = time.monotonic()
         try:
             # serial is None here only if dynamic setup above already failed to
             # find a usable device; re-attempting capture on a nonexistent device
@@ -1978,6 +2058,18 @@ def run(
                 evidence={"reason": "unexpected capture-stage exception"},
                 error=f"capture stage raised unexpectedly: {exc}",
             )
+        # run_capture_stage returns a StageResult without a duration (defaults to
+        # 0), which _print_stage would otherwise render as a misleading "(0ms)"
+        # for a stage that actually took the whole capture window. Stamp the
+        # measured wall time so the stage line is honest; _reclassify_empty_capture
+        # preserves it.
+        capture_stage.duration_ms = capture_stage.duration_ms or elapsed_ms(capture_start)
+        # An empty capture is only a real FAILURE when a proxy/wiring problem is
+        # the plausible cause. A proxy-independent signal in hand (no INTERNET, or
+        # dynamic ran with 0 in-process SSL bypassEffect) can prove the empty
+        # capture was expected/inapplicable - reclassify those to "skipped" so the
+        # stage line stops crying wolf while a genuine proxy failure stays loud.
+        capture_stage = _reclassify_empty_capture(capture_stage, manifest_info, dynamic_stage)
         stage_results.append(capture_stage)
         _print_stage(capture_stage)
         if capture_stage.status == "failed":

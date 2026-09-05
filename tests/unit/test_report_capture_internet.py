@@ -33,12 +33,23 @@ def _empty_capture_stage():
     )
 
 
-def _render(manifest, tmp_path):
+def _dynamic_stage(frida_messages):
+    # A dynamic (Frida) stage carrying a real message stream, so the report's
+    # in-process bypass-effect signal is available to disambiguate an empty
+    # capture (memory: report-completeness-gaps). status is irrelevant to the
+    # audit - _hooks_engaged keys only on stage=="dynamic" + frida_messages.
+    return StageResult(
+        stage="dynamic", status="success",
+        evidence={"frida_messages": frida_messages, "scripts_applied": ["synthesized"]},
+    )
+
+
+def _render(manifest, tmp_path, extra_stages=()):
     report_path = generate_report(
         run_id="cap", apk_hash="cap001", timestamp="2026-08-23T12:00:00",
         metadata={"hashes": {"sha256": "cap001"}, "package": {"package_name": "com.example.net"}},
         classification=_neither_classification(), verification=None, correlation=None,
-        stage_results=[_empty_capture_stage()], output_dir=tmp_path, manifest=manifest,
+        stage_results=[_empty_capture_stage(), *extra_stages], output_dir=tmp_path, manifest=manifest,
     )
     return report_path.read_text(encoding="utf-8")
 
@@ -68,3 +79,53 @@ def test_empty_capture_without_internet_is_expected(tmp_path):
     assert "no `android.permission.INTERNET` permission" in content
     assert "expected regardless of proxy state" in content
     assert "coverage limitation of this run" not in content
+
+
+def _internet_manifest():
+    return ManifestInfo(
+        debuggable=False, network_security_config=None,
+        permissions=["android.permission.INTERNET"],
+    )
+
+
+def test_empty_capture_with_internet_and_zero_ssl_effects_is_app_silence(tmp_path):
+    # AndroGoat case: dynamic ran, the in-process TLS observer saw 0 bypass
+    # effects (only a root probeHit), so an empty capture is an un-exercised
+    # network/SSL path - NOT the "device could not reach mitmdump" hypothesis.
+    # The observer is a Frida hook independent of the proxy, so its silence
+    # positively rules out a proxy-reachability failure.
+    dynamic = _dynamic_stage([{"payload": {"probeHit": "root", "path": "/system/xbin/su"}}])
+    content = _render(_internet_manifest(), tmp_path, extra_stages=[dynamic])
+    assert "## Captured Traffic" in content
+    assert "0 SSL bypass-effect messages this run" in content
+    assert "un-exercised network/SSL path this run" in content
+    assert "not a proxy the device could not reach" in content
+    # must NOT read as the proxy-wiring-failure branch...
+    assert "real capture-path failure" not in content
+    # ...nor collapse back to the generic dual-hypothesis clause.
+    assert "may not have exercised the network, or a pinned endpoint refused the proxy CA" not in content
+
+
+def test_empty_capture_with_internet_and_ssl_effects_is_a_proxy_failure(tmp_path):
+    # The other branch: the in-process TLS observer DID see the app's pinned
+    # request (a bypassEffect), yet no flow reached the proxy -> the device->proxy
+    # path is broken (a real capture-path failure), not app-silence.
+    dynamic = _dynamic_stage([{"payload": {"bypassEffect": "ssl-pin-check"}}])
+    content = _render(_internet_manifest(), tmp_path, extra_stages=[dynamic])
+    assert "## Captured Traffic" in content
+    assert "real capture-path failure" in content
+    assert "the device->mitmdump traffic path did not carry the request" in content
+    assert "ssl-pin-check" in content
+    # this is NOT the app-silence case.
+    assert "un-exercised network/SSL path this run" not in content
+
+
+def test_empty_capture_without_dynamic_stage_stays_generic_coverage_limitation(tmp_path):
+    # No dynamic stage -> no second (proxy-independent) signal to disambiguate ->
+    # the honest generic dual-hypothesis coverage-limitation text is preserved,
+    # never over-claimed into either determinate branch.
+    content = _render(_internet_manifest(), tmp_path)
+    assert "coverage limitation of this run" in content
+    assert "may not have exercised the network, or a pinned endpoint refused the proxy CA" in content
+    assert "real capture-path failure" not in content
+    assert "0 SSL bypass-effect messages this run" not in content

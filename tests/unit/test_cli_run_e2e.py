@@ -590,12 +590,19 @@ def test_capture_failure_footer_does_not_claim_dynamic_was_not_attempted(run_set
     )
     monkeypatch.setattr(device_mod, "clear_logcat", lambda serial: None)
     monkeypatch.setattr(device_mod, "capture_logcat", lambda serial: "")
-    # capture fails with no flows
+    # capture fails HARD (a genuine setup failure that legitimately stays FAILED).
+    # An empty "no flows captured" capture is now reclassified to `skipped` when a
+    # proxy-independent signal proves it inapplicable - and this scenario (dynamic
+    # ran with 0 in-process bypassEffect) is exactly app-silence, not a broken run,
+    # so it would NO LONGER exit non-zero (see test_cli_reclassify_capture.py). A
+    # missing mitmdump carries a distinct reason, stays FAILED, and is precisely the
+    # capture-failure footer case under test: the footer must credit that dynamic
+    # DID run rather than claim it was never attempted.
     monkeypatch.setattr(
         "dynamic.mitmproxy_capture.run_capture_stage",
         lambda *a, **kw: StageResult(
             stage="capture-traffic", status="failed",
-            evidence={"reason": "no flows captured"}, error="no flows",
+            evidence={"reason": "mitmdump not found"}, error="mitmdump not found",
         ),
     )
 

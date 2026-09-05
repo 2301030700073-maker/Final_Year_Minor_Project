@@ -13,6 +13,23 @@ from report import attribution as attribution_module
 from static.coverage import confidence_bound, verdict_label
 from static.manifest import ManifestInfo
 
+# The hand-authored Frida bypass scripts are loaded by dynamic/frida_runner.py from
+# its sibling `scripts/` dir (frida_runner.SCRIPT_DIR = <src>/dynamic/scripts). We
+# anchor to the SAME directory from the report layer WITHOUT importing frida_runner
+# (which pulls in the Android/dynamic stack) so the pure report path stays importable
+# anywhere. Used only to turn a bypass script's basename into the exact full path it
+# was loaded from - and only when that file genuinely exists on disk (never a guessed
+# path): _resolve_script_path falls back to the bare basename if it is absent.
+_SCRIPT_DIR = (Path(__file__).resolve().parents[1] / "dynamic" / "scripts")
+
+
+def _resolve_script_path(basename: str) -> str:
+    """Full on-disk path a hand-authored bypass script was loaded from, or the bare
+    basename if that file is not present (honest: never invent a path that isn't
+    there). `basename` is a `scripts_applied` label already known to end in `.js`."""
+    candidate = _SCRIPT_DIR / basename
+    return str(candidate) if candidate.is_file() else basename
+
 
 def _md(value) -> str:
     """Escape a value for safe inline Markdown so an adversarial APK-derived
@@ -364,8 +381,8 @@ This run's decompilation completed successfully ({{ jadx_file_count }} source fi
 {% if hooks_driving_signatures -%}
 - Driven by static signatures: {% for s in hooks_driving_signatures %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}.
 {% endif -%}
-{% if hooks_handauthored_scripts -%}
-- Hand-authored script(s): {% for s in hooks_handauthored_scripts %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}.
+{% if hooks_handauthored_script_paths -%}
+- Bypass script(s) used (full path): {% for s in hooks_handauthored_script_paths %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}.
 {% endif -%}
 - Readiness checkpoints delivered: {% if hooks_checkpoints_fired %}{% for c in hooks_checkpoints_fired %}`{{ c }}`{% if not loop.last %}, {% endif %}{% endfor %}{% else %}none observed{% endif %}.
 - Behavioral engagement (the app's own check hitting a hook): {{ hooks_root_probe_hits }} root probeHit(s){% if hooks_ssl_effects %}; SSL effects {% for k, v in hooks_ssl_effects.items() %}`{{ k }}`={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}; 0 SSL effects{% endif %}. A probeHit is not attributed to a single signature - the union hooks serve many signatures at once, so a 1:1 claim would be fabricated.
@@ -550,7 +567,8 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
     absent = {
         "hooks_audit_present": False, "hooks_engaged_any": False,
         "hooks_checkpoints_fired": [], "hooks_driving_signatures": [],
-        "hooks_handauthored_scripts": [], "hooks_loaded_not_engaged": [],
+        "hooks_handauthored_scripts": [], "hooks_handauthored_script_paths": [],
+        "hooks_loaded_not_engaged": [],
         "hooks_root_probe_hits": 0, "hooks_ssl_effects": {},
     }
     if dynamic_stage is None:
@@ -619,6 +637,9 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
         "hooks_checkpoints_fired": sorted(checkpoints),
         "hooks_driving_signatures": sorted(set(driving)),
         "hooks_handauthored_scripts": sorted(set(handauthored)),
+        "hooks_handauthored_script_paths": [
+            _resolve_script_path(s) for s in sorted(set(handauthored))
+        ],
         "hooks_loaded_not_engaged": loaded_not_engaged,
         "hooks_root_probe_hits": root_probe_hits,
         "hooks_ssl_effects": dict(sorted(ssl_effects.items())),

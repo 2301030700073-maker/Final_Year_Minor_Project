@@ -1511,7 +1511,8 @@ def test_hooks_engaged_absent_without_dynamic_stage():
     assert out == {
         "hooks_audit_present": False, "hooks_engaged_any": False,
         "hooks_checkpoints_fired": [], "hooks_driving_signatures": [],
-        "hooks_handauthored_scripts": [], "hooks_loaded_not_engaged": [],
+        "hooks_handauthored_scripts": [], "hooks_handauthored_script_paths": [],
+        "hooks_loaded_not_engaged": [],
         "hooks_root_probe_hits": 0, "hooks_ssl_effects": {},
     }
 
@@ -1625,6 +1626,25 @@ def test_hooks_engaged_labels_handauthored_scripts():
     assert out["hooks_handauthored_scripts"] == ["uncrackable1.js"]
     assert out["hooks_driving_signatures"] == []
     assert out["hooks_checkpoints_fired"] == ["OkHttp CertificatePinner"]
+    # A script not present on disk falls back to its bare basename (never a
+    # fabricated path) - uncrackable1.js is not a real script in this repo.
+    assert out["hooks_handauthored_script_paths"] == ["uncrackable1.js"]
+
+
+def test_hooks_engaged_real_script_resolves_to_full_path():
+    # A real hand-authored bypass script is reported with the exact full path it was
+    # loaded from (src/dynamic/scripts/...), answering "which script did the bypass".
+    from report.generator import _hooks_engaged, _SCRIPT_DIR
+    dynamic = StageResult(
+        stage="dynamic", status="success",
+        evidence={"scripts_applied": ["root_bypass_v1.js"],
+                  "frida_messages": [{"type": "send", "payload": {"hook": "RootBeer"}}]},
+    )
+    out = _hooks_engaged([dynamic])
+    assert out["hooks_handauthored_scripts"] == ["root_bypass_v1.js"]
+    expected = str(_SCRIPT_DIR / "root_bypass_v1.js")
+    assert out["hooks_handauthored_script_paths"] == [expected]
+    assert expected.endswith("src/dynamic/scripts/root_bypass_v1.js")
 
 
 def test_generate_report_renders_hooks_engaged_audit(tmp_path):
@@ -1633,7 +1653,8 @@ def test_generate_report_renders_hooks_engaged_audit(tmp_path):
     stage_results = [StageResult(
         stage="dynamic", status="success",
         evidence={
-            "scripts_applied": ["synthesized", "root_su_binary_paths",
+            "scripts_applied": ["synthesized", "root_bypass_v1.js",
+                                "root_su_binary_paths",
                                 "custom_trustmanager_checkservertrusted"],
             "frida_messages": [
                 {"type": "send", "payload": {"hook": "root_su_binary_paths"}},
@@ -1652,6 +1673,9 @@ def test_generate_report_renders_hooks_engaged_audit(tmp_path):
     )
     content = report_path.read_text(encoding="utf-8")
     assert "Bypass hooks engaged (auditable, this run)" in content
+    # the bypass script that did the work is named with its full on-disk path
+    assert "Bypass script(s) used (full path):" in content
+    assert "src/dynamic/scripts/root_bypass_v1.js`" in content
     assert "`root_su_binary_paths`" in content            # driving signature named
     assert "1 root probeHit(s)" in content                # real behavioral count
     assert "`ssl-pin-check`=2" in content                 # real effect count

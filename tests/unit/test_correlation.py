@@ -3,6 +3,13 @@ from dynamic.correlation import correlate
 
 DETECTED = CategoryVerdict(confidence=0.9, detected=True, evidence=[])
 NOT_DETECTED = CategoryVerdict(confidence=0.1, detected=False, evidence=[])
+# CORR-COVLIM1: detected=False but coverage_limited=True is "unknown, not
+# absent" (ADR-0006) - static declined to certify a negative over a surface it
+# could not fully analyze. Distinct from NOT_DETECTED, which is a confident
+# negative (surface fully analyzed, nothing found).
+COVERAGE_LIMITED = CategoryVerdict(
+    confidence=0.1, detected=False, evidence=[], coverage_limited=True
+)
 
 
 def _classification(root_detected: bool, ssl_detected: bool) -> ClassificationResult:
@@ -182,3 +189,59 @@ def test_correlate_ssl_bypass_without_prediction_is_a_mismatch():
     assert len(result.mismatches) == 1
     assert "did not predict SSL-pinning" in result.mismatches[0]
     assert result.unverified == []
+
+
+def test_correlate_root_bypass_on_coverage_limited_verdict_is_not_a_mismatch():
+    # CORR-COVLIM1: static was coverage-limited on root (detected=False but
+    # coverage_limited=True = "unknown, not absent", ADR-0006) - it declined to
+    # certify a negative, never claimed one. Dynamic confirming a bypass there is
+    # a FILLED coverage gap, not a static/dynamic disagreement. It must NOT land
+    # in mismatches (that would blend a confirmed gap with a real static miss and
+    # read as the static engine being wrong when it behaved exactly as designed),
+    # and matches stays False (static never predicted the positive - not agreement).
+    root = COVERAGE_LIMITED
+    ssl = NOT_DETECTED
+    classification = ClassificationResult(action=Action.NEITHER, root=root, ssl=ssl)
+    verification = VerificationResult(root_bypassed=True, ssl_bypassed=None, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert result.matches is False
+    assert result.mismatches == []
+    assert len(result.coverage_confirmed) == 1
+    assert "coverage-limited" in result.coverage_confirmed[0]
+    assert "root-detection" in result.coverage_confirmed[0]
+
+
+def test_correlate_ssl_bypass_on_coverage_limited_verdict_is_not_a_mismatch():
+    # CORR-COVLIM1 SSL mirror: a coverage-limited SSL verdict is "unknown, not
+    # absent"; dynamic confirming a bypass fills that gap, it is not a conflict.
+    root = NOT_DETECTED
+    ssl = COVERAGE_LIMITED
+    classification = ClassificationResult(action=Action.NEITHER, root=root, ssl=ssl)
+    verification = VerificationResult(root_bypassed=None, ssl_bypassed=True, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert result.matches is False
+    assert result.mismatches == []
+    assert len(result.coverage_confirmed) == 1
+    assert "coverage-limited" in result.coverage_confirmed[0]
+    assert "SSL-pinning" in result.coverage_confirmed[0]
+
+
+def test_correlate_confident_negative_bypass_stays_a_mismatch_not_coverage_confirmed():
+    # Regression guard for CORR-COVLIM1: the coverage-limited relabel must gate
+    # STRICTLY on coverage_limited=True. A CONFIDENT negative (fully analyzed,
+    # nothing found) that dynamic then contradicts is a REAL static miss and must
+    # stay a MISMATCH - never softened to coverage-confirmed, which would hide a
+    # genuine false negative behind a "filled gap" label.
+    classification = _classification(root_detected=False, ssl_detected=False)
+    verification = VerificationResult(root_bypassed=True, ssl_bypassed=None, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert result.matches is False
+    assert len(result.mismatches) == 1
+    assert "did not predict root-detection" in result.mismatches[0]
+    assert result.coverage_confirmed == []

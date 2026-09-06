@@ -608,6 +608,17 @@ class CorrelationResult:
     # (matches stays False, never fabricated) and not a conflict - so it gets
     # its own label instead of reading as a MISMATCH that never happened.
     unverified: list[str] = field(default_factory=list)
+    # CORR-COVLIM1 (ADR-0006 tier fidelity): dynamic confirmed a bypass in a
+    # category whose STATIC verdict was coverage-limited (detected=False but
+    # coverage_limited=True - "unknown, not absent", never a confident negative).
+    # This is NOT a MISMATCH: static did not predict absence, it declined to
+    # certify one over a surface it could not fully analyze (a packed/Dart/native
+    # region), and dynamic then filled that gap in. Folding it into `mismatches`
+    # would blend a confirmed coverage gap (working as designed) with a real
+    # static miss (a confident negative that was wrong) - exactly the tier-blend
+    # ADR-0006 forbids. It keeps matches=False (static never predicted the
+    # positive, so it is not agreement) but stays out of the mismatch tally.
+    coverage_confirmed: list[str] = field(default_factory=list)
 
 
 class SuccessCheck(Protocol):

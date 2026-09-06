@@ -306,6 +306,8 @@ string in this APK; only its *ownership* is unverified.
    inconclusive (UNVERIFIED), or agreement (MATCH). -#}
 {% if correlation.mismatches -%}
 - Verdict: MISMATCH (static and dynamic disagreed)
+{% elif correlation.coverage_confirmed -%}
+- Verdict: COVERAGE-CONFIRMED (dynamic confirmed a bypass in a category static was coverage-limited on - a filled gap, not a disagreement)
 {% elif correlation.unverified -%}
 - Verdict: UNVERIFIED (dynamic could not test the static prediction - inconclusive, not a disagreement)
 {% else -%}
@@ -313,6 +315,9 @@ string in this APK; only its *ownership* is unverified.
 {% endif %}
 {% for m in correlation.mismatches -%}
 - MISMATCH: {{ m }}
+{% endfor %}
+{% for c in correlation.coverage_confirmed -%}
+- COVERAGE-CONFIRMED: {{ c }}
 {% endfor %}
 {% for u in correlation.unverified -%}
 - UNVERIFIED: {{ u }}

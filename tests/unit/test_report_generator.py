@@ -726,6 +726,58 @@ def test_generate_report_mismatch_verdict_wins_over_unverified(tmp_path):
     assert "- UNVERIFIED: SSL-pinning could not be tested - inconclusive" in content
 
 
+def test_generate_report_renders_coverage_confirmed_verdict(tmp_path):
+    # CORR-COVLIM1: dynamic confirmed a bypass in a category static was
+    # coverage-limited on. The headline must name COVERAGE-CONFIRMED (a filled
+    # gap), never MISMATCH (which would read as the static engine being wrong) and
+    # never UNVERIFIED (dynamic DID test it). The per-item body line renders too.
+    correlation = CorrelationResult(
+        matches=False,
+        mismatches=[],
+        unverified=[],
+        coverage_confirmed=[
+            "dynamic confirmed a root-detection bypass in a coverage-limited category"
+        ],
+    )
+    report_path = generate_report(
+        run_id="covconf", apk_hash="cov001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "cov001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=correlation,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "- Verdict: COVERAGE-CONFIRMED" in content
+    assert "- Verdict: MISMATCH" not in content
+    assert "- Verdict: UNVERIFIED" not in content
+    assert "- Verdict: MATCH" not in content
+    assert "- COVERAGE-CONFIRMED: dynamic confirmed a root-detection bypass in a coverage-limited category" in content
+
+
+def test_generate_report_mismatch_wins_over_coverage_confirmed(tmp_path):
+    # Precedence guard: a real disagreement (MISMATCH) must win the headline over
+    # a coverage-confirmed gap - a genuine static/dynamic conflict is more severe
+    # than a filled coverage gap and must never be hidden behind it. The template's
+    # mismatches-first ordering is load-bearing here too.
+    correlation = CorrelationResult(
+        matches=False,
+        mismatches=["static predicted root-detection, dynamic saw none"],
+        unverified=[],
+        coverage_confirmed=["dynamic confirmed an SSL bypass in a coverage-limited category"],
+    )
+    report_path = generate_report(
+        run_id="mixcov", apk_hash="mix001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "mix001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=correlation,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "- Verdict: MISMATCH (static and dynamic disagreed)" in content
+    assert "- Verdict: COVERAGE-CONFIRMED" not in content  # disagreement wins the headline
+    # both body loops still render: the disagreement and the filled-gap line
+    assert "- MISMATCH: static predicted root-detection, dynamic saw none" in content
+    assert "- COVERAGE-CONFIRMED: dynamic confirmed an SSL bypass in a coverage-limited category" in content
+
+
 def test_generate_report_limitations_section_present_and_specific(tmp_path):
     report_path = generate_report(
         run_id="run4", apk_hash="jkl012", timestamp="2026-07-30T12:00:00",

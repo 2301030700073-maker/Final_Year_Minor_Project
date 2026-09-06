@@ -32,6 +32,10 @@ def _aab(write_dir: Path) -> Path:
         "base/root/classes3.dex": b"\x00dex-3",
         "base/lib/arm64-v8a/libnative.so": b"\x7fELF-arm64",
         "base/lib/x86_64/libnative.so": b"\x7fELF-x86",
+        # A native lib bundletool placed under the "root" module (base/root/):
+        # destined for the APK root, so it must survive normalization. Kept in
+        # the shared fixture so every AAB test exercises it.
+        "base/root/lib/arm64-v8a/libroot.so": b"\x7fELF-root-lib",
         "base/res/xml/network_security_config.xml": b"<network-security-config/>",
         "base/assets/secret.dat": b"payload",
     })
@@ -61,9 +65,44 @@ def test_normalize_aab_merges_root_level_entries(tmp_path):
         assert "classes3.dex" in names           # from base/root/
         assert "lib/arm64-v8a/libnative.so" in names
         assert "lib/x86_64/libnative.so" in names
+        # A native lib under base/root/lib/<abi>/ must be rescued to the APK root
+        # (previously dropped -> silent native-coverage loss, ADR-0006).
+        assert "lib/arm64-v8a/libroot.so" in names
         assert "res/xml/network_security_config.xml" in names   # NSC resolution
         assert "assets/secret.dat" in names
         assert z.read("AndroidManifest.xml").startswith(b"<manifest package='com.example.aab'/>")
+
+
+def test_normalize_aab_rescues_base_root_native_lib_without_dropping_or_duplicating(tmp_path):
+    # A native library shipped under base/root/lib/<abi>/ used to vanish from the
+    # synthesized APK: the merge rescued only base/lib/*.so, so the native stage
+    # never saw it - a silent coverage loss that can read a real native root/SSL
+    # detection as a confident negative (ADR-0006 forbids exactly that). It must
+    # now land at the APK root. When base/lib and base/root/lib carry the SAME
+    # path, base/ wins deterministically and NO duplicate zip entry is emitted
+    # (a duplicate arcname is a corrupt APK). base/root/*.dex stays handled by
+    # the renumbering dex loop, never also copied verbatim.
+    aab = _zip(tmp_path, "collide.aab", {
+        "base/manifest/AndroidManifest.xml": b"<manifest package='com.example.aab'/>",
+        "base/dex/classes.dex": b"\x00dex-1",
+        "base/root/classes2.dex": b"\x00dex-2",                    # root-placed dex
+        "base/lib/arm64-v8a/libc.so": b"BASE-libc",                # base copy (wins)
+        "base/root/lib/arm64-v8a/libc.so": b"ROOT-libc",           # collision (loses)
+        "base/root/lib/arm64-v8a/libonlyroot.so": b"\x7fELF-only", # only in root/
+    })
+    out = normalize.normalize_aab(aab, tmp_path / "out")
+    with zipfile.ZipFile(out) as z:
+        names = z.namelist()
+        # No duplicate arcnames anywhere (corrupt-APK guard).
+        assert len(names) == len(set(names)), f"duplicate arcname: {names}"
+        # The root-only native lib survives.
+        assert "lib/arm64-v8a/libonlyroot.so" in names
+        # On a genuine path collision, base/ content wins.
+        assert z.read("lib/arm64-v8a/libc.so") == b"BASE-libc"
+        # base/root/*.dex is renumbered by the dex loop, not copied verbatim.
+        dex = sorted(n for n in names if n.startswith("classes") and n.endswith(".dex"))
+        assert dex == ["classes.dex", "classes2.dex"], dex
+        assert not any(n.startswith("root/") or n.startswith("base/") for n in names)
 
 
 def test_normalize_aab_renumbers_dex_in_order(tmp_path):

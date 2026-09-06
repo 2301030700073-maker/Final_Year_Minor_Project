@@ -110,19 +110,45 @@ def normalize_aab(aab: Path, out_dir: Path) -> Path:
             raise ValueError(f"{aab} has no {_AAB_MANIFEST} - not a valid AAB")
         zout.writestr("AndroidManifest.xml", zin.read(_AAB_MANIFEST))
         # dex: base/dex/*.dex + base/root/*.dex -> classes.dex, classes2.dex, ...
+        written: set[str] = {"AndroidManifest.xml"}
         for i, entry in enumerate(_sorted_dex_entries(zin), 1):
             name = "classes.dex" if i == 1 else f"classes{i}.dex"
             zout.writestr(name, zin.read(entry))
+            written.add(name)
         for n in zin.namelist():
-            # drop the base/ prefix only - the remainder already carries the
-            # lib/<abi>/, res/, assets/ path (base/lib/x.so -> lib/x.so).
-            if n.startswith("base/lib/") and n.endswith(".so"):
-                zout.writestr(n[len("base/"):], zin.read(n))
-            elif n.startswith("base/res/"):
-                # resources so a declared NSC @xml/ reference resolves
-                zout.writestr(n[len("base/"):], zin.read(n))
-            elif n.startswith("base/assets/"):
-                zout.writestr(n[len("base/"):], zin.read(n))
+            # Map a base/ entry to the APK-root path the single-APK pipeline
+            # reads. Two prefixes both land content at the APK root:
+            #   base/<x>       -> <x>            (base/lib/…, base/res/…, base/assets/…)
+            #   base/root/<x>  -> <x>            (bundletool's "root" module: files
+            #                                     destined for the APK root, incl.
+            #                                     native libs under base/root/lib/<abi>/)
+            # base/root/lib/<abi>/*.so was previously DROPPED entirely: the merge
+            # rescued only base/lib/*.so, so a native library shipped under
+            # base/root/ vanished from the synthesized APK and the native stage
+            # never saw it - a silent coverage loss that could read a real native
+            # root/SSL detection as a confident negative (ADR-0006 forbids exactly
+            # this). Rescue both prefixes; base/ wins a genuine path collision
+            # (written-set guard) so we never emit a duplicate arcname (a corrupt
+            # zip) and precedence is deterministic, mirroring split-set base-wins.
+            if n.startswith("base/root/"):
+                arc = n[len("base/root/"):]
+            elif n.startswith("base/"):
+                arc = n[len("base/"):]
+            else:
+                continue
+            # base/root/*.dex is already emitted (renumbered) by the dex loop
+            # above; don't also copy it verbatim under its original name.
+            if Path(arc).name.startswith("classes") and Path(arc).name.endswith(".dex"):
+                continue
+            keep = (
+                (arc.startswith("lib/") and arc.endswith(".so"))
+                or arc.startswith("res/")       # NSC @xml/ resolution
+                or arc.startswith("assets/")     # asset-packed .so / configs
+            )
+            if not keep or arc in written:
+                continue
+            zout.writestr(arc, zin.read(n))
+            written.add(arc)
     return out_apk
 
 

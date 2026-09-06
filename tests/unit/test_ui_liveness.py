@@ -152,6 +152,33 @@ def test_tls_block_detects_trust_anchor_failure():
     assert "trust anchor" in hits[0].lower()
 
 
+def test_tls_block_detects_each_marker_in_isolation():
+    """Every TLS-block marker must fire on a line that carries ONLY that marker.
+    Regression: the markers are compared against a lowercased line, but three of
+    them (CertPathValidatorException, SSLHandshakeException, Could not validate)
+    were stored mixed-case, so they could never be a substring of a lowercased
+    line - a silent miss for an app whose startup-TLS rejection logs only that
+    exception form (e.g. `Caused by: ...CertPathValidatorException: ...` with no
+    accompanying "trust anchor" line). The prior test only passed because its
+    single line ALSO contained the all-lowercase "trust anchor..." marker, never
+    exercising these three independently."""
+    pkg = "com.example.app"
+    isolated = {
+        "CertPathValidatorException only":
+            "09-06 10:00:01.002  4521  4550 W System.err: "
+            "Caused by: java.security.cert.CertPathValidatorException: bad chain",
+        "SSLHandshakeException only":
+            "09-06 10:00:01.001  4521  4550 W System.err: "
+            "javax.net.ssl.SSLHandshakeException: Chain validation failed",
+        "Could not validate only":
+            "09-06 10:00:01.003  4521  4550 E okhttp: Could not validate certificate chain",
+        "handshake timed out only":
+            "09-06 10:00:01.004  4521  4550 E Conscrypt: handshake timed out",
+    }
+    for label, line in isolated.items():
+        assert _parse_tls_block(line, pkg, "4521") == [line.strip()], label
+
+
 def test_tls_block_empty_when_clean():
     assert _parse_tls_block("no tls errors here\n", "com.x") == []
 

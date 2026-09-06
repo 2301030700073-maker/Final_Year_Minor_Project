@@ -40,11 +40,19 @@ _ANR_MARKERS = (
 # these and never advances past a splash/loading gate. This is the honest
 # "why the app is stuck" discriminator - the app is not ANR-frozen, it is
 # blocked on TLS trust it cannot satisfy.
+#
+# These are compared against a LOWERCASED logcat line (see _parse_tls_block), so
+# every marker MUST itself be lowercase - a mixed-case marker (e.g.
+# `CertPathValidatorException`) can never be a substring of a lowercased line and
+# would silently never fire, losing the "why the splash is stuck" signal for an
+# app that logs only that exception form. Kept lowercase here so the intended
+# case-insensitive match actually holds for all five markers, not just the two
+# that happened to be all-lowercase.
 _TLS_BLOCK_MARKERS = (
     "trust anchor for certification path not found",
-    "CertPathValidatorException",
-    "SSLHandshakeException",
-    "Could not validate",
+    "certpathvalidatorexception",
+    "sslhandshakeexception",
+    "could not validate",
     "handshake timed out",
 )
 

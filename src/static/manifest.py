@@ -258,18 +258,60 @@ def _parse_manifest_root(
     )
 
 
+def _iter_production_scope(root) -> "list":
+    """Every element in the NSC tree EXCEPT those inside a `<debug-overrides>`
+    subtree, root included. Android applies `<debug-overrides>` only when the app
+    is `android:debuggable="true"` (a debug build); on a shipped production APK
+    that whole subtree is inert. Trust-anchors, domain-configs and pin-sets
+    declared under it are therefore NOT production attack surface, so counting
+    them as stored certs / cleartext domains / active pin-sets would surface a
+    debug-only config as a real production SSL weakness - a false signal of the
+    same class the `nsc_debug_overrides` signature precision fix already guards
+    against. ElementTree carries no parent pointers, so walk the tree ourselves
+    and prune at any `debug-overrides` element instead of using `root.iter()`
+    (which recurses into it). Order is preserved (pre-order), so first-seen
+    dedup in the callers is unchanged."""
+    out = []
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        out.append(node)
+        # Push children in reverse so pop() yields them in document order; skip
+        # descending into a debug-overrides subtree entirely.
+        kids = [c for c in list(node) if _localname(c.tag) != "debug-overrides"]
+        stack.extend(reversed(kids))
+    return out
+
+
+def _localname(tag) -> str:
+    """The local tag name without any `{ns}` prefix. NSC elements are normally
+    un-namespaced, but tolerate a namespaced tag so the debug-overrides prune is
+    never defeated by a decoder that qualifies element names."""
+    t = str(tag)
+    return t.rsplit("}", 1)[-1] if "}" in t else t
+
+
+def _nsc_iter(nsc_path: Path | None, tag: str):
+    """Parse the NSC and yield every `<tag>` element in PRODUCTION scope (outside
+    any `<debug-overrides>`). Shared by the stored-cert, cleartext-domain and
+    pin-set readers so the debug-overrides prune cannot drift between them.
+    Returns [] on no file / unreadable / parse error - each caller keeps its own
+    conservative empty-on-failure contract."""
+    if nsc_path is None:
+        return []
+    try:
+        tree = ET.parse(nsc_path)
+    except (ET.ParseError, OSError):
+        return []
+    return [el for el in _iter_production_scope(tree.getroot()) if _localname(el.tag) == tag]
+
+
 def _nsc_cleartext_permitted(nsc_path: Path | None) -> bool | None:
     """The <base-config cleartextTrafficPermitted="..."> value from the resolved
     networkSecurityConfig. Returns None when there is no NSC, it cannot be read,
     or no base-config cleartext policy is declared. This is the app's default
     cleartext policy for every domain the NSC does not override."""
-    if nsc_path is None:
-        return None
-    try:
-        tree = ET.parse(nsc_path)
-    except (ET.ParseError, OSError):
-        return None
-    for config in tree.getroot().iter("base-config"):
+    for config in _nsc_iter(nsc_path, "base-config"):
         # The cleartextTrafficPermitted attribute can be namespaced (canonical
         # android:cleartextTrafficPermitted) OR unprefixed, as apktool's decoded
         # output produced it for AndroGoat. Accept both - a security platform
@@ -290,15 +332,9 @@ def _nsc_cleartext_domains(nsc_path: Path | None) -> list[str]:
     their own flag). Only EXPLICIT permits are surfaced, never an inherited or
     inferred one, so this adds fact and never flips a policy negative (ADR-0006).
     Empty when there is no NSC, it cannot be read, or nothing permits cleartext."""
-    if nsc_path is None:
-        return []
-    try:
-        tree = ET.parse(nsc_path)
-    except (ET.ParseError, OSError):
-        return []
     domains: list[str] = []
     seen: set[str] = set()
-    for config in tree.getroot().iter("domain-config"):
+    for config in _nsc_iter(nsc_path, "domain-config"):
         # Same namespace tolerance as the base-config read: the attribute can be
         # android:-prefixed or bare depending on how the NSC was decoded.
         val = config.get(f"{ANDROID_NS}cleartextTrafficPermitted") or config.get("cleartextTrafficPermitted")
@@ -323,14 +359,8 @@ def _nsc_pin_set_expirations(nsc_path: Path | None) -> list[str]:
     testable; the report compares them against the run's own timestamp. A pin-set
     with no expiration never expires and is omitted. Empty when there is no NSC,
     it cannot be read, or no pin-set declares an expiration."""
-    if nsc_path is None:
-        return []
-    try:
-        tree = ET.parse(nsc_path)
-    except (ET.ParseError, OSError):
-        return []
     out: list[str] = []
-    for pinset in tree.getroot().iter("pin-set"):
+    for pinset in _nsc_iter(nsc_path, "pin-set"):
         exp = pinset.get(f"{ANDROID_NS}expiration") or pinset.get("expiration")
         if exp and exp.strip():
             out.append(exp.strip())
@@ -420,14 +450,17 @@ def _count_stored_certs(nsc_path: Path | None) -> int:
     XML (`<trust-anchors><certificates src="system|user|@raw/..."/></trust-anchors>`).
     0 when no NSC file, or none declared. These weaken SSL pinning, so their
     presence is an SSL evidence contributor.
-    H2: a malformed NSC is NOT swallowed here - it propagates as ET.ParseError.
-    The caller gates this on `_resources_complete` (which flags the surface
-    partial), so this function is only called on a file already known to parse."""
+    H2: the caller gates this on `_resources_complete` (which flags the surface
+    partial when the NSC is missing/unparseable), so in the real flow this only
+    runs on a file already known to parse; a malformed file reaching it directly
+    degrades to 0 (via `_nsc_iter`), never a raise that would abort a caller.
+    Trust-anchors under `<debug-overrides>` are excluded: they apply only on a
+    debuggable build and are inert in production, so counting them would surface
+    a debug-only trust anchor as a real SSL weakness (see _iter_production_scope)."""
     if nsc_path is None:
         return 0
-    tree = ET.parse(nsc_path)
     count = 0
-    for certs in tree.getroot().iter("certificates"):
+    for certs in _nsc_iter(nsc_path, "certificates"):
         # `src` may be namespaced (canonical android:src) OR unprefixed, as
         # apktool's decoded NSC emits (<certificates src="system"/>). Same
         # dual-form handling as the cleartextTrafficPermitted reader above.

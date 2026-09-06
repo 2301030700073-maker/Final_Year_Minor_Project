@@ -154,6 +154,65 @@ def test_parse_manifest_counts_stored_certs_from_nsc_file(tmp_path):
     assert info.stored_certs == 2
 
 
+def test_debug_overrides_trust_anchors_excluded_from_stored_certs(tmp_path):
+    # <debug-overrides> applies ONLY on a debuggable build; it is inert in
+    # production. A trust anchor declared inside it is not production SSL attack
+    # surface, so it must NOT be counted as a stored cert - counting it would
+    # surface a debug-only trust anchor as a real production SSL weakness (a
+    # false signal, the same class the nsc_debug_overrides precision fix guards).
+    resource_root = tmp_path / "apktool"
+    (resource_root / "res" / "xml").mkdir(parents=True)
+    (resource_root / "res" / "xml" / "network_security_config.xml").write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<network-security-config>\n'
+        '    <base-config cleartextTrafficPermitted="false"/>\n'
+        '    <trust-anchors>\n'
+        '        <certificates src="system"/>\n'          # production: counted
+        '    </trust-anchors>\n'
+        '    <debug-overrides>\n'
+        '        <trust-anchors>\n'
+        '            <certificates src="user"/>\n'         # debug-only: excluded
+        '        </trust-anchors>\n'
+        '    </debug-overrides>\n'
+        '</network-security-config>\n'
+    )
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(MANIFEST_WITH_NSC)
+
+    info = parse_manifest(manifest_path, resource_root)
+
+    # only the production trust anchor counts, not the debug-overrides one
+    assert info.stored_certs == 1
+
+
+def test_debug_overrides_cleartext_domains_excluded(tmp_path):
+    # A <domain-config cleartextTrafficPermitted="true"> under <debug-overrides>
+    # exposes its domain to cleartext ONLY on a debug build - it is not a
+    # production cleartext attack-surface domain and must not be reported as one.
+    resource_root = tmp_path / "apktool"
+    (resource_root / "res" / "xml").mkdir(parents=True)
+    (resource_root / "res" / "xml" / "network_security_config.xml").write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<network-security-config>\n'
+        '    <base-config cleartextTrafficPermitted="false"/>\n'
+        '    <domain-config cleartextTrafficPermitted="true">\n'
+        '        <domain>prod.example.com</domain>\n'      # production: reported
+        '    </domain-config>\n'
+        '    <debug-overrides>\n'
+        '        <domain-config cleartextTrafficPermitted="true">\n'
+        '            <domain>debug.local</domain>\n'        # debug-only: excluded
+        '        </domain-config>\n'
+        '    </debug-overrides>\n'
+        '</network-security-config>\n'
+    )
+    manifest_path = tmp_path / "AndroidManifest.xml"
+    manifest_path.write_text(MANIFEST_WITH_NSC)
+
+    info = parse_manifest(manifest_path, resource_root)
+
+    assert info.cleartext_domains == ["prod.example.com"]
+
+
 def test_parse_manifest_counts_stored_certs_from_unprefixed_src(tmp_path):
     # Regression: apktool's decoded NSC emits <certificates src="system"/> with
     # the `src` attribute UNPREFIXED (not android:src). _count_stored_certs must

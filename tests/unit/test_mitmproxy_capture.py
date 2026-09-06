@@ -83,6 +83,41 @@ def test_parse_flow_detail_multiple_requests_one_response_keeps_order():
     assert flows[1].status == ""
 
 
+def test_parse_flow_detail_back_to_back_requests_before_any_response():
+    # Regression guard: two request lines arrive with NO response line between
+    # them (HTTP/2 multiplexing / connection reuse can interleave requests ahead
+    # of any `<<` on native flow_detail=2). The first request was captured for
+    # real - overwriting `pending` with the second would SILENTLY drop it
+    # (principle 3: never a silent loss). Both must survive; the first stays
+    # response-less (status "") rather than borrowing the second's response.
+    text = (
+        "127.0.0.1:1: GET https://first.example/a HTTP/2.0\n"
+        "127.0.0.1:2: POST https://second.example/b HTTP/2.0\n"
+        " << HTTP/2.0 201 Created 3b\n"
+    )
+    flows = mitmproxy_capture._parse_flow_detail(text)
+    assert [f.host for f in flows] == ["first.example", "second.example"]
+    assert flows[0].method == "GET"
+    assert flows[0].path == "/a"
+    assert flows[0].status == ""          # never fabricated from the 201 below
+    assert flows[1].method == "POST"
+    assert flows[1].status == "201"       # the response pairs with the 2nd only
+
+
+def test_parse_flow_detail_three_requests_no_responses_all_kept():
+    # The overwrite bug compounds: N back-to-back requests with no responses must
+    # yield N flows, not just the last. Before the flush-on-new-request fix this
+    # returned a single flow.
+    text = (
+        "127.0.0.1:1: GET https://one.example/ HTTP/2.0\n"
+        "127.0.0.1:2: GET https://two.example/ HTTP/2.0\n"
+        "127.0.0.1:3: GET https://three.example/ HTTP/2.0\n"
+    )
+    flows = mitmproxy_capture._parse_flow_detail(text)
+    assert [f.host for f in flows] == ["one.example", "two.example", "three.example"]
+    assert all(f.status == "" for f in flows)
+
+
 # --- reachability probe: @@CLIENT_CONNECT@@ marker counting --------------------
 
 def test_count_client_connections_counts_markers():

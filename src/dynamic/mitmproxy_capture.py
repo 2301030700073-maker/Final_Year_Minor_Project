@@ -187,6 +187,19 @@ def _parse_flow_detail(text: str) -> list[FlowSummary]:
                 path = parsed.path or "/"
             except ValueError:
                 host, path = "", "/"
+            # A new request while one is still pending means the prior request
+            # never got its response line before this one arrived (HTTP/2
+            # multiplexing or connection reuse can interleave two request lines
+            # ahead of any `<<` on native flow_detail=2). Flush the pending flow
+            # response-less instead of overwriting it - dropping a request we
+            # actually captured would be a SILENT flow loss (principle 3), the
+            # same honesty the end-of-loop flush below already enforces. Status
+            # stays "" so the report shows it was seen but its response was not
+            # paired, never fabricating a status. (On the WSL2 addon path request
+            # and response are written together, so pending is always None here -
+            # this only ever fires on the native interleaved path.)
+            if pending is not None:
+                flows.append(pending)
             pending = FlowSummary(host=host, method=method, path=path, status="")
     # Flush a request that never got a response line (e.g. failed handshake).
     if pending is not None:

@@ -6,7 +6,7 @@ import re
 import sqlite3
 import time
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -85,6 +85,30 @@ class Signature:
     # explicitly opts a pattern into the looser matching.
     case_sensitive: bool = True
     multiline: bool = False
+    # PERF1: memoized per-flag compiled regex cache. The scan hot path calls
+    # re.search(pattern, line, flags) once per (regex signature, pattern, line);
+    # over a large corpus (12k+ files) that is millions of calls, each of which
+    # re-parses the raw pattern string unless it happens to still be in re's
+    # small (512-entry) internal cache - which churns out under exactly this kind
+    # of many-distinct-pattern load. Compiling once and reusing is a standard,
+    # behavior-identical optimization: re.search(p, s, f) is defined as
+    # re.compile(p, f).search(s). NOT a YAML field (never set from a file, so
+    # ctor(**entry) never sees it); excluded from equality/repr so two signatures
+    # with the same authored content still compare equal and print cleanly.
+    _compiled: dict[int, tuple["re.Pattern[str]", ...]] = field(
+        default_factory=dict, compare=False, repr=False
+    )
+
+    def compiled_patterns(self, flags: int) -> tuple["re.Pattern[str]", ...]:
+        """This signature's patterns compiled under `flags`, memoized per flag
+        value. Every pattern was already validated-compiled at load
+        (_validate_signature_entry), so compilation here cannot raise; the cache
+        just moves that one compile out of the per-line inner loop."""
+        cached = self._compiled.get(flags)
+        if cached is None:
+            cached = tuple(re.compile(p, flags) for p in self.patterns)
+            self._compiled[flags] = cached
+        return cached
 
 
 def _validate_category(entry: dict, path: Path, sig_id: str, valid, label: str = "signature") -> None:
@@ -249,8 +273,8 @@ def _line_matches(line: str, signature: Signature) -> str | None:
         return None
     if signature.pattern_type == "regex":
         flags = re.IGNORECASE if not signature.case_sensitive else 0
-        for pattern in signature.patterns:
-            match = re.search(pattern, line, flags)
+        for compiled in signature.compiled_patterns(flags):
+            match = compiled.search(line)
             if match:
                 return match.group(0)
         return None
@@ -551,8 +575,8 @@ def scan(
                 flags = re.DOTALL
                 if not signature.case_sensitive:
                     flags |= re.IGNORECASE
-                for pattern in signature.patterns:
-                    match = re.search(pattern, text, flags)
+                for compiled in signature.compiled_patterns(flags):
+                    match = compiled.search(text)
                     if time.monotonic() - match_start > LINE_MATCH_BUDGET_SECONDS:
                         raise TimeoutError(
                             f"static scan: multiline matching of {file_path.name} against "

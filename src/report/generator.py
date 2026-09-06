@@ -91,7 +91,7 @@ TEMPLATE = _env.from_string("""\
 **Cleartext-permitted domains ({{ manifest.cleartext_domains | length }}):** {% for d in manifest.cleartext_domains %}`{{ d }}`{% if not loop.last %}, {% endif %}{% endfor %}
 {% endif -%}
 {% if expired_pin_sets -%}
-**NSC pin-set EXPIRED:** the network-security-config declares certificate pinning whose expiration ({{ expired_pin_sets | join(", ") }}) precedes this run - Android stops enforcing an expired pin-set and falls back to normal CA validation, so this NSC-declared pinning is **not active at runtime** (any other pinning mechanism is unaffected; confirm dynamically). Declared pinning is still reported above - this only flags that the framework will not enforce it.
+**NSC pin-set EXPIRED:** the network-security-config declares certificate pinning whose expiration ({{ expired_pin_sets | join(", ") }}) is on or before this run's date - Android parses the expiration to midnight at the start of that day and stops enforcing once the clock passes it, falling back to normal CA validation, so this NSC-declared pinning is **not active at runtime** (any other pinning mechanism is unaffected; confirm dynamically). Declared pinning is still reported above - this only flags that the framework will not enforce it.
 {% endif -%}
 **Permissions{% if manifest.permissions %} ({{ manifest.permissions | length }}){% endif %}:** {{ manifest.permissions | join(", ") if manifest.permissions else "none" }}
 {% set _exported = manifest.exported_components | selectattr("exported") | list -%}
@@ -695,12 +695,22 @@ def _is_iso_date(s: str) -> bool:
 
 
 def _expired_pin_sets(manifest, timestamp: str) -> list[str]:
-    """NSC <pin-set> expiration dates that precede the run date - certificate
+    """NSC <pin-set> expiration dates on OR BEFORE the run date - certificate
     pinning Android no longer enforces (it falls back to normal CA validation).
     Compared against the RUN's own timestamp (deterministic, not a live clock);
     ISO dates compare lexicographically so no datetime import is needed. Malformed
     dates and a run timestamp that is not a clean ISO date are skipped, never
-    flagged (conservative - we never invent an expiry we cannot compute)."""
+    flagged (conservative - we never invent an expiry we cannot compute).
+
+    Why `<=`, not `<`: Android parses `expiration="YYYY-MM-DD"` (via
+    SimpleDateFormat("yyyy-MM-dd")) to MIDNIGHT at the START of that day, and
+    NetworkSecurityTrustManager bypasses pinning when
+    `System.currentTimeMillis() > expirationTime`. A run whose date equals the
+    expiration date happens at some later moment that same day (a run timestamp
+    carries a time component and is never exactly 00:00:00.000), so Android has
+    ALREADY stopped enforcing that pin-set. Treating it as still-active would
+    OVERSTATE the app's defenses in the report - the dangerous direction for a
+    security tool - so an expiration equal to the run date is flagged inactive."""
     if manifest is None:
         return []
     run_date = (timestamp or "")[:10]
@@ -708,7 +718,7 @@ def _expired_pin_sets(manifest, timestamp: str) -> list[str]:
         return []
     return [
         exp for exp in (getattr(manifest, "pin_set_expirations", None) or [])
-        if _is_iso_date(exp) and exp < run_date
+        if _is_iso_date(exp) and exp <= run_date
     ]
 
 

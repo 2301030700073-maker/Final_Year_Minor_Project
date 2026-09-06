@@ -63,6 +63,25 @@ def test_future_only_pin_set_is_not_flagged():
     assert _expired_pin_sets(m, "2026-08-23T12:00:00") == []
 
 
+def test_pin_set_expiring_on_run_date_is_inactive():
+    # Boundary: an expiration EQUAL to the run's date. Android parses
+    # expiration="YYYY-MM-DD" to midnight at the START of that day and bypasses
+    # pinning when now > expirationTime; the run happens later that same day, so
+    # Android has already stopped enforcing. Flagging it inactive is both faithful
+    # to Android and the safe direction (never overstate the app's defenses).
+    m = ManifestInfo(
+        debuggable=False, network_security_config="@xml/nsc",
+        pin_set_expirations=["2026-08-23"],
+    )
+    assert _expired_pin_sets(m, "2026-08-23T12:00:00") == ["2026-08-23"]
+    # A pin-set expiring the day AFTER the run is still active.
+    m2 = ManifestInfo(
+        debuggable=False, network_security_config="@xml/nsc",
+        pin_set_expirations=["2026-08-24"],
+    )
+    assert _expired_pin_sets(m2, "2026-08-23T12:00:00") == []
+
+
 def test_malformed_and_missing_inputs_are_safe():
     m = ManifestInfo(
         debuggable=False, network_security_config="@xml/nsc",

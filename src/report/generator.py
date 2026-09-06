@@ -352,7 +352,9 @@ The app accepted proxy-decrypted HTTPS flows through the capture proxy (`{{ capt
 
 Raw flow file: `{{ capture_flows_path }}`
 {% else -%}
-{% if manifest and "android.permission.INTERNET" not in (manifest.permissions or []) -%}
+{% if capture_errored -%}
+No traffic was captured because the **capture stage did not complete — it raised an error** ({{ capture_error or capture_reason or "reason not recorded" }}). The empty flow list is a direct consequence of that stage failure, **not** a property of the app's network behaviour and **not** a coverage limitation of an app that ran to completion: the capture aborted before it could exercise or observe the app's traffic at all. Resolve the stage error and re-run the capture before drawing any conclusion about this app's network behaviour. The capture stage is honest: an empty capture is reported here with its recorded reason, never a fabricated flow list.
+{% elif manifest and "android.permission.INTERNET" not in (manifest.permissions or []) -%}
 No traffic was captured. The app declares **no `android.permission.INTERNET` permission**, so it cannot open a network socket — the empty capture is expected regardless of proxy state (capture stage reason: {{ capture_reason or "reason not recorded" }}). The capture stage is honest: an empty capture is reported here with its recorded reason, never a fabricated flow list.
 {% elif manifest and "android.permission.INTERNET" in manifest.permissions -%}
 No traffic was captured ({{ capture_reason or "reason not recorded" }}). The app **declares `android.permission.INTERNET`**, so it can open network sockets — {% if hooks_audit_present and hooks_ssl_effects %}but the dynamic stage's in-process TLS observer DID record SSL bypass-effect messages this run ({% for k, v in hooks_ssl_effects.items() %}`{{ k }}`={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}): the app's own pinned request executed and the Frida hook observed it, yet no flow reached the proxy. That observer is in-process and independent of the capture proxy, so the empty flow list is a **real capture-path failure** - the device->mitmdump traffic path did not carry the request - not app-silence, and a proxy/wiring problem to fix rather than a property of the app.{% elif hooks_audit_present %}and the dynamic stage's in-process TLS observer recorded **0 SSL bypass-effect messages this run** - the app's own pinned request never executed. That observer is a Frida hook independent of the capture proxy (a proxy the device could not reach would still let it observe the app's request), so the empty capture is an **un-exercised network/SSL path this run** (a coverage limitation of a non-interactive run - interactive/UI-driven capture is needed to drive the app to a request), not a proxy the device could not reach, and not evidence that the app makes no network calls.{% else %}the absence of captured flows is a **coverage limitation of this run** (the app may not have exercised the network, or a pinned endpoint refused the proxy CA), not evidence that the app makes no network calls.{% endif %}{% if capture_client_connections is not none %} Device-side reachability probe: the capture proxy recorded **{{ capture_client_connections }} client connection(s)** from the device this run — {% if capture_client_connections > 0 %}the device DID reach mitmdump, so the empty flow list is app-silence or a post-connect CA refusal, **not** a device→proxy reachability failure.{% else %}the device never reached mitmdump, so this is a **real device→proxy reachability failure** to fix, not a property of the app.{% endif %}{% endif %} The capture stage is honest: an empty capture is reported here with its recorded reason, never a fabricated flow list.
@@ -728,6 +730,10 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
             # reachability line is guarded by capture_present today, but the
             # contract must not depend on that gate to stay crash-free.
             "capture_client_connections": None,
+            # No capture stage ran, so it cannot have raised: definitionally not
+            # an errored stage, and there is no stage error to surface.
+            "capture_errored": False,
+            "capture_error": None,
         }
     evidence = capture_stage.evidence or {}
     flows = evidence.get("flow_summary") or []
@@ -744,6 +750,21 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
         # Only surfaced when the addon recorded it; missing stays None (never 0)
         # so the template never asserts a reachability verdict we did not measure.
         "capture_client_connections": evidence.get("client_connections"),
+        # A capture stage that FAILED by *raising* did not complete a capture
+        # window - mitmproxy_capture.run_capture_stage records reason="capture
+        # exception" + the exception text on .error for that path. Its empty flow
+        # list reflects the stage crash, NOT any property of the app's network
+        # behaviour. This is distinct from a clean zero-flow capture ("no flows
+        # captured"), which DID run to completion and whose emptiness the
+        # reachability probe / dynamic-observer prose explains. The report must
+        # give a crashed stage its real reason, never the app-behaviour /
+        # coverage-limitation framing ([[not-attempted-neq-skipped]],
+        # [[fallback-hardcoded-cause-check-reachability]]).
+        "capture_errored": (
+            capture_stage.status == "failed"
+            and evidence.get("reason") == "capture exception"
+        ),
+        "capture_error": capture_stage.error,
     }
 
 

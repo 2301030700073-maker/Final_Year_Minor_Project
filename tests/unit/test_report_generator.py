@@ -1090,6 +1090,80 @@ def test_generate_report_states_no_internet_as_capture_failure_cause(tmp_path):
     assert "no traffic was captured" in content2.lower() or "No traffic was captured" in content2
 
 
+def test_capture_summary_flags_a_crashed_capture_stage():
+    # A capture stage that FAILED by raising records reason="capture exception"
+    # + the exception text on .error (mitmproxy_capture.run_capture_stage). That
+    # is categorically different from a clean zero-flow capture ("no flows
+    # captured"), which ran to completion. _capture_summary must tell them apart
+    # so the report can give a crashed stage its true reason instead of an
+    # app-behaviour / coverage-limitation explanation.
+    from common import StageResult
+    from report.generator import _capture_summary
+
+    crashed = StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={"reason": "capture exception", "flows_path": "/x/flows"},
+        error="capture stage raised: RuntimeError('frida attach failed')",
+    )
+    cs = _capture_summary([crashed])
+    assert cs["capture_errored"] is True
+    assert cs["capture_error"] == "capture stage raised: RuntimeError('frida attach failed')"
+
+    clean_empty = StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={"reason": "no flows captured", "proxy": "127.0.0.1:8081",
+                  "client_connections": 3},
+        error="no traffic captured through the proxy - ...",
+    )
+    cs_clean = _capture_summary([clean_empty])
+    assert cs_clean["capture_errored"] is False  # completed, just empty
+
+    no_stage = _capture_summary([])
+    assert no_stage["capture_errored"] is False
+    assert no_stage["capture_error"] is None
+    # Uniform contract: both return paths expose the new keys (also locked by
+    # test_report_template_coverage.test_capture_summary_return_paths_expose_identical_keys).
+    assert set(no_stage) == set(cs)
+
+
+def test_generate_report_crashed_capture_is_not_read_as_app_behaviour(tmp_path):
+    # A capture stage that RAISED (reason="capture exception") did not complete a
+    # capture window - its empty flow list reflects the stage crash, not the app.
+    # Before the fix the report reached the INTERNET branch and explained the
+    # empty capture as "a coverage limitation of this run (the app may not have
+    # exercised the network...)" - a confidently-wrong app-behaviour cause for a
+    # crashed tool (not-attempted != skipped; a hardcoded cause is false the
+    # moment a different root cause reaches the branch). The report must instead
+    # name the stage failure and surface the real error.
+    from static.manifest import ManifestInfo
+    from common import StageResult
+
+    crashed = StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={"reason": "capture exception", "flows_path": "/x/flows"},
+        error="capture stage raised: RuntimeError('frida attach failed: device offline')",
+    )
+    # INTERNET declared - this is exactly the branch that produced the false prose.
+    manifest = ManifestInfo(
+        debuggable=False, network_security_config=None,
+        permissions=["android.permission.INTERNET"],
+    )
+    report_path = generate_report(
+        run_id="cap-crash", apk_hash="cap03", timestamp="2026-09-06T12:00:00",
+        metadata={"hashes": {"sha256": "cap03"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[crashed], output_dir=tmp_path, manifest=manifest,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    # Truthful: names the stage failure and surfaces the real error.
+    assert "capture stage did not complete" in content
+    assert "frida attach failed: device offline" in content
+    # Never frames a crashed stage as app behaviour / a coverage limitation of a
+    # run that completed.
+    assert "the app may not have exercised the network" not in content
+    assert "coverage limitation of this run" not in content
+
+
 def test_generate_report_renders_git_commit(tmp_path):
     # RESID-7A: the report must show which version of the analysis code
     # produced it (reproducibility intent, ADR-0007) - like the toolchain

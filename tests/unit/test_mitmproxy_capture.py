@@ -83,6 +83,38 @@ def test_parse_flow_detail_multiple_requests_one_response_keeps_order():
     assert flows[1].status == ""
 
 
+def test_parse_flow_detail_header_value_never_fabricates_a_flow():
+    # Regression: a request/response HEADER VALUE can contain a method token and
+    # " HTTP/" (Referer/Via/Link carrying "GET ... HTTP/1.1"). Headers are INDENTED
+    # beneath the request line; the request line is always at column 0. Matching on
+    # " HTTP/" after strip() discarded that indentation fabricated a phantom flow
+    # from the header - inflating flows_count and risking a fake `success` proof on
+    # an all-header, zero-real-request capture (principle 3). Only the genuine
+    # column-0 request line may parse.
+    text = (
+        "127.0.0.1:38908: GET https://real.example/ HTTP/2.0\n"
+        "    referer: https://real.example/s?q=GET+HTTP/1.1+guide\n"
+        " << HTTP/2.0 200 OK 559b\n"
+        "    via: 1.1 GET-proxy HTTP/1.1\n"
+    )
+    flows = mitmproxy_capture._parse_flow_detail(text)
+    assert len(flows) == 1
+    assert flows[0].host == "real.example"
+    assert flows[0].path == "/"
+    assert flows[0].status == "200"
+
+
+def test_parse_flow_detail_all_header_noise_yields_no_flow():
+    # The dangerous case in isolation: NO real request line, only indented header
+    # lines that happen to carry "METHOD ... HTTP/". Must yield zero flows, so a
+    # capture that decrypted nothing can never be dressed up as a success.
+    text = (
+        "    referer: https://x/?q=POST+HTTP/1.1\n"
+        "    via: 1.1 GET-node HTTP/1.1\n"
+    )
+    assert mitmproxy_capture._parse_flow_detail(text) == []
+
+
 def test_parse_flow_detail_back_to_back_requests_before_any_response():
     # Regression guard: two request lines arrive with NO response line between
     # them (HTTP/2 multiplexing / connection reuse can interleave requests ahead

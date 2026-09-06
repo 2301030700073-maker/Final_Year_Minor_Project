@@ -169,8 +169,17 @@ def _parse_flow_detail(text: str) -> list[FlowSummary]:
             flows.append(pending)
             pending = None
             continue
-        # Request line: "<client>: METHOD URL HTTP/x".
-        if " HTTP/" in line:
+        # Request line: "<client>: METHOD URL HTTP/x", ALWAYS at column 0 in
+        # flow_detail=2 (native and the WSL2 addon both emit it un-indented).
+        # mitmproxy INDENTS request/response headers beneath it - and an ordinary
+        # header VALUE can contain a method token and " HTTP/" (a Referer/Via/Link
+        # header carrying "GET ... HTTP/1.1"). Matching on " HTTP/" alone, after
+        # strip() discarded the indentation, fabricated a phantom flow from such a
+        # header - inflating flows_count, injecting a bogus host, and (all-header
+        # noise, zero real requests) risking a fake `success` decrypted-traffic
+        # proof (principle 3). Gate on the raw line being un-indented so only a
+        # genuine request line is parsed; an indented header can never qualify.
+        if " HTTP/" in line and not raw[0].isspace():
             tokens = line.split()
             method = None
             url = None

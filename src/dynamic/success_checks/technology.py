@@ -247,21 +247,22 @@ class TechnologyHooksEngagedCheck:
         # Symmetric in honesty to SSL - it confirms the detected root checks that
         # were actually exercised, which is all either mechanism can claim (ADR-0006).
         root_confirmed = bool(root_probe_hits)
+        # Post-bypass liveness (FR-4.6) + real-time UI-responsiveness lines come
+        # from the SHARED liveness_evidence_lines() helper, the single source of
+        # truth cli.py:2039 also renders for non-technology targets. These two
+        # keys were previously duplicated inline here (byte-identical), which let
+        # the two copies silently diverge on any future wording edit - and since
+        # they feed different targets' reports, no run would compare them. Splat
+        # the helper instead; the "app still running after bypass" key keeps its
+        # original leading position and "App UI responsiveness ..." lands last,
+        # matching the prior inline order (dict insertion order preserved).
+        liveness_lines = liveness_evidence_lines(app_still_running, ui_liveness)
         evidence_lines = {
-            # Explicit post-bypass liveness (FR-4.6): the app process survived
-            # the settle window and did not self-terminate on the injected
+            # Explicit post-bypass liveness (FR-4.6): the app process survived the
+            # settle window and did not self-terminate on the injected
             # instrumentation. Stated audibly so a bypass claim is never made
             # against a dead/self-killed process without it being called out.
-            "app still running after bypass": (
-                "True (process survived the settle window, did not self-terminate)"
-                if app_still_running
-                else (
-                    "False (app self-terminated on the injected instrumentation - "
-                    "bypass not confirmable)"
-                    if app_still_running is False
-                    else "not captured (liveness not recorded this run)"
-                )
-            ),
+            "app still running after bypass": liveness_lines["app still running after bypass"],
             "bypass hooks engaged": (
                 ", ".join(engaged) if engaged
                 else "none (no hook checkpoint observed)"
@@ -321,11 +322,11 @@ class TechnologyHooksEngagedCheck:
             # focus, no ANR / input-dispatch timeout was logged (UI thread not
             # frozen), and a real interactive UI hierarchy is rendered. This is
             # the honest "app is usable, not stuck" claim - it proves the UI is
-            # live and tappable without fabricating a specific click.
-            "App UI responsiveness (live, real device data)": (
-                _summarize_ui_liveness(ui_liveness)
-                if ui_liveness else "not captured (no live UI evidence this run)"
-            ),
+            # live and tappable without fabricating a specific click. From the
+            # shared helper (see the liveness_lines splat above).
+            "App UI responsiveness (live, real device data)": liveness_lines[
+                "App UI responsiveness (live, real device data)"
+            ],
         }
         return VerificationResult(
             root_bypassed=True if root_confirmed else None,

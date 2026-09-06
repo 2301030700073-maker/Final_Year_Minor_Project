@@ -139,6 +139,28 @@ def test_recover_sliced_table():
     assert recover_from_text(text) == [("en", "t", (4, 2))]
 
 
+def test_recover_sliced_table_across_interior_null_separators():
+    # A packed table holding SEVERAL strings separated by interior NUL bytes -
+    # R8's real sliced shape. Regression: the table decode used to truncate at
+    # the FIRST NUL before slicing, so every string after an interior separator
+    # (here "su", a root-detection string) was silently lost. Each slice must be
+    # extracted from the FULL table, then terminated at its own NUL.
+    text = ("static char[] c = {119,111,114,108,100,0,115,117,0,101,110};\n"
+            "String a = new String(c, 0, 5);\n"   # "world"
+            "String b = new String(c, 6, 2);\n"   # "su"  (past the first NUL)
+            "String d = new String(c, 9, 2);")    # "en"  (past the second NUL)
+    got = dict((v, sl) for v, _n, sl in recover_from_text(text))
+    assert got == {"world": (0, 5), "su": (6, 2), "en": (9, 2)}
+
+
+def test_recover_sliced_segment_terminates_at_its_own_null():
+    # A slice window that runs into trailing padding must stop at its own NUL,
+    # yielding the real string, not string+padding.
+    text = ("static char[] t = {115,117,0,0};\n"
+            "String s = new String(t, 0, 4);")   # window covers "su\0\0"
+    assert recover_from_text(text) == [("su", "t", (0, 4))]
+
+
 def test_recover_skips_expression_built_array():
     # gms/PropertyGuru-style arithmetic array - NOT pure-numeric -> not recovered.
     text = ("static char[] g = {(char)((x >> 10) & 31) + 96, (char)((x >> 6) & 63)};\n"

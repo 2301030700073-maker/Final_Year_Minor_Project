@@ -217,7 +217,18 @@ def _extract_tables(text: str) -> dict[str, list[int]]:
     return tables
 
 
-def _decode_numeric_array(body: str, tables: dict[str, list[int]] | None = None) -> str:
+def _truncate_at_null(s: str) -> str:
+    """A decoded string ends at its first NUL (R8 null-terminates / pads). Used
+    for the flat ctor's whole-string decode and, within a sliced ctor, for the
+    extracted segment - never across the whole packed table before slicing (the
+    interior NULs there separate several packed strings; see recover_from_text)."""
+    i = s.find("\x00")
+    return s if i < 0 else s[:i]
+
+
+def _decode_numeric_array(
+    body: str, tables: dict[str, list[int]] | None = None, *, truncate_at_null: bool = True
+) -> str:
     """Decode a string table's initializer body to plaintext. Recoverable
     families:
       1. FLAT pure-numeric - every item is a standalone numeric literal (R8's
@@ -257,10 +268,14 @@ def _decode_numeric_array(body: str, tables: dict[str, list[int]] | None = None)
     # them as non-recoverable rather than crash or emit garbage.
     if any(v < 0 or v > 0xFFFF for v in vals):
         return ""
-    # Trailing 0 bytes (R8 null-padding the table to a fixed stride) are truncated.
-    if 0 in vals:
-        vals = vals[: vals.index(0)]
-    return "".join(chr(v) for v in vals)
+    decoded = "".join(chr(v) for v in vals)
+    # Flat ctor: the string ends at the first NUL (R8 null-terminates / pads to a
+    # fixed stride). The SLICED ctor must NOT truncate here - a packed table holds
+    # several strings separated by interior NULs, and slicing happens AFTER; cutting
+    # at the first NUL would drop every string past the first separator (a silent
+    # missed-signature fault). recover_from_text passes truncate_at_null=False for
+    # the sliced path and applies the NUL cut to each extracted segment instead.
+    return _truncate_at_null(decoded) if truncate_at_null else decoded
 
 
 def recover_from_text(text: str) -> list[tuple[str, str, tuple[int, int] | None]]:
@@ -279,23 +294,34 @@ def recover_from_text(text: str) -> list[tuple[str, str, tuple[int, int] | None]
 
     # Boundary #3: sibling literal int tables let a subscripted constant fold.
     tables = _extract_tables(text)
-    decodes: dict[str, str] = {}
+    # Two decodes per array: the flat form cuts at the first NUL (whole-string
+    # terminator); the sliced form keeps the FULL table so interior NULs that
+    # separate several packed strings survive until each slice is extracted.
+    flat: dict[str, str] = {}
+    full: dict[str, str] = {}
     for m in _ARRAY_DECL.finditer(text):
         name, body = m.group(1), m.group(2)
         if name in needed:
-            decodes[name] = _decode_numeric_array(body, tables)
+            flat[name] = _decode_numeric_array(body, tables)
+            full[name] = _decode_numeric_array(body, tables, truncate_at_null=False)
 
     out: list[tuple[str, str, tuple[int, int] | None]] = []
     for m in _STR_SINGLE_ARG_CTOR.finditer(text):
         name = m.group(1)
-        val = decodes.get(name, "")
+        val = flat.get(name, "")
         if val:
             out.append((val, name, None))
     for m in _STR_SLICED_CTOR.finditer(text):
         name, off, ln = m.group(1), int(m.group(2)), int(m.group(3))
-        val = decodes.get(name, "")
-        if val:
-            out.append((val[off : off + ln], name, (off, ln)))
+        table = full.get(name, "")
+        if table:
+            # Extract the requested [offset:offset+len] window from the full packed
+            # table, then terminate that segment at its own first NUL (a C-string
+            # slice ends at its NUL) so a slice landing on padding yields the real
+            # string, not string+padding.
+            seg = _truncate_at_null(table[off : off + ln])
+            if seg:
+                out.append((seg, name, (off, ln)))
     return out
 
 

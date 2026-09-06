@@ -47,11 +47,36 @@ def _md(value) -> str:
     return s
 
 
+def _fmt_edge(x: float) -> str:
+    """Render a confidence-calibration bucket edge faithfully.
+
+    The curve deliberately inserts the decision threshold and every per-run
+    threshold as explicit bucket edges (G2 / Finding D) - "the one boundary that
+    matters for future threshold re-scoring" - and those are NOT constrained to
+    0.1 steps (settings.yaml/_load_thresholds accept any float; per-run
+    thresholds are whatever governed each historical run, e.g. 0.84). A fixed
+    `%.1f` silently ROUNDS them: a tuned 0.75 renders as "0.8", which (a) hides
+    the very boundary this curve exists to surface, (b) collides two distinct
+    buckets [0.7,0.75) and [0.75,0.8) into "[0.7, 0.8)" and a degenerate
+    "[0.8, 0.8)", and (c) leaves the first label's count spanning a range its
+    text overstates. That is a label-vs-value honesty defect in a scientific
+    artifact, not cosmetics.
+
+    Show up to 4 decimals (enough for any realistic threshold, and it rounds
+    away 0.1-arithmetic float noise like 0.30000000000000004), trimming trailing
+    zeros but always keeping at least one decimal - so a 0.1-multiple edge
+    renders EXACTLY as `%.1f` did (0.0->"0.0", 0.7->"0.7", 1.0->"1.0"): zero
+    change to the default-edge curve, faithful for tuned/per-run edges."""
+    s = f"{x:.4f}".rstrip("0")
+    return s + "0" if s.endswith(".") else s
+
+
 # Markdown output, not HTML: autoescape stays off (the template hand-escapes the
 # few literal angle-bracket strings it needs). We instead neutralize the specific
 # structure-breaking characters in untrusted values via the `md` filter above.
 _env = Environment()
 _env.filters["md"] = _md
+_env.filters["edge"] = _fmt_edge
 
 TEMPLATE = _env.from_string("""\
 # Analysis Report
@@ -861,7 +886,7 @@ Bucket edges always include the real decision threshold explicitly - the one bou
 | Range | Count | Observed Positive Rate |
 |---|---|---|
 {% for b in buckets -%}
-| [{{ "%.1f"|format(b.range_low) }}, {{ "%.1f"|format(b.range_high) }}) | {{ b.count }} | {{ "%.2f"|format(b.observed_positive_rate) if b.observed_positive_rate is not none else "no data" }} |
+| [{{ b.range_low|edge }}, {{ b.range_high|edge }}) | {{ b.count }} | {{ "%.2f"|format(b.observed_positive_rate) if b.observed_positive_rate is not none else "no data" }} |
 {% endfor %}
 {% endfor %}
 ## Notes

@@ -208,6 +208,61 @@ def test_field_names_builds_category_field_triple():
     assert _field_names("ssl") == ("ssl_confidence", "ssl_detected", "ssl_bypassed")
 
 
+def test_fmt_edge_renders_tuned_thresholds_faithfully_and_leaves_defaults_unchanged():
+    # _fmt_edge: the curve inserts the decision threshold and every per-run
+    # threshold as explicit bucket edges (G2/Finding D), and those are NOT
+    # 0.1-aligned. A fixed `%.1f` rounded a tuned 0.75 to "0.8" - hiding the
+    # boundary and colliding buckets. _fmt_edge must render such edges truthfully
+    # while leaving a 0.1-multiple edge EXACTLY as `%.1f` did (no change to the
+    # default-edge curve).
+    from report.generator import _fmt_edge
+    # Non-0.1 edges (tuned/per-run thresholds) render with full precision.
+    assert _fmt_edge(0.75) == "0.75"
+    assert _fmt_edge(0.84) == "0.84"    # the per-run threshold the existing curve tests use
+    assert _fmt_edge(0.725) == "0.725"
+    assert _fmt_edge(0.65) == "0.65"
+    # 0.1-multiple edges render identically to the old `%.1f`: one decimal kept.
+    assert _fmt_edge(0.0) == "0.0"
+    assert _fmt_edge(0.1) == "0.1"
+    assert _fmt_edge(0.7) == "0.7"
+    assert _fmt_edge(1.0) == "1.0"
+    # 0.1-arithmetic float noise is rounded away at 4 decimals, not leaked.
+    assert _fmt_edge(0.1 + 0.2) == "0.3"
+
+
+def test_calibration_curve_render_shows_tuned_threshold_boundary_not_a_rounded_collision():
+    # Regression: with a tuned threshold (e.g. 0.75), the curve DATA correctly
+    # splits [0.7,0.8) into [0.7,0.75) and [0.75,0.8) (the threshold-as-edge
+    # feature). But the markdown render used `%.1f`, collapsing them to
+    # "[0.7, 0.8)" and a degenerate "[0.8, 0.8)" - the tuned boundary the curve
+    # exists to surface became invisible and a bucket's count no longer matched
+    # its label. The existing curve tests only assert the float edges in the
+    # DATA, never the rendered label, so the corruption lived purely in the
+    # render. Assert the rendered curve names the real boundary and shows no
+    # rounded collision.
+    from report.generator import CALIBRATION_TEMPLATE
+
+    report = compute_calibration_report(
+        runs=[], ground_truth={}, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+        threshold={"root": 0.75, "ssl": 0.75},
+    )
+    # precondition: the threshold IS an explicit edge in the data (feature works)
+    root_edges = {b.range_low for b in report.calibration_curve["root"]}
+    assert 0.75 in root_edges
+
+    content = CALIBRATION_TEMPLATE.render(report=report)
+
+    # The tuned boundary is visible in the rendered curve, both as a range end
+    # and a range start - faithful to the data.
+    assert "[0.7, 0.75)" in content
+    assert "[0.75, 0.8)" in content
+    # The old `%.1f` collision must be gone: 0.75 no longer masquerades as 0.8,
+    # and there is no degenerate zero-width-looking bucket.
+    assert "[0.8, 0.8)" not in content
+    # A 0.1-multiple boundary elsewhere still renders exactly as before.
+    assert "[0.8, 0.9)" in content
+
+
 def test_calibration_report_renders_skeleton_warning_on_small_corpus():
     # report.skeleton_warning: a sub-30 observation corpus renders a loud
     # "skeleton, not a statistically robust result" note (so bucket rates are

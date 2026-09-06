@@ -101,10 +101,10 @@ def parse_mapping(text: str) -> MappingTable:
 def deobfuscate_source(source: str, mapping: MappingTable) -> str:
     """Restore obfuscated identifiers to their originals in a Java source text.
 
-    Replaces each mapped obfuscated simple name with its original, using word
-    boundaries and longest-identifier-first ordering (so a longer obfuscated
-    name isn't shadowed by a prefix that is also a mapped name). Returns the
-    source unchanged when there is nothing to restore.
+    Replaces each mapped obfuscated simple name with its original, using
+    identifier boundaries and longest-identifier-first ordering (so a longer
+    obfuscated name isn't shadowed by a prefix that is also a mapped name).
+    Returns the source unchanged when there is nothing to restore.
     """
     if not mapping:
         return source
@@ -124,5 +124,17 @@ def deobfuscate_source(source: str, mapping: MappingTable) -> str:
         # every genuine mapping; it only converts that crash into a safe verbatim
         # substitution - honoring this module's "a malformed line must not abort
         # deobfuscation" intent and ADR-0006 (degrade conservatively, never crash).
-        out = re.sub(rf"\b{re.escape(obf)}\b", lambda m, o=orig: o, out)
+        # Identifier boundaries must treat `$` as part of the name, not a break.
+        # `\b` is defined over `\w` = [A-Za-z0-9_], which EXCLUDES `$` - but `$`
+        # is a legal Java identifier char that R8/the JVM use heavily for
+        # synthetic names (nested classes `Outer$Inner`, lambda captures `val$x`,
+        # `access$000`, Kotlin delegates). With `\b`, a one-letter mapping like
+        # `c -> verify` fires INSIDE `access$c`/`val$c`/`c$field`, because `\b`
+        # sees a boundary between `c` and `$` - a false substitution that
+        # corrupts an unrelated synthetic identifier and can invent or destroy a
+        # signature hit in the deobfuscated view. Use explicit lookarounds that
+        # include `$` (and `\w`) on both sides so a match fires only at a true
+        # identifier edge. Byte-identical to `\b` for every name not adjacent to
+        # a `$`; it only declines the false in-identifier hits.
+        out = re.sub(rf"(?<![\w$]){re.escape(obf)}(?![\w$])", lambda m, o=orig: o, out)
     return out

@@ -150,6 +150,36 @@ def test_deobfuscate_source_backslash_hazard_is_reachable_end_to_end(tmp_path):
     assert deobfuscate_source("class a {}", mapping) == "class Foo\\qux {}"
 
 
+def test_deobfuscate_source_dollar_is_part_of_identifier_not_a_boundary():
+    # `$` is a legal Java identifier char that R8/the JVM use for synthetic
+    # names (nested classes Outer$Inner, lambda captures val$x, access$000,
+    # Kotlin delegates). A one-letter mapping like `c -> verify` must NOT fire
+    # inside `access$c` / `val$c` / `c$field` - `\b` wrongly saw a boundary
+    # between the letter and the `$` and made that false in-identifier
+    # substitution, corrupting an unrelated synthetic name and potentially
+    # inventing/destroying a signature hit in the deobfuscated view. A genuine
+    # standalone call still restores.
+    t = MappingTable(obfuscated_to_original={"c": "verify"})
+    src = "obj.c(); this.c$field = access$c + val$c;"
+    out = deobfuscate_source(src, t)
+    assert "obj.verify()" in out            # real call restored
+    assert "this.c$field" in out            # synthetic id untouched
+    assert "access$c" in out and "val$c" in out  # both captures untouched
+    assert "verify$" not in out and "$verify" not in out
+
+
+def test_deobfuscate_source_nested_class_segment_not_falsely_renamed():
+    # R8 renames nested classes with `$` segments (Outer$Inner). A mapping for a
+    # simple name that equals one segment must not rewrite that segment when it
+    # sits against a `$` - only a true standalone occurrence is restored.
+    t = MappingTable(obfuscated_to_original={"a": "Outer"})
+    # `a$b` is one synthetic identifier; the leading `a` is NOT the standalone
+    # class `a`, so it must stay put. A bare `a` elsewhere still restores.
+    out = deobfuscate_source("new a$b(); Class k = a.class;", t)
+    assert "new a$b()" in out
+    assert "Outer.class" in out
+
+
 def test_deobfuscate_source_real_mapping_output_unchanged_by_literal_fix():
     # Regression: for every genuine Java identifier (no backslash), the literal
     # callable replacement is byte-identical to the old template form. This pins

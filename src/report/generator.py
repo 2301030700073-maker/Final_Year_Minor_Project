@@ -383,6 +383,9 @@ This run's decompilation completed successfully ({{ jadx_file_count }} source fi
 
 {% if hooks_audit_present -%}
 **Bypass hooks engaged (auditable, this run).** Reconstructed from the dynamic stage's own Frida message stream so engagement traces back to the signatures that drove it (G10), not an opaque yes/no. Every count below is a real delivered message:
+{% if hooks_script_errors -%}
+- ⚠ **{{ hooks_script_errors | length }} Frida hook script error(s) delivered this run** — one or more injected hooks raised an uncaught error while running ({% for e in hooks_script_errors %}`{{ e }}`{% if not loop.last %}; {% endif %}{% endfor %}). The bypass instrumentation did NOT run cleanly this run, so any absence of engagement or verification below is a **script fault to fix**, not a property of the app.
+{% endif -%}
 {% if hooks_driving_signatures -%}
 - Driven by static signatures: {% for s in hooks_driving_signatures %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}.
 {% endif -%}
@@ -395,7 +398,11 @@ This run's decompilation completed successfully ({{ jadx_file_count }} source fi
 - Loaded but readiness not observed this run: {% for s in hooks_loaded_not_engaged %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %} (the hook was attached; the app's own check may simply not have exercised it - engagement is a lower bound, not a confirmed absence).
 {% endif -%}
 {% if not hooks_engaged_any -%}
+{% if hooks_script_errors -%}
+- No engagement signal was delivered at all this run, and {{ hooks_script_errors | length }} hook script error(s) were recorded (above): the most likely cause is the **script fault**, not an un-exercised path. Treat this run's engagement and any dependent verification as incomplete until the hook error is fixed and the run is repeated.
+{% else -%}
 - No engagement signal was delivered at all this run: hooks were loaded but neither a readiness checkpoint nor a behavioral signal came back. This is un-exercised (or a suppressed message stream), NOT a failed bypass - the distinction the earlier "engagement showed none" result could not make.
+{% endif -%}
 {% endif -%}
 
 {% endif -%}
@@ -575,6 +582,7 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
         "hooks_handauthored_scripts": [], "hooks_handauthored_script_paths": [],
         "hooks_loaded_not_engaged": [],
         "hooks_root_probe_hits": 0, "hooks_ssl_effects": {},
+        "hooks_script_errors": [],
     }
     if dynamic_stage is None:
         return absent
@@ -601,7 +609,24 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
     root_probe_hits = 0
     probe_hits_any = 0
     ssl_effects: dict[str, int] = {}
+    script_errors: list[str] = []
     for m in evidence.get("frida_messages") or []:
+        # Principle 3 / ADR-0006: a Frida `{'type':'error'}` message is an uncaught
+        # exception raised BY an injected hook at runtime - the instrumentation did
+        # NOT run cleanly. Such a message carries no `payload`, so every other
+        # consumer (checkpoint waiter, success checks, this loop's payload branch)
+        # skips it - and a crashed run then renders as a clean, un-exercised
+        # negative, the exact misleading "engagement showed none" outcome this audit
+        # exists to prevent. Collected so the report can say the hook crashed.
+        if isinstance(m, dict) and m.get("type") == "error":
+            desc = str(m.get("description") or "unspecified Frida script error").strip()
+            fname, lineno = m.get("fileName"), m.get("lineNumber")
+            if fname and lineno is not None:
+                desc = f"{desc} ({fname}:{lineno})"
+            elif lineno is not None:
+                desc = f"{desc} (line {lineno})"
+            script_errors.append(desc)
+            continue
         payload = m.get("payload") if isinstance(m, dict) else None
         if not isinstance(payload, dict):
             continue
@@ -648,6 +673,7 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
         "hooks_loaded_not_engaged": loaded_not_engaged,
         "hooks_root_probe_hits": root_probe_hits,
         "hooks_ssl_effects": dict(sorted(ssl_effects.items())),
+        "hooks_script_errors": script_errors,
     }
 
 

@@ -1566,6 +1566,7 @@ def test_hooks_engaged_absent_without_dynamic_stage():
         "hooks_handauthored_scripts": [], "hooks_handauthored_script_paths": [],
         "hooks_loaded_not_engaged": [],
         "hooks_root_probe_hits": 0, "hooks_ssl_effects": {},
+        "hooks_script_errors": [],
     }
 
 
@@ -1664,6 +1665,85 @@ def test_hooks_engaged_no_signal_is_unexercised_not_failure():
     assert out["hooks_engaged_any"] is False
     assert out["hooks_checkpoints_fired"] == []
     assert out["hooks_loaded_not_engaged"] == ["root_su_binary_paths"]
+
+
+def test_hooks_engaged_surfaces_frida_script_errors():
+    # Principle 3 / ADR-0006: a Frida `{'type':'error'}` message is an uncaught
+    # exception raised BY an injected hook - the instrumentation did not run
+    # cleanly. It carries no `payload`, so every other consumer skips it, and a
+    # crashed run would otherwise render as a clean, un-exercised negative (the
+    # misleading "engagement showed none" outcome this audit exists to prevent).
+    # The audit must collect it, format it with its location, and NOT let it
+    # inflate any engagement count.
+    from report.generator import _hooks_engaged
+    dynamic = StageResult(
+        stage="dynamic", status="success",
+        evidence={
+            "scripts_applied": ["synthesized", "root_su_binary_paths"],
+            "frida_messages": [
+                {"type": "error", "description": "ReferenceError: Foo is not defined",
+                 "fileName": "hook.js", "lineNumber": 12,
+                 "stack": "ReferenceError: Foo is not defined\n    at <eval>"},
+                {"type": "error", "description": "Error: no class com.x.Y"},  # no location
+            ],
+        },
+    )
+    out = _hooks_engaged([dynamic])
+    assert out["hooks_audit_present"] is True
+    # Errors are recorded, formatted with location when present, never counted as
+    # engagement (no checkpoint/probe/effect came from a crash).
+    assert out["hooks_script_errors"] == [
+        "ReferenceError: Foo is not defined (hook.js:12)",
+        "Error: no class com.x.Y",
+    ]
+    assert out["hooks_engaged_any"] is False   # a crash is NOT engagement
+    assert out["hooks_checkpoints_fired"] == []
+    assert out["hooks_root_probe_hits"] == 0
+    assert out["hooks_ssl_effects"] == {}
+    # A run with a real checkpoint AND an error surfaces BOTH - the error never
+    # suppresses genuine engagement, and engagement never hides the error.
+    mixed = StageResult(
+        stage="dynamic", status="success",
+        evidence={"scripts_applied": ["synthesized", "root_su_binary_paths"],
+                  "frida_messages": [
+                      {"type": "send", "payload": {"hook": "root_su_binary_paths"}},
+                      {"type": "error", "description": "TypeError: x.y is null"}]},
+    )
+    mixed_out = _hooks_engaged([mixed])
+    assert mixed_out["hooks_engaged_any"] is True
+    assert mixed_out["hooks_checkpoints_fired"] == ["root_su_binary_paths"]
+    assert mixed_out["hooks_script_errors"] == ["TypeError: x.y is null"]
+    # Absent path (no dynamic stage) still exposes the key as [] - the uniform
+    # contract the template-coverage guard relies on.
+    assert _hooks_engaged([])["hooks_script_errors"] == []
+
+
+def test_generate_report_frida_script_error_is_not_read_as_unexercised(tmp_path):
+    # The honesty hole this closes: with only an error message, engaged_any is
+    # False, so the report used to print "un-exercised ... NOT a failed bypass" -
+    # actively false when a hook actually crashed. The report must instead name
+    # the crash and attribute the empty engagement to the script fault.
+    classification = _classification()
+    dynamic = StageResult(
+        stage="dynamic", status="success",
+        evidence={"scripts_applied": ["synthesized", "root_su_binary_paths"],
+                  "frida_messages": [
+                      {"type": "error", "description": "ReferenceError: Foo is not defined",
+                       "fileName": "hook.js", "lineNumber": 12}]},
+    )
+    report_path = generate_report(
+        run_id="fridaerr", apk_hash="fe001", timestamp="2026-09-06T12:00:00",
+        metadata={"hashes": {"sha256": "fe001"}, "package": {"package_name": "com.example.app"}},
+        classification=classification, verification=None, correlation=None,
+        stage_results=[dynamic], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    # The crash is surfaced verbatim, with its location.
+    assert "Frida hook script error(s) delivered this run" in content
+    assert "ReferenceError: Foo is not defined (hook.js:12)" in content
+    # The crashed-branch line replaces the misleading "un-exercised" claim.
+    assert "the most likely cause is the **script fault**" in content
+    assert "This is un-exercised (or a suppressed message stream), NOT a failed bypass" not in content
 
 
 def test_hooks_engaged_labels_handauthored_scripts():

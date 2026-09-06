@@ -268,3 +268,97 @@ def test_migrate_schema_adds_missing_column_and_index(tmp_path):
 
     # idempotent: a second run adds nothing and does not raise
     _migrate_schema(engine)
+
+
+def test_load_runs_for_calibration_populates_every_runrow_field():
+    """Structural guard (sibling of REGEN-FIELDLOSS1's test_regen_field_coverage).
+
+    load_runs_for_calibration() is the ONLY translation of a persisted RunRecord
+    into calibration's RunRow, and it maps fields by hand - one `field=r.column`
+    keyword per RunRow field. A RunRow field added without a matching keyword here
+    falls back to its dataclass default (None / False / 0.0) for EVERY run, and
+    because that is a silent default - not an error - precision/recall would be
+    computed on quietly-wrong data with no test failing. (Concretely: forget
+    `ssl_threshold=` and every run's SSL calibration curve silently anchors to the
+    engine default threshold instead of the one that governed it; forget
+    `coverage=` and every negative reads as pre-coverage / unscannable, collapsing
+    Tier-2.) This makes the field->keyword contract proactive: introspect the
+    RunRow(...) call the loader makes and assert its keywords cover every field.
+
+    Pure/toolchain-free: AST + dataclasses.fields, executes no pipeline.
+    """
+    import ast
+    import dataclasses as dc
+    import inspect
+
+    from calibration.types import RunRow
+
+    tree = ast.parse(inspect.getsource(load_runs_for_calibration))
+    runrow_calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "RunRow"
+    ]
+    assert len(runrow_calls) == 1, (
+        f"expected exactly one RunRow(...) construction in load_runs_for_calibration, "
+        f"found {len(runrow_calls)} - update this guard if the loader was restructured."
+    )
+    call = runrow_calls[0]
+    # A **splat would make the keyword set impossible to verify statically, so the
+    # guard would silently pass while covering nothing - refuse it explicitly.
+    assert all(kw.arg is not None for kw in call.keywords), (
+        "load_runs_for_calibration builds RunRow(...) with a **splat; this guard "
+        "reads explicit keywords and cannot verify a splat - keep the construction "
+        "explicit, or teach this test how to resolve the splat's keys."
+    )
+    kwargs_passed = {kw.arg for kw in call.keywords}
+    field_names = {f.name for f in dc.fields(RunRow)}
+    missing = field_names - kwargs_passed
+    assert not missing, (
+        f"load_runs_for_calibration does not populate {sorted(missing)} of RunRow. "
+        f"An unpopulated field silently takes its dataclass default on EVERY loaded "
+        f"run and corrupts calibration (precision/recall/curve) with no error - pass "
+        f"{sorted(missing)[0]!r} from the matching RunRecord column."
+    )
+
+
+def test_load_runs_for_calibration_round_trips_distinctive_values(tmp_path):
+    """Companion to the structural guard: a real save_run -> load round-trip with
+    distinctive, non-default values, so a field wired to the WRONG column (which
+    the AST guard cannot catch - it only checks a keyword is present) still fails.
+    Every asserted value differs from the RunRow default for its field."""
+    verdict_root = CategoryVerdict(confidence=0.83, detected=True, evidence=[])
+    verdict_ssl = CategoryVerdict(confidence=0.42, detected=False, evidence=[])
+    classification = ClassificationResult(
+        action=Action.ROOT_ONLY, root=verdict_root, ssl=verdict_ssl,
+        root_threshold=0.6, ssl_threshold=0.55,
+    )
+    save_metadata(tmp_path, "cafef00d", {"package": {"package_name": "test.app"}})
+    save_run(tmp_path, "cafef00d", "runX", {
+        "classification": classification,
+        "verification": {"root_bypassed": True, "ssl_bypassed": None, "evidence_lines": {}},
+        "coverage": {"root": {"java": "fully_analyzed"}},
+        "stage_results": [
+            {"stage": "decompile", "status": "success",
+             "evidence": {"decompile_completeness": "complete"}},
+        ],
+    })
+
+    rows = load_runs_for_calibration(tmp_path)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.apk_hash == "cafef00d"
+    assert row.run_id == "runX"
+    assert row.action == "ROOT_ONLY"
+    assert row.root_confidence == 0.83
+    assert row.root_detected is True
+    assert row.root_bypassed is True
+    assert row.ssl_confidence == 0.42
+    assert row.ssl_detected is False
+    assert row.ssl_bypassed is None
+    assert row.decompile_completeness == "complete"
+    assert row.coverage == {"root": {"java": "fully_analyzed"}}
+    assert row.root_threshold == 0.6
+    assert row.ssl_threshold == 0.55
+    assert row.timestamp is not None  # stamped at save_run time

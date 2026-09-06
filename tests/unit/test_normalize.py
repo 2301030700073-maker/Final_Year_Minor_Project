@@ -105,6 +105,43 @@ def test_normalize_aab_rescues_base_root_native_lib_without_dropping_or_duplicat
         assert not any(n.startswith("root/") or n.startswith("base/") for n in names)
 
 
+def test_normalize_aab_base_wins_collision_regardless_of_zip_order(tmp_path):
+    # Base-wins on a base/ vs base/root/ path collision must hold DETERMINISTICALLY,
+    # independent of the order the two entries happen to appear in the AAB's central
+    # directory. The sibling test above lists base/lib/libc.so BEFORE its base/root/
+    # twin, so a first-in-zip-order merge would let base win there by luck - it never
+    # exercises the reverse ordering. This fixture lists the base/root/ copy FIRST:
+    #
+    #   base/root/lib/arm64-v8a/libc.so   (root module - must LOSE)
+    #   base/lib/arm64-v8a/libc.so        (base module - must WIN)
+    #
+    # A raw `namelist()` merge visits base/root/ first here, so its `arc in written`
+    # guard would keep ROOT-libc - analyzing a native lib the device would NOT load
+    # at that path, back toward the confident-negative this rescue exists to prevent
+    # (ADR-0006). The merge sorts non-root base/ ahead of base/root/, so base wins by
+    # construction whatever the zip order - the same guarantee split-set gets by
+    # merging base first (setdefault).
+    aab = _zip(tmp_path, "order.aab", {
+        "base/manifest/AndroidManifest.xml": b"<manifest package='com.example.aab'/>",
+        "base/dex/classes.dex": b"\x00dex-1",
+        "base/root/lib/arm64-v8a/libc.so": b"ROOT-libc",   # listed first, must lose
+        "base/lib/arm64-v8a/libc.so": b"BASE-libc",        # listed second, must win
+    })
+    # Confirm the fixture really does list the root copy first (else the test would
+    # not exercise the reverse ordering it exists to cover).
+    with zipfile.ZipFile(aab) as z:
+        order = [n for n in z.namelist() if n.endswith("libc.so")]
+    assert order == [
+        "base/root/lib/arm64-v8a/libc.so",
+        "base/lib/arm64-v8a/libc.so",
+    ], order
+    out = normalize.normalize_aab(aab, tmp_path / "out")
+    with zipfile.ZipFile(out) as z:
+        names = z.namelist()
+        assert names.count("lib/arm64-v8a/libc.so") == 1, f"duplicate arcname: {names}"
+        assert z.read("lib/arm64-v8a/libc.so") == b"BASE-libc"
+
+
 def test_normalize_aab_renumbers_dex_in_order(tmp_path):
     aab = _aab(tmp_path)
     out = normalize.normalize_aab(aab, tmp_path / "out")

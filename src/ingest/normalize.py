@@ -115,7 +115,7 @@ def normalize_aab(aab: Path, out_dir: Path) -> Path:
             name = "classes.dex" if i == 1 else f"classes{i}.dex"
             zout.writestr(name, zin.read(entry))
             written.add(name)
-        for n in zin.namelist():
+        for n in sorted(zin.namelist(), key=lambda e: (e.startswith("base/root/"), e)):
             # Map a base/ entry to the APK-root path the single-APK pipeline
             # reads. Two prefixes both land content at the APK root:
             #   base/<x>       -> <x>            (base/lib/…, base/res/…, base/assets/…)
@@ -127,9 +127,17 @@ def normalize_aab(aab: Path, out_dir: Path) -> Path:
             # base/root/ vanished from the synthesized APK and the native stage
             # never saw it - a silent coverage loss that could read a real native
             # root/SSL detection as a confident negative (ADR-0006 forbids exactly
-            # this). Rescue both prefixes; base/ wins a genuine path collision
-            # (written-set guard) so we never emit a duplicate arcname (a corrupt
-            # zip) and precedence is deterministic, mirroring split-set base-wins.
+            # this). Rescue both prefixes; on a genuine path collision (the same
+            # arc under both base/ and base/root/) base/ must win - it is the
+            # module bundletool actually installs at that path, so analyzing the
+            # base .so is analyzing what the device would load. The written-set
+            # guard only makes base/ win if base/ is CONSIDERED FIRST, which raw
+            # zip order does not guarantee: an AAB that happened to list
+            # base/root/lib/x.so before base/lib/x.so let the root module win (the
+            # wrong .so - back toward the very confident-negative this rescue
+            # exists to prevent). Sorting non-root base/ (key 0) ahead of
+            # base/root/ (key 1) makes base-wins deterministic and independent of
+            # zip order, mirroring split-set's "base merged first" (setdefault).
             if n.startswith("base/root/"):
                 arc = n[len("base/root/"):]
             elif n.startswith("base/"):

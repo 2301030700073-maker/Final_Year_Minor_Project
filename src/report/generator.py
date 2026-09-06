@@ -695,6 +695,13 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
             "capture_flows": [], "capture_hosts": [],
             "capture_flows_path": None, "capture_system_ca": None,
             "capture_proxy": None,
+            # No capture stage ran this run, so no device-side reachability probe
+            # was recorded: None (never 0, which would assert "device never
+            # reached the proxy" - a verdict we did not measure). Kept here so
+            # both return paths expose the SAME key set - the template's
+            # reachability line is guarded by capture_present today, but the
+            # contract must not depend on that gate to stay crash-free.
+            "capture_client_connections": None,
         }
     evidence = capture_stage.evidence or {}
     flows = evidence.get("flow_summary") or []

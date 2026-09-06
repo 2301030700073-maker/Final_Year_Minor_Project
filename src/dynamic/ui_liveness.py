@@ -151,9 +151,19 @@ def _parse_tls_block(logcat: str, package: str, pid: str | None = None) -> list[
 def _parse_clickable_nodes(uiautomator_xml: str) -> int:
     """Count interactive (clickable or focusable) UI nodes in a uiautomator
     dump. A rendered, interactive screen shows real tappable widgets; a stuck
-    or blank frame shows ~zero. Pure over the XML, fixture-testable."""
+    or blank frame shows ~zero. Pure over the XML, fixture-testable.
+
+    The `(?<![\\w-])` before the attribute name is load-bearing: `\\b` alone
+    matches the `clickable="true"` INSIDE `long-clickable="true"` (a distinct
+    uiautomator attribute), because a word boundary falls at the `-`/`c` seam. A
+    node that is long-clickable but NOT clickable/focusable would then be counted
+    as a tappable widget, and _classify_screen would label a splash/logo frame
+    (long-clickable root, zero real widgets) as "interactive" - overstating UI
+    liveness, the dangerous direction for this module's honesty claim. Requiring
+    no word char OR hyphen immediately before the name rejects long-clickable and
+    context-clickable while still matching a genuine clickable/focusable."""
     count = 0
-    for m in re.finditer(r'<node[^>]*\b(?:clickable|focusable)="true"[^>]*>', uiautomator_xml):
+    for m in re.finditer(r'<node[^>]*(?<![\w-])(?:clickable|focusable)="true"[^>]*>', uiautomator_xml):
         count += 1
     return count
 

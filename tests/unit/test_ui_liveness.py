@@ -81,6 +81,33 @@ def test_clickable_nodes_zero_on_blank_frame():
     assert _parse_clickable_nodes('<node text="loading" />') == 0
 
 
+def test_clickable_nodes_ignores_long_clickable_only_node():
+    # Regression: `long-clickable="true"` is a DISTINCT uiautomator attribute. A
+    # \b-anchored match saw the `clickable="true"` substring inside it and counted
+    # a non-tappable node - so a splash/logo frame with a long-clickable root read
+    # as "interactive", overstating UI liveness (the dangerous direction). A node
+    # that is long-clickable but NOT clickable/focusable must count as zero.
+    assert _parse_clickable_nodes(
+        '<node clickable="false" focusable="false" long-clickable="true" text="Brand"/>'
+    ) == 0
+    # context-clickable is the same hyphenated-attribute hazard.
+    assert _parse_clickable_nodes('<node context-clickable="true" clickable="false"/>') == 0
+    # But a node carrying BOTH long-clickable and a genuine clickable still counts
+    # once, in either attribute order (the real attribute satisfies the match).
+    assert _parse_clickable_nodes('<node long-clickable="true" clickable="true"/>') == 1
+    assert _parse_clickable_nodes('<node clickable="true" long-clickable="true"/>') == 1
+
+
+def test_classify_screen_long_clickable_root_is_not_interactive():
+    # End-to-end of the fix: a splash frame whose only "interactive" attribute is
+    # long-clickable, with minimal text, must classify as splash/loading - never
+    # "interactive (has tappable widgets)".
+    xml = '<node clickable="false" long-clickable="true" text="BrandName"/>'
+    clk = _parse_clickable_nodes(xml)
+    label = _classify_screen(_parse_text_nodes(xml), clk)
+    assert "NOT an interactive page" in label
+
+
 def test_rendered_content_true_when_children_beyond_rn_root():
     """RN dump: a single FrameLayout root (no clickable flag) wrapping real
     child widgets -> the surface IS rendering, so a 0 clickable count is

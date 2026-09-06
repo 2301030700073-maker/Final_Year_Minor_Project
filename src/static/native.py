@@ -253,6 +253,34 @@ def parse_readelf_symbols(text: str) -> list[str]:
     return names
 
 
+# `nm -D` (BSD default) emits a wholly different shape from readelf -Ws:
+#   `<value> <type> <name>`   for a defined symbol   (0000000000001234 T foo)
+#   `         <type> <name>`   for an undefined import (blank value:      U ptrace)
+# type is a single letter (T/t/W/w/U/B/D/R/...). Feeding this to the readelf
+# regex parses NOTHING (it expects the Num:/Value/Size/Type/Bind/Vis/Ndx columns),
+# so the nm fallback silently yielded [] on every host - a silent failure
+# (principle 3) that defeated the "dynamic table is the source of truth" intent.
+_NM_SYM_RE = re.compile(r"^\s*(?:[0-9a-fA-F]+)?\s+[A-Za-z]\s+(\S+)\s*$")
+
+
+def parse_nm_symbols(text: str) -> list[str]:
+    """Extract symbol names from `nm -D` output (BSD `value type name` format).
+
+    Returns the dynamic-symbol names; a version suffix is stripped for the same
+    reason parse_readelf_symbols strips it - a version is not part of a symbol's
+    identity for the exact-membership matcher. This is the fallback source for the
+    .dynsym table when pyelftools is unavailable: nm -D lists exactly the dynamic
+    table (matching the pyelftools primary path), NOT the full .symtab that
+    readelf -Ws returns, so it keeps the fallback corpus consistent with the
+    primary path instead of leaking FILE/LOCAL/.symtab-only names."""
+    names: list[str] = []
+    for line in text.splitlines():
+        m = _NM_SYM_RE.match(line)
+        if m:
+            names.append(m.group(1).split("@", 1)[0])
+    return names
+
+
 def parse_strings(text: str) -> list[str]:
     """Embedded strings from `strings` output - one printable string per line."""
     return [ln for ln in text.splitlines() if ln]
@@ -1395,7 +1423,7 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
             # unreadable file by the outer except below).
             dyn_exports: list[str] = []
             try:
-                dyn_exports = parse_readelf_symbols(
+                dyn_exports = parse_nm_symbols(
                     _run_tool([nm, "-D", str(effective_path)], NM_TIMEOUT, "nm")
                 )
             except NativeToolError:

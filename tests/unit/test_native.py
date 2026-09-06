@@ -16,6 +16,7 @@ from static.native import (
     find_external_native_loads,
     load_native_signatures,
     match_native,
+    parse_nm_symbols,
     parse_readelf_symbols,
     parse_strings,
     security_triggers,
@@ -64,6 +65,37 @@ def test_parse_readelf_symbols_strips_version_suffix():
 
 def test_parse_readelf_symbols_empty_on_garbage():
     assert parse_readelf_symbols("not a symbol table\n") == []
+
+
+def test_parse_nm_symbols_parses_the_nm_dash_d_format():
+    # `nm -D` (the fallback dynamic-symbol source when pyelftools is unavailable)
+    # emits `value type name` for defined symbols and a blank-value `type name`
+    # for undefined imports - a WHOLLY different shape from readelf -Ws. Feeding
+    # nm output to parse_readelf_symbols parsed NOTHING, so the fallback silently
+    # yielded [] on every host and `exports = dyn_exports or exports` always kept
+    # the readelf -Ws .symtab list instead of the intended dynamic table (a silent
+    # failure, principle 3, and a corpus inconsistent with the pyelftools path).
+    nm_out = (
+        "0000000000001234 T Java_com_x_MainActivity_isRooted\n"
+        "                 U ptrace\n"
+        "0000000000005678 T SSL_CTX_set_verify\n"
+        "                 U fork@LIBC\n"        # version suffix must be stripped
+        "0000000000009abc W __cxa_finalize\n"
+    )
+    names = parse_nm_symbols(nm_out)
+    assert "Java_com_x_MainActivity_isRooted" in names
+    assert "SSL_CTX_set_verify" in names
+    assert "ptrace" in names and "fork" in names   # imports captured, @-suffix gone
+    assert all("@" not in n for n in names)
+
+
+def test_parse_nm_symbols_empty_on_garbage_and_on_readelf_format():
+    # Robust to non-nm text, and it must NOT accidentally parse a readelf -Ws
+    # line (whose trailing token is the name but whose leading `N:` column is not
+    # an nm value/type pair) as a symbol - the two parsers stay format-specific.
+    assert parse_nm_symbols("not a symbol table\n") == []
+    readelf_line = "     9: 0000000000000000    18 FUNC    GLOBAL DEFAULT   11 check_root\n"
+    assert parse_nm_symbols(readelf_line) == []
 
 
 def test_parse_strings_splits_lines():

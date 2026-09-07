@@ -336,6 +336,26 @@ def test_confidence_bound_never_alters_numeric_confidence():
     assert verdict.confidence == 0.35  # unchanged
 
 
+def test_confidence_bound_empty_limited_names_cause_neutral_not_false_partial():
+    # FALLBACK-CAUSE1: a verdict can be coverage_limited with EVERY governing
+    # surface fully_analyzed - the CONTENT bound, where apply_unattributed_indicators
+    # marks the verdict (detection-shaped code matched no signature) WITHOUT touching
+    # the coverage map. The `limited` list is then empty. The old fallback word
+    # "partial" asserted a partial SURFACE that does not exist in this case (a
+    # hardcoded specific cause in a fallback - and on `report --regenerate` a
+    # completeness bound can reach the same empty branch via a reconstructed map, so
+    # >1 cause reaches it). The rendered upper bound must name the cause-neutral flag
+    # instead; the precise cause lives in the Decision line's unknown_uncovered_causes.
+    verdict = CategoryVerdict(confidence=0.3, detected=False, evidence=[], coverage_limited=True)
+    line = confidence_bound("root", verdict, {
+        "java": "fully_analyzed", "native": "fully_analyzed", "js": "fully_analyzed",
+    })
+    assert line.startswith("0.30")
+    assert "upper bound" in line          # it IS an upper bound - still annotated
+    assert "coverage-limited" in line     # cause-neutral, always true here
+    assert "partial" not in line          # never claims a surface partiality that isn't there
+
+
 def test_apply_attribution_degraded_java_downgrades_only_fully_analyzed():
     # F4: the DEX scan lost app-owned attribution and matched the WHOLE constant
     # pool -> the java surface is not the fully-attributed one fully_analyzed

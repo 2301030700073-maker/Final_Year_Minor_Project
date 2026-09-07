@@ -412,7 +412,20 @@ def confidence_bound(category: str, verdict, coverage: dict[str, Coverage]) -> s
         for s in GOVERNING_SURFACES.get(category, ())
         if cov.get(s) != "fully_analyzed"
     ]
-    bound = ", ".join(limited) if limited else "partial"
+    # `limited` is empty exactly when the verdict is coverage_limited yet NO
+    # governing surface is non-fully-analyzed - the CONTENT bound
+    # (apply_unattributed_indicators: detection-shaped code matched no signature
+    # marks the verdict without touching the coverage map), not a completeness
+    # bound. The old fallback word "partial" asserted a partial SURFACE that does
+    # not exist in that case - a hardcoded specific cause in a fallback, false the
+    # moment a different cause reaches it. And on `report --regenerate`, where
+    # verdict.coverage_limited is the PERSISTED flag but `coverage` is a
+    # reconstructed map, a completeness bound can reach here too - so >1 cause
+    # reaches this branch and no single specific cause is safe to name. Use the
+    # cause-neutral flag term; the precise cause is in the Decision line's
+    # unknown_uncovered_causes. Still truthful (the verdict IS coverage-limited),
+    # and it never claims a surface partiality that isn't there.
+    bound = ", ".join(limited) if limited else "coverage-limited"
     return f"{verdict.confidence:.2f} (upper bound: {bound})"
 
 

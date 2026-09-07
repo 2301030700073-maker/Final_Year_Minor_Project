@@ -606,3 +606,138 @@ def test_capture_stage_attaches_cleanup_warnings_to_evidence(monkeypatch, tmp_pa
     assert result.evidence["flows_count"] == 2  # real flows intact
     assert "cleanup_warnings" in result.evidence
     assert any("proxy not restored" in w for w in result.evidence["cleanup_warnings"])
+
+
+# --- crashed bypass-script surfacing (true cause of an empty capture) -----------
+
+def test_describe_script_errors_extracts_description_and_location():
+    # A bypass script that throws emits frida's {type:error} envelope; {type:send}
+    # payloads are normal traffic and must be ignored. Format mirrors the report
+    # generator's dynamic-stage describer exactly (fname:lineno when both present).
+    msgs = [
+        {"type": "send", "payload": {"bypassEffect": "unpinned"}},
+        {"type": "error", "description": "ReferenceError: Java is not defined",
+         "fileName": "pin.js", "lineNumber": 12},
+        {"type": "error", "lineNumber": 3},          # line only, default description
+        {"type": "error", "description": "  boom  "},  # description only, trimmed
+    ]
+    assert mitmproxy_capture._describe_script_errors(msgs) == [
+        "ReferenceError: Java is not defined (pin.js:12)",
+        "unspecified Frida script error (line 3)",
+        "boom",
+    ]
+
+
+def test_describe_script_errors_empty_when_no_error_messages():
+    # No {type:error} => empty, so the empty-flows branch keeps its plain
+    # device/app reason and invents NO script-crash cause (never a false cause).
+    # Non-dict elements and bare sends are ignored, not crashed on.
+    msgs = [{"type": "send", "payload": {"x": 1}}, "not-a-dict", {"type": "send"}]
+    assert mitmproxy_capture._describe_script_errors(msgs) == []
+
+
+def test_run_capture_stage_no_flows_names_crashed_bypass_script(monkeypatch, tmp_path):
+    # A pinning-bypass script that throws at runtime is a THIRD cause of zero flows
+    # (the bypass never took -> pinned TLS handshakes fail -> nothing decrypts),
+    # distinct from device-unreachable and app-silent. The raw {type:error} sits in
+    # frida_messages but no consumer audited the CAPTURE stage for it (_hooks_engaged
+    # reads only the dynamic stage), so `error` misdiagnosed a script crash as a
+    # wiring/app failure. The empty-flows branch must now NAME the crash as the
+    # prominent cause AND record it in evidence, while still keeping the device/app
+    # cause (the crash is the likely, not certain, explanation).
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: False)
+    monkeypatch.setattr(mitmproxy_capture.shutil, "which", lambda name: "/usr/bin/mitmdump")
+    monkeypatch.setattr(mitmproxy_capture.time, "sleep", lambda s: None)
+
+    class FakeProc:
+        def __init__(self, *a, **k):
+            pass
+        def communicate(self, timeout=None):
+            return "client connect 127.0.0.1:1\n", ""  # connected, but zero flows
+        def terminate(self):
+            pass
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(mitmproxy_capture.subprocess, "Popen", FakeProc)
+    monkeypatch.setattr(device, "create_mitm_ca", lambda confdir: confdir / "c.pem")
+    monkeypatch.setattr(device, "push_system_ca", lambda serial, cert: "/system/etc/security/cacerts/x.0")
+    monkeypatch.setattr(device, "adb_reverse", lambda serial, dp, hp, add=True: None)
+    monkeypatch.setattr(device, "set_http_proxy", lambda serial, host, port: None)
+    monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+
+    class FakeDevice:
+        def resume(self, pid):
+            pass
+
+    monkeypatch.setattr(mitmproxy_capture.frida_runner, "attach",
+                        lambda serial, pkg: (FakeDevice(), object(), 42))
+
+    def fake_load_script(session, name, on_message=None):
+        # frida delivers an uncaught script exception as a {type:error} envelope
+        on_message({"type": "error", "description": "ReferenceError: Java is not defined",
+                    "fileName": "pin.js", "lineNumber": 12}, None)
+
+    monkeypatch.setattr(mitmproxy_capture.frida_runner, "load_script", fake_load_script)
+
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1,
+        bypass_script="ssl_pinning_bypass_universal.js")
+
+    assert result.status == "failed"
+    assert result.evidence["reason"] == "no flows captured"
+    assert result.evidence["bypass_applied"] is True
+    # recorded structurally...
+    assert result.evidence["bypass_script_errors"] == [
+        "ReferenceError: Java is not defined (pin.js:12)"]
+    # ...and named as the prominent cause in the surfaced error, without dropping
+    # the device/app explanation (the crash is likely, not certain).
+    assert "pinning-bypass script raised" in result.error
+    assert "pin.js:12" in result.error
+    assert "no traffic captured through the proxy" in result.error
+
+
+def test_run_capture_stage_no_flows_clean_bypass_keeps_plain_reason(monkeypatch, tmp_path):
+    # Guards the `if bypass_applied and script_errors` gate: a bypass that applied
+    # cleanly (no {type:error}) but still saw zero flows must keep the plain
+    # device/app reason and fabricate NO script-crash cause - bypass_script_errors
+    # stays empty and `error` never mentions a script crash.
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: False)
+    monkeypatch.setattr(mitmproxy_capture.shutil, "which", lambda name: "/usr/bin/mitmdump")
+    monkeypatch.setattr(mitmproxy_capture.time, "sleep", lambda s: None)
+
+    class FakeProc:
+        def __init__(self, *a, **k):
+            pass
+        def communicate(self, timeout=None):
+            return "client connect 127.0.0.1:1\n", ""
+        def terminate(self):
+            pass
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(mitmproxy_capture.subprocess, "Popen", FakeProc)
+    monkeypatch.setattr(device, "create_mitm_ca", lambda confdir: confdir / "c.pem")
+    monkeypatch.setattr(device, "push_system_ca", lambda serial, cert: "/system/etc/security/cacerts/x.0")
+    monkeypatch.setattr(device, "adb_reverse", lambda serial, dp, hp, add=True: None)
+    monkeypatch.setattr(device, "set_http_proxy", lambda serial, host, port: None)
+    monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+
+    class FakeDevice:
+        def resume(self, pid):
+            pass
+
+    monkeypatch.setattr(mitmproxy_capture.frida_runner, "attach",
+                        lambda serial, pkg: (FakeDevice(), object(), 42))
+    monkeypatch.setattr(mitmproxy_capture.frida_runner, "load_script",
+                        lambda session, name, on_message=None: None)  # loads clean, no error
+
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1,
+        bypass_script="ssl_pinning_bypass_universal.js")
+
+    assert result.status == "failed"
+    assert result.evidence["bypass_applied"] is True
+    assert result.evidence["bypass_script_errors"] == []
+    assert "pinning-bypass script raised" not in result.error
+    assert "no traffic captured through the proxy" in result.error

@@ -160,6 +160,31 @@ def _count_client_connections(text: str) -> int:
     return count
 
 
+def _describe_script_errors(frida_messages: list) -> list[str]:
+    """Human-readable descriptions of uncaught Frida {type:error} messages.
+
+    A bypass script that throws at runtime emits a {type:"error", description,
+    fileName, lineNumber} envelope rather than a {type:"send", payload:...} one.
+    The capture stage collects these into frida_messages, but the empty-flows
+    branch otherwise blames only device reachability or app silence - so a crashed
+    pinning bypass (on a pinned target, THE reason there are no decrypted flows:
+    the bypass never took, the handshake failed) was misdiagnosed. Surfacing the
+    error lets the branch name the true cause. Mirrors the report generator's
+    dynamic-stage error describer exactly so the two never diverge; unify into
+    common.py if a third consumer appears."""
+    errors = []
+    for m in frida_messages:
+        if isinstance(m, dict) and m.get("type") == "error":
+            desc = str(m.get("description") or "unspecified Frida script error").strip()
+            fname, lineno = m.get("fileName"), m.get("lineNumber")
+            if fname and lineno is not None:
+                desc = f"{desc} ({fname}:{lineno})"
+            elif lineno is not None:
+                desc = f"{desc} (line {lineno})"
+            errors.append(desc)
+    return errors
+
+
 def _parse_flow_detail(text: str) -> list[FlowSummary]:
     """Extract {host, method, path, status} per flow from mitmdump's
     `flow_detail=2` stdout. Confirmed live format (mitmproxy 8.1.1):
@@ -560,6 +585,34 @@ def run_capture_stage(
         flows = _parse_flow_detail(stdout_text or "")
         if not flows:
             client_connections = _count_client_connections(stdout_text or "")
+            # A crashed pinning-bypass script is a THIRD, concrete cause of zero
+            # flows, distinct from device-unreachable and app-silent - and on a
+            # pinned target the most likely one (the bypass never took, so TLS
+            # handshakes fail and nothing is decrypted). It was previously
+            # swallowed: the raw {type:error} messages sit in frida_messages, but
+            # no consumer reads the CAPTURE stage for them (_hooks_engaged audits
+            # only the dynamic stage), so `error` blamed device/app alone -
+            # misdiagnosing a script crash as a wiring or app-silence failure.
+            script_errors = _describe_script_errors(frida_messages)
+            device_or_app_cause = (
+                "no traffic captured through the proxy - either the device "
+                f"could not reach mitmdump at 127.0.0.1:{proxy_port} "
+                "(on WSL2 the adb-server host must expose localhost:"
+                f"{proxy_port}; the stage auto-launched mitmdump on the "
+                "Windows host) or the app made no network requests during "
+                "the capture window"
+            )
+            if bypass_applied and script_errors:
+                error = (
+                    "the pinning-bypass script raised "
+                    f"{len(script_errors)} uncaught error(s) "
+                    f"({'; '.join(script_errors)}) - the bypass likely did not "
+                    "take, so a pinned app's TLS handshakes fail and yield no "
+                    "decrypted flows; fix the script before treating this as a "
+                    f"device-wiring or app-silence failure. {device_or_app_cause}"
+                )
+            else:
+                error = device_or_app_cause
             result = StageResult(
                 stage="capture-traffic", status="failed",
                 evidence={
@@ -574,18 +627,14 @@ def run_capture_stage(
                     # reached the proxy, app was silent (app-silence, not a wiring
                     # failure); 0 => device never reached the proxy (real failure).
                     "client_connections": client_connections,
+                    # Uncaught bypass-script errors (empty unless the script threw);
+                    # a non-empty list is the true, prominent cause named in `error`.
+                    "bypass_script_errors": script_errors,
                     "frida_messages": [
                         m.get("payload", m) for m in frida_messages
                     ],
                 },
-                error=(
-                    "no traffic captured through the proxy - either the device "
-                    f"could not reach mitmdump at 127.0.0.1:{proxy_port} "
-                    "(on WSL2 the adb-server host must expose localhost:"
-                    f"{proxy_port}; the stage auto-launched mitmdump on the "
-                    "Windows host) or the app made no network requests during "
-                    "the capture window"
-                ),
+                error=error,
             )
             return result
         hosts = sorted({f.host for f in flows if f.host})

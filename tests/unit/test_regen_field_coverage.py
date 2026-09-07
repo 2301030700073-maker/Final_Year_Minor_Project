@@ -81,6 +81,35 @@ _CONTRACTS = [
 ]
 
 
+def test_every_regen_deserializer_is_under_contract():
+    """Meta-guard (guard-of-the-guard): the per-field check above only protects the
+    deserializers listed in _CONTRACTS. That list is hand-maintained, so a NEW
+    `_*_from_json` added to cli.py but forgotten here would be silently uncovered -
+    REGEN-FIELDLOSS1 could then recur on the new type while this suite stays green,
+    the exact silent-omission class the whole module exists to prevent, reintroduced
+    one level up. Assert every `_*_from_json` function defined in cli.py appears in
+    _CONTRACTS. Pure/toolchain-free: enumerates definitions via ast, executes nothing.
+
+    Naming convention keyed on: every regen deserializer is a module-level
+    `def _<x>_from_json(...)` in cli.py (see the five today). A new one that follows
+    the convention is caught here; one that deliberately breaks the convention is a
+    reviewer's call, but must then be wired into _CONTRACTS by hand anyway."""
+    tree = ast.parse(inspect.getsource(cli))
+    defined = {
+        n.name for n in tree.body  # module-level defs only, not nested closures
+        if isinstance(n, ast.FunctionDef)
+        and n.name.startswith("_") and n.name.endswith("_from_json")
+    }
+    under_contract = {d.__name__ for _, d in _CONTRACTS}
+    uncovered = defined - under_contract
+    assert not uncovered, (
+        f"{sorted(uncovered)} is a regen deserializer in cli.py with no _CONTRACTS "
+        f"entry, so its dataclass fields are NOT checked for round-trip coverage "
+        f"(REGEN-FIELDLOSS1 can recur silently). Add a (Dataclass, cli.{sorted(uncovered)[0]}) "
+        f"pair to _CONTRACTS for every dataclass it reconstructs."
+    )
+
+
 @pytest.mark.parametrize(
     "klass, deserializer",
     _CONTRACTS,

@@ -238,6 +238,40 @@ def test_save_metadata_reingest_refuses_to_drop_existing_fields(tmp_path):
         save_metadata(tmp_path, "abc123", {"hashes": {"sha256": "abc123"}, "signer": {}})
 
 
+def test_save_metadata_reingest_refuses_to_drop_unpromoted_evidence(tmp_path):
+    # NFR-1 (Finding C, extended): the scalar guard above protects only the
+    # promoted columns. raw_metadata is the authoritative evidence blob and also
+    # carries sections that are NOT promoted to a column (permissions, native
+    # libraries); a lossy re-ingest that leaves the scalars intact but drops such
+    # a section used to overwrite the blob wholesale and silently lose it. It must
+    # now refuse loudly, for the same reason and in the same direction as the
+    # scalar guard - while a superset / value-updating re-ingest still applies.
+    import pytest
+    save_metadata(tmp_path, "abc123", {
+        "package": {"package_name": "com.x"},
+        "permissions": ["INTERNET", "READ_SMS"],
+        "native_libs": ["libfoo.so"],
+    })
+    # package_name (the only promoted scalar present) is unchanged, so the scalar
+    # guard does NOT fire, but the un-promoted permissions/native_libs sections
+    # are dropped - the exact gap the scalar guard could not see.
+    with pytest.raises(ValueError, match="evidence section"):
+        save_metadata(tmp_path, "abc123", {"package": {"package_name": "com.x"}})
+    # The failed re-ingest rolled back, so the original evidence is intact.
+    assert existing_metadata(tmp_path, "abc123")["permissions"] == ["INTERNET", "READ_SMS"]
+    # A superset re-ingest (adds a native lib, drops nothing) is a legitimate
+    # update and applies - the guard refuses loss, never a genuine change.
+    save_metadata(tmp_path, "abc123", {
+        "package": {"package_name": "com.x"},
+        "permissions": ["INTERNET", "READ_SMS"],
+        "native_libs": ["libfoo.so", "libbar.so"],
+    })
+    assert existing_metadata(tmp_path, "abc123")["native_libs"] == ["libfoo.so", "libbar.so"]
+    # An empty prior section is not "lost" if omitted - nothing was there to lose.
+    save_metadata(tmp_path, "def456", {"package": {"package_name": "com.y"}, "permissions": []})
+    save_metadata(tmp_path, "def456", {"package": {"package_name": "com.y"}})  # no raise
+
+
 def test_migrate_schema_adds_missing_column_and_index(tmp_path):
     # _migrate_schema: create_all never ALTERs an existing table, so a column the
     # model gained since the DB was first written is absent and every save fails

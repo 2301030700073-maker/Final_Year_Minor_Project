@@ -48,6 +48,11 @@ def save_metadata(analysis_root: Path, apk_hash: str, metadata: dict) -> Path:
 
     with Session(get_engine(analysis_root)) as session:
         record = session.get(ApkRecord, apk_hash)
+        # Snapshot the prior evidence blob before any overwrite, so the
+        # raw_metadata loss guard below compares against what was recorded. The
+        # scalar loop never touches raw_metadata, but capturing it here keeps the
+        # guard's intent local and obvious.
+        old_raw = dict(record.raw_metadata) if record is not None and record.raw_metadata else {}
         if record is None:
             record = ApkRecord(sha256=apk_hash, first_ingested_at=datetime.now(timezone.utc).isoformat())
             session.add(record)
@@ -82,6 +87,32 @@ def save_metadata(analysis_root: Path, apk_hash: str, metadata: dict) -> Path:
                     "before retrying"
                 )
             setattr(record, field, new_value)
+        # NFR-1 (Finding C, extended to the evidence blob): the loop above guards
+        # only the promoted scalar columns. raw_metadata is the authoritative
+        # roundtrip source of truth and carries evidence sections that are NOT
+        # promoted to a column (permissions, native libraries, and any future
+        # ingest detail); assigning it below overwrites the blob wholesale, so a
+        # lossy re-ingest that leaves the scalars intact but omits such a section
+        # silently drops it - exactly the loss the scalar guard refuses, one layer
+        # down and invisible to it. Refuse it the same way, for the same reason:
+        # a top-level section the prior record carried (non-empty) that the new
+        # ingest omits (absent or empty) is a regression, not a legitimate update.
+        # Sections that feed a promoted column (hashes/package/signer) are already
+        # caught transitively by the loop above; this closes the un-promoted ones.
+        # Checked at top-level-key granularity to match the flat altitude of the
+        # scalar guard - a value shrinking WITHIN a section is not inspected here
+        # (the nested fields that matter are promoted and already guarded). A
+        # superset or value-updating re-ingest still applies unchanged.
+        for key, old_value in old_raw.items():
+            if not old_value:
+                continue  # the prior section was itself empty/absent - nothing to lose
+            if not metadata.get(key):
+                raise ValueError(
+                    f"re-ingest of APK '{apk_hash}' would drop previously-recorded "
+                    f"evidence section '{key}' (was present, new ingest omits it) - "
+                    "refusing to silently lose existing evidence; investigate the "
+                    "ingest before retrying"
+                )
         record.raw_metadata = metadata
         session.commit()
 

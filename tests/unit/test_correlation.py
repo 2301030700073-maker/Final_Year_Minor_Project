@@ -245,3 +245,39 @@ def test_correlate_confident_negative_bypass_stays_a_mismatch_not_coverage_confi
     assert len(result.mismatches) == 1
     assert "did not predict root-detection" in result.mismatches[0]
     assert result.coverage_confirmed == []
+
+
+def test_correlate_root_coverage_limited_and_bypass_none_is_unverified_not_match():
+    # CORR-COVLIM1 (None mirror): static was coverage-limited on root ("unknown,
+    # not absent", ADR-0006) and dynamic could not confirm a bypass (None).
+    # Neither engine reached a conclusion, so the honest state is UNVERIFIED
+    # (inconclusive), NEVER a MATCH ("agree") - that would blend the coverage-
+    # limited tier into a confident agreement the engines never made. The gate is
+    # STRICT on coverage_limited: a confident negative + None stays a MATCH (the
+    # test above), exactly mirroring the bypass=True coverage_confirmed arm.
+    classification = ClassificationResult(action=Action.NEITHER, root=COVERAGE_LIMITED, ssl=NOT_DETECTED)
+    verification = VerificationResult(root_bypassed=None, ssl_bypassed=None, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert result.matches is False            # NOT a false "agree"
+    assert result.mismatches == []            # not a conflict either
+    assert result.coverage_confirmed == []    # no bypass was confirmed
+    assert len(result.unverified) == 1
+    assert "coverage-limited on root-detection" in result.unverified[0]
+    assert "inconclusive" in result.unverified[0]
+
+
+def test_correlate_ssl_coverage_limited_and_bypass_none_is_unverified_not_match():
+    # CORR-COVLIM1 SSL mirror (None): coverage-limited SSL + inconclusive dynamic
+    # is UNVERIFIED, not a fabricated MATCH.
+    classification = ClassificationResult(action=Action.NEITHER, root=NOT_DETECTED, ssl=COVERAGE_LIMITED)
+    verification = VerificationResult(root_bypassed=None, ssl_bypassed=None, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert result.matches is False
+    assert result.mismatches == []
+    assert result.coverage_confirmed == []
+    assert len(result.unverified) == 1
+    assert "coverage-limited on SSL-pinning" in result.unverified[0]

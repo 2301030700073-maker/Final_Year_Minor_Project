@@ -55,8 +55,23 @@ def correlate(classification: ClassificationResult, verification: VerificationRe
         mismatches.append(
             "dynamic analysis observed a root-detection block signal despite no static prediction of root-detection - anomaly, investigate before trusting either signal"
         )
-    # not predicted + bypass None (inconclusive): static said absent, dynamic
-    # never confirmed anything - agreement by non-claim, so no mismatch arm.
+    if not root_predicted and verification.root_bypassed is None and classification.root.coverage_limited:
+        # CORR-COVLIM1 (None mirror): static was coverage-limited on root
+        # ("unknown, not absent", ADR-0006) - it did NOT certify absence - and
+        # dynamic could not confirm a bypass either, so neither engine reached a
+        # conclusion. With no arm here it would fall through to a clean MATCH
+        # ("static and dynamic agree") - a FALSE agreement, the coverage-limited
+        # mirror of the RESID-6F false conflict, blending an uncertified negative
+        # into a confident MATCH, which ADR-0006 forbids. Surface it as UNVERIFIED
+        # so matches stays False and the headline names the real inconclusive state.
+        unverified.append(
+            "static analysis was coverage-limited on root-detection (unknown, not absent) and "
+            "dynamic verification could not confirm a bypass either - neither engine could certify "
+            "this category, so it is inconclusive, not an agreement"
+        )
+    # not predicted + CONFIDENT negative + bypass None: static confidently said
+    # absent and dynamic never confirmed anything - genuine agreement by non-claim
+    # (both point to "not present"), so no arm fires and matches stays True.
 
     ssl_predicted = classification.ssl.detected
     if ssl_predicted and verification.ssl_bypassed is False:
@@ -97,8 +112,19 @@ def correlate(classification: ClassificationResult, verification: VerificationRe
         mismatches.append(
             "dynamic analysis observed an SSL-pinning block signal despite no static prediction of SSL-pinning - anomaly, investigate before trusting either signal"
         )
-    # not predicted + SSL bypass None (inconclusive): agreement by non-claim, no
-    # mismatch arm.
+    if not ssl_predicted and verification.ssl_bypassed is None and classification.ssl.coverage_limited:
+        # CORR-COVLIM1 SSL mirror (None): static was coverage-limited on SSL
+        # ("unknown, not absent") and dynamic could not confirm a bypass either -
+        # neither engine certified the category. Falling through to MATCH would
+        # read as "static and dynamic agree", a false agreement over an
+        # uncertified negative (ADR-0006); surface it as UNVERIFIED instead.
+        unverified.append(
+            "static analysis was coverage-limited on SSL-pinning (unknown, not absent) and "
+            "dynamic verification could not confirm a bypass either - neither engine could certify "
+            "this category, so it is inconclusive, not an agreement"
+        )
+    # not predicted + CONFIDENT negative + SSL bypass None: genuine agreement by
+    # non-claim (both point to "not present"), so no arm fires and matches stays True.
 
     # matches is True ONLY on full agreement. Neither an unverified prediction
     # (RESID-6F - static predicted, dynamic could not test) nor a coverage-

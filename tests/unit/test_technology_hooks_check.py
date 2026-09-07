@@ -298,4 +298,22 @@ def test_summarize_handles_untyped_payload():
     # message arm (125-126) is confirmed alongside.
     from dynamic.success_checks.technology import _summarize
     assert _summarize("raw log") == "malformed:str"
-    assert _summarize({"type": "error", "payload": 42}) == "error:int"
+    # A send() carrying a bare int payload falls to the type-name branch.
+    assert _summarize({"type": "send", "payload": 42}) == "send:int"
+
+
+def test_summarize_renders_script_error_detail_not_error_null():
+    # An uncaught Frida {type:error} message carries its detail at the TOP level
+    # (description/fileName/lineNumber), NOT in a payload - so the payload branch
+    # rendered it "error:null" and hid the crash reason. This bounded, auditable
+    # sample exists to make "hooks engaged" auditable (distinguish a real "none"
+    # from an empty capture); a crashed bypass is WHY it reads "none", so the
+    # sample must name it. Wording comes from the shared describer (common),
+    # matching the report hooks-audit and the capture caveat.
+    from dynamic.success_checks.technology import _summarize
+    out = _summarize({"type": "error", "description": "ReferenceError: Java is not defined",
+                      "fileName": "pin.js", "lineNumber": 12})
+    assert out == "error:ReferenceError: Java is not defined (pin.js:12)"
+    assert "error:null" not in out
+    # a bare error with no description still names itself, never blanks
+    assert _summarize({"type": "error"}) == "error:unspecified Frida script error"

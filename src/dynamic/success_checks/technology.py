@@ -32,7 +32,7 @@ could send - a real signal."""
 
 from __future__ import annotations
 
-from common import VerificationResult
+from common import VerificationResult, describe_frida_script_errors
 
 # Cap on how many raw frida messages are surfaced into the report so the
 # engagement evidence stays bounded and auditable (ADR-0006), never a dump.
@@ -125,6 +125,19 @@ def _summarize(message: dict, limit: int = _PAYLOAD_TRUNCATE) -> str:
     if not isinstance(message, dict):
         return f"malformed:{type(message).__name__}"
     mtype = message.get("type", "?")
+    # An uncaught Frida script error carries its detail at the TOP level
+    # (description/fileName/lineNumber) with NO `payload`, so the payload branch
+    # below would render it "error:null" and hide the crash reason - exactly the
+    # signal this bounded, auditable sample exists to surface (a crashed bypass is
+    # WHY "hooks engaged" reads "none"). Describe it via the shared single source
+    # of truth (common) so the wording matches the report hooks-audit and the
+    # capture caveat; truncate to the same bound as a string payload.
+    if mtype == "error":
+        described = describe_frida_script_errors([message])
+        body = described[0] if described else "unspecified Frida script error"
+        if len(body) > limit:
+            body = body[:limit] + "…"
+        return f"error:{body}"
     payload = message.get("payload")
     if isinstance(payload, dict):
         if "hook" in payload:

@@ -376,6 +376,9 @@ The app accepted proxy-decrypted HTTPS flows through the capture proxy (`{{ capt
 {% endfor %}
 
 Raw flow file: `{{ capture_flows_path }}`
+{% if capture_bypass_script_errors %}
+> **Partial capture:** the injected pinning-bypass script raised {{ capture_bypass_script_errors | length }} uncaught error(s) during this otherwise-successful capture ({{ capture_bypass_script_errors | join("; ") }}). Flows were still decrypted, but a crashed hook can leave some pinned endpoints unbypassed and therefore uncaptured — **treat the flow list above as a lower bound, not a complete inventory of the app's traffic.**
+{% endif -%}
 {% else -%}
 {% if capture_errored -%}
 No traffic was captured because the **capture stage did not complete — it raised an error** ({{ capture_error or capture_reason or "reason not recorded" }}). The empty flow list is a direct consequence of that stage failure, **not** a property of the app's network behaviour and **not** a coverage limitation of an app that ran to completion: the capture aborted before it could exercise or observe the app's traffic at all. Resolve the stage error and re-run the capture before drawing any conclusion about this app's network behaviour. The capture stage is honest: an empty capture is reported here with its recorded reason, never a fabricated flow list.

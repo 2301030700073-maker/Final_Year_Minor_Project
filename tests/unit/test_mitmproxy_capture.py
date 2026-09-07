@@ -741,3 +741,56 @@ def test_run_capture_stage_no_flows_clean_bypass_keeps_plain_reason(monkeypatch,
     assert result.evidence["bypass_script_errors"] == []
     assert "pinning-bypass script raised" not in result.error
     assert "no traffic captured through the proxy" in result.error
+
+
+def test_run_capture_stage_success_records_bypass_script_errors(monkeypatch, tmp_path):
+    # A bypass hook that throws is delivered as a top-level {type:error} but does NOT
+    # abort the whole script - other hooks can still yield flows, so the capture
+    # SUCCEEDS while a genuine uncaught error is recorded. The success branch must
+    # store it (symmetric with the empty-flows branch) so the report can flag the
+    # flow list as a lower bound - a crashed hook may leave some pinned endpoints
+    # unbypassed and uncaptured. Never silently drop a recorded crash (principle 3).
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: False)
+    monkeypatch.setattr(mitmproxy_capture.shutil, "which", lambda name: "/usr/bin/mitmdump")
+    monkeypatch.setattr(mitmproxy_capture.time, "sleep", lambda s: None)
+
+    class FakeProc:
+        def __init__(self, *a, **k):
+            pass
+        def communicate(self, timeout=None):
+            return FIXTURE_DETAIL, ""  # real native flow_detail -> 2 flows -> success
+        def terminate(self):
+            pass
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(mitmproxy_capture.subprocess, "Popen", FakeProc)
+    monkeypatch.setattr(device, "create_mitm_ca", lambda confdir: confdir / "c.pem")
+    monkeypatch.setattr(device, "push_system_ca", lambda serial, cert: "/system/etc/security/cacerts/x.0")
+    monkeypatch.setattr(device, "adb_reverse", lambda serial, dp, hp, add=True: None)
+    monkeypatch.setattr(device, "set_http_proxy", lambda serial, host, port: None)
+    monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+
+    class FakeDevice:
+        def resume(self, pid):
+            pass
+
+    monkeypatch.setattr(mitmproxy_capture.frida_runner, "attach",
+                        lambda serial, pkg: (FakeDevice(), object(), 42))
+
+    def load_with_error(session, name, on_message=None):
+        # a genuine uncaught hook exception, delivered as a top-level {type:error}
+        on_message({"type": "error", "description": "TypeError: cannot read x",
+                    "fileName": "u.js", "lineNumber": 7}, None)
+
+    monkeypatch.setattr(mitmproxy_capture.frida_runner, "load_script", load_with_error)
+
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1,
+        bypass_script="ssl_pinning_bypass_universal.js")
+
+    assert result.status == "success"
+    assert result.evidence["flows_count"] == 2  # other hooks still let flows through
+    assert result.evidence["bypass_applied"] is True
+    # the crash is recorded on the SUCCESS path, not just the empty-flows path.
+    assert result.evidence["bypass_script_errors"] == ["TypeError: cannot read x (u.js:7)"]

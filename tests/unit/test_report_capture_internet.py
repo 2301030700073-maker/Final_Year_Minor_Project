@@ -198,3 +198,59 @@ def test_empty_capture_with_empty_bypass_errors_keeps_inferential_branch(tmp_pat
     content = report_path.read_text(encoding="utf-8")
     assert "un-exercised network/SSL path this run" in content
     assert "pinning-bypass script" not in content
+
+
+def _success_capture_stage(bypass_script_errors):
+    # A capture that DID yield flows (success) while the injected bypass recorded
+    # zero-or-more uncaught errors - exactly the evidence shape
+    # mitmproxy_capture.run_capture_stage emits on its success path.
+    return StageResult(
+        stage="capture-traffic", status="success",
+        evidence={
+            "flows_count": 1, "hosts": ["api.example.com"],
+            "flow_summary": [{"host": "api.example.com", "method": "GET",
+                              "path": "/v1/ping", "status": "200"}],
+            "flows_path": "/x/out.mitm",
+            "system_ca": "/system/etc/security/cacerts/x.0",
+            "proxy": "127.0.0.1:8080", "bypass_script": "ssl_pinning_bypass_universal.js",
+            "bypass_applied": True, "bypass_script_errors": bypass_script_errors,
+        },
+    )
+
+
+def test_success_capture_with_bypass_errors_flags_flow_list_as_lower_bound(tmp_path):
+    # A bypass hook that crashed can still let OTHER hooks yield flows, so a capture
+    # SUCCEEDS with genuine {type:error} messages recorded. The success (flow-table)
+    # branch must flag the flow list as a lower bound - a crashed hook may leave some
+    # pinned endpoints unbypassed and uncaptured - never silently present a partial
+    # capture as a complete traffic inventory (principle 3, no silent failures).
+    stage = _success_capture_stage(["ReferenceError: Java is not defined (pin.js:12)"])
+    report_path = generate_report(
+        run_id="cap", apk_hash="cap001", timestamp="2026-08-23T12:00:00",
+        metadata={"hashes": {"sha256": "cap001"}, "package": {"package_name": "com.example.net"}},
+        classification=_neither_classification(), verification=None, correlation=None,
+        stage_results=[stage], output_dir=tmp_path, manifest=_internet_manifest(),
+    )
+    content = report_path.read_text(encoding="utf-8")
+    # the real flow is still shown (success path)...
+    assert "api.example.com" in content
+    assert "/v1/ping" in content
+    # ...with a caveat that names the crash and frames the list as a lower bound.
+    assert "Partial capture" in content
+    assert "ReferenceError: Java is not defined (pin.js:12)" in content
+    assert "lower bound" in content
+
+
+def test_success_capture_without_bypass_errors_has_no_partial_caveat(tmp_path):
+    # Strict-gate guard: the lower-bound caveat fires ONLY on recorded bypass errors.
+    # A clean successful capture shows the flow table with NO partial-capture caveat.
+    stage = _success_capture_stage([])
+    report_path = generate_report(
+        run_id="cap", apk_hash="cap001", timestamp="2026-08-23T12:00:00",
+        metadata={"hashes": {"sha256": "cap001"}, "package": {"package_name": "com.example.net"}},
+        classification=_neither_classification(), verification=None, correlation=None,
+        stage_results=[stage], output_dir=tmp_path, manifest=_internet_manifest(),
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "api.example.com" in content
+    assert "Partial capture" not in content

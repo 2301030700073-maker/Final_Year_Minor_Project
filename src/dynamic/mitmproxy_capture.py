@@ -652,6 +652,13 @@ def run_capture_stage(
                 "proxy": f"127.0.0.1:{proxy_port}",
                 "bypass_script": bypass_script,
                 "bypass_applied": bypass_applied,
+                # A crashed bypass hook can still let OTHER hooks yield flows, so a
+                # capture can SUCCEED with genuine {type:error} messages recorded.
+                # Store them (symmetric with the empty-flows branch) so the report
+                # can flag the flow list as a lower bound - a crashed hook may leave
+                # some pinned endpoints unbypassed and uncaptured. Empty when the
+                # script ran clean or no bypass was injected.
+                "bypass_script_errors": _describe_script_errors(frida_messages),
                 "frida_messages": [
                     m.get("payload", m) for m in frida_messages
                 ],

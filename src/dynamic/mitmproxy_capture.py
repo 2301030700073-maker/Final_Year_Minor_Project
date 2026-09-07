@@ -219,6 +219,17 @@ def _parse_flow_detail(text: str) -> list[FlowSummary]:
                 parsed = urlsplit(url)
                 host = parsed.hostname or ""
                 path = parsed.path or "/"
+                # Preserve the query string: it is part of the request target the
+                # app actually put on the wire, and for a traffic-capture security
+                # tool it is often the whole point - an auth token, session id, or
+                # PII sent as a URL query parameter (and thereby exposed to proxies,
+                # server logs, and browser history) is a finding, not noise. Dropping
+                # it silently reported such a request as a bare path, hiding the
+                # sensitive data this phase exists to surface (principle 3 - no
+                # partial/omitted evidence). urlsplit already isolated it; keep only
+                # the query, never the fragment (client-side, never sent to a server).
+                if parsed.query:
+                    path = f"{path}?{parsed.query}"
             except ValueError:
                 host, path = "", "/"
             # A new request while one is still pending means the prior request

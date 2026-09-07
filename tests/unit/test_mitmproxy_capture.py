@@ -44,6 +44,23 @@ def test_parse_flow_detail_extracts_host_method_path_status():
     assert second.status == "204"
 
 
+def test_parse_flow_detail_preserves_query_string():
+    # The query string is part of the request target the app put on the wire - an
+    # auth token / session id / PII sent as a URL query parameter is exactly the
+    # sensitive-data-in-transit a traffic capture exists to surface, so it must not
+    # be silently dropped from the recorded path. The fragment (client-side, never
+    # sent to a server) is deliberately NOT part of a captured request target.
+    text = (
+        "127.0.0.1:1: GET https://api.example.com/v1/users?token=SECRET&id=5 HTTP/2.0\n"
+        " << HTTP/2.0 200 OK 12b\n"
+    )
+    flows = mitmproxy_capture._parse_flow_detail(text)
+    assert len(flows) == 1
+    assert flows[0].host == "api.example.com"
+    assert flows[0].path == "/v1/users?token=SECRET&id=5"
+    assert flows[0].status == "200"
+
+
 def test_parse_flow_detail_ignores_connect_and_lifecycle_lines():
     # The CONNECT line (opaque host:port, not a decrypted flow) and the
     # connect/disconnect noise must never surface as flows.

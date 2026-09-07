@@ -8,7 +8,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 from calibration.report import CalibrationReport
-from common import ClassificationResult, CorrelationResult, StageResult, VerificationResult
+from common import ClassificationResult, CorrelationResult, StageResult, VerificationResult, describe_frida_script_errors
 from report import attribution as attribution_module
 from static.coverage import confidence_bound, verdict_label
 from static.manifest import ManifestInfo
@@ -641,29 +641,17 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
     root_probe_hits = 0
     probe_hits_any = 0
     ssl_effects: dict[str, int] = {}
-    script_errors: list[str] = []
+    # Principle 3 / ADR-0006: uncaught Frida {type:error} messages mean an injected
+    # hook crashed at runtime (the instrumentation did NOT run cleanly). They carry
+    # no payload, so every payload consumer below skips them and a crashed run would
+    # render as a clean, un-exercised negative - the "engagement showed none" trap
+    # this audit exists to prevent. Described via the single shared helper (common),
+    # so this audit and the capture stage never drift on the wording, then skipped
+    # in the payload loop.
+    script_errors = describe_frida_script_errors(evidence.get("frida_messages") or [])
     for m in evidence.get("frida_messages") or []:
-        # Principle 3 / ADR-0006: a Frida `{'type':'error'}` message is an uncaught
-        # exception raised BY an injected hook at runtime - the instrumentation did
-        # NOT run cleanly. Such a message carries no `payload`, so every other
-        # consumer (checkpoint waiter, success checks, this loop's payload branch)
-        # skips it - and a crashed run then renders as a clean, un-exercised
-        # negative, the exact misleading "engagement showed none" outcome this audit
-        # exists to prevent. Collected so the report can say the hook crashed.
         if isinstance(m, dict) and m.get("type") == "error":
-            # Fallback AFTER trimming: a whitespace-only description strips to ""
-            # and must still name something, never render as a blank cause /
-            # " (line N)" (principle 3). Kept byte-identical to the capture stage's
-            # describer (mitmproxy_capture) - both are slated to fold into one shared
-            # common helper; until then the two must stay in lockstep.
-            desc = str(m.get("description") or "").strip() or "unspecified Frida script error"
-            fname, lineno = m.get("fileName"), m.get("lineNumber")
-            if fname and lineno is not None:
-                desc = f"{desc} ({fname}:{lineno})"
-            elif lineno is not None:
-                desc = f"{desc} (line {lineno})"
-            script_errors.append(desc)
-            continue
+            continue  # crash described above; carries no payload
         payload = m.get("payload") if isinstance(m, dict) else None
         if not isinstance(payload, dict):
             continue

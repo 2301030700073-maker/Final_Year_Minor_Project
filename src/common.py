@@ -626,3 +626,38 @@ class SuccessCheck(Protocol):
         """Return which categories were confirmed bypassed, with the specific
         evidence line proving it - never a bare boolean."""
         ...
+
+
+def describe_frida_script_errors(frida_messages: list) -> list[str]:
+    """Human-readable descriptions of uncaught Frida ``{'type': 'error'}`` messages.
+
+    A bypass/instrumentation script that throws at runtime emits a
+    ``{type:"error", description, fileName, lineNumber}`` envelope rather than a
+    ``{type:"send", payload:...}`` one. Such a message carries NO ``payload``, so
+    every payload-oriented consumer (checkpoint waiter, success checks, effect
+    counters) skips it - and a crashed run would otherwise render as a clean,
+    un-exercised negative (the misleading "engagement showed none" / "app was
+    silent" outcome). This is the single source of truth for turning those
+    envelopes into report prose, shared by the traffic-capture stage
+    (``mitmproxy_capture``) and the report hooks-audit (``generator._hooks_engaged``)
+    so the two can never drift on this honesty-critical wording (ADR-0006, principle
+    3).
+
+    Each returned string is ``"<description> (<file>:<line>)"`` when a source
+    location is present, ``"<description> (line <line>)"`` when only the line is,
+    else the bare description. The ``"unspecified..."`` fallback is applied AFTER
+    trimming, so a missing OR whitespace-only description still names a cause and a
+    delivered error is never rendered as an empty string. Non-dict elements and
+    non-error messages are ignored, never raised on."""
+    errors: list[str] = []
+    for m in frida_messages or []:
+        if not (isinstance(m, dict) and m.get("type") == "error"):
+            continue
+        desc = str(m.get("description") or "").strip() or "unspecified Frida script error"
+        fname, lineno = m.get("fileName"), m.get("lineNumber")
+        if fname and lineno is not None:
+            desc = f"{desc} ({fname}:{lineno})"
+        elif lineno is not None:
+            desc = f"{desc} (line {lineno})"
+        errors.append(desc)
+    return errors

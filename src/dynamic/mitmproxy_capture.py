@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from common import StageResult
+from common import StageResult, describe_frida_script_errors
 from dynamic import device
 from dynamic import frida_runner
 from dynamic import pass_through_proxy
@@ -160,32 +160,11 @@ def _count_client_connections(text: str) -> int:
     return count
 
 
-def _describe_script_errors(frida_messages: list) -> list[str]:
-    """Human-readable descriptions of uncaught Frida {type:error} messages.
-
-    A bypass script that throws at runtime emits a {type:"error", description,
-    fileName, lineNumber} envelope rather than a {type:"send", payload:...} one.
-    The capture stage collects these into frida_messages, but the empty-flows
-    branch otherwise blames only device reachability or app silence - so a crashed
-    pinning bypass (on a pinned target, THE reason there are no decrypted flows:
-    the bypass never took, the handshake failed) was misdiagnosed. Surfacing the
-    error lets the branch name the true cause. Mirrors the report generator's
-    dynamic-stage error describer exactly so the two never diverge; unify into
-    common.py if a third consumer appears."""
-    errors = []
-    for m in frida_messages:
-        if isinstance(m, dict) and m.get("type") == "error":
-            # Fallback AFTER trimming: a whitespace-only description (a hook doing
-            # `throw " "`) strips to "" and must still name something, never render
-            # as a blank cause / " (line N)" (principle 3 - no empty error output).
-            desc = str(m.get("description") or "").strip() or "unspecified Frida script error"
-            fname, lineno = m.get("fileName"), m.get("lineNumber")
-            if fname and lineno is not None:
-                desc = f"{desc} ({fname}:{lineno})"
-            elif lineno is not None:
-                desc = f"{desc} (line {lineno})"
-            errors.append(desc)
-    return errors
+# The single implementation of this honesty-critical formatting now lives in
+# common.describe_frida_script_errors, shared with the report hooks-audit
+# (generator._hooks_engaged) so the two can never drift. Kept bound to the
+# module-private name the capture branches and tests already use.
+_describe_script_errors = describe_frida_script_errors
 
 
 def _parse_flow_detail(text: str) -> list[FlowSummary]:

@@ -354,6 +354,47 @@ def test_generate_report_attributes_mixed_app_and_bundled_sdk(tmp_path):
     assert "consistent with SDK telemetry/fraud-detection" not in content
 
 
+def test_generate_report_suppresses_mixed_attribution_when_not_detected(tmp_path):
+    # ADR-0010 parity for the `mixed` branch: attribution notes annotate a
+    # DETECTED verdict. `gate_all_third_party` nulls all_third_party for a
+    # non-detected category ("a non-detected run must never carry it or a
+    # consumer would infer a detection that doesn't exist"), and the macro's
+    # all_third_party branch is gated on detected - but the sibling `mixed`
+    # branch was NOT, so a non-detected category whose below-threshold matches
+    # split app/third-party rendered "root-detection matches split across the
+    # app's own package ... and bundled third-party libraries" directly beneath
+    # an "Inconclusive" verdict: an attribution claim under a verdict that
+    # asserts no detection. classification.root_attribution is populated for a
+    # non-detected category (cli sets it from root.evidence, which includes
+    # below-threshold matches), so mixed=True is reachable here. Gate BOTH
+    # directions: fires when detected (covered by the sibling test above),
+    # suppressed when the category is not detected.
+    root = CategoryVerdict(
+        confidence=0.2, detected=False,
+        evidence=[Evidence(signature_id="root_su_binary_paths", file="Main.java",
+                           line_or_offset=42, matched_text="/system/bin/su")],
+    )
+    ssl = CategoryVerdict(confidence=0.1, detected=False, evidence=[])
+    cls = ClassificationResult(
+        action=Action.NEITHER, root=root, ssl=ssl,
+        root_attribution={
+            "app_package": "com.example.app", "app_owned": 1, "third_party": 1,
+            "vendors": ["okhttp"], "all_third_party": False, "mixed": True,
+        },
+    )
+    report_path = generate_report(
+        run_id="mixnd", apk_hash="mnd001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "mnd001"}, "package": {"package_name": "com.example.app"}},
+        classification=cls, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    # the verdict is non-detected...
+    assert "-> Inconclusive" in content
+    # ...so the mixed-attribution disclosure must NOT render under it
+    assert "matches split across the app's own package" not in content
+
+
 def test_generate_report_attributes_ssl_all_third_party_bundled_sdk(tmp_path):
     # Boundary-4/5 honesty, the SSL half: when every SSL-pinning match lives in a
     # bundled third-party library (none in the app's own package), the report

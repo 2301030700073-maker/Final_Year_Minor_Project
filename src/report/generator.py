@@ -136,7 +136,7 @@ TEMPLATE = _env.from_string("""\
 {% endfor %}
 {% if attr and attr.all_third_party and classification[cat].detected -%}
 > **Attribution:** all {{ attr.third_party }} {{ noun }} matches are in bundled third-party libraries ({{ attr.vendors | join(', ') }}), none in the app's own package (`{{ attr.app_package }}`) - {{ vendor_note }}
-{% elif attr and attr.mixed -%}
+{% elif attr and attr.mixed and classification[cat].detected -%}
 > **Attribution:** {{ noun }} matches split across the app's own package ({{ attr.app_owned }}) and bundled third-party libraries ({{ attr.third_party }}: {{ attr.vendors | join(', ') }}).
 {% endif %}
 {% endmacro -%}

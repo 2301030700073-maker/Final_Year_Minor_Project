@@ -98,6 +98,45 @@ def test_scan_uses_deobfuscated_view_to_match_renamed_code(tmp_path):
     assert "app_cert_activity" in {e.signature_id for e in ev_with.ssl_evidence}
 
 
+def test_scan_does_not_double_count_a_match_shared_by_both_views(tmp_path):
+    # L-M3 additive contract: a file is matched against its ORIGINAL text and,
+    # with a mapping, its DEOBFUSCATED view. A line the obfuscator left untouched
+    # (a framework FQCN, a string literal with no renamed token) is byte-identical
+    # in both views, so a signature hitting it used to fire TWICE - inflating
+    # total_counts' truncation note and putting the SAME match in ssl_evidence
+    # twice. The deobfuscated view is meant to surface matches the renamed code
+    # HID, not re-count the ones both views share.
+    from static.signatures import Signature, scan
+
+    shared = Signature(  # un-renamed framework class -> identical in both views
+        id="shared_hv", category="ssl", weight=0.5, pattern_type="class_reference",
+        patterns=["javax.net.ssl.HostnameVerifier"], evidence_type="source",
+    )
+    renamed = Signature(  # only matches after deobfuscation restores com.example.a
+        id="renamed_app", category="ssl", weight=0.5, pattern_type="class_reference",
+        patterns=["com.example.MainActivity"], evidence_type="source",
+    )
+    # Line 1 is renamed (com.example.a -> com.example.MainActivity), so the file
+    # differs overall and the deobfuscated view IS appended; line 2 carries no
+    # mapped token, so it is byte-identical in both views.
+    (tmp_path / "a.java").write_text(
+        "class com.example.a {\n"
+        "    javax.net.ssl.HostnameVerifier v = null;\n"
+        "}\n"
+    )
+    mapping = parse_mapping("com.example.MainActivity -> com.example.a:\n")
+
+    ev = scan(tmp_path, [shared, renamed], mapping=mapping)
+
+    # the identical-in-both-views match is recorded ONCE, not once-per-view
+    shared_rows = [e for e in ev.ssl_evidence if e.signature_id == "shared_hv"]
+    assert len(shared_rows) == 1
+    # ...and additivity is preserved: the renamed-only match still surfaces from
+    # the deobfuscated view (proving the dedup did not over-suppress).
+    renamed_rows = [e for e in ev.ssl_evidence if e.signature_id == "renamed_app"]
+    assert len(renamed_rows) == 1
+
+
 def test_deobfuscate_source_skips_empty_obfuscated_key(tmp_path):
     # deobfuscate.py:115: a mapping entry with an EMPTY obfuscated name (which a
     # malformed "orig -> " line can produce) must be skipped, not regex-applied.

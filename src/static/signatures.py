@@ -460,6 +460,20 @@ def scan(
         # is_known_third_party() check exactly, so behavior there is unchanged.
         _third_party_file = is_third_party_file(
             derive_namespace(str(file_path.relative_to(root))), app_package)
+        # L-M3 dedup: this file is matched against its original text AND (when a
+        # mapping is present) its deobfuscated view. A line the obfuscator left
+        # untouched - a framework FQCN, a string literal with no renamed token -
+        # is byte-identical in both views, so without this guard _record() would
+        # fire TWICE for one real match: inflating total_counts (the RESID-4F
+        # truncation note) and putting a duplicate row in Evidence + the SQLite
+        # xref. The deobfuscated view is ADDITIVE (see below) - it must surface
+        # matches the renamed code HID, not re-count the ones both views share.
+        # Keyed (signature, line, matched_text) so a genuinely NEW deobf-only
+        # match (a restored identifier changes matched_text) is still recorded,
+        # and scoped per file so an identical match in another file is unaffected.
+        # With no mapping there is one view, so this never fires - the common
+        # path is byte-identical to before.
+        recorded: set[tuple[str, int, str]] = set()
         def _record(signature: Signature, matched_text: str, line_number: int) -> None:
             # Third-party exclusion (GAP-1): bundled SDKs (GMS, okhttp, Sentry,
             # ...) perform their own root/SSL checks. Counting those matches as
@@ -474,6 +488,10 @@ def scan(
             # reaches _record() (an in-function guard here would be dead code).
             # derive_namespace is computed once per file above, not inlined here,
             # so this hot path does no re-splitting per signature.
+            key = (signature.id, line_number, matched_text)
+            if key in recorded:
+                return  # identical match already recorded from the other text view
+            recorded.add(key)
             matched_signatures.add(signature.id)
             matched_categories.add(signature.category)
             total_counts[signature.id] += 1

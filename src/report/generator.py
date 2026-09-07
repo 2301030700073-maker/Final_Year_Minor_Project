@@ -651,7 +651,12 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
         # negative, the exact misleading "engagement showed none" outcome this audit
         # exists to prevent. Collected so the report can say the hook crashed.
         if isinstance(m, dict) and m.get("type") == "error":
-            desc = str(m.get("description") or "unspecified Frida script error").strip()
+            # Fallback AFTER trimming: a whitespace-only description strips to ""
+            # and must still name something, never render as a blank cause /
+            # " (line N)" (principle 3). Kept byte-identical to the capture stage's
+            # describer (mitmproxy_capture) - both are slated to fold into one shared
+            # common helper; until then the two must stay in lockstep.
+            desc = str(m.get("description") or "").strip() or "unspecified Frida script error"
             fname, lineno = m.get("fileName"), m.get("lineNumber")
             if fname and lineno is not None:
                 desc = f"{desc} ({fname}:{lineno})"

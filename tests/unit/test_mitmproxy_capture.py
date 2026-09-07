@@ -636,6 +636,22 @@ def test_describe_script_errors_empty_when_no_error_messages():
     assert mitmproxy_capture._describe_script_errors(msgs) == []
 
 
+def test_describe_script_errors_never_renders_a_blank_description():
+    # A DELIVERED error is never rendered as an empty string (principle 3). The
+    # "unspecified..." fallback is applied AFTER trimming, so a whitespace-only
+    # description (a hook doing `throw " "`) still names a cause instead of
+    # surfacing as "" or a bare " (line N)". The identical describer in the report's
+    # _hooks_engaged carries the same fix - the two are kept byte-for-byte in step.
+    msgs = [
+        {"type": "error", "description": "   ", "lineNumber": 5},  # blank + line
+        {"type": "error", "description": "\t "},                    # blank, no location
+    ]
+    assert mitmproxy_capture._describe_script_errors(msgs) == [
+        "unspecified Frida script error (line 5)",
+        "unspecified Frida script error",
+    ]
+
+
 def test_run_capture_stage_no_flows_names_crashed_bypass_script(monkeypatch, tmp_path):
     # A pinning-bypass script that throws at runtime is a THIRD cause of zero flows
     # (the bypass never took -> pinned TLS handshakes fail -> nothing decrypts),

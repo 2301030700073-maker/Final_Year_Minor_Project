@@ -175,7 +175,10 @@ def _describe_script_errors(frida_messages: list) -> list[str]:
     errors = []
     for m in frida_messages:
         if isinstance(m, dict) and m.get("type") == "error":
-            desc = str(m.get("description") or "unspecified Frida script error").strip()
+            # Fallback AFTER trimming: a whitespace-only description (a hook doing
+            # `throw " "`) strips to "" and must still name something, never render
+            # as a blank cause / " (line N)" (principle 3 - no empty error output).
+            desc = str(m.get("description") or "").strip() or "unspecified Frida script error"
             fname, lineno = m.get("fileName"), m.get("lineNumber")
             if fname and lineno is not None:
                 desc = f"{desc} ({fname}:{lineno})"

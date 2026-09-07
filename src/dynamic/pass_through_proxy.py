@@ -164,16 +164,23 @@ def start_windows_passthrough(python_win: str, script_win: str, port: int) -> No
                    capture_output=True, text=True, check=True, timeout=30)
 
 
-def _windows_best_effort(cmd: str) -> None:
-    """Run a Windows-host PowerShell command best-effort, swallowing any launch
-    or execution failure. Used for cleanup (stopping the pass-through proxy and
-    mitmdump) where a missed stop is not worth failing the stage over."""
+def _windows_best_effort(cmd: str) -> str | None:
+    """Run a Windows-host PowerShell command best-effort. Used for cleanup
+    (stopping the pass-through proxy and mitmdump) where a missed stop is not
+    worth failing the stage over, so this never raises. But "never raises" is
+    not "silent" (principle 3): if the command could not even be LAUNCHED
+    (powershell.exe missing, timeout), the failure reason is RETURNED so a
+    caller that reports leaks can surface it; callers that don't care ignore it.
+    A non-zero exit from the command itself is NOT a launch failure (a
+    'nothing to stop' pipeline still exits cleanly here) - we only report that
+    we could not run the command at all, never over-claim a confirmed leak."""
     try:
         subprocess.run(
             ["powershell.exe", "-NoProfile", "-Command", cmd],
             capture_output=True, text=True, timeout=20)
-    except Exception:
-        pass
+        return None
+    except Exception as exc:
+        return f"{type(exc).__name__}: {exc}"
 
 
 def stop_windows_passthrough() -> None:

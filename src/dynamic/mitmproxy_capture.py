@@ -326,8 +326,19 @@ def _cleanup(serial: str, proxy_port: int, proc: subprocess.Popen | None) -> lis
             warnings.append(f"local mitmdump terminate failed (may be stray): {exc}")
     # On WSL2 the mitmdump runs on the Windows host, so stop it there too (the
     # pass-through proxy is a separate python.exe and is intentionally left up).
+    # This is the ACTUAL mitmdump-stop path on the reference environment, so its
+    # failure must get the same visibility the local proc.terminate() above does
+    # (principle 3): a Windows-host stop that could not even be RUN means a stray
+    # mitmdump may still be holding the capture port. Record it as exactly that -
+    # "could not run the stop command", not a confirmed leak.
     if _on_wsl2():
-        _stop_windows_mitmdump()
+        stop_err = _stop_windows_mitmdump()
+        if stop_err is not None:
+            warnings.append(
+                "Windows-host mitmdump stop command could not be run (a stray "
+                f"mitmdump may remain on the Windows host holding the capture "
+                f"port): {stop_err}"
+            )
     return warnings
 
 
@@ -419,9 +430,12 @@ def _read_flow_detail_log(path: Path) -> str:
         return ""
 
 
-def _stop_windows_mitmdump() -> None:
-    """Best-effort stop of the Windows-host mitmdump after a WSL2 capture."""
-    pass_through_proxy._windows_best_effort(
+def _stop_windows_mitmdump() -> str | None:
+    """Best-effort stop of the Windows-host mitmdump after a WSL2 capture.
+    Returns a failure reason if the stop command could not be RUN (so _cleanup
+    can report a possibly-stray mitmdump on the Windows host), None on a clean
+    launch. The reason is 'could not run the stop', not a confirmed leak."""
+    return pass_through_proxy._windows_best_effort(
         "Get-Process mitmdump -ErrorAction SilentlyContinue | Stop-Process -Force"
     )
 

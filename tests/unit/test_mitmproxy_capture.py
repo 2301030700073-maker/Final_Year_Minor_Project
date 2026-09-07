@@ -810,3 +810,55 @@ def test_run_capture_stage_success_records_bypass_script_errors(monkeypatch, tmp
     assert result.evidence["bypass_applied"] is True
     # the crash is recorded on the SUCCESS path, not just the empty-flows path.
     assert result.evidence["bypass_script_errors"] == ["TypeError: cannot read x (u.js:7)"]
+
+
+def test_windows_best_effort_returns_launch_failure_reason(monkeypatch):
+    # principle 3: a Windows-host cleanup command that cannot even be LAUNCHED
+    # (powershell.exe missing, timeout) must not vanish. _windows_best_effort now
+    # RETURNS the failure reason - for a caller that reports leaks - instead of
+    # swallowing it with a bare `pass`, while still never raising.
+    def _boom(*a, **k):
+        raise FileNotFoundError("powershell.exe not found")
+
+    monkeypatch.setattr(pass_through_proxy.subprocess, "run", _boom)
+    reason = pass_through_proxy._windows_best_effort("Stop-Process foo")
+    assert reason is not None
+    assert "FileNotFoundError" in reason and "powershell.exe" in reason
+
+    # A clean launch returns None (nothing to report) even when the command
+    # itself exits non-zero - we only report that we could not RUN it, never
+    # over-claim a confirmed leak from a benign 'nothing to stop' exit code.
+    def _ok(*a, **k):
+        return subprocess.CompletedProcess(a[0] if a else [], returncode=1,
+                                           stdout="", stderr="nothing to stop")
+
+    monkeypatch.setattr(pass_through_proxy.subprocess, "run", _ok)
+    assert pass_through_proxy._windows_best_effort("Stop-Process foo") is None
+
+
+def test_cleanup_reports_windows_mitmdump_stop_failure(monkeypatch):
+    # The WSL2 Windows-host mitmdump-stop is the ACTUAL mitmdump-stop path on the
+    # reference environment. A failure to even RUN it must surface as a cleanup
+    # warning - parity with the local proc.terminate() warning - so a stray
+    # Windows-host mitmdump is visible in the report (via evidence
+    # cleanup_warnings), never swallowed by a bare pass (principle 3). It is
+    # worded as "could not run the stop", not a confirmed leak.
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: True)
+    monkeypatch.setattr(mitmproxy_capture.pass_through_proxy, "is_listening",
+                        lambda port: False)
+    monkeypatch.setattr(mitmproxy_capture.device, "clear_http_proxy",
+                        lambda serial: None)
+    monkeypatch.setattr(mitmproxy_capture.device, "adb_reverse",
+                        lambda *a, **k: None)
+
+    # stop command could not be run -> a warning naming a possible stray mitmdump
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump",
+                        lambda: "FileNotFoundError: powershell.exe not found")
+    warns = mitmproxy_capture._cleanup("serial", 8081, None)
+    assert any("stray" in w and "Windows host" in w and "powershell.exe" in w
+               for w in warns), warns
+
+    # a clean stop (None) adds no such warning - no fabricated leak claim
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    warns2 = mitmproxy_capture._cleanup("serial", 8081, None)
+    assert not any("stray" in w for w in warns2), warns2

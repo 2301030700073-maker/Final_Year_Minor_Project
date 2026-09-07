@@ -334,7 +334,7 @@ string in this APK; only its *ownership* is unverified.
 {% elif correlation.coverage_confirmed -%}
 - Verdict: COVERAGE-CONFIRMED (dynamic confirmed a bypass in a category static was coverage-limited on - a filled gap, not a disagreement)
 {% elif correlation.unverified -%}
-- Verdict: UNVERIFIED (dynamic could not test the static prediction - inconclusive, not a disagreement)
+- Verdict: UNVERIFIED (dynamic verification was inconclusive - not a disagreement)
 {% else -%}
 - Verdict: MATCH (static and dynamic agree)
 {% endif %}

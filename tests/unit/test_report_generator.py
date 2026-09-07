@@ -700,9 +700,43 @@ def test_generate_report_renders_unverified_not_mismatch(tmp_path):
     assert "- UNVERIFIED: static analysis predicted root-detection" in content
     assert "- MISMATCH:" not in content
     # The verdict headline must name the state, never "- Matches: False" - that
-    # would read as a static/dynamic disagreement that never happened.
-    assert "- Verdict: UNVERIFIED (dynamic could not test" in content
+    # would read as a static/dynamic disagreement that never happened. The headline
+    # is flavor-neutral: it summarizes ANY inconclusive (RESID-6F here, or a
+    # coverage-limited category dynamic could not confirm) without asserting a
+    # positive "prediction" a coverage-limited verdict never made - the precise
+    # flavor lives in the per-item UNVERIFIED line above.
+    assert "- Verdict: UNVERIFIED (dynamic verification was inconclusive" in content
     assert "- Matches:" not in content
+
+
+def test_generate_report_unverified_headline_covers_coverage_limited_flavor(tmp_path):
+    # CORR-COVLIM1 (None mirror), render side: correlate() now routes a
+    # coverage-limited category whose bypass was inconclusive into `unverified`
+    # (not a false MATCH). The shared UNVERIFIED headline must render for THIS
+    # flavor too - and must NOT claim a static "prediction" (there was none; static
+    # was coverage-limited). The per-item line carries the precise reason.
+    correlation = CorrelationResult(
+        matches=False,
+        mismatches=[],
+        unverified=[
+            "static analysis was coverage-limited on root-detection (unknown, not "
+            "absent) and dynamic verification could not confirm a bypass either - "
+            "neither engine could certify this category, so it is inconclusive, not "
+            "an agreement"
+        ],
+    )
+    report_path = generate_report(
+        run_id="covlim-unv", apk_hash="cvu001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "cvu001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=correlation,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "- Verdict: UNVERIFIED (dynamic verification was inconclusive" in content
+    assert "- UNVERIFIED: static analysis was coverage-limited on root-detection" in content
+    # never a false agreement, and never resurrects the old prediction-specific prose
+    assert "- Verdict: MATCH" not in content
+    assert "- Verdict: UNVERIFIED (dynamic could not test the static prediction" not in content
 
 
 def test_generate_report_renders_match_verdict(tmp_path):

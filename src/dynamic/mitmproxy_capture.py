@@ -126,13 +126,38 @@ class FlowSummary:
 
 
 def _count_client_connections(text: str) -> int:
-    """How many client TCP connections actually reached the proxy this run,
-    counted from the addon's @@CLIENT_CONNECT@@ markers. Proxy-independent
-    reachability signal: >0 with zero flows means the device reached mitmdump but
-    the app stayed silent (or refused the CA on a pinned request) - NOT a
-    device->proxy wiring failure. Pure, fixture-testable (no mitmproxy needed)."""
-    return sum(1 for raw in text.splitlines()
-               if raw.strip() == _CLIENT_CONNECT_MARKER)
+    """How many client TCP connections actually reached the proxy this run.
+    Proxy-independent reachability signal: >0 with zero flows means the device
+    reached mitmdump but the app stayed silent (or refused the CA on a pinned
+    request) - NOT a device->proxy wiring failure; 0 means the device never
+    reached the proxy at all. Pure, fixture-testable (no mitmproxy needed).
+
+    Two sources, because the two placements read DIFFERENT output (only ever one
+    at a time), and both must feed this same probe:
+      * WSL2: the Windows-host addon writes an explicit @@CLIENT_CONNECT@@ marker
+        per client_connected hook (mitmdump's own stdout is hidden/unread there).
+      * Native Linux: no addon runs; mitmdump's captured flow_detail=2 stdout
+        carries its own un-indented `client connect <peer>` lifecycle line per
+        connection (the very lines _parse_flow_detail skips). Counting ONLY the
+        WSL2 marker made this always 0 on native, so a native zero-flow capture
+        where the device DID connect was mis-reported downstream as "device never
+        reached the proxy" - both the report generator's reachability sentence and
+        cli's capture reclassification branch on this count, so a structural 0 there
+        prints a false wiring-failure diagnosis (principle 3/ADR-0006).
+    The two never overlap (the marker is uppercase/underscored; the lifecycle line
+    is not) and "client connect" is not a substring of "client disconnect", so a
+    disconnect is never miscounted. The native match is gated on the line being
+    un-indented (column 0, as real flow_detail emits it) - same discipline the
+    request-line parser uses - so an indented header value that merely contains
+    the substring can never inflate the count."""
+    count = 0
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line == _CLIENT_CONNECT_MARKER:
+            count += 1
+        elif "client connect" in line and not raw[0].isspace():
+            count += 1
+    return count
 
 
 def _parse_flow_detail(text: str) -> list[FlowSummary]:

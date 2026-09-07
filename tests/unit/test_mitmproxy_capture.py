@@ -163,9 +163,40 @@ def test_count_client_connections_counts_markers():
 
 
 def test_count_client_connections_zero_when_absent():
-    # No connections reached the proxy -> 0 (the real-reachability-failure signal).
-    assert mitmproxy_capture._count_client_connections(FIXTURE_DETAIL) == 0
+    # No connection line and no marker -> 0 (the genuine device-never-reached
+    # signal). A bare flow with no lifecycle line, and empty input, both count 0.
+    text = (
+        "127.0.0.1:1: GET https://a.example/ HTTP/2.0\n"
+        " << HTTP/2.0 200 OK 1b\n"
+    )
+    assert mitmproxy_capture._count_client_connections(text) == 0
     assert mitmproxy_capture._count_client_connections("") == 0
+
+
+def test_count_client_connections_counts_native_flow_detail_lifecycle_lines():
+    # Native Linux runs plain mitmdump (no addon); its flow_detail=2 stdout carries
+    # its own un-indented `client connect <peer>` line per connection instead of the
+    # WSL2 addon's @@CLIENT_CONNECT@@ marker. The reachability probe MUST count those
+    # too - counting only the marker made this always 0 on native, so a native
+    # zero-flow capture where the device DID connect was mis-reported as "device
+    # never reached the proxy" (report generator's reachability sentence + cli's
+    # capture reclassification both branch on this count). FIXTURE_DETAIL is real
+    # native output with exactly one client-connect line.
+    assert mitmproxy_capture._count_client_connections(FIXTURE_DETAIL) == 1
+    # Two native connections; neither `client disconnect` nor `server connect` may
+    # be miscounted as a client connection.
+    text = (
+        "client connect 127.0.0.1:5001\n"
+        "server connect example.com:443\n"
+        "client disconnect 127.0.0.1:5001\n"
+        "client connect 127.0.0.1:5002\n"
+        "client disconnect 127.0.0.1:5002\n"
+    )
+    assert mitmproxy_capture._count_client_connections(text) == 2
+    # An INDENTED header value that merely contains the substring is never a
+    # connection (same un-indented discipline the request-line parser uses).
+    indented = "    x-note: client connect happened upstream\n"
+    assert mitmproxy_capture._count_client_connections(indented) == 0
 
 
 def test_connect_marker_never_counted_as_a_flow():

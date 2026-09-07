@@ -37,7 +37,7 @@ _DYNLOAD_OTHER = re.compile(
     r"(?:"
     r"Class\.forName|"
     r"(?:dalvik\.system\.)?DexFile|"
-    r"(?:DexFile\.)?loadDex|"
+    r"(?:dalvik\.system\.)?(?:DexFile\.)?loadDex|"
     r"openDexFile"
     r")"
     r"\s*\("

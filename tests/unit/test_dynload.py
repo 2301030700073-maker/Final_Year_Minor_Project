@@ -38,6 +38,20 @@ def test_finds_dexfile_loaddex(tmp_path):
     assert len(hits) == 1
 
 
+def test_finds_dexfile_loaddex_fully_qualified(tmp_path):
+    # A decompiler can emit the DexFile.loadDex static call fully qualified
+    # (dalvik.system.DexFile.loadDex) when DexFile isn't imported - the same way
+    # the FQ constructor (new dalvik.system.DexFile) and the FQ class loaders
+    # (new dalvik.system.PathClassLoader, test above) appear. Those sibling arms
+    # already carry the (?:dalvik\.system\.)? prefix; the loadDex arm did not, so
+    # this real dynamic-load call slipped through - a missed loading call silently
+    # over-claims a confident java negative over the payload it hides, exactly the
+    # err-toward-recall contract this module states (ADR-0006).
+    p = _write(tmp_path, "D2.java", "dalvik.system.DexFile.loadDex(p, o, 0);")
+    hits = dynload.find_dynamic_loading([p])
+    assert len(hits) == 1
+
+
 def test_finds_base_and_inmemory_loaders(tmp_path):
     p = _write(
         tmp_path, "E.java",

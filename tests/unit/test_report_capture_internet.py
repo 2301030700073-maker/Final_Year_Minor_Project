@@ -129,3 +129,72 @@ def test_empty_capture_without_dynamic_stage_stays_generic_coverage_limitation(t
     assert "may not have exercised the network, or a pinned endpoint refused the proxy CA" in content
     assert "real capture-path failure" not in content
     assert "0 SSL bypass-effect messages this run" not in content
+
+
+def _crashed_bypass_capture_stage():
+    # A capture whose injected pinning-bypass script threw at runtime: a clean
+    # `failed` (NOT a raised stage exception), reason "no flows captured", with the
+    # crash recorded in evidence.bypass_script_errors - exactly what
+    # mitmproxy_capture.run_capture_stage emits for that case.
+    return StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={
+            "reason": "no flows captured", "flow_summary": [],
+            "bypass_applied": True,
+            "bypass_script_errors": ["ReferenceError: Java is not defined (pin.js:12)"],
+        },
+        error="the pinning-bypass script raised 1 uncaught error(s) (ReferenceError: Java is not defined (pin.js:12)) - the bypass likely did not take",
+    )
+
+
+def test_empty_capture_from_crashed_bypass_names_the_script_not_coverage_limitation(tmp_path):
+    # End-to-end closure. A crashed pinning-bypass script is a clean `failed` with
+    # reason "no flows captured", so capture_errored is False and the empty capture
+    # would fall into the has-INTERNET inferential branch. With a dynamic stage
+    # showing 0 SSL bypass effects, that branch MISDIAGNOSES the empty capture as an
+    # "un-exercised network/SSL path" coverage limitation - hiding the real cause
+    # the capture stage recorded. The dedicated bypass-crash branch must PRE-EMPT
+    # that inference and name the crashed script as the true cause.
+    report_path = generate_report(
+        run_id="cap", apk_hash="cap001", timestamp="2026-08-23T12:00:00",
+        metadata={"hashes": {"sha256": "cap001"}, "package": {"package_name": "com.example.net"}},
+        classification=_neither_classification(), verification=None, correlation=None,
+        stage_results=[
+            _crashed_bypass_capture_stage(),
+            _dynamic_stage([{"payload": {"probeHit": "root"}}]),  # 0 SSL bypass effects
+        ],
+        output_dir=tmp_path, manifest=_internet_manifest(),
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "## Captured Traffic" in content
+    # the true, recorded cause is named...
+    assert "pinning-bypass script" in content
+    assert "ReferenceError: Java is not defined (pin.js:12)" in content
+    # ...and the inferential misdiagnosis is PRE-EMPTED, never printed. Without the
+    # fix, this exact scenario prints "un-exercised network/SSL path this run".
+    assert "un-exercised network/SSL path this run" not in content
+    assert "coverage limitation of this run" not in content
+
+
+def test_empty_capture_with_empty_bypass_errors_keeps_inferential_branch(tmp_path):
+    # Strict-gate regression guard: the crash branch must fire ONLY on recorded
+    # bypass errors. An empty capture with an EMPTY bypass_script_errors (a bypass
+    # that applied cleanly, or no bypass at all) must still reach the existing
+    # has-INTERNET inferential prose - the crash branch must not swallow the normal
+    # empty-capture case.
+    stage = StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={"reason": "no flows captured", "flow_summary": [],
+                  "bypass_applied": True, "bypass_script_errors": []},
+        error="no flows",
+    )
+    report_path = generate_report(
+        run_id="cap", apk_hash="cap001", timestamp="2026-08-23T12:00:00",
+        metadata={"hashes": {"sha256": "cap001"}, "package": {"package_name": "com.example.net"}},
+        classification=_neither_classification(), verification=None, correlation=None,
+        stage_results=[stage, _dynamic_stage([{"payload": {"probeHit": "root"}}])],
+        output_dir=tmp_path, manifest=_internet_manifest(),
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "un-exercised network/SSL path this run" in content
+    assert "pinning-bypass script" not in content

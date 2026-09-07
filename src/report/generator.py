@@ -379,6 +379,8 @@ Raw flow file: `{{ capture_flows_path }}`
 {% else -%}
 {% if capture_errored -%}
 No traffic was captured because the **capture stage did not complete — it raised an error** ({{ capture_error or capture_reason or "reason not recorded" }}). The empty flow list is a direct consequence of that stage failure, **not** a property of the app's network behaviour and **not** a coverage limitation of an app that ran to completion: the capture aborted before it could exercise or observe the app's traffic at all. Resolve the stage error and re-run the capture before drawing any conclusion about this app's network behaviour. The capture stage is honest: an empty capture is reported here with its recorded reason, never a fabricated flow list.
+{% elif capture_bypass_script_errors -%}
+No traffic was captured because the **pinning-bypass script injected for this capture raised an uncaught error** ({{ capture_bypass_script_errors | join("; ") }}). The bypass never took effect, so a pinned app's TLS handshakes fail and yield no decrypted flows — the empty flow list is a **direct consequence of the crashed bypass script**, not app-silence, not a device→proxy reachability failure, and not a coverage limitation of an app that ran to completion. Fix the bypass script and re-run the capture before drawing any conclusion about this app's network behaviour. The capture stage is honest: an empty capture is reported here with its recorded reason, never a fabricated flow list.
 {% elif manifest and "android.permission.INTERNET" not in (manifest.permissions or []) -%}
 No traffic was captured. The app declares **no `android.permission.INTERNET` permission**, so it cannot open a network socket — the empty capture is expected regardless of proxy state (capture stage reason: {{ capture_reason or "reason not recorded" }}). The capture stage is honest: an empty capture is reported here with its recorded reason, never a fabricated flow list.
 {% elif manifest and "android.permission.INTERNET" in manifest.permissions -%}
@@ -769,6 +771,10 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
             # an errored stage, and there is no stage error to surface.
             "capture_errored": False,
             "capture_error": None,
+            # No capture stage ran, so no injected bypass script could have crashed:
+            # empty list (same list type as the present path - uniform key set so
+            # the template never references an undefined var, RPT-TMPLCOV1).
+            "capture_bypass_script_errors": [],
         }
     evidence = capture_stage.evidence or {}
     flows = evidence.get("flow_summary") or []
@@ -800,6 +806,17 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
             and evidence.get("reason") == "capture exception"
         ),
         "capture_error": capture_stage.error,
+        # A crashed pinning-bypass script (recorded by run_capture_stage as
+        # evidence.bypass_script_errors) is a clean `failed`, NOT a raised
+        # exception, so capture_errored is False and the empty capture would flow
+        # into the inferential has-INTERNET branch - which re-derives a cause from
+        # the DYNAMIC stage's hooks (untouched by a capture-stage bypass crash) and
+        # misdiagnoses it as app-silence / an un-exercised path. Surface the
+        # recorded crash so the template names the true cause with precedence over
+        # that inference. `or []` keeps OLD cached runs (no such key) an empty list,
+        # never None, so the template's truthiness test and join stay crash-free
+        # ([[crashed-capture-stage-true-reason]], [[report-template-variable-coverage]]).
+        "capture_bypass_script_errors": evidence.get("bypass_script_errors") or [],
     }
 
 

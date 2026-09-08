@@ -13,9 +13,11 @@ whenever a real proxy/wiring problem cannot be ruled out. Only a proxy-independe
 signal that PROVES the empty capture inapplicable/expected downgrades it to
 `skipped`:
   - no android.permission.INTERNET  => app cannot open a socket (guaranteed empty)
-  - INTERNET + dynamic ran-success + 0 in-process SSL bypassEffect => app-silence
-    (the in-process Frida observer would have fired even through an unreachable
-    proxy, so its silence rules out a proxy-reachability failure)
+  - INTERNET + dynamic ran-success + NO in-process SSL-exercised signal (neither
+    the synthesized bypass's bypassEffect nor the predefined bypass's pin-check/
+    verify firing for a concrete host) => app-silence (the in-process Frida
+    observers would have fired even through an unreachable proxy, so their silence
+    rules out a proxy-reachability failure)
 
 Anything undisambiguable - INTERNET but no successful dynamic signal (dynamic
 skipped/failed/absent), or no manifest at all - stays FAILED; reclassifying it
@@ -109,12 +111,12 @@ def test_internet_dynamic_zero_ssl_effects_is_skipped_app_silence():
 
 
 def test_internet_dynamic_success_no_messages_is_skipped():
-    # dynamic succeeded but the app fired neither a probeHit nor a bypassEffect ->
-    # 0 SSL effects -> the SSL path was not exercised this run -> app-silence.
+    # dynamic succeeded but the app fired neither a probeHit nor any SSL-exercised
+    # signal -> 0 SSL effects -> the SSL path was not exercised this run -> app-silence.
     dyn = _dynamic([])
     out = _reclassify_empty_capture(_capture(), _manifest(_INTERNET), dyn)
     assert out.status == "skipped"
-    assert "0 in-process bypassEffect" in out.evidence["not_applicable_reason"]
+    assert "no in-process SSL signal" in out.evidence["not_applicable_reason"]
 
 
 # --- stays FAILED: real proxy failure / undisambiguable ---------------------
@@ -125,6 +127,42 @@ def test_internet_dynamic_with_ssl_effect_stays_failed():
     dyn = _dynamic([{"payload": {"bypassEffect": "ssl-pin-check"}}])
     out = _reclassify_empty_capture(_capture(), _manifest(_INTERNET), dyn)
     assert out.status == "failed"
+
+
+def test_internet_predefined_pincheck_fired_for_host_stays_failed():
+    # The known targets (uc*/AndroGoat) run ssl_pinning_bypass_v1.js, which emits NO
+    # bypassEffect - it signals the app's pin check EXECUTING via a message carrying
+    # the concrete host it fired for ({hook:"OkHttp CertificatePinner.check",
+    # hostname:..., bypassed:true}, sent inside the hooked check). That is positive
+    # evidence the app opened a pinned connection; 0 flows then = a REAL proxy
+    # failure and must stay loud. Counting only bypassEffect read this as 0 effects
+    # and falsely downgraded it to app-silence (fails pre-fix, when it was skipped).
+    dyn = _dynamic([{"payload": {"hook": "OkHttp CertificatePinner.check",
+                                 "hostname": "owasp.org", "bypassed": True}}])
+    out = _reclassify_empty_capture(_capture(), _manifest(_INTERNET), dyn)
+    assert out.status == "failed"
+
+
+def test_internet_predefined_verifychain_fired_for_host_stays_failed():
+    # The TrustManagerImpl.verifyChain arm of the same script carries `host`.
+    dyn = _dynamic([{"payload": {"hook": "TrustManagerImpl.verifyChain",
+                                 "host": "owasp.org", "bypassed": True}}])
+    out = _reclassify_empty_capture(_capture(), _manifest(_INTERNET), dyn)
+    assert out.status == "failed"
+
+
+def test_internet_install_only_message_without_host_is_still_app_silence():
+    # Guard against over-broadening: an INSTALL-time message proves only that the
+    # hook was placed, not that the app made a request. universal-ssl-pinning
+    # bypassed:true carries no host, and CertificatePinner present:false carries no
+    # host either - neither is a pinned-connection signal, so a run with only these
+    # stays app-silence (skipped). The broadened counter keys on a concrete host,
+    # not on bypassed:true alone, so these do NOT spuriously force the loud verdict.
+    dyn = _dynamic([{"payload": {"hook": "universal-ssl-pinning", "bypassed": True}},
+                    {"payload": {"hook": "OkHttp CertificatePinner", "present": False}}])
+    out = _reclassify_empty_capture(_capture(), _manifest(_INTERNET), dyn)
+    assert out.status == "skipped"
+    assert "did not exercise" in out.evidence["not_applicable_reason"]
 
 
 def test_internet_no_dynamic_stage_stays_failed():

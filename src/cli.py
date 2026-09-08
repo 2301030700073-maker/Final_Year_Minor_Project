@@ -729,12 +729,19 @@ def _reclassify_empty_capture(
       1. Manifest declares NO android.permission.INTERNET -> the app cannot open a
          socket, so zero flows is guaranteed regardless of proxy state. Sound
          invariant (no INTERNET => no traffic). -> skipped (not applicable).
-      2. INTERNET declared, dynamic stage RAN, and its in-process Frida TLS observer
-         recorded 0 SSL bypassEffect messages -> the app's own pinned request never
-         executed. That observer is in-process, so a proxy the device could not reach
-         would still let it fire; its silence rules out a proxy-reachability failure
-         and means the app simply did not exercise its network path in a
-         non-interactive window. -> skipped (app-silence, interactive capture needed).
+      2. INTERNET declared, dynamic stage RAN, and it recorded NO in-process signal
+         that the app exercised its SSL path - neither the synthesized bypass's
+         bypassEffect ('ssl-pin-check'/'ssl-handshake') NOR the predefined
+         ssl_pinning_bypass_v1.js pin-check/cert-verify firing for a concrete host
+         (a message carrying `hostname`/`host`, sent inside the hooked
+         CertificatePinner.check / TrustManagerImpl.verifyChain). Those observers are
+         in-process, so a proxy the device could not reach would still let them fire;
+         their combined silence rules out a proxy-reachability failure and means the
+         app simply did not exercise its network path in a non-interactive window.
+         -> skipped (app-silence, interactive capture needed). Counting bypassEffect
+         alone (which ONLY the synthesizer emits) read a fired pin-check on a known
+         target - uc*/AndroGoat all map to ssl_pinning_bypass_v1.js - as zero effects
+         and wrongly downgraded a genuine 0-flows proxy failure to app-silence.
 
       3. INTERNET declared, no in-process signal available (dynamic skipped/failed/
          absent), but the capture addon recorded >0 client connections to the proxy
@@ -743,8 +750,9 @@ def _reclassify_empty_capture(
          wiring failure. This is the reachability probe that closes the last
          previously-undisambiguable case. -> skipped (device reached proxy, app quiet).
 
-    Anything else stays failed: INTERNET + bypassEffect>0 + 0 flows is a REAL
-    capture-path failure (the app made the request, nothing reached the proxy);
+    Anything else stays failed: INTERNET + an in-process SSL signal (bypassEffect,
+    or a pin-check/verify that fired for a host) + 0 flows is a REAL capture-path
+    failure (the app made the request, nothing reached the proxy);
     INTERNET + 0 client connections is a genuine reachability failure (the device
     never reached the proxy); and INTERNET with no dynamic signal AND no connection
     count at all cannot rule a proxy problem out, so all remain loud. A missing
@@ -776,21 +784,40 @@ def _reclassify_empty_capture(
             error=None, duration_ms=capture_stage.duration_ms,
         )
 
-    # Signal 2: INTERNET + dynamic ran + 0 in-process SSL bypassEffect -> app-silence.
+    # Signal 2: INTERNET + dynamic ran + NO in-process signal that the app exercised
+    # its SSL path -> app-silence. "Exercised" is any of: the synthesized bypass's
+    # bypassEffect ('ssl-pin-check'/'ssl-handshake'), OR the predefined
+    # ssl_pinning_bypass_v1.js pin-check/cert-verify firing for a concrete host
+    # (payload carries a `hostname`/`host`). Those latter messages are sent INSIDE
+    # the hooked CertificatePinner.check / TrustManagerImpl.verifyChain, so they
+    # appear only when the app actually opened a pinned connection. Counting only
+    # bypassEffect (emitted ONLY by the synthesizer) read a fired pin-check on a
+    # known target (uc*/AndroGoat, all mapped to ssl_pinning_bypass_v1.js) as 0
+    # effects and falsely downgraded a genuine 0-flows proxy failure to app-silence
+    # - the "relax a loud signal for a nicer number" move this reclassifier exists
+    # to avoid. An INSTALL-time message (universal-ssl-pinning bypassed:true with no
+    # host, or CertificatePinner present:false) carries no host and correctly does
+    # NOT count: it proves the hook was placed, not that a request was made - so the
+    # discriminator keys on a concrete host, never on bypassed:true alone.
     if has_internet and dynamic_stage is not None and dynamic_stage.status == "success":
         dyn_ev = dynamic_stage.evidence or {}
         frida_messages = dyn_ev.get("frida_messages") or []
         ssl_effects = 0
         for m in frida_messages:
             payload = m.get("payload") if isinstance(m, dict) else None
-            if isinstance(payload, dict) and isinstance(payload.get("bypassEffect"), str):
+            if not isinstance(payload, dict):
+                continue
+            if (isinstance(payload.get("bypassEffect"), str)
+                    or isinstance(payload.get("hostname"), str)
+                    or isinstance(payload.get("host"), str)):
                 ssl_effects += 1
         if ssl_effects == 0:
             return StageResult(
                 stage="capture-traffic", status="skipped",
                 evidence={**evidence, "reclassified_from": "failed",
                           "not_applicable_reason": "app did not exercise its "
-                          "network/SSL path (0 in-process bypassEffect; interactive "
+                          "network/SSL path (no in-process SSL signal - 0 bypassEffect "
+                          "and no pinned-connection hook fired for a host; interactive "
                           "capture needed) - not a proxy failure"},
                 error=None, duration_ms=capture_stage.duration_ms,
             )

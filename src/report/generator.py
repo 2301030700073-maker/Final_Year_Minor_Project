@@ -392,6 +392,12 @@ No traffic was captured ({{ capture_reason or "reason not recorded" }}). The app
 No traffic was captured ({{ capture_reason or "reason not recorded" }}). The capture stage is honest: an empty capture is reported here with its recorded reason, never a fabricated flow list.
 {% endif -%}
 {% endif %}
+{% if capture_cleanup_warnings -%}
+> **Capture cleanup warnings:** device/proxy teardown did not fully complete this run — {{ capture_cleanup_warnings | length }} warning(s), which may indicate a leaked device proxy setting, an un-removed `adb reverse`, or a stray `mitmdump` process (including one on the WSL2 Windows host holding the capture port). Surfaced here so a leaked teardown is visible in the report, not only in the stored evidence (principle 3):
+{% for w in capture_cleanup_warnings -%}
+> - `{{ w | md }}`
+{% endfor -%}
+{% endif -%}
 {% endif %}
 ## Limitations
 
@@ -767,6 +773,11 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
             # an errored stage, and there is no stage error to surface.
             "capture_errored": False,
             "capture_error": None,
+            # No capture stage ran, so no cleanup could have leaked a device
+            # proxy / adb reverse / stray mitmdump: empty list (same type as the
+            # present path - uniform key set so the template never references an
+            # undefined var, RPT-TMPLCOV1).
+            "capture_cleanup_warnings": [],
             # No capture stage ran, so no injected bypass script could have crashed:
             # empty list (same list type as the present path - uniform key set so
             # the template never references an undefined var, RPT-TMPLCOV1).
@@ -813,6 +824,17 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
         # never None, so the template's truthiness test and join stay crash-free
         # ([[crashed-capture-stage-true-reason]], [[report-template-variable-coverage]]).
         "capture_bypass_script_errors": evidence.get("bypass_script_errors") or [],
+        # Device/proxy teardown failures the capture stage collected rather than
+        # swallowed (run_capture_stage's finally block records them on
+        # evidence.cleanup_warnings - a leaked device proxy, an un-removed adb
+        # reverse, or a stray mitmdump including on the WSL2 Windows host). They
+        # were persisted to the stored evidence but never RENDERED, so a leaked
+        # teardown was invisible to anyone reading the .md report - only half of
+        # the "not swallowed, visible in the report" contract (principle 3). Surface
+        # them so the report actually shows the leak. `or []` keeps OLD cached runs
+        # (no such key) and clean runs an empty list, never None, so the template's
+        # truthiness test and join stay crash-free (RPT-TMPLCOV1).
+        "capture_cleanup_warnings": evidence.get("cleanup_warnings") or [],
     }
 
 

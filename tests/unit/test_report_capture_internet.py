@@ -254,3 +254,59 @@ def test_success_capture_without_bypass_errors_has_no_partial_caveat(tmp_path):
     content = report_path.read_text(encoding="utf-8")
     assert "api.example.com" in content
     assert "Partial capture" not in content
+
+
+def _render_one(stage, tmp_path):
+    report_path = generate_report(
+        run_id="cap", apk_hash="cap001", timestamp="2026-08-23T12:00:00",
+        metadata={"hashes": {"sha256": "cap001"}, "package": {"package_name": "com.example.net"}},
+        classification=_neither_classification(), verification=None, correlation=None,
+        stage_results=[stage], output_dir=tmp_path, manifest=_internet_manifest(),
+    )
+    return report_path.read_text(encoding="utf-8")
+
+
+def test_capture_cleanup_warnings_are_rendered_not_only_stored(tmp_path):
+    # run_capture_stage's finally block COLLECTS teardown failures (a leaked device
+    # proxy, an un-removed adb reverse, a stray mitmdump - including one on the WSL2
+    # Windows host) onto evidence.cleanup_warnings instead of swallowing them. But
+    # they were only STORED (and unit-tested as stored), never RENDERED - so a
+    # leaked teardown was invisible to a reader of the .md report, only half of the
+    # "not swallowed, visible in the report" contract (principle 3). The report must
+    # actually surface them, on BOTH the flows and the no-flows capture outcomes
+    # (the block sits outside the flows/no-flows branch).
+    warns = ["local mitmdump terminate failed (may be stray): boom",
+             "adb reverse --remove 8080 failed (leaked reverse): denied"]
+
+    # (a) a SUCCESS capture (flows present) still surfaces the teardown warnings.
+    success = _success_capture_stage([])
+    success.evidence["cleanup_warnings"] = warns
+    c1 = _render_one(success, tmp_path)
+    assert "Capture cleanup warnings" in c1
+    assert "2 warning(s)" in c1
+    assert "local mitmdump terminate failed (may be stray): boom" in c1
+    assert "adb reverse --remove 8080 failed (leaked reverse): denied" in c1
+
+    # (b) an EMPTY (no-flows) capture surfaces them too - a leak is visible on
+    # either outcome, not just when flows happened to be captured.
+    empty = _empty_capture_stage()
+    empty.evidence["cleanup_warnings"] = warns
+    c2 = _render_one(empty, tmp_path)
+    assert "Capture cleanup warnings" in c2
+    assert "local mitmdump terminate failed (may be stray): boom" in c2
+
+
+def test_capture_cleanup_warnings_escaped_and_absent_when_clean(tmp_path):
+    # Adversarial teardown text (a stray-process message could carry anything) is
+    # escaped via `| md`, so a pipe/newline cannot break the report's structure.
+    adversarial = _success_capture_stage([])
+    adversarial.evidence["cleanup_warnings"] = ["stray mitmdump on host | port 8081\nrow"]
+    c = _render_one(adversarial, tmp_path)
+    assert "Capture cleanup warnings" in c
+    assert "stray mitmdump on host \\| port 8081 row" in c  # pipe escaped, newline->space
+
+    # Strict gate: a clean capture (no cleanup_warnings recorded) shows NO block -
+    # the warning must never be fabricated when teardown completed cleanly.
+    clean = _success_capture_stage([])
+    assert "cleanup_warnings" not in clean.evidence
+    assert "Capture cleanup warnings" not in _render_one(clean, tmp_path)

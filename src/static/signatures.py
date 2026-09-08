@@ -550,7 +550,23 @@ def scan(
         # the fundamental signature-bounded limitation (ADR-0001). Same app-owned
         # exclusion as the signatures, so a bundled SDK's detection code never
         # surfaces as the app's own unknown detection.
-        indicator_categories |= find_indicator_categories(text)
+        #
+        # Scanned over BOTH views (original + the mapping-deobfuscated view, when
+        # one is present) - exactly like the signature passes below, not the
+        # original text alone. The ROOT indicators key on app-defined method names
+        # (isRooted/checkRoot/detectRoot/...) that R8 renames to a()/b(): a custom,
+        # UNSIGNATURED root check the obfuscator renamed is invisible in the
+        # original decompiled text and only reappears in the deobfuscated view.
+        # The signature passes already scan `texts`, so a KNOWN renamed technique
+        # is still caught - but this safety net for UNKNOWN techniques was reading
+        # the original only, leaving it blind in exactly the obfuscated-app
+        # population it exists for and letting a confident NEITHER be certified
+        # over a renamed custom root check (ADR-0006). find_indicator_categories
+        # returns a set and this unions, so a category seen in both views is
+        # counted once; with no mapping texts == [text] and this is byte-identical
+        # to the prior single-view scan (common path unchanged).
+        for view in texts:
+            indicator_categories |= find_indicator_categories(view)
 
         for text in texts:
             lines = text.splitlines()

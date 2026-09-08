@@ -230,6 +230,82 @@ def test_string_encryption_true_on_dynamic_xor_decryptor():
     assert _has_string_encryption(text) is True
 
 
+# OBF-VENDOR1: the string-encryption signal degrades the app's Java surface to
+# `partial` (heavy -> java_coverage partial), so it must be scoped to the app's
+# OWN code - a bundled SDK's encrypted strings are the vendor's obfuscation of the
+# vendor's strings, not the app hiding its own root/SSL detection literals. Without
+# the filter every app bundling such an SDK (appsflyer/gms shapes) read `heavy` ->
+# a false coverage limitation. Mirrors find_dynamic_loading / find_webview_js
+# (java-covlim vendor-filter). Class names are non-minified in these fixtures so the
+# separate (deliberately corpus-wide) name-ratio signal never fires - isolating the
+# string-encryption path under test.
+
+# Flat-numeric R8 fingerprint: single-arg `new String(<numeric array>)`, >=8 pure
+# literals. Class name is long so the name-ratio stays 0.
+_ENC_BODY = (
+    "  int[] k = {99,104,101,99,107,95,114,111,111,116,0,0,0,0,0};\n"
+    "  private String dec() {{ return new String(k); }}\n"
+)
+
+
+def _write_at(tmp_path: Path, relpath: str, cls: str, encrypted: bool) -> Path:
+    # A decompiled-source path with a real `sources/<pkg>/...` layout so
+    # namespace_of_decompiled_path anchors on the marker (a bare tmp filename has
+    # no namespace and reads app-owned).
+    p = tmp_path / relpath
+    p.parent.mkdir(parents=True, exist_ok=True)
+    body = _ENC_BODY if encrypted else "  void go() {}\n"
+    p.write_text(f"public class {cls} {{\n{body}}}\n", encoding="utf-8")
+    return p
+
+
+def test_string_encryption_in_vendor_code_does_not_escalate(tmp_path):
+    # A bundled Facebook Audience Network (com.facebook.ads) class with R8 string
+    # encryption + the app's own clear code. Pre-fix this read `heavy` (java
+    # partial) for every app bundling such an SDK; now the vendor file is skipped.
+    vendor = _write_at(tmp_path, "sources/com/facebook/ads/RemoteRenderer.java", "RemoteRenderer", True)
+    app = _write_at(tmp_path, "sources/com/myapp/MainActivity.java", "MainActivity", False)
+    assert detect_obfuscation_level([vendor, app], app_package="com.myapp") != "heavy"
+
+
+def test_identical_encryption_escalates_only_outside_a_recognized_vendor(tmp_path):
+    # The clincher: identical encrypted content, the ONLY difference is the
+    # namespace. In a recognized vendor it is excluded (not heavy); in an unknown
+    # namespace it is scanned (heavy) - so the exclusion, not a weaker signal, is
+    # what changed. Proves the string-encryption detector still fires.
+    vendor = _write_at(tmp_path, "sources/com/facebook/ads/RemoteRenderer.java", "RemoteRenderer", True)
+    unknown = _write_at(tmp_path, "sources/org/unknownvendorx/RemoteRenderer.java", "RemoteRenderer", True)
+    assert detect_obfuscation_level([vendor], app_package="com.myapp") != "heavy"
+    assert detect_obfuscation_level([unknown], app_package="com.myapp") == "heavy"
+
+
+def test_string_encryption_in_app_own_code_still_escalates(tmp_path):
+    # Recall-safe: the app's OWN encrypted strings still force `heavy` (java
+    # partial) - the vendor skip must never swallow the app's own code.
+    own = _write_at(tmp_path, "sources/com/myapp/Secret.java", "Secret", True)
+    clear = _write_at(tmp_path, "sources/com/myapp/MainActivity.java", "MainActivity", False)
+    assert detect_obfuscation_level([own, clear], app_package="com.myapp") == "heavy"
+
+
+def test_string_encryption_bugb_app_sharing_vendor_prefix_still_escalates(tmp_path):
+    # Bug-B parity: an app whose own package shares a recognized vendor prefix
+    # (Cash App is com.squareup.cash) keeps its own subtree app-owned, so its own
+    # encrypted strings still escalate.
+    own = _write_at(tmp_path, "sources/com/squareup/cash/Secret.java", "Secret", True)
+    assert detect_obfuscation_level([own], app_package="com.squareup.cash") == "heavy"
+
+
+def test_string_encryption_vendor_excluded_under_default_app_package(tmp_path):
+    # Safe default: with no app_package the test reduces to the plain vendor check,
+    # so a recognized-vendor encrypted file is still excluded (matches the
+    # find_dynamic_loading / find_webview_js default), while an unknown namespace
+    # is never asserted third-party and is still scanned (recall-safe).
+    vendor = _write_at(tmp_path, "sources/com/facebook/ads/RemoteRenderer.java", "RemoteRenderer", True)
+    unknown = _write_at(tmp_path, "sources/org/unknownvendorx/Secret.java", "Secret", True)
+    assert detect_obfuscation_level([vendor]) != "heavy"
+    assert detect_obfuscation_level([unknown]) == "heavy"
+
+
 def test_string_encryption_true_on_runtime_xor_loop():
     # Boundary #4 runtime XOR-loop shape (appsflyer AFf1cSDK): a string is
     # decrypted in place via `arr[i] = (char)(arr[i] ^ key)` in a loop, then

@@ -531,7 +531,7 @@ def _max_obfuscation(a, b):
     return a if _OBF_ORDER[a] >= _OBF_ORDER[b] else b
 
 
-def _obfuscation_level_over_corpus(jadx_output, cfr_output):
+def _obfuscation_level_over_corpus(jadx_output, cfr_output, app_package=None):
     """DYNCOV1 (obfuscation half): read obfuscation over BOTH the jadx-only corpus
     and the full jadx+CFR corpus, returning the more-severe.
 
@@ -545,8 +545,8 @@ def _obfuscation_level_over_corpus(jadx_output, cfr_output):
     reading downward. So we FLOOR the wider reading at the jadx-only reading - the
     CFR classes can only ever RAISE the level, never dilute it. Conservative in the
     one safe direction (more partial), never sharpening a negative."""
-    jadx_level = detect_obfuscation_level(_full_java_corpus([jadx_output]))
-    full_level = detect_obfuscation_level(_full_java_corpus([jadx_output, cfr_output]))
+    jadx_level = detect_obfuscation_level(_full_java_corpus([jadx_output]), app_package)
+    full_level = detect_obfuscation_level(_full_java_corpus([jadx_output, cfr_output]), app_package)
     return _max_obfuscation(jadx_level, full_level)
 
 
@@ -1429,7 +1429,8 @@ def run(
     # drive native/manifest coverage. The per-surface map is persisted per run
     # and feeds the report + calibration exclusion (G1/F2/G-A).
     obfuscation_stage, obfuscation_level = _wrap_stage(
-        "obfuscation", _obfuscation_level_over_corpus, jadx_output, cfr_output
+        "obfuscation", _obfuscation_level_over_corpus, jadx_output, cfr_output,
+        ingest_result.evidence["package"]["package_name"],
     )
     stage_results.append(obfuscation_stage)
     _print_stage(obfuscation_stage)

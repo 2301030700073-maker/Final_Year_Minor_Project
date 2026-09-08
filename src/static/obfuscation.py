@@ -15,7 +15,7 @@ TN.
 """
 
 from __future__ import annotations
-from common import read_text_ignore
+from common import is_third_party_decompiled_file, read_text_ignore
 
 import re
 from pathlib import Path
@@ -205,9 +205,24 @@ def _has_string_encryption(text: str) -> bool:
     return False
 
 
-def _any_string_encryption(java_files: list[Path]) -> bool:
-    """True when any decompiled .java shows the string-encryption fingerprint."""
+def _any_string_encryption(java_files: list[Path], app_package: str | None = None) -> bool:
+    """True when any of the APP's OWN decompiled .java shows the string-encryption
+    fingerprint. OBF-VENDOR1: a bundled SDK's encrypted strings (the corpus notes
+    above name appsflyer's XOR-loop and the gms/ads decryptor) are the vendor's
+    obfuscation of the VENDOR's own strings, not the app hiding its own root/SSL
+    detection literals - so they must not force the app's Java surface to `partial`
+    (a false coverage limitation for every app bundling such an SDK), exactly as
+    find_dynamic_loading / find_webview_js exclude vendor code (the java-covlim
+    vendor-filter lesson). Safe direction is preserved structurally: the app's OWN
+    encrypted strings - including an app whose package shares a recognized vendor
+    prefix (Bug-B) - still fire and still force `heavy`; only recognized
+    third-party files are skipped. The class-name-ratio signal is deliberately
+    left corpus-wide (a separate, broader question with an unverified calibration
+    impact), so a vendor-minified bundle still reads heavy via that path - this
+    filter only ever relaxes the string-encryption signal, never the ratio one."""
     for p in java_files:
+        if is_third_party_decompiled_file(str(p), app_package):
+            continue
         text = read_text_ignore(p)
         if text is None:
             continue
@@ -232,15 +247,21 @@ def _minified_name_ratio(names: list[str]) -> float:
     return minified / len(app_names)
 
 
-def detect_obfuscation_level(java_files: list[Path]) -> ObfuscationLevel:
+def detect_obfuscation_level(java_files: list[Path], app_package: str | None = None) -> ObfuscationLevel:
     """Two deterministic rules. G7 (class-name ratio) first, plus the R8 string-
     encryption fingerprint: string encryption hides the very literals the
     signature corpus matches, so its presence alone forces `heavy` (-> Java
     surface partial via N1/G-C) regardless of class names. Empty corpus =>
     'clear' (nothing to observe; the coverage contract separately marks a
     low-corpus Java surface partial via decompile_completeness, so this can't
-    over-claim absence)."""
-    if _any_string_encryption(java_files):
+    over-claim absence).
+
+    OBF-VENDOR1: `app_package` scopes the string-encryption signal to the app's
+    OWN code - a bundled SDK's encrypted strings are the vendor's, not the app
+    hiding its detection literals, so they must not force the app to `heavy`
+    (see _any_string_encryption). None (the default) reduces to the recognized-
+    vendor exclusion, matching find_dynamic_loading / find_webview_js."""
+    if _any_string_encryption(java_files, app_package):
         return "heavy"
     names = _class_simple_names(java_files)
     # Single source of truth for the class-name thresholds: obfuscation_from_names

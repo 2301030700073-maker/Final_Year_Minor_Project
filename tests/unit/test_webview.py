@@ -120,3 +120,72 @@ def test_skips_unreadable_file(tmp_path):
         assert remote is False
     finally:
         p.chmod(0o644)
+
+
+def _write_at(tmp_path: Path, relpath: str, text: str) -> Path:
+    # A decompiled-source path with a real `sources/<pkg>/...` layout so
+    # derive_namespace anchors on the marker (a bare tmp filename has no
+    # namespace and reads app-owned).
+    p = tmp_path / relpath
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+# WEBVIEW-VENDOR1: a bundled WebView SDK's remote-JS load is the vendor's content,
+# not the app hiding its own root/SSL checks. It must NOT set has_remote_js (which
+# degrades the app's java surface to partial) - mirroring DYNLOAD-VENDOR1. Only the
+# app's OWN remote-JS load degrades.
+
+_REMOTE_JS = 'web.loadUrl("https://ads.example.com/interstitial.js");'
+
+
+def test_vendor_remote_js_is_excluded(tmp_path):
+    # A Facebook Audience Network (com.facebook.ads) WebView loading remote JS: a
+    # recognized vendor, not under the app package -> skipped entirely. Without the
+    # fix this set has_remote_js=True and degraded java to partial for every app
+    # bundling such an SDK.
+    p = _write_at(tmp_path, "sources/com/facebook/ads/AudienceNetworkActivity.java", _REMOTE_JS)
+    sites, remote = webview.find_webview_js([p], app_package="com.myapp")
+    assert sites == []
+    assert remote is False
+
+
+def test_app_own_remote_js_still_degrades(tmp_path):
+    # The app's OWN remote-JS load (in its own package subtree) is still counted -
+    # a real coverage limitation over JS we cannot read (ADR-0006), never excluded.
+    p = _write_at(tmp_path, "sources/com/myapp/net/WebCheck.java", _REMOTE_JS)
+    sites, remote = webview.find_webview_js([p], app_package="com.myapp")
+    assert len(sites) == 1
+    assert remote is True
+
+
+def test_bugb_app_sharing_vendor_prefix_still_degrades(tmp_path):
+    # Bug-B parity: an app whose own package shares a recognized vendor prefix
+    # (e.g. Cash App is com.squareup.cash) keeps its own subtree app-owned, so its
+    # own remote-JS load still degrades - the vendor skip must never swallow the
+    # app's own code.
+    p = _write_at(tmp_path, "sources/com/squareup/cash/ui/Web.java", _REMOTE_JS)
+    sites, remote = webview.find_webview_js([p], app_package="com.squareup.cash")
+    assert len(sites) == 1
+    assert remote is True
+
+
+def test_default_app_package_none_excludes_recognized_vendor(tmp_path):
+    # Safe default: with no app_package the test reduces to the plain vendor check,
+    # so a recognized-vendor path is still excluded (the historical no-filter
+    # behavior only ever OVER-degraded; the default now matches dynload's).
+    p = _write_at(tmp_path, "sources/com/facebook/ads/AudienceNetworkActivity.java", _REMOTE_JS)
+    sites, remote = webview.find_webview_js([p])
+    assert sites == []
+    assert remote is False
+
+
+def test_default_app_package_none_keeps_unknown_namespace_scanned(tmp_path):
+    # ...and an UNKNOWN namespace (could be the app's own code under a different
+    # package) is never asserted third-party, so it is still scanned and still
+    # degrades - the recall-safe direction is preserved with no app_package.
+    p = _write_at(tmp_path, "sources/org/unknownapp/Web.java", _REMOTE_JS)
+    sites, remote = webview.find_webview_js([p])
+    assert len(sites) == 1
+    assert remote is True

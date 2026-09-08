@@ -431,6 +431,44 @@ def is_third_party_file(ns: str | None, app_package: str | None) -> bool:
     return is_known_third_party(ns) and not is_under_package(ns, app_package)
 
 
+def namespace_of_decompiled_path(path: str) -> str | None:
+    """Package namespace for a decompiled-source PATH, tolerant of the CFR layout.
+
+    jadx writes `.../sources/<pkg>/...`, so `derive_namespace` can anchor on the
+    `sources` marker even in an absolute path. CFR writes
+    `<analysis>/<sha256>/cfr/<pkg>/...` - no marker at all - so an absolute CFR
+    path would derive as `outputs.analysis.<sha>.cfr.okhttp3.internal` and match
+    no vendor prefix, meaning every CFR-recovered bundled-SDK file reads as
+    app-owned (CFR-NS1). Anchor on the decompiler's own output dir first: the
+    `cfr` segment is treated as the anchor ONLY when the segment before it is the
+    64-hex APK hash, so a genuine package segment named `cfr` is never mistaken
+    for the output dir. Single source of truth for the java coverage-limited
+    scans that walk the jadx+CFR corpus (dynload, webview) so they cannot drift."""
+    parts = path.split("/")
+    for i, seg in enumerate(parts):
+        if (
+            seg == "cfr"
+            and i > 0
+            and len(parts[i - 1]) == 64
+            and all(ch in "0123456789abcdef" for ch in parts[i - 1])
+        ):
+            return derive_namespace("/".join(parts[i + 1:]))
+    return derive_namespace(path)
+
+
+def is_third_party_decompiled_file(path: str, app_package: str | None) -> bool:
+    """Bug-B-correct third-party test for a decompiled-source PATH (jadx or CFR).
+
+    The path-level companion to `is_third_party_file` (which takes a namespace):
+    it resolves the path to its namespace via `namespace_of_decompiled_path`
+    (CFR-aware) first, so the java coverage-limited scans that walk the jadx+CFR
+    corpus - `dynload.find_dynamic_loading` and `webview.find_webview_js` - share
+    ONE definition of 'this file is bundled-SDK code to skip' and cannot drift.
+    `app_package` None/empty reduces to the plain vendor check (safe direction:
+    only recognized vendors are ever excluded, the app's own code never is)."""
+    return is_third_party_file(namespace_of_decompiled_path(path), app_package)
+
+
 @dataclass
 class StageResult:
     stage: str

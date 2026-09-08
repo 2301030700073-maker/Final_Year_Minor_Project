@@ -15,7 +15,7 @@ for the boundary-4 unaccounted-loads signal, but for the java surface.
 """
 
 from __future__ import annotations
-from common import derive_namespace, is_third_party_file, read_text_ignore
+from common import is_third_party_decompiled_file, read_text_ignore
 
 import re
 from pathlib import Path
@@ -44,31 +44,6 @@ _DYNLOAD_OTHER = re.compile(
 )
 
 
-def _namespace_of(path: str) -> str | None:
-    """Package namespace for a decompiled source path, tolerant of the CFR layout.
-
-    DYNLOAD-VENDOR1/CFR-NS1: jadx writes `.../sources/<pkg>/...`, so
-    `derive_namespace` can anchor on the `sources` marker even in an absolute
-    path. CFR writes `<analysis>/<sha256>/cfr/<pkg>/...` - no marker at all - so
-    an absolute CFR path derived as `outputs.analysis.<sha>.cfr.okhttp3.internal`
-    and matched no vendor prefix, meaning every CFR-recovered bundled-SDK file
-    read as app-owned. Anchor on the decompiler's own output dir first. The `cfr`
-    segment is only treated as the anchor when the segment before it is the
-    64-hex APK hash, so a genuine package segment named `cfr` is never mistaken
-    for the output dir.
-    """
-    parts = path.split("/")
-    for i, seg in enumerate(parts):
-        if (
-            seg == "cfr"
-            and i > 0
-            and len(parts[i - 1]) == 64
-            and all(ch in "0123456789abcdef" for ch in parts[i - 1])
-        ):
-            return derive_namespace("/".join(parts[i + 1:]))
-    return derive_namespace(path)
-
-
 def find_dynamic_loading(java_files, app_package: str | None = None) -> list[str]:
     """Scan the decompiled .java corpus for dynamic-code-loading call sites.
 
@@ -84,23 +59,24 @@ def find_dynamic_loading(java_files, app_package: str | None = None) -> list[str
         for every line that invokes a runtime class loader. Empty means no
         dynamic loading is statically visible.
 
-    DYNLOAD-VENDOR1: bundled-SDK code is excluded, via the same
-    `common.is_third_party_file` the source scan and the DEX scan use, so the
-    three cannot drift (Bug-B parity - an app whose own package shares a vendor
-    prefix keeps its own subtree app-owned). Erring toward recall is the right
-    call for the APP's own code, but a `Class.forName` inside a vendor library is
-    not the app releasing a hidden payload - Retrofit reflecting on
-    `android.os.Build` and OkHttp reflecting on Jetty's ALPN classes are library
-    plumbing on constant, platform-resident class names. Counting them degraded
-    the java surface to `partial` for essentially every app that bundles OkHttp or
-    Retrofit, which made a confident java negative unreachable across the corpus
-    and permanently held the only registered root/SSL negative control out of
-    Tier-2 calibration.
+    DYNLOAD-VENDOR1: bundled-SDK code is excluded, via the shared
+    `common.is_third_party_decompiled_file` the webview scan now also uses (which
+    itself resolves the path with `common.is_third_party_file`, the same test the
+    source scan and the DEX scan use), so none of the four can drift (Bug-B parity
+    - an app whose own package shares a vendor prefix keeps its own subtree
+    app-owned). Erring toward recall is the right call for the APP's own code, but
+    a `Class.forName` inside a vendor library is not the app releasing a hidden
+    payload - Retrofit reflecting on `android.os.Build` and OkHttp reflecting on
+    Jetty's ALPN classes are library plumbing on constant, platform-resident class
+    names. Counting them degraded the java surface to `partial` for essentially
+    every app that bundles OkHttp or Retrofit, which made a confident java
+    negative unreachable across the corpus and permanently held the only
+    registered root/SSL negative control out of Tier-2 calibration.
     """
     hits: list[str] = []
     for f in java_files:
         path = Path(f)
-        if is_third_party_file(_namespace_of(str(path)), app_package):
+        if is_third_party_decompiled_file(str(path), app_package):
             continue
         text = read_text_ignore(path)
         if text is None:

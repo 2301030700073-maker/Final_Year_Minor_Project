@@ -1388,7 +1388,16 @@ def run(
     # source is JS we cannot read statically and forces the java surface to
     # partial (handled in the apply_dynamic_loading_java fold below, ADR-0006).
     webview_sites, webview_has_remote_js = (
-        find_webview_js(native_java_files) if native_java_files else ([], False)
+        find_webview_js(
+            native_java_files,
+            # WEBVIEW-VENDOR1: same app_package find_dynamic_loading gets, so the
+            # two java coverage-limited scans share one third-party definition. A
+            # bundled WebView SDK's remote-JS load is the vendor's content, not the
+            # app hiding its own checks - counting it degraded java to partial for
+            # every app bundling such an SDK (the DYNLOAD-VENDOR1 false-partial).
+            app_package=ingest_result.evidence["package"]["package_name"],
+        )
+        if native_java_files else ([], False)
     )
     native_stage, native_evidence = _wrap_stage(
         "native_scan", _run_native_scan, apk, ANALYSIS_ROOT, apk_hash, native_java_files

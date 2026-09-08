@@ -26,7 +26,7 @@ the coverage downgrade.
 """
 
 from __future__ import annotations
-from common import read_text_ignore
+from common import is_third_party_decompiled_file, read_text_ignore
 
 import re
 from pathlib import Path
@@ -58,12 +58,15 @@ _WVB_REMOTE = re.compile(
 )
 
 
-def find_webview_js(java_files) -> tuple[list[str], bool]:
+def find_webview_js(java_files, app_package: str | None = None) -> tuple[list[str], bool]:
     """Scan the decompiled .java corpus for WebView JS-bridge / JS-execution calls.
 
     Args:
         java_files: iterable of paths to decompiled .java sources (the same corpus
             threaded into `find_dynamic_loading`).
+        app_package: the analyzed app's own declared package, used for the shared
+            Bug-B-correct third-party test below. None reduces that test to the
+            plain vendor check (safe direction).
 
     Returns:
         A `(call_sites, has_remote_js)` tuple. `call_sites` is a list of
@@ -71,11 +74,26 @@ def find_webview_js(java_files) -> tuple[list[str], bool]:
         eval / `javascript:`-URL / loadDataWithBaseURL call. `has_remote_js` is
         True when any of them loads JS from an explicit remote http(s) URL - the
         source we cannot read, which forces the java surface to `partial`.
+
+    WEBVIEW-VENDOR1: bundled-SDK code is excluded, via the SAME
+    `common.is_third_party_decompiled_file` `find_dynamic_loading` uses, so the two
+    java coverage-limited scans cannot drift on the shared jadx+CFR corpus. This
+    mirrors DYNLOAD-VENDOR1 exactly: a bundled SDK's WebView remote-JS load - an ad
+    SDK's `loadUrl("https://...")`, a Cordova/analytics/in-app-browser container -
+    is the *vendor's* remote content, not the app hiding its own root/SSL checks in
+    JS we cannot read. Counting it set `has_remote_js` and degraded the app's java
+    surface to `partial` for essentially every app that bundles a WebView-based
+    SDK, making a confident java negative unreachable (the same false-partial that
+    held the only registered negative control out of Tier-2 calibration for
+    dynload). The app's OWN remote-JS check stays app-owned under Bug-B parity and
+    still degrades - only recognized-vendor code is skipped, never the app's.
     """
     hits: list[str] = []
     has_remote_js = False
     for f in java_files:
         path = Path(f)
+        if is_third_party_decompiled_file(str(path), app_package):
+            continue
         text = read_text_ignore(path)
         if text is None:
             # Unreadable source (perm/race) - skip rather than abort. Same idiom

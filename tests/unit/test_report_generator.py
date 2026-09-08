@@ -1239,6 +1239,65 @@ def test_generate_report_crashed_capture_is_not_read_as_app_behaviour(tmp_path):
     assert "coverage limitation of this run" not in content
 
 
+def test_reachability_probe_zero_corroborates_unexercised_not_a_wiring_failure(tmp_path):
+    # RPT-REACH-COVLIM1: the empty-capture paragraph appends a device-side
+    # reachability-probe clause to whichever in-process-observer branch fired.
+    # When that observer recorded 0 SSL bypass-effects (Branch B: "the app's own
+    # pinned request never executed ... NOT a proxy the device could not reach"),
+    # a 0-connection probe is EXPECTED - no request was sent, so nothing reached
+    # the proxy. The probe==0 clause used to flatly assert "the device never
+    # reached mitmdump, so this is a real device->proxy reachability failure"
+    # regardless of that observer evidence, so the SAME paragraph both denied and
+    # asserted a reachability failure. The clause must corroborate the un-exercised
+    # finding here, never contradict it (ADR-0006 tiers; the recurring render-layer
+    # honesty bug where an appended clause disagrees with the one above it).
+    from static.manifest import ManifestInfo
+    from common import StageResult
+
+    manifest = ManifestInfo(debuggable=False, network_security_config=None,
+                            permissions=["android.permission.INTERNET"])
+    # probe==0: the reachability probe counted no client connection to the proxy.
+    capture0 = StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={"reason": "no flows captured", "proxy": "127.0.0.1:8081",
+                  "client_connections": 0},
+        error="no traffic captured through the proxy", duration_ms=0)
+
+    # Branch B: hooks audited, ZERO ssl bypass-effects observed.
+    dynamic_b = StageResult(
+        stage="dynamic", status="success",
+        evidence={"frida_messages": [{"type": "send", "payload": {"hook": "root_su_binary_paths"}}]},
+        duration_ms=1)
+    p = generate_report(
+        run_id="reach-b0", apk_hash="rb0", timestamp="2026-09-08T12:00:00",
+        metadata={"hashes": {"sha256": "rb0"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[dynamic_b, capture0], output_dir=tmp_path, manifest=manifest)
+    content = p.read_text(encoding="utf-8")
+    # Branch B's conclusion is present...
+    assert "not a proxy the device could not reach" in content
+    # ...and the probe clause corroborates it instead of contradicting.
+    assert "0 connections corroborates that" in content
+    assert "real device→proxy reachability failure" not in content
+
+    # The fix must NOT over-reach: when the observer DID record an SSL bypass-effect
+    # (Branch A: the app's pinned request executed) yet 0 connections reached the
+    # proxy, that IS a genuine device->proxy reachability failure - the clause must
+    # still say so, and must NOT emit the un-exercised corroboration.
+    dynamic_a = StageResult(
+        stage="dynamic", status="success",
+        evidence={"frida_messages": [{"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}}]},
+        duration_ms=1)
+    p2 = generate_report(
+        run_id="reach-a0", apk_hash="ra0", timestamp="2026-09-08T12:00:00",
+        metadata={"hashes": {"sha256": "ra0"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[dynamic_a, capture0], output_dir=tmp_path, manifest=manifest)
+    content2 = p2.read_text(encoding="utf-8")
+    assert "real device→proxy reachability failure" in content2
+    assert "0 connections corroborates that" not in content2
+
+
 def test_generate_report_renders_git_commit(tmp_path):
     # RESID-7A: the report must show which version of the analysis code
     # produced it (reproducibility intent, ADR-0007) - like the toolchain

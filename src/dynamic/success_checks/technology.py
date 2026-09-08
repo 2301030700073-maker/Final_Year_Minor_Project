@@ -120,6 +120,25 @@ def _summarize_ui_liveness(ui: dict) -> str:
     ntext = ui.get("text_node_count")
     if ntext is not None:
         parts.append(f"visible text nodes:{ntext}")
+    # Structural corroborator for the screen_state verdict above: whether a
+    # rendered content widget exists BEYOND the bare layout root (a non-container
+    # class node). ui_liveness._parse_rendered_content computes exactly this to
+    # tell an RN/Flutter/WebView surface that is DRAWING content (0 per-node
+    # clickables is expected there - JS/engine-driven) apart from an empty frame,
+    # but the verdict was decided from text-node count alone and this signal was
+    # computed, stored, and then never shown to anyone. Surface it so the
+    # "content rendered" / "splash/loading" label is auditable against the
+    # independent structural fact, and so the honest RN case (real content
+    # widgets, minimal text, 0 clickables -> a conservative "splash/loading"
+    # verdict) carries its qualifying evidence instead of discarding it. Strictly
+    # report-only: it never overrides _classify_screen - letting it upgrade a
+    # splash verdict would push toward OVERSTATING liveness, the dangerous
+    # direction this module guards against (see the clickable-node regex note).
+    # None (dump failed) is omitted like visible-text-nodes above; screen_state
+    # already reads "not captured" on that path.
+    rendered = ui.get("rendered_content")
+    if rendered is not None:
+        parts.append(f"content widget beyond bare layout root:{'yes' if rendered else 'no'}")
     # When the screen is a splash/loading frame (no interactive widgets, minimal
     # text), state it explicitly rather than letting a rendered flag read as a
     # healthy, tappable UI. A bypass on a screen that never advanced is not a

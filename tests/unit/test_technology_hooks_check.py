@@ -292,6 +292,43 @@ def test_ui_liveness_covers_uncommon_evidence_branches():
     assert "boom" in s and "bang" in s
 
 
+def test_rendered_content_widget_surfaced_and_auditable_against_splash_verdict():
+    # rendered_content (ui_liveness._parse_rendered_content) was computed, stored,
+    # and never shown. It is the structural signal separating an RN/Flutter surface
+    # DRAWING content from an empty frame - so it must be surfaced to make the
+    # screen_state verdict auditable. The key honest case: a conservative
+    # "splash/loading" verdict (minimal text, 0 clickables) coexisting with real
+    # rendered content widgets - the RN image-heavy screen. The qualifier appears,
+    # AND it must NOT overturn the splash verdict (report-only; overriding it would
+    # push toward overstating liveness, the dangerous direction).
+    from dynamic.success_checks.technology import _summarize_ui_liveness
+    s = _summarize_ui_liveness({
+        "screen_state": "splash/loading (no interactive widgets, minimal text) - NOT an interactive page",
+        "clickable_nodes": 0,
+        "text_node_count": 1,
+        "rendered_content": True,
+    })
+    assert "content widget beyond bare layout root:yes" in s
+    # the conservative splash verdict still stands - the qualifier corroborates,
+    # never overturns it.
+    assert "did NOT advance" in s
+    assert "splash/loading" in s
+
+
+def test_rendered_content_false_and_not_captured_are_honest():
+    # False -> an explicit ":no" (a bare frame, no content widget beyond the root).
+    # None / absent -> the line is OMITTED, never guessed: on a failed dump
+    # screen_state already reads "not captured", so a fabricated yes/no here would
+    # be a signal the run never observed (ADR-0006, this module's honesty contract).
+    from dynamic.success_checks.technology import _summarize_ui_liveness
+    s_false = _summarize_ui_liveness({"rendered_content": False, "text_node_count": 5})
+    assert "content widget beyond bare layout root:no" in s_false
+    s_none = _summarize_ui_liveness({"rendered_content": None, "screen_state": "not captured (uiautomator dump failed)"})
+    assert "content widget beyond bare layout root" not in s_none
+    s_absent = _summarize_ui_liveness({"screen_state": "interactive"})
+    assert "content widget beyond bare layout root" not in s_absent
+
+
 def test_anr_cause_named_when_ui_frozen():
     # Symmetric to the startup-TLS quote: when the UI thread froze (anr_detected),
     # the summary must NAME the captured ANR / input-dispatch cause, not just

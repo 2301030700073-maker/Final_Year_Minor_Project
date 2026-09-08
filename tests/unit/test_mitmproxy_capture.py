@@ -61,6 +61,45 @@ def test_parse_flow_detail_preserves_query_string():
     assert flows[0].status == "200"
 
 
+def test_parse_flow_detail_reads_the_wsl2_addon_reason_phraseless_response(tmp_path):
+    # PRODUCER <-> CONSUMER format contract. On WSL2 the flow log is written by the
+    # baked-in mitmdump addon (_write_windows_addon / _ADDON_TEMPLATE), NOT by a
+    # native flow_detail=2 run. The addon writes its response line WITHOUT a reason
+    # phrase - " << HTTP/1.1 <status>", exactly three tokens - whereas every native
+    # fixture in this file carries one (" << HTTP/2.0 200 OK 559b", >=4 tokens).
+    # _parse_flow_detail reads the status from tokens[2], correct for BOTH shapes,
+    # but no other test exercises the reason-phraseless 3-token line: a future edit
+    # assuming a reason phrase is always present (e.g. tightening `len(tokens) >= 3`
+    # to `>= 4`) would silently zero the status on EVERY WSL2 flow with the whole
+    # suite still green. Pin the contract from both ends.
+    addon = tmp_path / "addon.py"
+    mitmproxy_capture._write_windows_addon(addon, r"C:\Users\Public\f.log")
+    rendered = addon.read_text()
+    # (1) Producer: the baked client prefix and the reason-phraseless response
+    # marker the parser depends on are the exact format the addon emits.
+    assert "127.0.0.1:1: " in rendered
+    assert " << HTTP/1.1 " in rendered
+
+    # (2) Consumer: the addon's exact output round-trips. The first flow got a
+    # response (3-token status line, no reason phrase); the second errored with no
+    # response (_emit writes only the request line -> flushed with status="").
+    addon_output = (
+        "127.0.0.1:1: GET https://m.example.com/track?uid=42 HTTP/1.1\n"
+        " << HTTP/1.1 200\n"
+        "127.0.0.1:1: POST https://m.example.com/beacon HTTP/1.1\n"
+    )
+    flows = mitmproxy_capture._parse_flow_detail(addon_output)
+    assert len(flows) == 2
+    assert flows[0].host == "m.example.com"
+    assert flows[0].method == "GET"
+    assert flows[0].path == "/track?uid=42"
+    assert flows[0].status == "200"      # extracted from the reason-phraseless line
+    assert flows[1].host == "m.example.com"
+    assert flows[1].method == "POST"
+    assert flows[1].path == "/beacon"
+    assert flows[1].status == ""         # error flow: request seen, no response paired
+
+
 def test_parse_flow_detail_ignores_connect_and_lifecycle_lines():
     # The CONNECT line (opaque host:port, not a decrypted flow) and the
     # connect/disconnect noise must never surface as flows.

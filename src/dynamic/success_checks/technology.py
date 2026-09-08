@@ -82,6 +82,20 @@ def _summarize_ui_liveness(ui: dict) -> str:
     parts = [_fmt("activity_resumed", "activity RESUMED"),
              _fmt("window_focused", "window focused"),
              _fmt("anr_detected", "ANR/frozen-UI")]
+    # When the UI thread DID freeze (anr_detected), name the actual ANR /
+    # input-dispatch-timeout cause the scan captured, instead of a bare
+    # "ANR/frozen-UI:yes" - the symmetric treatment to the startup-TLS quote
+    # below. A frozen UI thread and a rejected startup handshake are the two
+    # "why the app is stuck" causes this summary deliberately separates, and
+    # `anr_lines` are real logcat lines captured for exactly this purpose;
+    # dropping them left the report naming the SSL cause but not the ANR one.
+    # Same tail-quote as TLS (a logcat line's tail carries the message, not the
+    # timestamp/tag prefix).
+    if ui.get("anr_detected"):
+        anr_sample = ui.get("anr_lines") or []
+        if anr_sample:
+            aline = anr_sample[0]
+            parts.append("ANR cause - " + (aline[-90:] if len(aline) > 90 else aline))
     # TLS trust/validation failure: the honest "why the splash is stuck"
     # signal - the app is not ANR-frozen, its startup network calls are being
     # rejected on the certificate trust path (e.g. a MITM/proxy CA not in its

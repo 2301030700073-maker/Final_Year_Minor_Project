@@ -292,6 +292,42 @@ def test_ui_liveness_covers_uncommon_evidence_branches():
     assert "boom" in s and "bang" in s
 
 
+def test_anr_cause_named_when_ui_frozen():
+    # Symmetric to the startup-TLS quote: when the UI thread froze (anr_detected),
+    # the summary must NAME the captured ANR / input-dispatch cause, not just
+    # report a bare "ANR/frozen-UI:yes". anr_lines are captured for exactly this;
+    # dropping them left the report naming the SSL cause but never the ANR one.
+    from dynamic.success_checks.technology import _summarize_ui_liveness
+    anr_line = ("09-08 12:00:00.123  1234  1250 E ActivityManager: ANR in "
+                "com.example.app: Input dispatching timed out (Waiting to send "
+                "non-key event to the focused window)")
+    s = _summarize_ui_liveness({"anr_detected": True, "anr_lines": [anr_line]})
+    assert "ANR/frozen-UI:yes" in s
+    assert "ANR cause - " in s
+    # the message tail is named (not just the yes flag)...
+    assert "Input dispatching timed out" in s
+    # ...and the >90-char line was tail-quoted, dropping the timestamp/pid head.
+    assert anr_line not in s
+    assert "09-08 12:00:00.123" not in s
+
+
+def test_no_anr_cause_when_not_frozen():
+    # Strict gate: a live (un-frozen) UI reports "ANR/frozen-UI:no" and NO cause.
+    from dynamic.success_checks.technology import _summarize_ui_liveness
+    s = _summarize_ui_liveness({"anr_detected": False, "anr_lines": []})
+    assert "ANR/frozen-UI:no" in s
+    assert "ANR cause" not in s
+
+
+def test_no_anr_cause_fabricated_when_no_lines_captured():
+    # Strict gate: frozen, but the scan captured no ANR line (a logcat race or an
+    # unrecognized format) -> report the yes flag, never fabricate a cause quote.
+    from dynamic.success_checks.technology import _summarize_ui_liveness
+    s = _summarize_ui_liveness({"anr_detected": True, "anr_lines": []})
+    assert "ANR/frozen-UI:yes" in s
+    assert "ANR cause" not in s
+
+
 def test_summarize_handles_untyped_payload():
     # technology.py:140: a payload that is neither dict, str, nor None (an int)
     # renders its type name honestly instead of crashing - and the non-dict

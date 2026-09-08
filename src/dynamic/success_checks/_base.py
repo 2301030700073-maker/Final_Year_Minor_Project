@@ -74,7 +74,16 @@ def run_check(
     block_match = re.search(block_pattern, combined, re.IGNORECASE)
     hooks_installed_match = re.search(hooks_installed_pattern, frida_log, re.IGNORECASE)
     fired_hooks = fired_hook_ids(frida_log, all_hook_ids, firing_markers)
-    hooks_confirmed_fired = all(h in fired_hooks for h in root_hook_ids)
+    # `all()` over an empty root_hook_ids is vacuously True, which would confirm a
+    # root bypass from ZERO fired hooks - a silent OVER-claim, the worst direction
+    # for this tool and a direct violation of this engine's core invariant (never
+    # confirm a bypass from absence of evidence - see module docstring). A target
+    # with no root-check hooks cannot have a confirmed root bypass, so require at
+    # least one hook: the verdict then falls to None (inconclusive) rather than a
+    # fabricated True. No current UnCrackable target passes an empty set - this
+    # guards the reusable engine against a future/misconfigured caller (the whole
+    # reason this shared engine exists is so a new target reuses it without drift).
+    hooks_confirmed_fired = bool(root_hook_ids) and all(h in fired_hooks for h in root_hook_ids)
 
     evidence_lines: dict[str, str] = {}
     if hooks_installed_match:
@@ -111,10 +120,18 @@ def run_check(
         # contradiction branch above (hooks fired AND block signal) is a real
         # False.
         root_bypassed = None
-        missing = sorted(set(root_hook_ids) - fired_hooks)
-        evidence_lines["hooks_not_confirmed"] = (
-            f"hook firing not confirmed for: {missing} - cannot confirm the bypass took effect"
-        )
+        if not root_hook_ids:
+            # The guard above already forced None here; say why plainly so a
+            # future target that reused this engine with no root hooks reads a
+            # clear cause instead of a bare "not confirmed for: []".
+            evidence_lines["hooks_not_confirmed"] = (
+                "no root-check hooks were defined for this target - cannot confirm a root bypass"
+            )
+        else:
+            missing = sorted(set(root_hook_ids) - fired_hooks)
+            evidence_lines["hooks_not_confirmed"] = (
+                f"hook firing not confirmed for: {missing} - cannot confirm the bypass took effect"
+            )
 
     return VerificationResult(
         root_bypassed=root_bypassed,

@@ -1986,3 +1986,87 @@ def test_generate_report_shows_evidence_provenance(tmp_path):
     content = report_path.read_text(encoding="utf-8")
     assert "(bytecode_string)" in content
     assert "`root_su_binary_paths` (bytecode_string) at Main.java:42" in content
+
+
+def _neither():
+    root = CategoryVerdict(confidence=0.1, detected=False, evidence=[])
+    ssl = CategoryVerdict(confidence=0.1, detected=False, evidence=[])
+    return ClassificationResult(action=Action.NEITHER, root=root, ssl=ssl)
+
+
+def test_self_termination_is_a_promoted_finding_not_a_flat_unverified(tmp_path):
+    # FR-4.6: when the app self-terminated on the instrumentation, frida_runner
+    # records a failed dynamic stage with app_self_terminated=True + a specific
+    # reason, and verification stays None. Without promotion the Dynamic
+    # Verification section renders the SAME generic "bypass not verified" line it
+    # shows for any dynamic failure, and the distinct anti-tampering reason lived
+    # ONLY in the Stage Results error cell - flattening a positive security finding
+    # (the app has active anti-instrumentation that FIRED) into a mere absence.
+    reason = ("target app self-terminated after resume - detected the "
+              "instrumentation (Frida/root) and exited before dynamic "
+              "verification could confirm a bypass")
+    dynamic = StageResult(
+        stage="dynamic", status="failed",
+        evidence={"app_self_terminated": True, "reason": reason,
+                  "scripts_applied": ["synthesized"], "frida_messages": []},
+        error="app self-terminated due to detected instrumentation (FR-4.6)",
+    )
+    report_path = generate_report(
+        run_id="st", apk_hash="st001", timestamp="2026-08-23T12:00:00",
+        metadata={"hashes": {"sha256": "st001"}, "package": {"package_name": "com.example.app"}},
+        classification=_neither(), verification=None, correlation=None,
+        stage_results=[dynamic], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    # promoted to its own line in Dynamic Verification, framed as a positive finding
+    assert "App anti-instrumentation fired (FR-4.6)" in content
+    assert "positive finding" in content
+    assert reason in content
+    # the note sits in the Dynamic Verification section, above Stage Results
+    assert content.index("anti-instrumentation fired") < content.index("## Stage Results")
+
+
+def test_no_self_termination_note_on_a_normal_dynamic_run(tmp_path):
+    # Strict gate: the note fires ONLY on a real app_self_terminated signal. A
+    # dynamic stage that ran normally (no such flag) must NOT print the finding -
+    # it is read from the stage's own evidence, never inferred from a None verdict.
+    dynamic = StageResult(
+        stage="dynamic", status="success",
+        evidence={"frida_messages": [], "scripts_applied": ["synthesized"]},
+    )
+    report_path = generate_report(
+        run_id="st", apk_hash="st002", timestamp="2026-08-23T12:00:00",
+        metadata={"hashes": {"sha256": "st002"}, "package": {"package_name": "com.example.app"}},
+        classification=_neither(), verification=None, correlation=None,
+        stage_results=[dynamic], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "anti-instrumentation fired" not in content
+    # and a run with no dynamic stage at all is equally silent
+    r2 = generate_report(
+        run_id="st", apk_hash="st003", timestamp="2026-08-23T12:00:00",
+        metadata={"hashes": {"sha256": "st003"}, "package": {"package_name": "com.example.app"}},
+        classification=_neither(), verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+    assert "anti-instrumentation fired" not in r2.read_text(encoding="utf-8")
+
+
+def test_self_termination_note_falls_back_when_reason_missing(tmp_path):
+    # Robustness: an older/edge dynamic stage that set app_self_terminated=True but
+    # carries no reason string still gets the finding, using the shared default
+    # wording (single source of truth with frida_runner._self_terminated_result).
+    dynamic = StageResult(
+        stage="dynamic", status="failed",
+        evidence={"app_self_terminated": True, "frida_messages": []},
+        error="app self-terminated (FR-4.6)",
+    )
+    report_path = generate_report(
+        run_id="st", apk_hash="st004", timestamp="2026-08-23T12:00:00",
+        metadata={"hashes": {"sha256": "st004"}, "package": {"package_name": "com.example.app"}},
+        classification=_neither(), verification=None, correlation=None,
+        stage_results=[dynamic], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "App anti-instrumentation fired (FR-4.6)" in content
+    assert "detected the instrumentation (Frida/root)" in content

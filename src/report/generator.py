@@ -312,6 +312,9 @@ string in this APK; only its *ownership* is unverified.
 
 - Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}bypass not verified (see stage status and evidence below){% endif %}{% endif %}
 - SSL bypassed: {% if verification %}{% if verification.ssl_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.ssl_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}bypass not verified (see stage status and evidence below){% endif %}{% endif %}
+{% if self_termination_note -%}
+- ⚠ **App anti-instrumentation fired (FR-4.6):** `{{ self_termination_note | md }}`. This is a **positive finding** - the app has active anti-tampering that detected the Frida/root instrumentation and self-terminated - not merely an unverified bypass. A bypass could not be confirmed *because* the app's own defenses ended the process first; treat the inconclusive/​not-verified verdict above as a consequence of that defense, not evidence the app lacks the protection.
+{% endif -%}
 {% if verification -%}
 {% for key, value in verification.evidence_lines.items() -%}
 - {{ key }}: `{{ value }}`
@@ -496,6 +499,7 @@ def generate_report(
         **_hooks_engaged(stage_results),
         **(_capture := _capture_summary(stage_results)),
         handshake_capture_note=_handshake_capture_note(verification, _capture),
+        self_termination_note=_self_termination_note(stage_results),
         manifest=manifest,
         expired_pin_sets=_expired_pin_sets(manifest, timestamp),
         coverage=coverage,
@@ -706,6 +710,38 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
         "hooks_ssl_effects": dict(sorted(ssl_effects.items())),
         "hooks_script_errors": script_errors,
     }
+
+
+def _self_termination_note(stage_results: list[StageResult]) -> str | None:
+    """The FR-4.6 anti-instrumentation finding, promoted to its own report line.
+
+    When the spawned app exits during the settle window, frida_runner records a
+    `failed` dynamic stage with evidence `app_self_terminated=True` and a specific
+    reason (it detected the Frida/root instrumentation and self-terminated before a
+    bypass could be confirmed). That is a POSITIVE security finding - the app has
+    active anti-tampering that fired - not merely "we could not verify a bypass".
+
+    But with verification=None the Dynamic Verification section renders the same
+    generic "bypass not verified" line it shows for any dynamic failure, and the
+    distinct reason lived ONLY in the Stage Results table's error cell - where a
+    reader does not connect it to the verdict. This flattens a real finding into an
+    absence (the render-layer honesty gap this project keeps closing). Surface it as
+    its own line so the report states the anti-instrumentation behavior plainly.
+
+    Reads the dynamic stage's own evidence (never inferred) and returns None when the
+    app did not self-terminate, so the line only appears when the signal is real. The
+    reason is carried straight from the stage evidence - a single source of truth with
+    frida_runner._self_terminated_result, so the two never drift."""
+    dynamic_stage = next((s for s in stage_results if s.stage == "dynamic"), None)
+    if dynamic_stage is None:
+        return None
+    evidence = dynamic_stage.evidence or {}
+    if not evidence.get("app_self_terminated"):
+        return None
+    return evidence.get("reason") or (
+        "target app self-terminated after resume - detected the instrumentation "
+        "(Frida/root) and exited before dynamic verification could confirm a bypass"
+    )
 
 
 def _is_iso_date(s: str) -> bool:

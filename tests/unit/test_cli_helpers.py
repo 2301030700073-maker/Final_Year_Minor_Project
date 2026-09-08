@@ -470,6 +470,82 @@ def test_calibration_table_header_cell_parity_and_exclusion_counts():
     assert root_row["Excl known-miss"] == "0"
 
 
+def test_tn0_tautology_caveat_fires_for_positive_only_category_console_parity():
+    # Console parity with the generated report's CALIB-TN0-LABEL caveat: a
+    # positive-only Tier-2 corpus (TP>0, FP=0, TN=0) makes precision 1.00 a
+    # tautology - the false-positive direction was never tested. _calibration_table
+    # shows a bare 1.00; the markdown report warns; the console (read first, often
+    # alone) carried nothing. root here is a single ground-truth positive that was
+    # detected on a complete decompile (TP=1, no negatives at all) -> the tautology
+    # shape; ssl has no positive (TP=0) so it must NOT fire - guarding the TP>0
+    # clause, since an empty/N/A category is not a tautology.
+    from calibration.report import compute_calibration_report
+    from calibration.types import GroundTruthEntry, RunRow
+    from cli import _tn0_tautology_caveats
+
+    runs = [RunRow(
+        apk_hash="h1", run_id="r1", action="ROOT_ONLY",
+        root_confidence=0.9, root_detected=True, root_bypassed=True,
+        ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+        decompile_completeness="complete",
+    )]
+    report = compute_calibration_report(
+        runs,
+        ground_truth={"h1": GroundTruthEntry("h1", root=True, ssl=False, source="manual")},
+        generated_at="t", ground_truth_commit="c",
+    )
+    # precondition: root is exactly the tautology shape and precision reads 1.00
+    assert report.tier2["root"].true_positive > 0
+    assert report.tier2["root"].false_positive == 0
+    assert report.tier2["root"].true_negative == 0
+    assert report.tier2["root"].precision.rate == 1.0
+
+    lines = _tn0_tautology_caveats(report)
+    assert len(lines) == 1
+    assert lines[0].startswith("root ")
+    assert "TN=0" in lines[0]
+    assert "tautology" in lines[0]
+    # selectivity: ssl (no positive) is not a tautology and must not be named
+    assert not any("ssl" in line for line in lines)
+
+
+def test_tn0_tautology_caveat_suppressed_when_a_negative_control_exists():
+    # The gate is the caveat's EXACT claim, not a precision==1.00 proxy: once a
+    # mis-detected negative control exists (FP>0), precision drops below 1.00 and
+    # the caveat's "no negative control / a false positive would be structurally
+    # invisible" text is FALSE - so it must NOT fire, even though TN is still 0.
+    # A precision==1.00 proxy would (correctly) also stay silent here, but this
+    # pins the FP==0 clause directly (caveat-gate-matches-its-text).
+    from calibration.report import compute_calibration_report
+    from calibration.types import GroundTruthEntry, RunRow
+    from cli import _tn0_tautology_caveats
+
+    runs = [
+        RunRow(apk_hash="h1", run_id="r1", action="ROOT_ONLY",
+               root_confidence=0.9, root_detected=True, root_bypassed=True,
+               ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+               decompile_completeness="complete"),
+        # a ground-truth root-NEGATIVE that was detected -> a false positive: the
+        # negative control the tautology text claims does not exist.
+        RunRow(apk_hash="h4", run_id="r4", action="ROOT_ONLY",
+               root_confidence=0.9, root_detected=True, root_bypassed=True,
+               ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+               decompile_completeness="complete"),
+    ]
+    report = compute_calibration_report(
+        runs,
+        ground_truth={
+            "h1": GroundTruthEntry("h1", root=True, ssl=False, source="manual"),
+            "h4": GroundTruthEntry("h4", root=False, ssl=False, source="manual"),
+        },
+        generated_at="t", ground_truth_commit="c",
+    )
+    assert report.tier2["root"].false_positive > 0   # negative control exists
+    assert report.tier2["root"].true_negative == 0    # but still no TN
+    assert report.tier2["root"].precision.rate < 1.0
+    assert _tn0_tautology_caveats(report) == []        # exact gate: no false caveat
+
+
 def test_calibration_table_surfaces_known_miss_count_separately_from_partial():
     # CALIB-EXCL-MISS1 console parity: the markdown report names the excluded
     # known misses, and _calibration_table's docstring promises parity with its

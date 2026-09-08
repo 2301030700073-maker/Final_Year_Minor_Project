@@ -2320,6 +2320,37 @@ def _calibration_table(report) -> tuple[list[str], list[list[str]]]:
     return columns, rows
 
 
+def _tn0_tautology_caveats(report) -> list[str]:
+    """Console parity for the generated report's CALIB-TN0-LABEL caveat
+    (report/generator.py): the lines qualifying any Tier-2 precision that reads
+    1.00 ONLY because the corpus is positive-only. A positive-only Tier-2 corpus
+    (TP>0, FP=0, TN=0) makes precision a tautology - the false-positive direction
+    was never tested and a false positive would be structurally invisible - yet
+    _calibration_table shows a bare 1.00, and the console (read first, often
+    alone) carried no warning while the markdown report did. Returned as data,
+    like _calibration_table, so the gate is a unit-testable fact.
+
+    The gate is the caveat's EXACT claim - TN==0 AND FP==0 AND TP>0 - never a
+    precision==1.00 proxy: that proxy also matches an n=0 cell (precision renders
+    N/A, no tautology) and a <1.00 cell where FP>0 (a mis-detected negative
+    control DOES exist), which would print a self-contradictory note under a cell
+    that is not 1.00 (CALIB-TN0-LABEL / caveat-gate-matches-its-text)."""
+    lines: list[str] = []
+    for category in CATEGORIES:
+        t2 = report.tier2[category]
+        if t2.true_negative == 0 and t2.false_positive == 0 and t2.true_positive > 0:
+            lines.append(
+                f"{category} Tier 2 precision reads 1.00 but TN=0 - every "
+                f"ground-truthed {category} case in Tier 2 is a positive, so the "
+                f"false-positive direction has never been tested and a false "
+                f"positive would be structurally invisible here. That 1.00 is a "
+                f"tautology, not validated precision; add a {category}-negative "
+                f"control (e.g. a stock app) and re-measure before trusting it "
+                f"(ADR-0006)."
+            )
+    return lines
+
+
 @app.command("calibration-report")
 def calibration_report(
     ground_truth: Path = typer.Option(
@@ -2397,6 +2428,14 @@ def calibration_report(
                 f"every governing surface fully analyzed, otherwise there is no "
                 f"true-positive to measure precision/recall against.[/yellow]"
             )
+
+    # CALIB-TN0-LABEL (console parity): qualify a Tier-2 precision that reads 1.00
+    # only because the corpus is positive-only (TP>0, FP=0, TN=0). The generated
+    # report already carries this caveat; the console table showed a bare 1.00,
+    # and the console is read first and often alone. Same exact gate as the
+    # markdown, so the two views agree on how far to trust that 1.00.
+    for line in _tn0_tautology_caveats(report):
+        console.print(f"[yellow]Note: {line}[/yellow]")
 
     output_path = generate_calibration_report(report, CALIBRATION_REPORTS_ROOT)
     console.print(f"\n[bold green]Calibration report: {output_path}[/bold green]")

@@ -100,6 +100,52 @@ def test_parse_flow_detail_reads_the_wsl2_addon_reason_phraseless_response(tmp_p
     assert flows[1].status == ""         # error flow: request seen, no response paired
 
 
+def test_parse_flow_detail_captures_webdav_caldav_methods_not_only_the_rfc9110_core():
+    # A flow's method is recognised via `tok in _METHODS`; a method OUTSIDE that
+    # set makes the parser find no method token and DROP the whole request line
+    # (method is None -> continue). The set must therefore carry the WebDAV
+    # (RFC 4918) / CalDAV (RFC 4791) / versioning REPORT (RFC 3253) verbs a real
+    # Android sync client emits, not just the RFC 9110 core (GET/POST/...), or
+    # those flows vanish silently. On the WSL2 addon path this is verdict-flipping:
+    # the addon's response() hook already WITNESSED and logged the flow, so dropping
+    # it can leave `flows` empty and make run_capture_stage report a false `failed`
+    # "no flows captured" for a capture that genuinely succeeded (principle 3).
+    for verb in ("PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE",
+                 "LOCK", "UNLOCK", "REPORT", "MKCALENDAR"):
+        assert verb in mitmproxy_capture._METHODS, f"{verb} missing from _METHODS"
+
+    # Native flow_detail=2 shape: a CalDAV sync alongside an ordinary GET. Before
+    # the widening the PROPFIND line was dropped and only the GET survived.
+    native = (
+        "127.0.0.1:38908: PROPFIND https://dav.example.com/calendars/?export=1 HTTP/2.0\n"
+        "    depth: 1\n"
+        " << HTTP/2.0 207 Multi-Status 812b\n"
+        "127.0.0.1:38910: GET https://api.example.com/ping HTTP/2.0\n"
+        " << HTTP/2.0 200 OK 12b\n"
+    )
+    nf = mitmproxy_capture._parse_flow_detail(native)
+    assert [(f.method, f.host, f.status) for f in nf] == [
+        ("PROPFIND", "dav.example.com", "207"),
+        ("GET", "api.example.com", "200"),
+    ]
+    assert nf[0].path == "/calendars/?export=1"   # query string preserved as elsewhere
+
+    # WSL2 addon shape (request + reason-phraseless response written together): a
+    # WebDAV file client. Before the widening BOTH flows were dropped -> [] -> the
+    # stage would have reported a false `failed` for a witnessed, successful capture.
+    addon_output = (
+        "127.0.0.1:1: REPORT https://dav.example.com/cal/ HTTP/1.1\n"
+        " << HTTP/1.1 207\n"
+        "127.0.0.1:1: MKCOL https://dav.example.com/newcol/ HTTP/1.1\n"
+        " << HTTP/1.1 201\n"
+    )
+    af = mitmproxy_capture._parse_flow_detail(addon_output)
+    assert [(f.method, f.host, f.status) for f in af] == [
+        ("REPORT", "dav.example.com", "207"),
+        ("MKCOL", "dav.example.com", "201"),
+    ]
+
+
 def test_parse_flow_detail_ignores_connect_and_lifecycle_lines():
     # The CONNECT line (opaque host:port, not a decrypted flow) and the
     # connect/disconnect noise must never surface as flows.

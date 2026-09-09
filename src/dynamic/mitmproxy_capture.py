@@ -41,7 +41,30 @@ CAPTURE_WINDOW_SECONDS = 12.0
 CLEANUP_RETRIES = 2
 _WSL_LISTEN_TIMEOUT = 20.0
 
-_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE"}
+# HTTP request methods _parse_flow_detail recognises as the start of a flow.
+# The first eight are the RFC 9110 core; the rest are the WebDAV (RFC 4918),
+# WebDAV-versioning REPORT (RFC 3253) and CalDAV MKCALENDAR (RFC 4791) verbs an
+# Android sync client (CalDAV/CardDAV calendar-contact sync, a Nextcloud/ownCloud
+# file client) genuinely puts on the wire. A method NOT in this set makes the
+# parser find no method token and DROP the line (method is None -> continue),
+# which on the WSL2 addon path - where the addon's response() hook already
+# WITNESSED the flow and logged it - silently discards a real, captured flow;
+# enough such drops leave `flows` empty and flip the stage to a false `failed`
+# "no flows captured", misreporting a successful capture as a device-wiring or
+# app-silence failure (principle 3, the same silent-flow-loss the interleaved
+# flush and query-string preservation below guard against). Widening the set is
+# safe against the opposite error (a phantom flow): _parse_flow_detail only ever
+# reaches the method loop on a column-0, un-indented, " HTTP/"-bearing line -
+# i.e. a genuine request line - because headers are indented, lifecycle lines
+# are filtered, and response lines are indented and matched by the `<<` branch;
+# so these verbs can only ever match the method position of a real request. A
+# truly custom (non-standard) verb is still dropped - the honest residual of an
+# enumeration - but every standard verb a real app emits is now captured.
+_METHODS = {
+    "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE",
+    "PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK",
+    "REPORT", "MKCALENDAR",
+}
 # WSL2's /proc/version carries a "microsoft" marker; absent on native Linux.
 _WSL_VERSION_PATH = "/proc/version"
 

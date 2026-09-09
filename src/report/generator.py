@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,17 +33,29 @@ def _resolve_script_path(basename: str) -> str:
 
 
 def _md(value) -> str:
-    """Escape a value for safe inline Markdown so an adversarial APK-derived
+    r"""Escape a value for safe inline Markdown so an adversarial APK-derived
     string (matched_text, host, path, ...) cannot break the report's structure:
     a newline injects a new table row / list item, a `|` a new table column, and
     a backtick closes the code span the value is rendered inside. Newlines become
-    spaces and pipes are backslash-escaped (exact text preserved); a literal
+    spaces; pipes are backslash-escaped (exact text preserved); a literal
     backtick - essentially never present in a real matched token - is shown as an
     apostrophe so the surrounding code span stays intact. A documented display
-    substitution, never a silent drop (ADR-0006)."""
+    substitution, never a silent drop (ADR-0006).
+
+    Pipe-escaping is backslash-aware: GFM treats a pipe as escaped only when an
+    ODD number of backslashes precedes it, so a bare `|`->`\|` turns a value that
+    already ends a backslash run right before a pipe (`\|`, one backslash) into
+    `\\|` (two) - which GFM reads as an escaped backslash plus a LIVE pipe,
+    re-injecting the very table column this guards against (e.g. a captured host
+    or path in the plain-cell flows table). So double any backslash run
+    immediately before a pipe (keeping those backslashes literal) and escape the
+    pipe in ONE pass - a sequential two-step replace would re-process its own
+    output. Lone backslashes elsewhere are deliberately left untouched so a
+    matched token like a regex `\d+` still renders verbatim inside its code
+    span."""
     s = "" if value is None else str(value)
     s = s.replace("\r", " ").replace("\n", " ")
-    s = s.replace("|", "\\|")
+    s = re.sub(r"(\\*)\|", lambda m: m.group(1) * 2 + r"\|", s)
     s = s.replace("`", "'")
     return s
 

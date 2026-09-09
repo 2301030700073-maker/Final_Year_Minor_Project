@@ -497,3 +497,27 @@ def test_ui_actions_for_is_action_aware():
 
     # Unknown targets fall back to the static UI_ACTIONS_BY_TARGET (empty list).
     assert frida_runner._ui_actions_for("UnCrackable1", Action.BOTH) == []
+
+
+def test_bypass_success_result_records_liveness_true_for_both_spawn_paths():
+    # FR-4.6 (pure): the SUCCESS builder both spawn paths share must always record
+    # app_still_running=True - reaching a success result means self-termination was
+    # checked and did NOT fire, so the process demonstrably survived the settle
+    # window (the mirror of _self_terminated_result, which records
+    # app_self_terminated=True). Before this shared builder the two-spawn
+    # (AndroGoat) path omitted the key, so its report read "not captured" for a
+    # survival it had actually observed, while single-spawn targets reported it.
+    two_spawn = frida_runner._bypass_success_result(
+        4321, [{"payload": {"hook": "x"}}], ["synthesized"], "AndroGoat", 0.0)
+    assert two_spawn.status == "success"
+    assert two_spawn.evidence["app_still_running"] is True
+    assert two_spawn.evidence["pid"] == 4321
+    # the two-spawn path gathers no UI liveness -> honest not-captured, never guessed
+    assert two_spawn.evidence["ui_liveness"] is None
+
+    # the single-spawn path passes its real-time UI evidence straight through
+    single = frida_runner._bypass_success_result(
+        9, [], ["synthesized"], "UnCrackable1", 0.0,
+        ui_liveness={"activity_resumed": True, "anr_detected": False})
+    assert single.evidence["app_still_running"] is True
+    assert single.evidence["ui_liveness"] == {"activity_resumed": True, "anr_detected": False}

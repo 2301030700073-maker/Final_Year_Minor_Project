@@ -211,6 +211,37 @@ def _self_terminated_result(
     )
 
 
+def _bypass_success_result(
+    pid: int, messages: list, scripts_applied: list, target: str, start: float,
+    *, ui_liveness: dict | None = None,
+) -> StageResult:
+    """The FR-4.6 SUCCESS outcome, shared by the single- and two-spawn paths so
+    the liveness contract cannot drift - the mirror of _self_terminated_result.
+
+    Reaching a success result means self-termination was already checked and did
+    NOT fire (otherwise classify_self_termination fired and the failed path
+    returned first) - the spawned process survived the settle window - so
+    app_still_running is recorded True here unconditionally. A bypass claim on a
+    process that killed itself would be meaningless, so the success evidence
+    states the app was still running after the bypass scripts, surfaced in the
+    report's Dynamic Verification as an explicit, auditable liveness signal.
+    ui_liveness is the single-spawn path's real-time UI evidence (dumpsys/logcat/
+    uiautomator); the two-spawn path does not gather it, so it stays None ("not
+    captured") - honest, never a guessed pass. Before this shared builder the
+    two-spawn success path omitted app_still_running entirely, so AndroGoat's
+    report read "not captured" for a survival it had actually observed."""
+    return StageResult(
+        stage="dynamic", status="success",
+        evidence={
+            "scripts_applied": scripts_applied, "pid": pid,
+            "frida_messages": messages, "target": target,
+            "app_still_running": True,
+            "ui_liveness": ui_liveness,
+        },
+        duration_ms=elapsed_ms(start),
+    )
+
+
 def classify_self_termination(process_alive: bool) -> bool:
     """FR-4.6: after the bypass scripts have run and the settle window elapsed,
     a spawned process that is no longer alive self-terminated - it detected the
@@ -515,10 +546,12 @@ def run_dynamic_stage(
             outcome["result"] = _self_terminated_result(root_pid, messages, scripts_applied, target, start)
             return
 
-        outcome["result"] = StageResult(
-            stage="dynamic", status="success",
-            evidence={"scripts_applied": scripts_applied, "pid": root_pid, "frida_messages": messages, "target": target},
-            duration_ms=elapsed_ms(start),
+        # FR-4.6 success via the shared builder: root_pid survived the settle
+        # window (self-termination checked just above), so app_still_running is
+        # recorded True. The two-spawn path gathers no UI liveness, so ui_liveness
+        # stays None ("not captured") - honest, not a guess.
+        outcome["result"] = _bypass_success_result(
+            root_pid, messages, scripts_applied, target, start,
         )
 
     def _run_frida() -> None:
@@ -603,22 +636,13 @@ def run_dynamic_stage(
             except Exception:
                 ui_liveness = None
 
-            outcome["result"] = StageResult(
-                stage="dynamic", status="success",
-                evidence={
-                    "scripts_applied": scripts_applied, "pid": pid,
-                    "frida_messages": messages, "target": target,
-                    # FR-4.6 liveness: reaching here means the process survived
-                    # the settle window (otherwise classify_self_termination fired
-                    # and we returned the failed path above). A bypass claim on a
-                    # process that killed itself would be meaningless, so the
-                    # success evidence records that the app was still running after
-                    # the bypass scripts - surfaced in the report's Dynamic
-                    # Verification as an explicit, auditable liveness signal.
-                    "app_still_running": True,
-                    "ui_liveness": ui_liveness,
-                },
-                duration_ms=elapsed_ms(start),
+            # FR-4.6 success via the shared builder (see _bypass_success_result):
+            # reaching here means the process survived the settle window, so
+            # app_still_running is recorded True; ui_liveness carries this path's
+            # real-time UI evidence gathered just above.
+            outcome["result"] = _bypass_success_result(
+                pid, messages, scripts_applied, target, start,
+                ui_liveness=ui_liveness,
             )
         except Exception as exc:
             outcome["result"] = StageResult(

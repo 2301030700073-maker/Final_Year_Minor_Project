@@ -387,3 +387,32 @@ def test_app_owned_strings_real_androguard_xref_shape():
     assert "com.android.insecurebankv2" in result  # referenced by an app class -> kept
     assert "test-keys" not in result               # referenced only by okhttp3 -> dropped
     assert degraded is False                        # per-string attribution actually ran
+
+
+def test_dex_scan_matched_text_is_deterministic_across_set_order(tmp_path, monkeypatch):
+    # matched_text is consumed downstream (report renders it; report/attribution
+    # derives a vendor FROM it), so the string a signature records as its match
+    # must be reproducible for the identical APK. The matcher records the FIRST
+    # string a signature matched; iterating the app_strings SET directly made that
+    # first-match depend on str hash order (randomized per process via
+    # PYTHONHASHSEED), so a multi-pattern signature hitting several strings could
+    # record a different matched_text - and thus a different vendor - run to run.
+    # Sorting the strings before matching makes the recorded match the
+    # lexicographically-first one, mirroring the primary file-ordered scan.
+    apk = tmp_path / "app.apk"
+    apk.write_bytes(b"APK-BYTES-DET")
+
+    # One signature, two app-owned strings it matches via DIFFERENT patterns:
+    # "abc_su_bin" matches pattern "su"; "xyz_busybox_lib" matches "busybox".
+    # sorted() orders "abc_su_bin" first, so matched_text must be "su" every run.
+    monkeypatch.setattr(
+        ags, "_extract_strings",
+        lambda p: ("com.example.app", {"xyz_busybox_lib", "abc_su_bin"}, False),
+    )
+    sigs = [type("S", (), {
+        "id": "multi", "patterns": ["su", "busybox"],
+        "pattern_type": "string_literal", "case_sensitive": True,
+    })()]
+
+    r = ags.scan_dex_strings(apk, sigs, cache_dir=None)
+    assert r["matched"]["multi"] == "su"

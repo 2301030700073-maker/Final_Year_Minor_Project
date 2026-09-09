@@ -320,7 +320,23 @@ def scan_dex_strings(apk_path: Path, signatures: list, cache_dir: Path | None = 
     sig_evaluated: dict[str, int] = {}
     sig_errored: dict[str, int] = {}
     sig_last_error: dict[str, str] = {}
-    for s in app_strings:
+    # Iterate the strings in a STABLE order, not raw set order. `matched[sig.id]`
+    # records the FIRST string a signature matched, and matched_text is consumed
+    # downstream (report renders it; report/attribution._string_vendor attributes
+    # a vendor FROM it). For a regex signature (matched_text = the input
+    # substring, group(0)) or a multi-pattern one (different DEX strings hit
+    # different patterns), that first-match value varies with iteration order -
+    # and a set of str has no stable order across processes (PYTHONHASHSEED
+    # randomizes str hashing), so the identical APK would render a different
+    # matched_text/vendor run-to-run. The primary text scan (signatures.scan) is
+    # deterministic because it walks splitlines() in file order; sorting here
+    # restores that same reproducibility for the DEX surface. Detection is
+    # unaffected (a signature matches iff ANY string matches, order-independent),
+    # and the broken-signature accounting is order-independent too (a
+    # never-matching sig is evaluated against every string regardless of order;
+    # a matching sig never enters `broken`), so this changes only WHICH matching
+    # string is cited, deterministically.
+    for s in sorted(app_strings):
         for sig in signatures:
             if sig.id in matched:
                 # Already matched - demonstrably works; stop re-evaluating it.

@@ -609,6 +609,33 @@ def test_cleanup_restores_pass_through_internet_on_wsl2(monkeypatch):
     assert calls["clear"] == 0  # never left without internet
 
 
+def test_cleanup_warns_when_wsl2_pass_through_down_leaves_no_internet(monkeypatch):
+    # WSL2 has no direct NAT: the pass-through proxy is the device's ONLY internet
+    # path. If it is not listening at cleanup (it died mid-run, or the Windows probe
+    # could not confirm it), clearing the stale capture-proxy pointer does NOT
+    # restore internet - so cleanup must WARN, never silently record a clean restore
+    # (principle 3). Previously this WSL2 branch set restored=True with no warning,
+    # hiding a stranded device - or one whose live pass-through the probe merely
+    # failed to confirm - from the report.
+    calls = {"set": 0, "clear": 0}
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: True)
+    monkeypatch.setattr(pass_through_proxy, "is_listening", lambda *a, **k: False)
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    monkeypatch.setattr(device, "set_http_proxy",
+                        lambda s, host, port: calls.__setitem__("set", calls["set"] + 1))
+    monkeypatch.setattr(device, "clear_http_proxy",
+                        lambda s: calls.__setitem__("clear", calls["clear"] + 1))
+    monkeypatch.setattr(device, "adb_reverse", lambda *a, **k: None)
+    warnings = mitmproxy_capture._cleanup("emulator-5554", 8081, None)
+    assert calls["set"] == 0            # nothing to restore the device TO
+    assert calls["clear"] == 1          # stale capture-proxy pointer still cleared
+    assert any("pass-through proxy not listening" in w
+               and "without working internet" in w for w in warnings), warnings
+    # NOT the generic retry-exhausted message: no adb exception occurred, the
+    # cause is a specific one (pass-through down), and it must be named as such.
+    assert not any("retries" in w for w in warnings), warnings
+
+
 def test_cleanup_clears_proxy_on_native_linux(monkeypatch):
     # Native Linux has direct internet, so the proxy is cleared outright.
     calls = {"set": 0, "clear": 0}

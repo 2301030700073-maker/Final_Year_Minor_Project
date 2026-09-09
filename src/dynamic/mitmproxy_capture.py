@@ -317,23 +317,57 @@ def _cleanup(serial: str, proxy_port: int, proc: subprocess.Popen | None) -> lis
     with no internet at all. Instead the device proxy is restored to the
     pass-through proxy (the working-internet path) when that proxy is up; only
     on native Linux (where the device reaches the internet directly) is the
-    proxy cleared outright."""
+    proxy cleared outright. If on WSL2 the pass-through is NOT up at cleanup
+    (it died during the run, or the probe could not confirm it), there is
+    nothing to restore internet TO: the stale capture-proxy pointer is cleared
+    but a warning is recorded rather than claiming a clean restore, since the
+    device is genuinely left without a working internet path."""
     warnings: list[str] = []
     restored = False
+    # WSL2-only: the pass-through proxy IS the device's sole internet path (no
+    # direct NAT). If it is not listening at cleanup time, clearing the stale
+    # capture-proxy pointer does NOT restore internet - track that distinctly from
+    # a genuine restore so it is reported as a warning, never recorded as a clean
+    # restore (the silent-failure this branch used to be - see below).
+    wsl2_internet_unrestored = False
     last_exc: Exception | None = None
+    on_wsl2 = _on_wsl2()
     for _ in range(CLEANUP_RETRIES):
         try:
-            if (_on_wsl2()
-                    and pass_through_proxy.is_listening(INTERNET_PROXY_PORT)):
+            if on_wsl2 and pass_through_proxy.is_listening(INTERNET_PROXY_PORT):
                 device.set_http_proxy(serial, "127.0.0.1", INTERNET_PROXY_PORT)
-            else:
+                restored = True
+            elif on_wsl2:
+                # Pass-through down (it died during the run) or the Windows probe
+                # could not confirm it. There is nothing to restore the device TO,
+                # and on WSL2 clearing does not fall back to NAT - so clear the
+                # stale capture-proxy pointer but do NOT claim a restore: restored
+                # stays False and the distinct warning below tells the report the
+                # device may be left without a working internet path (principle 3).
+                # Previously this branch set restored=True with no warning, so a
+                # WSL2 cleanup that stranded the device - or that cleared a proxy
+                # whose pass-through was actually fine but momentarily unprobeable -
+                # was recorded as a clean restore the report could not see.
                 device.clear_http_proxy(serial)
-            restored = True
+                wsl2_internet_unrestored = True
+            else:
+                # Native Linux reaches the internet directly, so clearing the proxy
+                # outright genuinely restores connectivity.
+                device.clear_http_proxy(serial)
+                restored = True
             break
         except Exception as exc:
             last_exc = exc
             time.sleep(0.5)
-    if not restored:
+    if wsl2_internet_unrestored:
+        warnings.append(
+            f"WSL2 pass-through proxy not listening on port {INTERNET_PROXY_PORT} "
+            "at cleanup - the device's only internet path (WSL2 has no direct NAT) "
+            "could not be restored; the stale capture-proxy setting was cleared, "
+            "but the device is left without working internet - restart the "
+            "pass-through (ensure_internet) to recover"
+        )
+    elif not restored:
         warnings.append(
             f"device proxy not restored after {CLEANUP_RETRIES} retries - the "
             f"device may be left without a working proxy/internet: {last_exc}"

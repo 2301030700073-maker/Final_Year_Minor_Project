@@ -189,14 +189,27 @@ def _native_root_exec_blocking() -> str:
     export degrades silently (ADR-0006)."""
     return (
         "function nbasename(p) { var i = p.lastIndexOf('/'); return i === -1 ? p : p.substr(i + 1); }\n"
-        "function isRootBin(b) { return b === 'su' || b === 'magisk' || b === 'ksu' || b === 'apatch'; }\n"
+        # Single source of truth for the root-binary set: isRootBin (execve
+        # basename) and isRootExecStr (system shell string) both iterate it, so a
+        # native root check that shells out to ANY of them - bare name, absolute
+        # path, or a which/command -v/type probe - is blocked symmetrically. The
+        # system matcher previously hand-enumerated only a subset (all forms for su,
+        # just the space-delimited form for magisk/ksu, nothing for apatch), so an
+        # absolute-path magisk shell-out or any apatch shell-out slipped through
+        # while the identical execve form was blocked - contradicting both its own
+        # "references one [root binary]" docstring and isRootBin's set.
+        "var ROOT_BINS = ['su', 'magisk', 'ksu', 'apatch'];\n"
+        "function isRootBin(b) { return ROOT_BINS.indexOf(b) !== -1; }\n"
         "function isRootExecStr(s) {\n"
         "  if (!s) return false;\n"
         "  var t = ' ' + s.replace(/[\"']/g, ' ') + ' ';\n"
-        "  return t.indexOf(' su ') !== -1 || t.indexOf('/su ') !== -1\n"
-        "      || t.indexOf(' magisk ') !== -1 || t.indexOf(' ksu ') !== -1\n"
-        "      || t.indexOf('which su') !== -1 || t.indexOf('which magisk') !== -1\n"
-        "      || t.indexOf('command -v su') !== -1 || t.indexOf('type su') !== -1;\n"
+        "  for (var i = 0; i < ROOT_BINS.length; i++) {\n"
+        "    var b = ROOT_BINS[i];\n"
+        "    if (t.indexOf(' ' + b + ' ') !== -1 || t.indexOf('/' + b + ' ') !== -1\n"
+        "        || t.indexOf('which ' + b) !== -1 || t.indexOf('command -v ' + b) !== -1\n"
+        "        || t.indexOf('type ' + b) !== -1) return true;\n"
+        "  }\n"
+        "  return false;\n"
         "}\n"
         "try {\n"
         "  var ev = Module.findExportByName('libc.so', 'execve');\n"

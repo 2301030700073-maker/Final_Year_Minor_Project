@@ -484,7 +484,10 @@ def test_native_root_exec_blocking_covered_for_su_embedded():
     assert "'execve'" in src
     assert "'system'" in src
     assert "isRootBin" in src
-    assert "which su" in src
+    # the which/command -v idiom is built per root binary from the shared
+    # ROOT_BINS set (su included), so "which su" etc. is matched at runtime.
+    assert "t.indexOf('which ' + b)" in src
+    assert "ROOT_BINS" in src and "'su'" in src
     assert "probeHit" in src
     # conservative: only a root-binary basename/reference blocks, never a benign exec
     assert "isRootBin(nbasename(p))" in src
@@ -835,8 +838,9 @@ def test_native_root_exec_blocking_blocks_root_binaries_only():
     assert "isRootBin" in src
     for b in ("su", "magisk", "ksu", "apatch"):
         assert ("'" + b + "'") in src
-    # the which/command -v shell idiom is caught too
-    assert "which su" in src and "command -v su" in src
+    # the which/command -v/type shell idiom is built per binary from ROOT_BINS,
+    # so it is caught for every root binary, not just su
+    assert "t.indexOf('which ' + b)" in src and "t.indexOf('command -v ' + b)" in src
     # a blocked probe emits the probeHit that confirms root (ADR-0006 determinism)
     assert "probeHit" in src
     # per-symbol try/catch so a missing export degrades silently, not a hard fail

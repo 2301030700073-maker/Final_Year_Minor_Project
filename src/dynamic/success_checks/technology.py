@@ -32,7 +32,7 @@ could send - a real signal."""
 
 from __future__ import annotations
 
-from common import VerificationResult, describe_frida_script_errors
+from common import TLS_HANDSHAKE_NONE_OBSERVED, VerificationResult, describe_frida_script_errors
 
 # Cap on how many raw frida messages are surfaced into the report so the
 # engagement evidence stays bounded and auditable (ADR-0006), never a dump.
@@ -345,7 +345,7 @@ class TechnologyHooksEngagedCheck:
                     "the cert trust path (SSL bypass did not neutralize them; "
                     "see startup-TLS signal)"
                     if (ui_liveness or {}).get("tls_blocked")
-                    else "none observed (no TLS handshake reached during the run)"
+                    else TLS_HANDSHAKE_NONE_OBSERVED
                 )
             ),
             # Confirmed SSL bypass, on the app's own observable behavior: its pin-

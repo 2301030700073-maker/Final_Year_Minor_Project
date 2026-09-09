@@ -666,6 +666,18 @@ class SuccessCheck(Protocol):
         ...
 
 
+# The exact "TLS handshakes completed post-bypass" evidence-line value the SSL
+# success-check emits when the Frida SSL observer saw NO completed handshake at all
+# (success_checks/technology.py). The report's _handshake_capture_note
+# (report/generator.py) reconciles THIS specific state against decrypted capture
+# flows; if the two modules ever hold different spellings of the sentence, that
+# reconciliation silently stops firing and the report contradicts itself ("no TLS
+# handshake" printed beside decrypted flows) - the honesty gap the note exists to
+# close. One constant referenced by both emitter and consumer makes that drift
+# impossible, the same de-drift discipline as describe_frida_script_errors below.
+TLS_HANDSHAKE_NONE_OBSERVED = "none observed (no TLS handshake reached during the run)"
+
+
 def describe_frida_script_errors(frida_messages: list) -> list[str]:
     """Human-readable descriptions of uncaught Frida ``{'type': 'error'}`` messages.
 

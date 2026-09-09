@@ -9,7 +9,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 from calibration.report import CalibrationReport
-from common import ClassificationResult, CorrelationResult, StageResult, VerificationResult, describe_frida_script_errors
+from common import ClassificationResult, CorrelationResult, StageResult, TLS_HANDSHAKE_NONE_OBSERVED, VerificationResult, describe_frida_script_errors
 from report import attribution as attribution_module
 from static.coverage import confidence_bound, verdict_label
 from static.manifest import ManifestInfo
@@ -898,7 +898,7 @@ def _handshake_capture_note(verification, capture_summary: dict) -> str | None:
     if verification is None:
         return None
     hs = verification.evidence_lines.get("TLS handshakes completed post-bypass", "")
-    if "none observed (no TLS handshake reached during the run)" not in hs:
+    if TLS_HANDSHAKE_NONE_OBSERVED not in hs:
         return None
     flows = capture_summary.get("capture_flows") or []
     if not flows:

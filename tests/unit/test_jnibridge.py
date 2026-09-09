@@ -171,3 +171,37 @@ def test_declared_natives_in_text_linewise():
     assert names == ["encrypt", "init"]
     assert all(d.class_name == "com.example.Crypto" for d in found)
     assert _declared_natives_in_text("no native anywhere", "X") == []
+
+
+def test_declared_natives_ignores_comments_and_string_literals():
+    # Regression: `_NATIVE_DECL` ran over raw jadx text, so a native-looking call
+    # MENTIONED in a `//` comment, a javadoc/block-comment line, or a string
+    # literal fabricated a DeclaredNative - a phantom binding that renders a fake
+    # row in the JNI-bindings table and can force native coverage to `partial` on
+    # non-code text (a Principle-3 fake finding, and an under-claim of coverage).
+    # Masking strings / stripping comments can only REMOVE false matches: a real
+    # `native` declaration contains neither, so a genuine declaration - including
+    # an annotated one or one with a trailing comment - is never dropped (dropping
+    # it would be the dangerous false-negative direction). The fix is strictly
+    # one-directional.
+    from static.jnibridge import _declared_natives_in_text
+
+    text = (
+        "package com.example;\n"
+        "public class Crypto {\n"
+        "    // the loader calls the native helper doCheck() indirectly\n"
+        "    /* native disabledOld() left for reference */\n"
+        "     * javadoc: uses nativeInit() under the hood\n"
+        '    private void log() { Log.d(TAG, "loading native lib initCrypto()"); }\n'
+        "    public static native String encrypt(String s);\n"
+        "    native long init(); // TODO: remove before ship\n"
+        "}\n"
+    )
+    names = [d.method_name for d in _declared_natives_in_text(text, "com.example.Crypto")]
+    # Only the two REAL declarations survive; every mention in comment/string/
+    # javadoc is gone, and the trailing-comment declaration is kept.
+    assert names == ["encrypt", "init"]
+    assert "doCheck" not in names        # // comment mention
+    assert "disabledOld" not in names    # /* block comment
+    assert "nativeInit" not in names     # javadoc continuation line
+    assert "initCrypto" not in names     # string literal

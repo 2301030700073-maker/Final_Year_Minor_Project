@@ -57,6 +57,20 @@ _PACKAGE = re.compile(r"(?m)^\s*package\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*
 # the method name (the last token before `(`).
 _NATIVE_DECL = re.compile(r"\bnative\b[^;(]*\b([A-Za-z_$][\w$]*)\s*\(")
 
+# A comment or string literal that merely MENTIONS a native-looking call (e.g.
+# `// calls the native helper doCheck()`, a javadoc `* uses nativeInit()`, or a
+# `Log.d(TAG, "loading native lib initCrypto()")`) is NOT a declaration. Left
+# unfiltered, `_NATIVE_DECL` matches inside it and fabricates a DeclaredNative -
+# a phantom binding that renders a fake row in the JNI-bindings table and can
+# force native coverage to `partial` on non-code text (a Principle-3 fake finding
+# and an under-claim of coverage). A REAL native declaration contains neither a
+# string literal nor a `//` comment, so masking string contents and stripping
+# line comments can only ever REMOVE a false match - never drop a real
+# declaration (the dangerous false-negative direction, which would let a
+# confident negative stand over an unexamined native method).
+_LINE_COMMENT = re.compile(r"//.*$")
+_STRING_LIT = re.compile(r'"(?:\\.|[^"\\])*"')
+
 
 @dataclass(frozen=True)
 class DeclaredNative:
@@ -97,7 +111,20 @@ def _declared_natives_in_text(text: str, class_name: str) -> list[DeclaredNative
     safe; a line that fails to parse is skipped, never crash."""
 
     found: list[DeclaredNative] = []
-    for line in text.splitlines():
+    for raw in text.splitlines():
+        # A javadoc / block-comment continuation line (`* uses nativeInit()`) or a
+        # line that opens a block comment (`/* native doCheck() */`) is prose, not
+        # a declaration. A real `native` declaration never begins with `*` or `/*`,
+        # so skipping these only removes false matches.
+        stripped = raw.lstrip()
+        if stripped.startswith("*") or stripped.startswith("/*"):
+            continue
+        # Mask string-literal contents and drop a trailing line comment so a
+        # native-looking call MENTIONED in a string or `//` comment cannot be read
+        # as a declaration. Masking (not deleting) preserves column structure and
+        # cannot merge a real declaration across the removed span.
+        line = _STRING_LIT.sub('""', raw)
+        line = _LINE_COMMENT.sub("", line)
         if "native" not in line:
             continue
         for m in _NATIVE_DECL.finditer(line):

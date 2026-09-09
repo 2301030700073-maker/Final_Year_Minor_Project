@@ -128,9 +128,11 @@ if __name__ == "__main__":
 
 
 def _windows_python() -> str | None:
-    """Locate a plain python.exe on the Windows host to run the pass-through
-    proxy (no mitmproxy needed there). Returns the Windows path or None."""
-    for probe in ("python", "py"):
+    """Locate a real Python interpreter on the Windows host to run the
+    pass-through proxy (no mitmproxy needed there): a plain `python.exe`, or the
+    `py` launcher (`py.exe`) as a fallback when `python.exe` is not directly on
+    PATH. Returns the Windows path or None."""
+    for probe, suffix in (("python", "python.exe"), ("py", "py.exe")):
         try:
             res = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-Command", f"where.exe {probe}"],
@@ -140,9 +142,17 @@ def _windows_python() -> str | None:
         if res.returncode != 0:
             continue
         lines = [ln.strip() for ln in res.stdout.splitlines() if ln.strip()]
-        # Skip the Microsoft Store stub (WindowsApps) - it is not a real python.
+        # Match the probe's OWN executable name and skip the Microsoft Store stub
+        # (WindowsApps) - it is not a real python. `where.exe py` returns py.exe
+        # (the launcher), which a python.exe-only suffix filter always rejected,
+        # making the `py` fallback DEAD: a host with only the launcher and no
+        # python.exe on PATH then got a false "no python" and lost its only WSL2
+        # internet path. `py.exe <script> <port>` is the launcher's canonical
+        # script invocation and works via start_windows_passthrough unchanged;
+        # and if a found interpreter somehow failed to listen, _wait_listening
+        # still raises loudly - so accepting py.exe never fabricates internet.
         for ln in lines:
-            if "WindowsApps" not in ln and ln.lower().endswith("python.exe"):
+            if "WindowsApps" not in ln and ln.lower().endswith(suffix):
                 return ln
     return None
 

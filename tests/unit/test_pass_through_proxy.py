@@ -52,6 +52,39 @@ def test_windows_python_none_when_no_python(monkeypatch):
     assert ptp._windows_python() is None
 
 
+def test_windows_python_falls_back_to_py_launcher(monkeypatch):
+    # Regression: `where.exe py` returns the launcher path `py.exe`, but the
+    # filter required endswith("python.exe") - so the `py` fallback was DEAD, and
+    # a host with only the launcher (no python.exe on PATH) got a false "no
+    # python" and lost its ONLY WSL2 internet path. The `py` probe must accept
+    # py.exe (still skipping any WindowsApps stub), matching its own exe name.
+    def fake_run(cmd, **kwargs):
+        query = cmd[-1]
+        if query == "where.exe python":
+            return subprocess.CompletedProcess(cmd, 1)          # no python.exe on PATH
+        if query == "where.exe py":
+            return subprocess.CompletedProcess(                 # only the launcher
+                cmd, 0, stdout="C:\\Windows\\py.exe\n")
+        raise AssertionError(query)
+
+    monkeypatch.setattr(ptp.subprocess, "run", fake_run)
+    assert ptp._windows_python() == "C:\\Windows\\py.exe"
+
+
+def test_windows_python_prefers_python_exe_over_py_launcher(monkeypatch):
+    # When both exist, the `python` probe runs first and wins - the py fallback
+    # only fires when python.exe is genuinely absent, so adding it never changes
+    # the reference host's behavior (python.exe present there).
+    def fake_run(cmd, **kwargs):
+        query = cmd[-1]
+        if query == "where.exe python":
+            return subprocess.CompletedProcess(cmd, 0, stdout="C:\\Python314\\python.exe\n")
+        raise AssertionError("py probe must not run when python.exe is found: " + query)
+
+    monkeypatch.setattr(ptp.subprocess, "run", fake_run)
+    assert ptp._windows_python() == "C:\\Python314\\python.exe"
+
+
 def test_start_windows_passthrough_builds_detached_start_process(monkeypatch):
     # Must use Start-Process without a redirect (a redirect blocks on the
     # long-running child) and pass the script path + port as inline args.

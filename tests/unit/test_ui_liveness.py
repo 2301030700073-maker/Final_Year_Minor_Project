@@ -295,6 +295,38 @@ def test_cat_failure_degrades_honestly(monkeypatch):
     assert any("uiautomator" in e for e in r["_errors"])
 
 
+def test_logcat_failure_degrades_both_anr_and_tls_to_not_captured(monkeypatch):
+    # ui_liveness.py logcat except arm: the ANR scan and the TLS-trust-block scan
+    # BOTH derive from the same `logcat -d` call, so when it raises both signals
+    # must degrade to the None "not captured" sentinel and the error be recorded -
+    # the module's contract is a surfaced "not captured", never a silent absence.
+    # Regression: only anr_detected got the sentinel; tls_blocked was left ABSENT,
+    # so the two co-sourced signals ended in different states (None vs missing key)
+    # and any presence-checking/serializing consumer would see the TLS signal
+    # vanish silently. This except arm had no test at all (the other failure tests
+    # exercise pidof/uiautomator/cat, never logcat itself raising).
+    from dynamic import ui_liveness
+    def fake_run(cmd, **kw):
+        if "logcat" in cmd:
+            raise OSError("device offline reading logcat")
+        if "uiautomator" in cmd:
+            return type("R", (), {"stdout": "UI hierchary dumped to: /sdcard/ui_dump.xml"})()
+        if "cat" in cmd:
+            return type("R", (), {"stdout": '<node text="Home" clickable="true"/>'})()
+        if "dumpsys" in cmd or "pidof" in cmd:
+            return type("R", (), {"stdout": ""})()
+        raise AssertionError(cmd)
+    monkeypatch.setattr(ui_liveness.subprocess, "run", fake_run)
+    r = ui_liveness.check_ui_liveness("s", "com.x", adb="adb")
+    assert r["anr_detected"] is None
+    assert r["tls_blocked"] is None          # the fix: explicit "not captured"...
+    assert "tls_blocked" in r                # ...not a silent absence
+    assert any("logcat" in e for e in r["_errors"])
+    # A failed logcat degrades only its OWN signals; the independent uiautomator
+    # scan still succeeded, so no unrelated signal is lost.
+    assert r["clickable_nodes"] == 1
+
+
 def test_matches_target_by_package_then_pid_column_token():
     # _matches_target: a line belongs to the app when it names the package, OR
     # carries the app's pid as the exact PID/TID column token (so SDK-tagged

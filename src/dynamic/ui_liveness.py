@@ -288,7 +288,18 @@ def check_ui_liveness(serial: str, package: str, adb: str | None = None) -> dict
         result["tls_blocked"] = bool(tls)
         result["tls_block_lines"] = tls[:2]
     except Exception as e:
+        # The ANR scan and the TLS-trust-block scan both derive from THIS single
+        # `logcat -d` call. When it fails, degrade BOTH to the None "not captured"
+        # sentinel - this module's contract (the docstring, and the four other
+        # except arms) is that a failed shell call is a surfaced "not captured",
+        # never a silent absence. Leaving tls_blocked absent while anr_detected got
+        # the sentinel was exactly that silent absence for the co-sourced TLS
+        # signal: a presence-checking or serializing consumer would see the two in
+        # different states, and _summarize_ui_liveness's positive-only TLS callout
+        # would read identically to "logcat succeeded, no TLS block" - the honesty
+        # boundary this module exists to hold, quietly not held for the TLS cause.
         result["anr_detected"] = None
+        result["tls_blocked"] = None
         result["_errors"] = result.get("_errors", []) + [f"logcat: {e}"]
 
     # 4) interactive UI hierarchy. Only trust the catted dump if uiautomator

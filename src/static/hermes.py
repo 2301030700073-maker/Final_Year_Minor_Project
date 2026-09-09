@@ -197,12 +197,21 @@ def scan_bundle(path: Path) -> dict:
     """
     if not is_binary_bundle(path):
         return {"kind": "plain", "strings": 0, "matches": []}
-    raw: bytes
+    # Only the 4-byte magic decides the "hermes" vs "binary" label here; the two
+    # extract_* passes below re-read the file for the actual string recovery. The
+    # previous `path.read_bytes()` allocated a full copy of the bundle - which for
+    # a real release RN bundle is often >1 MB (the PropertyGuru bundle measured in
+    # this module's own notes is ~megabytes) - purely to look at its first 4 bytes,
+    # then discarded it. Read just the magic instead. The OSError->opaque contract
+    # (an unreadable bundle degrades honestly, never a fabricated kind) is
+    # preserved, and a short read of <4 bytes compares unequal -> "binary", exactly
+    # as `b"".startswith(HERMES_MAGIC)` did before.
     try:
-        raw = path.read_bytes()
+        with open(path, "rb") as fh:
+            magic = fh.read(len(HERMES_MAGIC))
     except OSError:
         return {"kind": "opaque", "strings": 0, "matches": []}
-    kind = "hermes" if raw.startswith(HERMES_MAGIC) else "binary"
+    kind = "hermes" if magic == HERMES_MAGIC else "binary"
     # Recover BOTH 1-byte-per-char (ASCII) and UTF-16LE wide strings: a detection
     # idiom stored as a wide string is invisible to the ASCII pass alone (HERM1),
     # so scanning only ASCII would silently miss it. Combining both surfaces more

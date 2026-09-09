@@ -160,6 +160,41 @@ def test_load_thresholds_present_but_non_numeric_value_raises_loudly(monkeypatch
         _load_thresholds()
 
 
+def test_load_thresholds_scalar_section_raises_loudly(monkeypatch):
+    # Wrong SHAPE: `thresholds: 0.7` (a hand-edit expecting a single knob) is a
+    # present-but-malformed file. The .get() lookups raise AttributeError, which is
+    # NOT in the loader's except tuple - so without the isinstance guard this
+    # escaped as a raw traceback, bypassing the curated fail-loud guidance every
+    # other malformed-settings mode gets (principle 3).
+    _fake_settings(monkeypatch, "thresholds: 0.7\n")
+    with pytest.raises(RuntimeError, match="could not be read/parsed"):
+        _load_thresholds()
+
+
+def test_load_thresholds_list_section_raises_loudly(monkeypatch):
+    # Same shape defect, list form: `thresholds:` as a sequence, not a mapping.
+    _fake_settings(monkeypatch, "thresholds:\n  - 0.7\n  - 0.8\n")
+    with pytest.raises(RuntimeError, match="could not be read/parsed"):
+        _load_thresholds()
+
+
+def test_load_thresholds_non_mapping_top_level_raises_loudly(monkeypatch):
+    # The TOP LEVEL is a sequence, not a mapping - .get("thresholds") itself raises
+    # AttributeError. Also funneled into the curated loud failure.
+    _fake_settings(monkeypatch, "- a\n- b\n")
+    with pytest.raises(RuntimeError, match="could not be read/parsed"):
+        _load_thresholds()
+
+
+def test_load_thresholds_explicit_null_section_falls_back_to_default(monkeypatch):
+    # A bare `thresholds:` (explicit null) carries no value to lose, so it is
+    # treated like an ABSENT section - engine defaults, not a loud failure. This
+    # pins the boundary between "malformed value present" (raise) and "no value
+    # present" (default), so the shape guard never over-fails an empty section.
+    _fake_settings(monkeypatch, "thresholds:\n")
+    assert _load_thresholds() == (0.7, 0.7)
+
+
 def test_apply_manifest_ssl_signal_noops_without_nsc():
     evidence = StaticEvidence()
 

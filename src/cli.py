@@ -591,13 +591,31 @@ def _load_thresholds() -> tuple[float, float]:
         return DEFAULT_THRESHOLD, DEFAULT_THRESHOLD
     try:
         with open(settings_path, encoding="utf-8") as f:
-            thresholds = (yaml.safe_load(f) or {}).get("thresholds", {})
-        root = float(thresholds.get("root", DEFAULT_THRESHOLD))
-        ssl = float(thresholds.get("ssl", DEFAULT_THRESHOLD))
+            parsed = yaml.safe_load(f) or {}
+        # A wrong-SHAPE settings.yaml - the top level, or the `thresholds` section,
+        # is a scalar/list instead of a mapping (a hand-edit that wrote
+        # `thresholds: 0.7` expecting a single knob) - makes the .get() lookups
+        # below raise AttributeError, which is NOT in the except tuple: it would
+        # escape as a raw traceback, bypassing the curated "fix the file, or remove
+        # it" guidance this block exists to give for a present-but-malformed file.
+        # Normalize both shape errors into TypeError (already funneled below) with a
+        # precise reason so every malformed-file mode fails loud the same way. An
+        # absent or explicitly-null `thresholds:` is NOT malformed - it carries no
+        # value to lose, so it falls back to the engine default like a missing file.
+        if not isinstance(parsed, dict):
+            raise TypeError(f"top-level YAML is a {type(parsed).__name__}, expected a mapping")
+        raw = parsed.get("thresholds")
+        if raw is None:
+            raw = {}
+        if not isinstance(raw, dict):
+            raise TypeError(f"'thresholds' is a {type(raw).__name__}, expected a mapping")
+        root = float(raw.get("root", DEFAULT_THRESHOLD))
+        ssl = float(raw.get("ssl", DEFAULT_THRESHOLD))
     except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
-        # The file is present but unreadable/unparseable, or a threshold value is
-        # non-numeric (float() raise). Falling back to defaults here would move
-        # the detection boundary with no signal (principle 3). Fail loud instead.
+        # The file is present but unreadable/unparseable, a threshold value is
+        # non-numeric (float() raise), or its shape is wrong (the TypeErrors just
+        # above). Falling back to defaults here would move the detection boundary
+        # with no signal (principle 3). Fail loud instead.
         raise RuntimeError(
             f"{settings_path} exists but could not be read/parsed ({exc}); "
             "refusing to silently fall back to default detection thresholds - a "

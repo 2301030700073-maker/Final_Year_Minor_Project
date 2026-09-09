@@ -130,8 +130,52 @@ def test_generate_report_writes_file_with_expected_content(tmp_path):
     assert "not run (--skip-dynamic passed)" in content
 
 
-def test_generate_report_renders_webview_bridge_block_when_present(tmp_path):
-    # Gap A2: when the java scan surfaces WebView JS-bridge / remote-JS call
+def test_generate_report_escapes_pipes_in_apk_derived_table_cells(tmp_path):
+    # Markdown table-column-injection guard (report.generator._md), extended to
+    # EVERY table whose cells carry adversarial APK-derived strings - not just the
+    # js-evidence matched_text and captured-flows cells that test_report_md_escape
+    # already pins. A crafted APK can put a `|` in a JNI class/method name, a
+    # System.load target, a DexClassLoader call site, a WebView URL (a query
+    # string is the most plausible carrier), or a Dart AOT .so name; rendered raw
+    # into a `|`-delimited row it injects a phantom column and corrupts the table.
+    # Each of these five cells must pass through `| md`, which escapes the pipe as
+    # `\|` so the row structure survives. Regression: these five rendered their
+    # cells raw while the sibling js/flows tables were escaped (generator.py rows
+    # at lines 202/218/234/253/290). The `_md` function is unit-tested elsewhere;
+    # this pins that the filter is actually WIRED into each of these cells.
+    metadata = {
+        "hashes": {"sha256": "pipe1"},
+        "package": {"package_name": "com.example.pipe", "version_name": "1.0", "version_code": "1"},
+    }
+
+    report_path = generate_report(
+        run_id="run-pipe",
+        apk_hash="pipe1",
+        timestamp="2026-08-16T12:00:00",
+        metadata=metadata,
+        classification=_classification(),
+        verification=None,
+        correlation=None,
+        stage_results=[],
+        output_dir=tmp_path,
+        jni_bindings=[{"class_name": "com.x.A|B", "method_name": "chk|Root", "status": "unresolved"}],
+        unaccounted_loads=['System.load("/data/local/tmp/a|b.so")'],
+        dynamic_loads=['DexClassLoader("/sdcard/p|q.dex")'],
+        webview_sites=['MainActivity.java:9: web.loadUrl("https://cdn.example.com/c.js?a=1|b=2");'],
+        dart_aot_libs=["lib|app.so"],
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    # Every APK-derived cell escapes its pipe (\|), so none injects a live column.
+    assert "com.x.A\\|B" in content and "chk\\|Root" in content   # jni_bindings row
+    assert "/data/local/tmp/a\\|b.so" in content                   # unaccounted_loads row
+    assert "/sdcard/p\\|q.dex" in content                          # dynamic_loads row
+    assert "c.js?a=1\\|b=2" in content                             # webview_sites row
+    assert "lib\\|app.so" in content                               # dart_aot_libs row
+    # And the raw, unescaped pipe form of the JNI class name never survives (it
+    # has no prose duplicate, unlike dart_aot_libs which is also join()ed into a
+    # sentence): if `| md` were dropped the bare `A|B` would be a live delimiter.
+    assert "com.x.A|B" not in content
     # sites, the report must render them (the previously "unlabeled" gap). The
     # block only appears when webview_sites is non-empty.
     metadata = {

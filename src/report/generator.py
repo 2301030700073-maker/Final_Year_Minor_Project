@@ -199,7 +199,7 @@ claimed here. Status meaning:
 | Class | Method | Binding |
 |---|---|---|
 {% for b in jni_bindings -%}
-| `{{ b.class_name }}` | `{{ b.method_name }}` | {{ b.status }} |
+| `{{ b.class_name | md }}` | `{{ b.method_name | md }}` | {{ b.status }} |
 {% endfor %}
 {% endif %}
 {% if unaccounted_loads -%}
@@ -215,7 +215,7 @@ can confirm what these actually load.
 | Load target |
 |---|
 {% for t in unaccounted_loads -%}
-| `{{ t }}` |
+| `{{ t | md }}` |
 {% endfor %}
 {% endif %}
 {% if dynamic_loads -%}
@@ -231,7 +231,7 @@ what this actually loads.
 | Call site |
 |---|
 {% for d in dynamic_loads -%}
-| `{{ d }}` |
+| `{{ d | md }}` |
 {% endfor %}
 {% endif %}
 {% if webview_sites -%}
@@ -250,7 +250,7 @@ can confirm what the bridge actually checks.
 | Call site |
 |---|
 {% for w in webview_sites -%}
-| `{{ w }}` |
+| `{{ w | md }}` |
 {% endfor %}
 {% endif %}
 {% if js_evidence -%}
@@ -287,7 +287,7 @@ checks.
 | Dart AOT snapshot |
 |---|
 {% for d in dart_aot_libs -%}
-| `{{ d }}` |
+| `{{ d | md }}` |
 {% endfor %}
 {% endif %}
 {% if regenerated_from_stored_data -%}

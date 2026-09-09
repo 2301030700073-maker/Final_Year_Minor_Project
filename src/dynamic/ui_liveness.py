@@ -343,7 +343,21 @@ def check_ui_liveness(serial: str, package: str, adb: str | None = None) -> dict
             result["text_node_count"] = len(text_nodes)
             result["screen_state"] = _classify_screen(text_nodes, result["clickable_nodes"])
     except Exception as e:
+        # This section's co-sourced signals (clickable_nodes, rendered_content,
+        # screen_state) all derive from THIS uiautomator dump + cat. When either
+        # shell call raises, degrade ALL of them to the SAME "not captured"
+        # sentinels the dump-failed branch above sets - not just clickable_nodes.
+        # Leaving rendered_content/screen_state ABSENT was a silent absence:
+        # _summarize_ui_liveness omits the screen line entirely on a missing
+        # screen_state (vs the honest "not captured" label it renders when the
+        # dump-marker check fails), and a serializing/presence-checking consumer
+        # would see clickable_nodes present-as-None while its siblings vanished -
+        # the exact co-sourced asymmetry the logcat except arm above was fixed for.
+        # Distinct label ("error" vs "dump failed") keeps the two failure modes
+        # diagnosable; the exception detail is recorded in _errors.
         result["clickable_nodes"] = None
+        result["rendered_content"] = None
+        result["screen_state"] = "not captured (uiautomator error)"
         result["_errors"] = result.get("_errors", []) + [f"uiautomator: {e}"]
 
     return result

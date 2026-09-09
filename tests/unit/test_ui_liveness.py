@@ -276,10 +276,16 @@ def test_successful_dump_uses_cat(monkeypatch):
 
 
 def test_cat_failure_degrades_honestly(monkeypatch):
-    # ui_liveness.py:298-300: when the uiautomator dump SUCCEEDS but reading the
-    # file back (cat) raises - a genuine wrapper failure, not a fake detection -
-    # the whole step degrades to "not captured" and records the error, never a
-    # fabricated screen. Closes the last reachable pure wrapper branch.
+    # ui_liveness.py uiautomator except arm: when the dump SUCCEEDS but reading the
+    # file back (cat) raises - a genuine wrapper failure, not a fake detection - the
+    # whole step degrades to "not captured" and records the error, never a fabricated
+    # screen. This section's signals (clickable_nodes, rendered_content, screen_state)
+    # all derive from the same dump+cat, so ALL must reach the "not captured" sentinel
+    # together - not just clickable_nodes. Regression: only clickable_nodes got the
+    # sentinel; rendered_content/screen_state were left ABSENT, so a serializing or
+    # presence-checking consumer saw them vanish and _summarize_ui_liveness omitted the
+    # screen line entirely (vs the honest "not captured" label the dump-failed branch
+    # shows) - the same co-sourced asymmetry the logcat arm was fixed for.
     from dynamic import ui_liveness
     def fake_run(cmd, **kw):
         if "uiautomator" in cmd:
@@ -292,6 +298,9 @@ def test_cat_failure_degrades_honestly(monkeypatch):
     monkeypatch.setattr(ui_liveness.subprocess, "run", fake_run)
     r = ui_liveness.check_ui_liveness("s", "com.x", adb="adb")
     assert r["clickable_nodes"] is None
+    assert r["rendered_content"] is None           # co-sourced sibling, not left absent
+    assert "screen_state" in r                      # honest sentinel, not a missing key
+    assert "not captured" in r["screen_state"]
     assert any("uiautomator" in e for e in r["_errors"])
 
 

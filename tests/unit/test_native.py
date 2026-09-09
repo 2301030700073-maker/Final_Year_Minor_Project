@@ -135,6 +135,29 @@ def test_classify_obfuscated_empty_exports_is_false():
     assert _classify_obfuscated([], []) is False
 
 
+def test_classify_obfuscated_few_real_strings_relative_to_exports():
+    # The production-shaped case the ratio exists for, and a regression guard on
+    # the denominator. `strings` runs with its default -n 4, so every string it
+    # emits is >= 4 chars - a printable/len(strings) ratio is then a constant 1.0
+    # that can never fall below 0.1, i.e. the branch was DEAD against real tool
+    # output. Measured PER EXPORT the signal is live: 40 exports with a single
+    # real (>= 4-char) plaintext string -> 1/40 = 0.025 < 0.1 -> obfuscated. The
+    # old len(strings) denominator returned 1/1 = 1.0 here and missed it.
+    exports = [f"sym_{i}" for i in range(40)]
+    strings = ["libc.so"]  # one genuine >= 4-char embedded string, as `strings` emits
+    assert _classify_obfuscated(exports, strings) is True
+
+
+def test_classify_obfuscated_string_rich_lib_not_flagged_even_with_many_exports():
+    # The safe direction is preserved: a normal lib with a healthy plaintext-string
+    # yield is NOT flagged even with many exports - 12 exports, 50 readable strings
+    # -> 50/12 is far above the threshold, and none of the exports are pure-hex
+    # mangled, so neither obfuscation signal fires.
+    exports = [f"fn_{i}" for i in range(12)]
+    strings = [f"message_number_{i}" for i in range(50)]
+    assert _classify_obfuscated(exports, strings) is False
+
+
 def test_match_native_export_symbol_finds_evidence():
     lib = NativeLibrary(abi="arm64-v8a", name="libroot.so", exports=["check_root"])
     sig = NativeSignature(id="native_jni_root_check", category="root", weight=0.5,

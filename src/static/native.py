@@ -321,9 +321,16 @@ def _classify_obfuscated(exports: list[str], strings: list[str]) -> bool:
     if not exports:
         return False
     printable = sum(1 for s in strings if len(s) >= 4)
-    string_ratio = printable / max(len(strings), 1)
-    # Low ratio of readable strings to exports => names mangled, strings encrypted.
-    if string_ratio < 0.1 and len(exports) >= 10:
+    # Ratio of readable embedded strings to EXPORTS (not to len(strings)): an
+    # obfuscated lib has many exports yet almost no plaintext strings. The
+    # denominator has to be exports - `strings` runs with its default -n 4, so
+    # every line it emits is already >= 4 chars (printable == len(strings)), which
+    # pins a printable/len(strings) ratio at a constant 1.0 that can never fall
+    # below the threshold: that form was dead against real tool output and only
+    # ever "fired" on synthetic sub-4-char strings the tool cannot produce. Per
+    # export the signal is live and matches this heuristic's long-stated intent.
+    strings_per_export = printable / max(len(exports), 1)
+    if strings_per_export < 0.1 and len(exports) >= 10:
         return True
     mangle = sum(1 for e in exports if re.fullmatch(r"[a-f0-9]+", e.lower()))
     return mangle > len(exports) * 0.5

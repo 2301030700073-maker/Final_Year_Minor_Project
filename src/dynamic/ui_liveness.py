@@ -200,7 +200,17 @@ def _classify_screen(text_nodes: list[str], clickable_nodes: int | None) -> str:
         return "unknown (no UI dump captured)"
     if clickable_nodes and clickable_nodes > 0:
         return "interactive (has tappable widgets)"
-    visible = [t for t in text_nodes if t.strip()]
+    # DISTINCT non-empty strings, not the raw node count: this module's own
+    # discriminator is "more distinct visible strings than a splash frame" (see
+    # _SPLASH_TEXT_LIMIT). A splash/loading frame can repeat ONE label across
+    # several nodes (a shimmer row, a tagline echoed in a banner + a title bar),
+    # so counting duplicates would push it over the limit and mislabel it
+    # "content rendered" - overstating UI liveness, the dangerous direction this
+    # module guards against (same honesty rule as _parse_clickable_nodes). Dedup
+    # only ever LOWERS the count, so it can never upgrade a splash to interactive;
+    # a genuine content page still surfaces many distinct strings. Dedup on the
+    # stripped value so whitespace variants of one word are not counted as two.
+    visible = {t.strip() for t in text_nodes if t.strip()}
     if len(visible) <= _SPLASH_TEXT_LIMIT:
         return "splash/loading (no interactive widgets, minimal text) - NOT an interactive page"
     return "content rendered but no tappable widgets (RN/Flutter surface)"

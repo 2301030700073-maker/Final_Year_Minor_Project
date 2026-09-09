@@ -182,3 +182,79 @@ def test_guard_is_wired_to_the_real_generator_module():
     """Sanity: the AST this guard parses is the generator module actually imported
     (not a stale copy), so a real template edit is what gets checked."""
     assert Path(G.__file__) == Path(inspect.getsourcefile(G.generate_report))
+
+
+def test_calibration_template_strict_render_resolves_every_report_attribute():
+    """Attribute-level coverage for CALIBRATION_TEMPLATE, which the structural
+    check above cannot give it.
+
+    That check verifies each template's TOP-LEVEL variables are provided. For
+    CALIBRATION_TEMPLATE the only top-level variable is `report` - a single object -
+    so it is nearly vacuous: it confirms `report` is passed (always true) but cannot
+    see that `{{ report.generated_at }}`, `{{ t2.n }}`, or `{{ t1.confirmed }}` names
+    a REAL attribute. Under the report env's default Undefined, a renamed dataclass
+    field or a typo'd template attribute that is merely PRINTED renders as a silent
+    empty string - a blanked timestamp or metric in a scientific artifact that still
+    looks complete, the exact ADR-0006 silent-drop this file exists to prevent (the
+    render-based tests in test_calibration_report_generator.py assert specific
+    CAVEATS, but not that every table cell / header value is non-blank).
+
+    Render the real template SOURCE (same AST extraction the structural guard uses)
+    through a StrictUndefined env, with the same custom filters and a fully-computed
+    report, so every attribute path the template visits must resolve or the render
+    raises UndefinedError naming the broken reference. The fixture deliberately turns
+    ON the conditional branches (root's TN=0 tautology caveat and known-miss caveat,
+    the SSL-partial note, the small-corpus skeleton warning) so the strict pass walks
+    nearly every attribute path, not only the always-rendered header/table/curve ones.
+
+    Scope: the main TEMPLATE receives many flat kwargs and is well-covered by the
+    structural check plus its render-based tests; this strict pass targets the
+    single-object calibration template, where the top-level check sees almost nothing.
+    """
+    from jinja2 import Environment, StrictUndefined, UndefinedError
+
+    from calibration.report import compute_calibration_report
+    from calibration.types import GroundTruthEntry, RunRow
+
+    fully = {"java": "fully_analyzed", "native": "fully_analyzed",
+             "manifest": "fully_analyzed", "js": "fully_analyzed"}
+    runs = [
+        RunRow(
+            apk_hash="tp_hash", run_id="r1", action="ROOT_ONLY",
+            root_confidence=0.9, root_detected=True, root_bypassed=True,
+            ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+            decompile_completeness="complete", coverage=fully,
+        ),
+        RunRow(
+            apk_hash="miss_hash", run_id="r2", action="NEITHER",
+            root_confidence=0.3, root_detected=False, root_bypassed=None,
+            ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+            decompile_completeness="complete", coverage={**fully, "java": "partial"},
+        ),
+    ]
+    ground_truth = {
+        # tp_hash: detected root + GT root -> root TP=1, no FP, no TN -> TN=0
+        # tautology caveat fires; miss_hash: GT root present, prediction NEITHER,
+        # coverage-excluded -> known-miss caveat fires. Both under `root`.
+        "tp_hash": GroundTruthEntry("tp_hash", root=True, ssl=False, source="manual review"),
+        "miss_hash": GroundTruthEntry("miss_hash", root=True, ssl=False, source="DEX-verified"),
+    }
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+
+    strict = Environment(undefined=StrictUndefined)
+    strict.filters.update(G._env.filters)  # md, edge - the filters the real env registers
+    src = _template_source("CALIBRATION_TEMPLATE")
+
+    # Current template: every visited attribute path resolves -> no UndefinedError.
+    strict.from_string(src).render(report=report)
+
+    # Teeth: a typo'd attribute DOES raise under the same strict env, proving this
+    # guard would catch a future field rename instead of silently shipping a blank.
+    # (Without this negative control the positive render alone could pass vacuously
+    # if StrictUndefined were ever mis-wired.)
+    broken = src.replace("{{ report.generated_at }}", "{{ report.generatedd_at }}")
+    assert broken != src, "expected `{{ report.generated_at }}` in the template to build the negative control"
+    with pytest.raises(UndefinedError):
+        strict.from_string(broken).render(report=report)

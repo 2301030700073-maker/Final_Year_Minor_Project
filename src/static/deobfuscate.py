@@ -108,33 +108,50 @@ def deobfuscate_source(source: str, mapping: MappingTable) -> str:
     """
     if not mapping:
         return source
-    ordered = sorted(mapping.obfuscated_to_original.items(), key=lambda kv: -len(kv[0]))
-    out = source
-    for obf, orig in ordered:
-        if len(obf) < 1:
-            continue
-        # `orig` is inserted LITERALLY via a callable replacement. As a string
-        # template, re.sub interprets backslash escapes and \1 group refs inside
-        # the replacement - so a crafted mapping.txt whose ORIGINAL name carries
-        # `\q` (bad escape) or `\1` (group ref) would raise re.error and abort the
-        # whole signature scan over an untrusted, attacker-shipped mapping (the
-        # deobfuscate call in signatures.scan() sits past the per-file OSError
-        # guard, so the raise escapes the entire stage). A real Java identifier
-        # never contains a backslash, so the callable form is byte-identical for
-        # every genuine mapping; it only converts that crash into a safe verbatim
-        # substitution - honoring this module's "a malformed line must not abort
-        # deobfuscation" intent and ADR-0006 (degrade conservatively, never crash).
-        # Identifier boundaries must treat `$` as part of the name, not a break.
-        # `\b` is defined over `\w` = [A-Za-z0-9_], which EXCLUDES `$` - but `$`
-        # is a legal Java identifier char that R8/the JVM use heavily for
-        # synthetic names (nested classes `Outer$Inner`, lambda captures `val$x`,
-        # `access$000`, Kotlin delegates). With `\b`, a one-letter mapping like
-        # `c -> verify` fires INSIDE `access$c`/`val$c`/`c$field`, because `\b`
-        # sees a boundary between `c` and `$` - a false substitution that
-        # corrupts an unrelated synthetic identifier and can invent or destroy a
-        # signature hit in the deobfuscated view. Use explicit lookarounds that
-        # include `$` (and `\w`) on both sides so a match fires only at a true
-        # identifier edge. Byte-identical to `\b` for every name not adjacent to
-        # a `$`; it only declines the false in-identifier hits.
-        out = re.sub(rf"(?<![\w$]){re.escape(obf)}(?![\w$])", lambda m, o=orig: o, out)
-    return out
+    # Longest obfuscated name first so a longer name is never shadowed by a prefix
+    # that is also a mapped name. Empty keys are dropped: a malformed `orig -> `
+    # line yields one, and an empty alternative would match at every position and
+    # rewrite the whole source (test_deobfuscate_source_skips_empty_obfuscated_key).
+    keys = sorted((k for k in mapping.obfuscated_to_original if k), key=len, reverse=True)
+    if not keys:
+        return source
+    table = mapping.obfuscated_to_original
+    # ONE simultaneous pass over the original text, not one re.sub per key. A
+    # per-key sequential loop re-scans text an earlier key already inserted, so an
+    # original name that equals a later (shorter) obfuscated key gets
+    # re-substituted: with {"ab": "i", "i": "j"}, restoring ab->i and then applying
+    # i->j turned `ab` into `j` instead of `i`. Longest-first ordering does NOT
+    # prevent this - the inserted VALUE (`i`) collides with a shorter KEY (`i`). A
+    # single alternation matches every key against the untouched source exactly
+    # once, so inserted originals are never re-read (correct simultaneous-
+    # replacement semantics), and it is one pass, not N (N = mapping size,
+    # thousands for a real mapping.txt).
+    #
+    # `orig` is inserted LITERALLY via a callable replacement. As a string
+    # template, re.sub interprets backslash escapes and \1 group refs in the
+    # replacement, so a crafted mapping.txt whose ORIGINAL name carries `\q` (bad
+    # escape) or `\1` (group ref) would raise re.error and abort the whole
+    # signature scan over an untrusted, attacker-shipped mapping (the deobfuscate
+    # call in signatures.scan() sits past the per-file OSError guard, so the raise
+    # escapes the entire stage). A real Java identifier never contains a backslash,
+    # so the callable is byte-identical for every genuine mapping; it only converts
+    # that crash into a safe verbatim substitution (ADR-0006: degrade
+    # conservatively, never crash). The `.get` fallback is defensive - m.group(0)
+    # is always one of `keys`, so it never fires; if it ever did, the source is
+    # left as-is rather than raising.
+    #
+    # Identifier boundaries must treat `$` as part of the name, not a break. `\b`
+    # is defined over `\w` = [A-Za-z0-9_], which EXCLUDES `$` - but `$` is a legal
+    # Java identifier char R8/the JVM use heavily for synthetic names (nested
+    # `Outer$Inner`, lambda captures `val$x`, `access$000`, Kotlin delegates). With
+    # `\b`, a one-letter mapping like `c -> verify` fires INSIDE `access$c` /
+    # `val$c` / `c$field` - a false substitution that corrupts an unrelated
+    # synthetic identifier and can invent or destroy a signature hit. The
+    # lookarounds include `$` (and `\w`) on both sides so a match fires only at a
+    # true identifier edge; the trailing `(?![\w$])` also forces whole-identifier
+    # matching, so a short key that is a prefix of a longer identifier can never
+    # match it (this is what makes the alternation order-independent for boundary
+    # cases, longest-first notwithstanding). Byte-identical to the per-key form for
+    # every genuine mapping; it only declines the false in-identifier hits.
+    pattern = re.compile(rf"(?<![\w$])(?:{'|'.join(re.escape(k) for k in keys)})(?![\w$])")
+    return pattern.sub(lambda m: table.get(m.group(0), m.group(0)), source)

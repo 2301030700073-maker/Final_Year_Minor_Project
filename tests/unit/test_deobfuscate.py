@@ -228,3 +228,16 @@ def test_deobfuscate_source_real_mapping_output_unchanged_by_literal_fix():
         "    void onCreate(android.os.Bundle) -> b\n"
     )
     assert deobfuscate_source("class a { void b(){} }", t) == "class MainActivity { void onCreate(){} }"
+
+
+def test_deobfuscate_source_no_resubstitution_of_inserted_original():
+    # A per-key sequential loop re-scans text an earlier key inserted: with
+    # {"ab": "i", "i": "j"}, restoring `ab`->`i` and THEN applying `i`->`j` turned
+    # "ab" into "j" instead of "i" (the inserted VALUE "i" collided with the
+    # shorter KEY "i"; longest-first ordering does not prevent this). A single
+    # simultaneous pass matches every key against the untouched source exactly
+    # once, so an inserted original is never re-read.
+    t = MappingTable(obfuscated_to_original={"ab": "i", "i": "j"})
+    # "ab" must restore to "i" (NOT "j"); the standalone "i" restores to "j".
+    assert deobfuscate_source("ab i", t) == "i j"
+

@@ -519,10 +519,24 @@ def match_native(
     for lib in libraries:
         if lib.name.lower() in KNOWN_NATIVE_LIBS:
             continue
+        # Read the SAME body surface match_native does (ghidra_functions +
+        # body_calls, native.py match loop) - not just Ghidra bodies. body_calls
+        # is the capstone-recovered call surface (Fix-2), the ONLY body signal on
+        # a Ghidra-less machine. Omitting it here let a native SSL idiom that is an
+        # INDICATOR-only symbol (SSL_CTX_set_verify etc. - deliberately never a
+        # scored signature, so match_native never attributes it) escape this
+        # safety net: a lib statically linking BoringSSL calls that verify symbol
+        # as a DEFINED-internal function (hidden, absent from .dynsym exports),
+        # recovered only via body_calls, so on a Ghidra-less box the SSL category
+        # would NOT be marked coverage-limited -> a confident negative over cert-
+        # verification code never examined (the exact ADR-0006 over-claim this net
+        # prevents). Additive: body_calls can only ADD an unattributed indicator,
+        # never remove one or upgrade coverage.
         corpus_text = (
             "\n".join(lib.exports) + "\n"
             + "\n".join(lib.strings) + "\n"
-            + "\n".join(lib.ghidra_functions)
+            + "\n".join(lib.ghidra_functions) + "\n"
+            + "\n".join(lib.body_calls)
         )
         indicator_categories |= find_native_indicator_categories(corpus_text)
     result.unattributed_indicators = {

@@ -381,6 +381,25 @@ def test_match_native_unattributed_ssl_hostname_verify_indicator():
     assert result2.unattributed_indicators == {"ssl": True}
 
 
+def test_match_native_unattributed_ssl_indicator_from_body_calls_only():
+    # A lib that STATICALLY LINKS BoringSSL calls SSL_CTX_set_verify as a
+    # defined-internal function - hidden, absent from .dynsym exports and strings,
+    # recovered ONLY by the capstone body-call pass (body_calls) on a Ghidra-less
+    # machine. That verify symbol is an INDICATOR-only anchor (never a scored
+    # signature), so match_native never attributes it; the Boundary-2 net is the
+    # sole thing that can surface it as coverage-limited. It must read body_calls -
+    # the SAME body surface match_native's pattern search reads - or an entire
+    # native TLS-validation implementation escapes the safety net and the SSL
+    # category over-claims a confident negative (ADR-0006).
+    lib = NativeLibrary(
+        abi="arm64-v8a", name="libapp.so",
+        exports=["JNI_OnLoad"], strings=["hello"],
+        body_calls=["SSL_CTX_set_verify", "memcpy"],
+    )
+    result = match_native([lib], [])
+    assert result.unattributed_indicators == {"ssl": True}
+
+
 def test_match_native_no_unattributed_when_signature_matches_category():
     # Boundary-2: when a native signature already matched the category, the
     # indicator is NOT unattributed (the technique is recognized, not unknown).

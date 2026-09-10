@@ -9,7 +9,7 @@ from pathlib import Path
 
 ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 # Component element tags we enumerate as attack surface.
-_COMPONENT_TAGS = ("activity", "service", "receiver", "provider")
+_COMPONENT_TAGS = ("activity", "activity-alias", "service", "receiver", "provider")
 # A binary-manifest networkSecurityConfig reference is a raw RESOURCE ID
 # (@7F0E0000 / @0x7f0e0000), not the decoded @xml/<name> form apktool produces.
 # Must be recognized as a real NSC declaration so it is never treated as "no
@@ -381,8 +381,12 @@ def _collect_permissions(root: ET.Element) -> list[str]:
 
 
 def _collect_exported_components(application: ET.Element) -> list[dict]:
-    """Enumerate the app's declared components (activity/service/receiver/provider)
-    with their type, name and EFFECTIVE exported flag - the reachable attack surface.
+    """Enumerate the app's declared components (activity/activity-alias/service/
+    receiver/provider) with their type, name and EFFECTIVE exported flag - the
+    reachable attack surface. An <activity-alias> is an independently-launchable
+    entry point (its own name/exported/intent-filter aliasing a target activity),
+    externally reachable exactly like an <activity>, so omitting it from the
+    enumerated tags silently under-reported the attack surface.
 
     Android's default: a component with no `android:exported` is effectively
     exported when it declares an intent-filter, otherwise not. Reporting the raw
@@ -401,11 +405,12 @@ def _collect_exported_components(application: ET.Element) -> list[dict]:
                 exported = exported_attr.strip().lower() in ("true", "1")
             else:
                 # Android platform default differs by component type: an
-                # activity/service/receiver is exported iff it declares an
-                # intent-filter, but a <provider> is exported=TRUE regardless of
-                # intent-filter - an unset provider is externally reachable by
-                # other apps, so reporting it false under-reports a real
-                # content-provider attack surface.
+                # activity/activity-alias/service/receiver is exported iff it
+                # declares an intent-filter, but a <provider> is exported=TRUE
+                # regardless of intent-filter - an unset provider is externally
+                # reachable by other apps, so reporting it false under-reports a
+                # real content-provider attack surface. An activity-alias follows
+                # the activity rule (has_filter), never the provider one.
                 exported = True if tag == "provider" else has_filter
             components.append({"type": tag, "name": name, "exported": exported})
     return components

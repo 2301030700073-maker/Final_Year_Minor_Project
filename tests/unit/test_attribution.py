@@ -393,6 +393,8 @@ def test_collect_exported_components_resolves_effective_exported():
         '<service android:name=".Svc" android:exported="false"/>'
         '<provider android:name=".Provider"/>'
         '<receiver android:name=""/>'
+        '<activity-alias android:name=".AliasFiltered" android:targetActivity=".Launcher"><intent-filter/></activity-alias>'
+        '<activity-alias android:name=".AliasHidden" android:targetActivity=".Launcher"/>'
         "</application></manifest>"
     )
     app = root.find("application")
@@ -403,6 +405,13 @@ def test_collect_exported_components_resolves_effective_exported():
     assert flags[".Svc"] is False          # explicit android:exported="false"
     assert flags[".Provider"] is True      # provider default: exported regardless of intent-filter
     assert "" not in flags                 # name-less component skipped
+    # activity-alias is an independently-launchable entry point (real attack
+    # surface) and follows the ACTIVITY default, not the provider one: an intent-
+    # filter makes it exported, its absence does not. Regression: activity-alias
+    # was omitted from the enumerated component tags entirely, silently dropping
+    # exported aliases from the reported attack surface (an under-report).
+    assert flags[".AliasFiltered"] is True   # alias with intent-filter -> exported (activity rule)
+    assert flags[".AliasHidden"] is False    # alias, no filter -> not exported (NOT the provider True default)
 
 
 def test_manifest_device_admin_and_permissions():

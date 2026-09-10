@@ -303,6 +303,40 @@ def test_attribute_string_vendor_overrides_app_package_for_sdk_reference():
     assert result["vendors"] == ["com.google"]
 
 
+def test_string_vendor_never_asserts_a_vendor_for_the_apps_own_dotted_class():
+    # Bug-B parity on the string side (attribution.py's is_under_package guard in
+    # _string_vendor): a matched string that is a dotted reference into the app's
+    # OWN package subtree names the app's own class, never a bundled SDK - even
+    # when the app package shares a recognized vendor prefix. Here the app is
+    # com.google.mybankapp and its own root-check class is com.google.mybankapp.
+    # RootCheck: a valid dotted reference AND is_known_third_party matches the
+    # shared com.google prefix, so without the guard the app's own code is
+    # falsely attributed to Google. The guard returns None -> app-owned.
+    app = "com.google.mybankapp"
+    assert attribution._string_vendor("com.google.mybankapp.RootCheck", app) is None
+    # The guard is scoped to the app's OWN subtree only: a genuine SDK reference
+    # under the same vendor prefix but NOT under the app package still attributes
+    # (boundary #5 preserved - the guard narrows nothing it shouldn't).
+    assert attribution._string_vendor("com.google.android.gms.safetynet.SafetyNetApi", app) == "com.google"
+
+
+def test_attribute_string_vendor_keeps_apps_own_dotted_class_app_owned():
+    # End-to-end counterpart of the override test above: when the matched string
+    # is the app's OWN fully-qualified class (dotted, under its vendor-prefixed
+    # package) rather than a real SDK reference, the string-vendor guard keeps it
+    # app-owned. Removing that guard passes every other test in this file but
+    # silently re-flags this as Google third-party - Bug-B for string evidence.
+    evidence = [
+        {"file": "sources/com/google/mybankapp/RootCheck.java",
+         "matched_text": "com.google.mybankapp.RootCheck"},
+    ]
+    result = attribution.attribute_root_evidence("com.google.mybankapp", evidence)
+    assert result["app_owned"] == 1
+    assert result["third_party"] == 0
+    assert result["vendors"] == []
+    assert result["all_third_party"] is False
+
+
 def test_attribute_dataclass_evidence_without_matched_text_unchanged():
     # The existing _FakeEvidence dataclass has no matched_text attr; getattr
     # default returns None and the file-namespace logic is untouched.

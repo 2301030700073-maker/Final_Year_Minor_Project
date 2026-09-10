@@ -180,6 +180,76 @@ def test_both_androgoat_runs_two_spawns_one_per_dimension(monkeypatch):
     assert "synthesized:root_runtime_exec_su" in result.evidence["scripts_applied"]
 
 
+def _run_capture_scripts_applied(monkeypatch, action, target, synthesized):
+    """Drive run_dynamic_stage through the single-spawn synthesized path and return
+    the scripts_applied label list, so a test can assert the label matches what was
+    actually loaded (principle 3)."""
+
+    class _FakeDevice:
+        def spawn(self, pkg):
+            return 1234
+
+        def resume(self, pid):
+            return None
+
+    monkeypatch.setattr(
+        "dynamic.frida_runner.attach",
+        lambda serial, pkg: (_FakeDevice(), object(), 1234),
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner.load_script",
+        lambda session, name, on_message=None: None,
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner.load_script_source",
+        lambda session, src, on_message=None: None,
+    )
+    monkeypatch.setattr("dynamic.frida_runner._run_ui_action", lambda serial, a: None)
+    monkeypatch.setattr("dynamic.frida_runner.time.sleep", lambda s: None)
+    monkeypatch.setattr(
+        "dynamic.frida_runner._wait_for_checkpoint",
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
+    )
+    result = frida_runner.run_dynamic_stage(
+        "emulator-5554", "com.example.app", action, target=target,
+        synthesized=synthesized,
+    )
+    return result.evidence["scripts_applied"]
+
+
+def test_synth_ssl_only_label_omits_root_envelope(monkeypatch):
+    # Principle 3: scripts_applied must match what was actually LOADED. The native
+    # root envelope (native_su_binary_embedded / root_runtime_exec_su) is appended
+    # to the loaded source only for a root-needing action; a synthesized SSL_ONLY
+    # run loads the SSL bypass ALONE. Its label must therefore NOT claim the two
+    # root-envelope recipes ran - previously the synth label branch appended them
+    # whenever synth_source was set, over-claiming two root bypasses on an SSL-only
+    # run against a real target with pinning but no root check.
+    applied = _run_capture_scripts_applied(
+        monkeypatch, Action.SSL_ONLY, "some_real_app",
+        {"source": "sslsrc", "applied_hooks": ["custom_ssl_hook"]},
+    )
+    assert "synthesized" in applied
+    assert "custom_ssl_hook" in applied  # the SSL hook that WAS loaded
+    assert "synthesized:native_su_binary_embedded" not in applied
+    assert "synthesized:root_runtime_exec_su" not in applied
+
+
+def test_synth_root_only_label_includes_root_envelope(monkeypatch):
+    # The companion positive lock: a synthesized ROOT_ONLY run DOES append the
+    # native root envelope to the loaded source (frida_runner line 405), so its
+    # labels MUST be present. Pins the fix in both directions - SSL_ONLY omits,
+    # ROOT_ONLY includes - so a later change cannot silently drop the envelope
+    # label on a run that actually loads it.
+    applied = _run_capture_scripts_applied(
+        monkeypatch, Action.ROOT_ONLY, "some_real_app",
+        {"source": "rootsrc", "applied_hooks": []},
+    )
+    assert "synthesized" in applied
+    assert "synthesized:native_su_binary_embedded" in applied
+    assert "synthesized:root_runtime_exec_su" in applied
+
+
 def _run_with_captured_require_evidence(monkeypatch, action, target, synthesized):
     """Drive run_dynamic_stage and capture the require_evidence it passes to
     _wait_for_checkpoint for the single-spawn path."""

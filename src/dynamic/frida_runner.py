@@ -450,13 +450,26 @@ def run_dynamic_stage(
     # on both root and SSL. The scripts_applied label must match what is actually
     # loaded so the report never claims the vendor ran when it did not (principle 3).
     _extra_labels = [f"synthesized:{i}" for i in _root_envelope_ids]
+    # The native root envelope is appended to the LOADED source only for a
+    # root-needing action - the `synth_source is not None and action in
+    # (ROOT_ONLY, BOTH)` guard above on the synthesized path, and _supplement_root
+    # (which is only ever set for ROOT_ONLY/BOTH) on the hand-authored path. The
+    # scripts_applied label must track that exactly (principle 3 - the same
+    # label-matches-what-loaded contract the vendor note above states): a
+    # synthesized SSL_ONLY run loads the SSL bypass ALONE, so its label must NOT
+    # claim the two root-envelope recipes ran. _supplement_root already implies a
+    # root action, so its branch always loads the envelope; the synthesized branch
+    # also serves SSL_ONLY, so it needs the explicit action gate or it over-claims
+    # two root bypasses on an SSL-only run.
+    _root_envelope_loaded = action in (Action.ROOT_ONLY, Action.BOTH)
     if _supplement_root:
         scripts_applied = list(script_names) + _extra_labels
-    else:
-        scripts_applied = (
-            (["synthesized"] + synth_applied + _extra_labels)
-            if synth_source is not None else script_names
+    elif synth_source is not None:
+        scripts_applied = ["synthesized"] + synth_applied + (
+            _extra_labels if _root_envelope_loaded else []
         )
+    else:
+        scripts_applied = script_names
 
     # AndroGoat BOTH: the two button-triggered checks (SSL pinning in
     # TrafficActivity, root in RootDetectionActivity) are mutually exclusive in a

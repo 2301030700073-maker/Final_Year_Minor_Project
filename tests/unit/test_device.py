@@ -133,6 +133,31 @@ def test_clear_logcat_tolerates_transient_failure_and_succeeds_on_retry(monkeypa
     assert calls["n"] == 2  # first failed, retry succeeded
 
 
+def test_all_adb_calls_are_timeout_bounded(monkeypatch):
+    # NFR-7 / principle 3: every adb subprocess call in this module must be
+    # timeout-bounded so a stuck adb transport fails loudly instead of hanging
+    # the pipeline forever. discover_device (the FIRST dynamic call), install_apk
+    # and verify_installed were the three that lacked a timeout while every other
+    # adb call in the module carried one - a stated-discipline-vs-code gap. This
+    # pins the "every adb call is bounded" invariant so it can't silently regress.
+    monkeypatch.setattr(device, "_require_adb", lambda: "adb")
+    seen = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append(kwargs.get("timeout"))
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="List of devices attached\nemulator-5554\tdevice\n", stderr="")
+
+    monkeypatch.setattr(device.subprocess, "run", fake_run)
+    device.discover_device()
+    device.install_apk("emulator-5554", "/x/app.apk")
+    device.verify_installed("emulator-5554", "com.example")
+
+    assert len(seen) == 3, f"expected 3 adb calls, saw {len(seen)}"
+    assert all(isinstance(t, (int, float)) and t > 0 for t in seen), \
+        f"an adb call was not timeout-bounded (timeouts seen: {seen})"
+
+
 def test_verify_installed_requires_exact_package_match(monkeypatch):
     # FR-4.2: a similarly-prefixed package (com.example.app.prod) installed
     # without the target (com.example.app) must NOT "verify" it - substring

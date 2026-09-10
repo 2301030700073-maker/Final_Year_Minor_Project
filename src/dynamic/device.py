@@ -415,7 +415,8 @@ def _require_adb() -> str:
 def discover_device(serial: str | None = None) -> str:
     """Return the serial of a connected device/emulator, or raise loudly if none found."""
     adb = _require_adb()
-    result = subprocess.run([adb, "devices"], capture_output=True, text=True, check=True)
+    result = subprocess.run([adb, "devices"], capture_output=True, text=True,
+                            check=True, timeout=30)
     lines = [
         line for line in result.stdout.splitlines()[1:]
         if line.strip() and "\tdevice" in line
@@ -451,9 +452,16 @@ def install_apk(serial: str, apk_path: Path) -> None:
     adb = _require_adb()
     # -t: allow installing testOnly APKs (some training/vulnerable apps are
     # marked testOnly; install without -t fails INSTALL_FAILED_TEST_ONLY).
+    # Generous but bounded: installs vary with APK size + dexopt (unlike the
+    # near-instant queries elsewhere here), so a fixed short timeout could kill a
+    # legitimately-slow install - the unsafe false-failure direction. But leaving
+    # it unbounded lets a genuinely stuck install hang the pipeline forever,
+    # contradicting the module's own never-hang-silently discipline (principle 3).
+    # 5 minutes is far beyond any real install of this project's targets, so it
+    # only ever trips on a hang.
     subprocess.run(
         [adb, "-s", serial, "install", "-r", "-t", str(apk_path)],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, timeout=300,
     )
 
 
@@ -486,7 +494,7 @@ def verify_installed(serial: str, package_name: str) -> bool:
     adb = _require_adb()
     result = subprocess.run(
         [adb, "-s", serial, "shell", "pm", "list", "packages", package_name],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, timeout=20,
     )
     # FR-4.2: exact match, not substring. `pm list packages <filter>` filters by
     # substring, and verify used to check `package_name in result.stdout` - so a

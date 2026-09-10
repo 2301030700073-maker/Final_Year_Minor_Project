@@ -6,6 +6,7 @@ import pytest
 
 from static.decompile import (
     CACHE_REGISTRY_NAME,
+    _dex_unit_covered,
     _enforce_cache_budget,
     _find_cfr_jar,
     _jadx_covered,
@@ -1054,3 +1055,30 @@ def test_jadx_covered_whole_apk_thin_recovery_stays_partial():
     # No recovery at all -> uncovered.
     assert _jadx_covered(
         per_dex=False, jadx_returncode=1, fallback={}, jadx_file_count=100) is False
+
+
+def test_dex_unit_covered_clean_and_measured_recovery():
+    # A clean per-DEX unit (jadx exit 0, wrote real .java) is covered.
+    assert _dex_unit_covered(rc=0, files=10, recovered=False, recovered_count=0) is True
+    # A jadx-failed unit is covered when a secondary engine recovered >= 0.5 of
+    # what jadx wrote (the measured rule, parity with the whole-APK path).
+    assert _dex_unit_covered(rc=1, files=10, recovered=True, recovered_count=6) is True
+    # Recovery below the ratio stays uncovered (a partial hole).
+    assert _dex_unit_covered(rc=1, files=10, recovered=True, recovered_count=3) is False
+    # A jadx-failed unit with no recovery at all is uncovered.
+    assert _dex_unit_covered(rc=1, files=5, recovered=False, recovered_count=0) is False
+
+
+def test_dex_unit_covered_jadx_empty_dex_is_not_laundered_by_minimal_recovery():
+    # Per-DEX parity regression. A DEX jadx read NOTHING from (files == 0, rc != 0)
+    # has no jadx baseline to measure recovery against. The old inline
+    # `recovered_count >= 0.5 * max(files, 1)` degenerated to `>= 0.5`, so a SINGLE
+    # recovered file certified the whole DEX 'covered' - laundering a total
+    # jadx-failure DEX with minimal CFR recovery into 'complete', a confident
+    # negative over code never fully read (ADR-0006). It must stay a partial hole;
+    # the recovered .java is still scanned, only the completeness label tightens.
+    assert _dex_unit_covered(rc=1, files=0, recovered=True, recovered_count=1) is False
+    assert _dex_unit_covered(rc=1, files=0, recovered=True, recovered_count=200) is False
+    # A clean jadx unit that nonetheless wrote zero files is likewise not covered
+    # (nothing scannable), matching the pre-existing behavior on that edge.
+    assert _dex_unit_covered(rc=0, files=0, recovered=False, recovered_count=0) is False

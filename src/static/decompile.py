@@ -603,6 +603,38 @@ def _jadx_covered(
     )
 
 
+def _dex_unit_covered(rc: int, files: int, recovered: bool, recovered_count: int) -> bool:
+    """Whether ONE per-DEX unit counts as COVERED (no hole) for the completeness
+    label. Extracted from _decompile_dexes for the same reason _jadx_covered was:
+    the decision is verdict-critical (it feeds the aggregate returncode, hence
+    'complete' vs 'partial'), so it must be unit-testable without the real
+    jadx/dex2jar/CFR toolchain.
+
+    Rules, mirroring the whole-APK _jadx_covered:
+      * A clean jadx unit (rc == 0 and it wrote real .java) is covered.
+      * A jadx-FAILED unit is covered only if a secondary engine independently
+        recovered >= _RECOVERY_COVERAGE_RATIO of the .java jadx wrote.
+
+    The `files > 0` guard is the parity fix. When jadx wrote NOTHING for this DEX
+    there is no baseline to measure recovery against, and the old inline
+    `recovered_count >= _RECOVERY_COVERAGE_RATIO * max(files, 1)` degenerated to
+    `>= 0.5` - so ANY single recovered file certified the whole DEX covered,
+    laundering a total jadx-failure DEX with minimal CFR recovery into 'complete'
+    (ADR-0006: an UNMEASURED recovery must never certify completeness). The
+    whole-APK path never hits this because its total-failure gate (rc != 0 and
+    file_count == 0) returns early, so _jadx_covered only ever sees files > 0 and
+    its own max() is a no-op; the per-DEX path has no such per-unit early return,
+    so the guard must live here. The recovered .java is still scanned regardless
+    (it lands in the shared cfr/ scan root cli.py appends), so this tightens only
+    the completeness LABEL, never what gets analyzed - no detection is lost, the
+    run is just honestly labeled partial when a jadx-empty DEX can't be measured."""
+    if rc == 0 and files > 0:
+        return True
+    if files > 0 and recovered and recovered_count > 0:
+        return recovered_count >= _RECOVERY_COVERAGE_RATIO * files
+    return False
+
+
 def _decompile_dexes(
     apk_path: Path, target_dir: Path, dex_entries: list[dict], jadx: str,
 ) -> tuple[int, int, list[dict], dict]:
@@ -685,17 +717,16 @@ def _decompile_dexes(
             units[-1]["recovered_count"] = dex_fb.get("fallback_file_count")
             units[-1]["recovery_unavailable"] = dex_fb.get("fallback_unavailable")
             units[-1]["recovery_error_tail"] = dex_fb.get("fallback_error_tail")
-        # Finalise per-DEX coverage after recovery: a clean jadx unit is covered;
-        # a jadx-failed unit is covered ONLY if the secondary engine independently
-        # produced material output for it (>= _RECOVERY_COVERAGE_RATIO of the
-        # .java jadx wrote) - otherwise it stays a partial hole, never laundered
-        # into full coverage. A files==0 unit that recovery also cannot fill is a
-        # hole.
-        if rc == 0 and files > 0:
-            units[-1]["covered"] = True
-        elif units[-1]["recovered"] and units[-1]["recovered_count"] > 0:
-            units[-1]["covered"] = (
-                units[-1]["recovered_count"] >= _RECOVERY_COVERAGE_RATIO * max(files, 1))
+        # Finalise per-DEX coverage after recovery in one testable place
+        # (_dex_unit_covered): a clean jadx unit is covered; a jadx-failed unit is
+        # covered ONLY if a secondary engine independently recovered >=
+        # _RECOVERY_COVERAGE_RATIO of the .java jadx wrote. A files==0 unit (jadx
+        # wrote nothing, so recovery has no baseline to be measured against) is
+        # never certified covered from a recovery count alone - it stays a partial
+        # hole, never laundered into 'complete' (ADR-0006). The recovered .java is
+        # still scanned via the shared cfr/ root, so only the LABEL tightens.
+        units[-1]["covered"] = _dex_unit_covered(
+            rc, files, units[-1]["recovered"], units[-1]["recovered_count"])
     # any_failed is set only by a DEX that is NOT covered after recovery - a hole
     # the pipeline did not (or could not) fill. This lets a CFR-recovered DEX lift
     # the aggregate toward complete, while an unrecovered one honestly degrades it.

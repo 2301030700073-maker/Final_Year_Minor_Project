@@ -1,8 +1,8 @@
 """Coverage-limited signal: dynamic code loading (Gap from real-world research).
 
 An app that loads code at runtime via `DexClassLoader` / `PathClassLoader` /
-`BaseDexClassLoader` / `InMemoryDexClassLoader` / `Class.forName` / `DexFile` /
-`loadDex` / `openDexFile` hides a payload DEX that is released and loaded only at
+`BaseDexClassLoader` / `InMemoryDexClassLoader` / `DelegateLastClassLoader` /
+`Class.forName` / `DexFile` / `loadDex` / `openDexFile` hides a payload DEX that is released and loaded only at
 runtime - code the static scan cannot see. This is the core primitive of packers
 and dropper malware (Joker, Anatsa, SharkBot, Necro). We cannot unpack it here;
 the honest treatment (ADR-0006) is to *detect the loading call* and mark the code
@@ -29,7 +29,15 @@ _DYNLOAD_LOADER = re.compile(
     r"(?<![\w$.])"
     r"(?:new\s+)?"
     r"(?:dalvik\.system\.)?"
-    r"(?:DexClassLoader|PathClassLoader|BaseDexClassLoader|InMemoryDexClassLoader)"
+    r"(?:DexClassLoader|PathClassLoader|BaseDexClassLoader|InMemoryDexClassLoader"
+    # DelegateLastClassLoader (dalvik.system, API 27+) extends PathClassLoader and
+    # takes the same dexPath - a first-class runtime code loader in the very family
+    # above, used by plugin frameworks and packers for delegate-last (child-first)
+    # payload loading. Its name contains none of the four above as a substring, so
+    # it was silently missed; a payload hidden behind it would leave java a
+    # confident negative over code never seen (ADR-0006). Recall-only, so adding it
+    # can only degrade java to partial, never fabricate a positive.
+    r"|DelegateLastClassLoader)"
     r"\s*\("
 )
 _DYNLOAD_OTHER = re.compile(

@@ -61,6 +61,25 @@ def test_finds_base_and_inmemory_loaders(tmp_path):
     assert len(hits) == 1  # three call sites on one line -> one hit
 
 
+def test_finds_delegate_last_class_loader(tmp_path):
+    # DelegateLastClassLoader (dalvik.system, API 27+) extends PathClassLoader and
+    # takes the same dexPath - a first-class runtime code loader in the family this
+    # module targets, used for delegate-last (child-first) payload loading. Its name
+    # contains none of the other four loader names as a substring, so it was silently
+    # missed; a payload hidden behind it would leave java a confident negative over
+    # code never seen (ADR-0006), the err-toward-recall contract this module states.
+    # Same family-completion shape as the FQ loadDex arm above.
+    plain = _write(tmp_path, "L1.java", "ClassLoader c = new DelegateLastClassLoader(dexPath, parent);")
+    assert len(dynload.find_dynamic_loading([plain])) == 1
+    # And fully qualified, the way a decompiler emits it when the class isn't imported.
+    fq = _write(tmp_path, "L2.java", "new dalvik.system.DelegateLastClassLoader(p, lib, parent);")
+    assert len(dynload.find_dynamic_loading([fq])) == 1
+    # The negative-lookbehind guard still holds: the name as an identifier suffix,
+    # even immediately followed by `(`, is not a hit (would match on `\s*\(` alone).
+    suffix = _write(tmp_path, "L3.java", "myDelegateLastClassLoader(x);")
+    assert dynload.find_dynamic_loading([suffix]) == []
+
+
 def test_skips_non_loading_code(tmp_path):
     p = _write(
         tmp_path, "F.java",

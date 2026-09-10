@@ -41,6 +41,7 @@ import pytest
 from jinja2 import meta, nodes
 
 import report.generator as G
+from common import StageResult
 
 _GEN_SRC = Path(G.__file__).read_text(encoding="utf-8")
 _GEN_AST = ast.parse(_GEN_SRC)
@@ -258,3 +259,97 @@ def test_calibration_template_strict_render_resolves_every_report_attribute():
     assert broken != src, "expected `{{ report.generated_at }}` in the template to build the negative control"
     with pytest.raises(UndefinedError):
         strict.from_string(broken).render(report=report)
+
+
+# ---------------------------------------------------------------------------
+# Stage-independence of the context splat helpers
+# ---------------------------------------------------------------------------
+# generate_report() builds TEMPLATE's context by **splatting three dict helpers:
+# _decompile_summary, _hooks_engaged, _capture_summary. The structural guard at
+# the top enumerates each helper's provided keys by calling `fn([])` - the
+# stage-ABSENT return path ONLY. That sampling is faithful to a real render only
+# while a helper's key set is stage-INDEPENDENT. If a future edit gives a helper
+# a key on one return path but not the other, one of two things happens:
+#   * present-only key, referenced by the template -> the guard's fn([]) never
+#     sees it, the missing-var check fires, loud (safe); but
+#   * absent-only key, referenced by the template -> fn([]) DOES see it, the
+#     guard passes, yet a real run whose stage IS present renders it BLANK - the
+#     exact silent-dropped-caveat failure this file exists to prevent, slipping
+#     through the guard's own blind spot.
+# `test_capture_summary_return_paths_expose_identical_keys` above locks this for
+# _capture_summary (its docstring records why capture_client_connections was
+# upgraded from a template gate to this stronger invariant). Its siblings
+# _decompile_summary and _hooks_engaged were left unlocked though they carry the
+# identical two-return-path shape and feed the same render call. The two tests
+# below generalise the invariant to all three splat helpers and self-guard
+# against a fourth being added without a parity case.
+#
+# Each value is the minimal StageResult that drives its helper's stage-PRESENT
+# return path (helpers match on `.stage`).
+_SPLAT_HELPERS = {
+    "_decompile_summary": StageResult(
+        stage="decompile", status="success", evidence={}
+    ),
+    "_hooks_engaged": StageResult(
+        stage="dynamic", status="success", evidence={"frida_messages": []}
+    ),
+    "_capture_summary": StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={"reason": "no flows", "flow_summary": []},
+    ),
+}
+
+
+def _template_splat_helper_names() -> set[str]:
+    """Names of the helpers whose `**result` is splatted into `TEMPLATE.render()`
+    (the same call the structural guard reads), resolved via the shared
+    `_call_func_name` used by `_render_provides`."""
+    for node in ast.walk(_GEN_AST):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "render"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "TEMPLATE"
+        ):
+            names: set[str] = set()
+            for kw in node.keywords:
+                if kw.arg is None:  # **splat
+                    fn = _call_func_name(kw.value)
+                    if fn is not None:
+                        names.add(fn)
+            return names
+    raise AssertionError("no `TEMPLATE.render(...)` call found in generator.py")
+
+
+def test_every_template_splat_helper_has_a_parity_case():
+    """A new `**helper()` splat added to `TEMPLATE.render()` must get a case in
+    `_SPLAT_HELPERS` - otherwise its two-return-path key divergence would be
+    unguarded, reopening the coverage guard's absent-path-sampling blind spot for
+    that helper. (A stale case for a helper no longer splatted is harmless, so the
+    reverse is not asserted.)"""
+    untested = sorted(_template_splat_helper_names() - set(_SPLAT_HELPERS))
+    assert not untested, (
+        f"TEMPLATE.render() splats {untested}, but no return-path parity case "
+        f"exists for them in _SPLAT_HELPERS. Add each with the minimal StageResult "
+        f"that triggers its stage-present return path, so the coverage guard's "
+        f"fn([]) sampling cannot miss an absent-path-only key that would render "
+        f"blank on a real run."
+    )
+
+
+@pytest.mark.parametrize("helper_name", sorted(_SPLAT_HELPERS))
+def test_context_splat_helper_return_paths_expose_identical_keys(helper_name):
+    """Both return paths of every `TEMPLATE.render()` splat helper expose the SAME
+    keys. Generalises `test_capture_summary_return_paths_expose_identical_keys` to
+    _decompile_summary and _hooks_engaged, which the coverage guard samples via
+    `fn([])` but which nothing else pinned to their stage-present return path."""
+    fn = getattr(G, helper_name)
+    absent = set(fn([]).keys())
+    present = set(fn([_SPLAT_HELPERS[helper_name]]).keys())
+    assert absent == present, (
+        f"{helper_name} return paths diverge: only-present="
+        f"{sorted(present - absent)}, only-absent={sorted(absent - present)}. "
+        f"Both paths must expose the same keys so the coverage guard's fn([]) "
+        f"sampling reflects every real run and no template variable renders blank."
+    )

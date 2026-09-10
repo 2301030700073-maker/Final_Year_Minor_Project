@@ -281,3 +281,39 @@ def test_correlate_ssl_coverage_limited_and_bypass_none_is_unverified_not_match(
     assert result.coverage_confirmed == []
     assert len(result.unverified) == 1
     assert "coverage-limited on SSL-pinning" in result.unverified[0]
+
+
+def test_correlate_ssl_predicted_and_confirmed_is_a_match():
+    # The SSL mirror of test_correlate_matches_when_prediction_confirmed (the root
+    # happy path). The primary real-world SSL outcome - static detected pinning AND
+    # dynamic confirmed the bypass - is genuine agreement (a deterministic_matched +
+    # dynamically_confirmed finding), so NO arm fires and matches stays True. Root's
+    # happy path was locked; this SSL one was not, so a future change wrongly adding
+    # an arm on (ssl_predicted and ssl_bypassed is True) would flag the main SSL
+    # success as a mismatch/unverified with no test to catch it.
+    classification = _classification(root_detected=False, ssl_detected=True)
+    verification = VerificationResult(root_bypassed=None, ssl_bypassed=True, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert result.matches is True
+    assert result.mismatches == []
+    assert result.unverified == []
+    assert result.coverage_confirmed == []
+
+
+def test_correlate_both_predicted_and_confirmed_is_a_match():
+    # The strongest confirmed case: BOTH categories detected statically AND both
+    # bypasses dynamically confirmed. Both fall through with no arm firing -> a
+    # clean full MATCH. This is the only test exercising two simultaneous positive-
+    # and-confirmed categories (test 1 pairs root-confirmed with an ssl non-claim;
+    # the ssl test above pairs ssl-confirmed with a root non-claim).
+    classification = _classification(root_detected=True, ssl_detected=True)
+    verification = VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert result.matches is True
+    assert result.mismatches == []
+    assert result.unverified == []
+    assert result.coverage_confirmed == []

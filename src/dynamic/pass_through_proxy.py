@@ -39,8 +39,10 @@ from dynamic import device
 INTERNET_PROXY_PORT = 8080
 DEFAULT_PASSTHROUGH_PORT = INTERNET_PROXY_PORT
 _PASSTHROUGH_SCRIPT = '''\
-"""Tiny pass-through HTTP(S) proxy (no MITM). Forward CONNECT tunnels and
-origin-form HTTP transparently. stdlib-only, so it runs under plain python.exe."""
+"""Tiny pass-through HTTP(S) proxy (no MITM). Tunnel CONNECT requests
+transparently and forward absolute-form HTTP requests - the form a client sends
+to an EXPLICIT proxy (RFC 7230 5.3.2) - rewriting each to origin-form for the
+upstream. stdlib-only, so it runs under plain python.exe."""
 import asyncio
 from urllib.parse import urlsplit
 

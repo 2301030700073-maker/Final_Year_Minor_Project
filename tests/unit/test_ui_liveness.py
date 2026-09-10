@@ -6,7 +6,7 @@ functions over captured output."""
 from dynamic.ui_liveness import (
     _parse_activity_resumed, _parse_window_focused, _parse_anr, _parse_clickable_nodes,
     _parse_rendered_content, _parse_text_nodes, _classify_screen,
-    _parse_tls_block,
+    _parse_tls_block, _matches_target,
 )
 
 
@@ -144,6 +144,53 @@ def test_classify_screen_stuck_on_splash():
 def test_classify_screen_interactive_when_clickables():
     xml = '<node text="Home" clickable="true"/>'
     assert "interactive" in _classify_screen(_parse_text_nodes(xml), 1)
+
+
+def test_tls_block_matches_every_marker_case_insensitively():
+    # Regression for the marker-case bug (commit 0693fb29c): _TLS_BLOCK_MARKERS are
+    # compared against a LOWERCASED logcat line, so a mixed-case marker in the table
+    # could never be a substring and would silently never fire. Android/Java log
+    # these exceptions in mixed case, so each real-world form MUST still match. One
+    # line per marker (mixed case, as actually logged) - reverting ANY single marker
+    # to mixed-case in the table breaks exactly one assertion here.
+    pkg = "com.example.app"
+    real_forms = [
+        "Trust anchor for certification path not found.",
+        "java.security.cert.CertPathValidatorException: chain invalid",
+        "javax.net.ssl.SSLHandshakeException: handshake failed",
+        "Could not validate certificate chain",
+        "SSL handshake timed out after 10000ms",
+    ]
+    for form in real_forms:
+        line = f"09-10 12:00:01.234 4521 4600 W {pkg}: {form}"
+        assert _parse_tls_block(line, pkg, "4521") == [line.strip()], \
+            f"marker not matched case-insensitively: {form!r}"
+
+
+def test_tls_block_attributes_sdk_tagged_failure_by_pid_not_package():
+    # logcat-sdk-tag-attribution: a real app's SDK (okhttp/Conscrypt/expo) logs TLS
+    # failures under its OWN tag (System.err here), NOT the app package - but the
+    # line carries the app's pid in the threadtime PID column, so matching on the
+    # pid column keeps the failure attributed (matching only the package drops it).
+    # A separate line whose pid digits appear only in the MESSAGE BODY (a hex
+    # address) must NOT be attributed - the pid is a column token, not a substring.
+    pkg, pid = "com.example.app", "4521"
+    sdk_line = "09-10 12:00:01.234 4521 4600 W System.err: javax.net.ssl.SSLHandshakeException: trust failure"
+    body_only = "09-10 12:00:02.000 9999 9999 I OtherProc: freed handshake buffer at 0x4521"
+    assert _parse_tls_block("\n".join([sdk_line, body_only]), pkg, pid) == [sdk_line.strip()]
+
+
+def test_matches_target_pid_is_a_column_token_not_a_substring():
+    # The pid must match the threadtime PID (token 2) or TID (token 3) column, not
+    # appear anywhere in the line - otherwise an unrelated process's message body or
+    # a hex address containing the digits would be false-attributed to this app,
+    # flipping anr_detected/tls_blocked on evidence that isn't the app's.
+    pkg, pid = "com.example.app", "4521"
+    assert _matches_target("09-10 12:00:03.000 4521 4600 I tag: msg", pkg, pid) is True     # PID column
+    assert _matches_target("09-10 12:00:03.000 7000 4521 I tag: msg", pkg, pid) is True     # TID column
+    assert _matches_target("09-10 12:00:03.000 9999 9999 I tag: at 0x4521", pkg, pid) is False  # body only
+    assert _matches_target(f"09-10 12:00:03.000 9999 9999 I {pkg}: msg", pkg, None) is True     # package, no pid
+    assert _matches_target("09-10 12:00:03.000 4521 4600 I tag: msg", pkg, None) is False       # no pid, no package
 
 
 def test_classify_screen_content_but_rn_surface():

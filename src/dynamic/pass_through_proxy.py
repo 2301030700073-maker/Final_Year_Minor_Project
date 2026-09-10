@@ -255,8 +255,21 @@ def ensure_internet(serial: str, port: int = INTERNET_PROXY_PORT) -> None:
         start_windows_passthrough(python_win,
                                   f"C:\\Users\\Public\\{stamp}-passthrough.py", port)
         _wait_listening(port)
+    # The adb reverse (device 127.0.0.1:<port> -> adb-server host 127.0.0.1:<port>)
+    # is the ONLY outbound path on WSL2 - the emulator has no direct NAT - so it
+    # is load-bearing, not best-effort: without it the device proxy set just below
+    # points at a dead device-side loopback and the device has NO internet. A
+    # re-add of the same spec is idempotent (adb replaces the existing mapping and
+    # returns success), so this only ever raises on a genuine failure - which must
+    # be loud (NFR-7, and the docstring's own promise), exactly as the capture-port
+    # reverse in mitmproxy_capture.py raises. Swallowing it let ensure_internet
+    # report a working internet baseline while leaving the device stranded.
     try:
         device.adb_reverse(serial, port, port, add=True)
-    except Exception:
-        pass  # reverse re-add is best-effort; the proxy + device setting carry it
+    except Exception as e:
+        raise RuntimeError(
+            f"could not establish the adb reverse tcp:{port} that routes the "
+            f"device's traffic through the pass-through proxy - the device would "
+            f"be left with no working internet on WSL2 (the emulator has no direct "
+            f"NAT). adb reverse failed: {e}") from e
     device.set_http_proxy(serial, "127.0.0.1", port)

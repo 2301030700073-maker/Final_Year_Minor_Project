@@ -164,6 +164,27 @@ def test_ensure_internet_skips_launch_when_already_listening(monkeypatch):
     assert started == ["proxy"]  # no launch, but the proxy is asserted
 
 
+def test_ensure_internet_raises_when_reverse_fails_and_leaves_proxy_unset(monkeypatch):
+    # NFR-7 / principle 3: the adb reverse (device loopback -> host) is the ONLY
+    # outbound path on WSL2 (the emulator has no direct NAT), so a genuine reverse
+    # failure means no internet - it must fail LOUDLY, never be swallowed as
+    # "best-effort". Regression: the failure was caught and passed, so
+    # ensure_internet reported a working baseline while the device was stranded.
+    # Two things must hold: (a) the reverse failure propagates as a RuntimeError,
+    # and (b) the device proxy is NOT set afterwards - setting it would point the
+    # device at a dead loopback. (A re-add of the same spec is idempotent and
+    # returns success, so this raise only ever fires on a real failure.)
+    proxy_set = []
+    monkeypatch.setattr(ptp, "is_listening", lambda *a, **k: True)  # skip launch
+    def _boom(*a, **k):
+        raise subprocess.CalledProcessError(1, ["adb", "reverse"])
+    monkeypatch.setattr(device, "adb_reverse", _boom)
+    monkeypatch.setattr(device, "set_http_proxy", lambda *a, **k: proxy_set.append(a))
+    with pytest.raises(RuntimeError, match="adb reverse"):
+        ptp.ensure_internet("emulator-5554", 8080)
+    assert proxy_set == []  # device NOT left pointed at a dead loopback
+
+
 def test_ensure_internet_raises_when_no_windows_python(monkeypatch):
     # NFR-7: no pass-through proxy means no internet on WSL2 - must fail loudly.
     monkeypatch.setattr(ptp, "is_listening", lambda *a, **k: False)

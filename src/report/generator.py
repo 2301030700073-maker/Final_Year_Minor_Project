@@ -396,7 +396,9 @@ Raw flow file: `{{ capture_flows_path }}`
 > **Partial capture:** the injected pinning-bypass script raised {{ capture_bypass_script_errors | length }} uncaught error(s) during this otherwise-successful capture ({{ capture_bypass_script_errors | join("; ") }}). Flows were still decrypted, but a crashed hook can leave some pinned endpoints unbypassed and therefore uncaptured — **treat the flow list above as a lower bound, not a complete inventory of the app's traffic.**
 {% endif -%}
 {% else -%}
-{% if capture_errored -%}
+{% if capture_not_applicable -%}
+No traffic was captured, and the capture stage was **reclassified from a bare failure to _skipped — not applicable_** because a proxy-independent signal proved this run's empty capture was expected, not a proxy/wiring fault: {{ capture_not_applicable_reason or capture_reason or "reason not recorded" }}. This is the pipeline's authoritative reason, recorded when the stage was classified (from the manifest, the device-side reachability probe, or the in-process SSL observer) — **not** a cause re-derived here from the empty flow list. The capture stage is honest: an empty capture is reported here with its recorded reason, never a fabricated flow list.
+{% elif capture_errored -%}
 No traffic was captured because the **capture stage did not complete — it raised an error** ({{ capture_error or capture_reason or "reason not recorded" }}). The empty flow list is a direct consequence of that stage failure, **not** a property of the app's network behaviour and **not** a coverage limitation of an app that ran to completion: the capture aborted before it could exercise or observe the app's traffic at all. Resolve the stage error and re-run the capture before drawing any conclusion about this app's network behaviour. The capture stage is honest: an empty capture is reported here with its recorded reason, never a fabricated flow list.
 {% elif capture_bypass_script_errors -%}
 No traffic was captured because the **pinning-bypass script injected for this capture raised an uncaught error** ({{ capture_bypass_script_errors | join("; ") }}). The bypass never took effect, so a pinned app's TLS handshakes fail and yield no decrypted flows — the empty flow list is a **direct consequence of the crashed bypass script**, not app-silence, not a device→proxy reachability failure, and not a coverage limitation of an app that ran to completion. Fix the bypass script and re-run the capture before drawing any conclusion about this app's network behaviour. The capture stage is honest: an empty capture is reported here with its recorded reason, never a fabricated flow list.
@@ -822,6 +824,12 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
             # an errored stage, and there is no stage error to surface.
             "capture_errored": False,
             "capture_error": None,
+            # No capture stage ran, so it was never reclassified to skipped/not-
+            # applicable: uniform key set with the present path so the template's
+            # capture_not_applicable branch never references an undefined var
+            # (RPT-TMPLCOV1).
+            "capture_not_applicable": False,
+            "capture_not_applicable_reason": None,
             # No capture stage ran, so no cleanup could have leaked a device
             # proxy / adb reverse / stray mitmdump: empty list (same type as the
             # present path - uniform key set so the template never references an
@@ -837,6 +845,21 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
     return {
         "capture_present": True,
         "capture_reason": evidence.get("reason"),
+        # A capture stage reclassified failed->skipped by _reclassify_empty_capture
+        # (cli.py) carries a DEFINITIVE, proxy-independent not_applicable_reason
+        # (no INTERNET / app did not exercise its SSL path / device reached the
+        # proxy but produced no decrypted flow). status=="skipped" on a
+        # capture-traffic stage is produced ONLY there and ONLY with that reason
+        # set (run_capture_stage itself returns success/failed, never skipped), so
+        # keying on the status is precise. Surface both so the report gives the
+        # stage its true classification-time reason WITH PRECEDENCE over the
+        # inferential empty-capture ladder, instead of re-deriving a (possibly
+        # contradictory) cause and rendering a deliberately-skipped, not-applicable
+        # stage as a bare empty failure - the reclassifier exists precisely to stop
+        # that "crying wolf" ([[not-attempted-neq-skipped]],
+        # [[crashed-capture-stage-true-reason]]).
+        "capture_not_applicable": capture_stage.status == "skipped",
+        "capture_not_applicable_reason": evidence.get("not_applicable_reason"),
         "capture_flows": flows,
         "capture_hosts": evidence.get("hosts") or [],
         "capture_flows_path": evidence.get("flows_path"),

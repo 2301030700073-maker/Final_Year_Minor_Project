@@ -310,3 +310,68 @@ def test_capture_cleanup_warnings_escaped_and_absent_when_clean(tmp_path):
     clean = _success_capture_stage([])
     assert "cleanup_warnings" not in clean.evidence
     assert "Capture cleanup warnings" not in _render_one(clean, tmp_path)
+
+
+def _reclassified_skipped_capture_stage():
+    # Exactly what cli._reclassify_empty_capture emits for its Signal-2 case: an
+    # empty capture (reason "no flows captured") reclassified failed->skipped
+    # because the in-process SSL observer showed the app never exercised its
+    # network/SSL path - a proxy-INDEPENDENT signal, so the empty capture is
+    # not-applicable this run, not a proxy failure. status=="skipped" + a
+    # definitive not_applicable_reason; the original reason is preserved too.
+    return StageResult(
+        stage="capture-traffic", status="skipped",
+        evidence={
+            "reason": "no flows captured", "flow_summary": [],
+            "reclassified_from": "failed",
+            "not_applicable_reason": (
+                "app did not exercise its network/SSL path (no in-process SSL "
+                "signal - 0 bypassEffect and no pinned-connection hook fired for a "
+                "host; interactive capture needed) - not a proxy failure"),
+        },
+        error=None,
+    )
+
+
+def test_reclassified_skipped_capture_names_authoritative_reason_not_inference(tmp_path):
+    # not-attempted != skipped, in the REPORT layer. cli._reclassify_empty_capture
+    # turns a bare empty-capture FAILURE into a `skipped` stage carrying a definitive,
+    # proxy-independent not_applicable_reason "so the stage line stops crying wolf".
+    # But _capture_summary keyed capture_present on stage existence and capture_reason
+    # on the STALE original reason, ignoring the skipped status and dropping
+    # not_applicable_reason entirely - so the report rendered a deliberately-skipped,
+    # not-applicable capture through the inferential empty-FAILURE ladder, re-deriving
+    # a cause (here "un-exercised network/SSL path this run") the reclassifier had
+    # already decided authoritatively (and, in the no-hooks case, one it had ruled
+    # OUT). The dedicated not-applicable branch must PRE-EMPT that inference and
+    # surface the pipeline's own reason.
+    dynamic = _dynamic_stage([{"payload": {"probeHit": "root", "path": "/system/xbin/su"}}])
+    report_path = generate_report(
+        run_id="cap", apk_hash="cap001", timestamp="2026-08-23T12:00:00",
+        metadata={"hashes": {"sha256": "cap001"}, "package": {"package_name": "com.example.net"}},
+        classification=_neither_classification(), verification=None, correlation=None,
+        stage_results=[_reclassified_skipped_capture_stage(), dynamic],
+        output_dir=tmp_path, manifest=_internet_manifest(),
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "## Captured Traffic" in content
+    # the stage's TRUE classification is named as such...
+    assert "reclassified from a bare failure to" in content
+    # ...carrying the pipeline's authoritative, proxy-independent reason verbatim...
+    assert "app did not exercise its network/SSL path" in content
+    assert "a cause re-derived here from the empty flow list" in content
+    # ...and the inferential misdiagnosis that would otherwise fire for this exact
+    # (INTERNET + 0-SSL-effect dynamic) shape is PRE-EMPTED, never printed.
+    assert "un-exercised network/SSL path this run" not in content
+
+
+def test_failed_empty_capture_is_not_rendered_as_not_applicable(tmp_path):
+    # Strict-gate regression: the not-applicable branch must fire ONLY for a
+    # `skipped` (reclassified) capture. A genuine `failed` empty capture (a real
+    # proxy/wiring problem the reclassifier deliberately left loud) must NOT be
+    # softened into "reclassified ... skipped" - it must still reach the inferential
+    # ladder and get its honest, un-softened explanation.
+    dynamic = _dynamic_stage([{"payload": {"probeHit": "root"}}])  # 0 SSL effects
+    content = _render(_internet_manifest(), tmp_path, extra_stages=[dynamic])
+    assert "reclassified from a bare failure to" not in content
+    assert "un-exercised network/SSL path this run" in content

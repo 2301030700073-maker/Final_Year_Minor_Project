@@ -99,3 +99,51 @@ def test_extract_run_id_returns_none_when_no_report_was_produced():
     from collect_verification_bundle import _extract_run_id
     assert _extract_run_id("") is None
     assert _extract_run_id("ingest failed before report generation\n") is None
+
+
+def test_find_fresh_report_reads_apk_hash_from_the_written_path_not_the_input(tmp_path):
+    # The bug this guards: the pipeline NORMALIZES the input before hashing (an
+    # .aab/.apks is converted to an apk and it is the CONVERTED apk that gets
+    # hashed - cli.py runs normalize_input() then compute_hashes()), and keys
+    # outputs/reports/<hash>/ to THAT hash. The sha256 of the raw input file is
+    # therefore NOT the apk_hash for a normalized input, so locating the report
+    # by re-hashing args.apk points at a nonexistent dir and ships no evidence
+    # on a fully successful run. The collector must instead read apk_hash from
+    # the report the pipeline actually wrote, found by this run's unique run_id.
+    from collect_verification_bundle import _find_fresh_report
+
+    reports_root = tmp_path / "outputs" / "reports"
+    pipeline_hash = "d" * 64  # the CONVERTED apk's hash - what the pipeline keyed the dir to
+    run_id = "a" * 32
+    written = reports_root / pipeline_hash / f"{run_id}.md"
+    written.parent.mkdir(parents=True)
+    written.write_text("# report\n", encoding="utf-8")
+
+    found = _find_fresh_report(run_id, reports_root)
+    assert found == written
+    # apk_hash is READ from the path, so it equals the dir the pipeline wrote -
+    # independent of any hash of the raw input file (the whole point of the fix).
+    assert found.parent.name == pipeline_hash
+
+
+def test_find_fresh_report_matches_only_this_runs_id_not_a_stale_report(tmp_path):
+    # A prior run's report for the same apk sits in the same hash dir. The glob
+    # is by this run's unique run_id, so a stale different-run_id report is never
+    # returned - the filesystem-layer counterpart of _extract_run_id's "ship no
+    # stale reports" contract.
+    from collect_verification_bundle import _find_fresh_report
+
+    reports_root = tmp_path / "outputs" / "reports"
+    hash_dir = reports_root / ("d" * 64)
+    hash_dir.mkdir(parents=True)
+    (hash_dir / f"{'b' * 32}.md").write_text("stale prior run", encoding="utf-8")
+
+    assert _find_fresh_report("a" * 32, reports_root) is None
+
+
+def test_find_fresh_report_returns_none_when_reports_root_is_absent(tmp_path):
+    # No runs ever recorded (reports_root missing): glob yields nothing, the
+    # helper returns None, and the caller ships no report - never raises.
+    from collect_verification_bundle import _find_fresh_report
+
+    assert _find_fresh_report("a" * 32, tmp_path / "outputs" / "reports") is None

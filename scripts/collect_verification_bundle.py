@@ -63,6 +63,23 @@ def _extract_run_id(cli_stdout: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _find_fresh_report(run_id: str, reports_root: Path) -> Path | None:
+    """Locate this run's report under outputs/reports/<apk_hash>/<run_id>.md and
+    return the path the pipeline ACTUALLY wrote - so apk_hash is read from that
+    path's parent, never recomputed from the input file.
+
+    Why not recompute: the pipeline normalizes the input before hashing (an
+    .aab/.apks is converted to an apk and it is the CONVERTED apk that gets
+    hashed - cli.py runs normalize_input() then compute_hashes()), and it keys
+    the output dir to that hash. So the raw input file's sha256 does NOT equal
+    the apk_hash for any normalized input; locating the report by re-hashing
+    args.apk would point at a nonexistent dir and ship no evidence on a fully
+    successful run. The run_id is unique per run, so `*/<run_id>.md` matches
+    exactly this invocation's report regardless of which hash dir it lives in."""
+    matches = sorted(reports_root.glob(f"*/{run_id}.md"))
+    return matches[0] if matches else None
+
+
 def _run(cmd: list[str], timeout: int = 60) -> dict:
     """Run a command, always returning a dict - never raises, so one missing
     tool or one failing check doesn't abort the whole collection run."""
@@ -229,24 +246,39 @@ def main() -> int:
         # ever done locally; a bundle should only ever contain evidence for
         # what this invocation actually analyzed, not everything lying
         # around in the working directory.
-        apk_hash = _sha256_of(Path(args.apk))
-
-        # Copy only THIS run's report, not every report ever written for this
-        # apk_hash - outputs/reports/ accumulates across runs, and shipping 25
-        # historical reports (one per prior run) with no marker invites a
-        # reviewer to mistake a stale one for this invocation's result (Finding
-        # H). The fresh report's filename is its run_id. If the run produced no
-        # report (a pre-report stage failed), ship none - an absent report is
-        # honest; a stale one is not.
-        reports_dir = REPO_ROOT / "outputs" / "reports" / apk_hash
+        # Scoped to this specific run's apk_hash - outputs/reports/ and
+        # outputs/analysis/ both accumulate across every APK and every run
+        # ever done locally; a bundle should only ever contain evidence for
+        # what this invocation actually analyzed, not everything lying
+        # around in the working directory.
+        #
+        # The apk_hash that keys those dirs is the hash of the NORMALIZED apk,
+        # not the raw input file: the pipeline runs normalize_input() (which
+        # converts an .aab/.apks to an apk) and THEN compute_hashes() on the
+        # result (cli.py). So for a normalized input, re-hashing args.apk here
+        # yields a different hash and points at dirs that don't exist - silently
+        # shipping no report and no analysis on a fully successful run, the exact
+        # false-absent-evidence outcome this collector's contract forbids. Take
+        # the authoritative hash from the report the pipeline actually wrote,
+        # located by this run's unique run_id.
+        #
+        # Copy only THIS run's report, not every report ever written for the
+        # apk_hash (Finding H): shipping historical reports with no marker
+        # invites a reviewer to mistake a stale one for this invocation's
+        # result. If the run produced no report (a pre-report stage failed),
+        # ship none - an absent report is honest; a stale one is not.
+        reports_root = REPO_ROOT / "outputs" / "reports"
         fresh_run_id = _extract_run_id(pipeline_result["stdout"] or "")
+        apk_hash: str | None = None
         if fresh_run_id:
-            fresh_report = reports_dir / f"{fresh_run_id}.md"
-            if fresh_report.exists():
-                (bundle_dir / "reports" / apk_hash).mkdir(parents=True, exist_ok=True)
-                shutil.copy2(fresh_report, bundle_dir / "reports" / apk_hash / f"{fresh_run_id}.md")
+            fresh_report = _find_fresh_report(fresh_run_id, reports_root)
+            if fresh_report is not None:
+                apk_hash = fresh_report.parent.name  # authoritative: the dir the pipeline wrote
+                dest_dir = bundle_dir / "reports" / apk_hash
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(fresh_report, dest_dir / f"{fresh_run_id}.md")
             else:
-                print(f"  (note: report {fresh_report} expected from this run but missing - not shipping any reports)")
+                print(f"  (note: report for run {fresh_run_id} expected from this run but not found under {reports_root} - not shipping any reports)")
         else:
             print("  (note: no report path found in this run's output - not shipping stale prior reports)")
 
@@ -254,7 +286,12 @@ def main() -> int:
         # metadata.json, run_*.json) so a mismatch between what a signature
         # expects and what the real app contains can be diagnosed directly
         # from the pushed bundle - no separate "please paste the code" round
-        # trip needed.
+        # trip needed. Prefer the authoritative apk_hash read from the report
+        # above; fall back to hashing the input only when no report was produced
+        # (correct for a plain .apk, which normalize passes through unchanged;
+        # best-effort for a normalized input whose run failed before reporting).
+        if apk_hash is None:
+            apk_hash = _sha256_of(Path(args.apk))
         analysis_dir = REPO_ROOT / "outputs" / "analysis" / apk_hash
         if analysis_dir.exists():
             shutil.copytree(analysis_dir, bundle_dir / "analysis" / apk_hash, dirs_exist_ok=True)

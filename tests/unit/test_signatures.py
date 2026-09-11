@@ -869,8 +869,48 @@ def test_scan_raises_loudly_on_regex_backtracking_budget(tmp_path, monkeypatch):
     )
     sigs = load_signatures(bad)
 
-    with pytest.raises(TimeoutError, match="catastrophically backtracking"):
+    # New honest message names both possible causes and reports the line length
+    # (the discriminator); assert the guard still fires loudly and surfaces the
+    # line length, independent of regex linearity.
+    with pytest.raises(TimeoutError, match=r"\(\d+ chars\)"):
         scan(tmp_path, sigs)
+
+
+def test_scan_per_line_budget_message_does_not_misattribute_to_linear_signature(tmp_path, monkeypatch):
+    # Principle 3 / honesty: the per-line ReDoS budget is CUMULATIVE across all
+    # signatures on one line, so it can trip from the aggregate cost over a very
+    # long line (a minified .js/.bundle is one multi-MB line, and those suffixes
+    # are scanned) with NO regex backtracking at all. The message must not then
+    # assert the signature that happened to run last "is catastrophically
+    # backtracking (ReDoS)" - here that signature is a trivial string_literal
+    # that cannot backtrack and is not even a regex. It must still fail loud, name
+    # BOTH causes, and report the line length (the discriminator). Reproduced
+    # against the shipped code before the fix: the old message falsely blamed this
+    # innocent linear signature and told the operator to linearize a non-regex.
+    import static.signatures as sig_mod
+    monkeypatch.setattr(sig_mod, "LINE_MATCH_BUDGET_SECONDS", 0.0)
+    (tmp_path / "Main.java").write_text("class A { String s = \"x\"; }\n")
+
+    innocent = tmp_path / "innocent.yaml"
+    innocent.write_text(
+        "- id: innocent_linear_marker\n"
+        "  category: root\n"
+        "  weight: 0.5\n"
+        "  pattern_type: string_literal\n"
+        "  patterns:\n"
+        "    - 'su'\n"
+        "  evidence_type: bytecode_string\n",
+        encoding="utf-8",
+    )
+    sigs = load_signatures(innocent)
+
+    with pytest.raises(TimeoutError) as excinfo:
+        scan(tmp_path, sigs)
+    msg = str(excinfo.value)
+    assert "is catastrophically backtracking" not in msg     # no false specific-cause claim
+    assert "chars)" in msg                                    # line length surfaced
+    assert "either" in msg and "unusually long line" in msg   # both causes named
+    assert "innocent_linear_marker" in msg                    # named as executing, not blamed
 
 
 def test_scan_raises_loudly_on_multiline_regex_backtracking_budget(tmp_path, monkeypatch):

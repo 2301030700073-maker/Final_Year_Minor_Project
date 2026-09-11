@@ -584,11 +584,32 @@ def scan(
                     # line means a hand-authored rule is backtracking quadratically,
                     # so scan() raises loudly instead of hanging the whole pipeline.
                     if time.monotonic() - line_start > LINE_MATCH_BUDGET_SECONDS:
+                        # The budget is cumulative across ALL signatures on this one
+                        # line (line_start is per line), so two distinct causes reach
+                        # this raise: a single catastrophically-backtracking regex, OR
+                        # the aggregate cost of every signature over an unusually long
+                        # line (a minified .js/.bundle can be one multi-MB line, and
+                        # those suffixes are scanned). Report the measured facts - the
+                        # line LENGTH is the discriminator between the two - and name
+                        # the signature that was EXECUTING when the budget tripped
+                        # WITHOUT asserting it is the culprit: it may be a perfectly
+                        # linear rule (even a non-regex string_literal) that merely ran
+                        # last, so the old "signature X is catastrophically backtracking
+                        # (ReDoS)" was a false specific-cause claim (principle 3). Still
+                        # fail loud (NFR-1); the budget itself is unchanged. The
+                        # multiline pass below times each signature on its own
+                        # (match_start is per signature), so its message CAN name the
+                        # responsible signature and does.
                         raise TimeoutError(
-                            f"static scan: matching line {line_number} of "
-                            f"{file_path.name} took > {LINE_MATCH_BUDGET_SECONDS:.1f}s - "
-                            f"signature '{signature.id}' is catastrophically backtracking "
-                            f"(ReDoS). The regex must be linearized; see signatures.py."
+                            f"static scan: matching line {line_number} "
+                            f"({len(line)} chars) of {file_path.name} against "
+                            f"{len(signatures)} signatures took > "
+                            f"{LINE_MATCH_BUDGET_SECONDS:.1f}s (executing signature "
+                            f"'{signature.id}' when the budget tripped). Cause is "
+                            f"either a catastrophically-backtracking regex or the "
+                            f"aggregate matching cost over an unusually long line - "
+                            f"the line length above is the discriminator. Linearize "
+                            f"the offending regex or split the input; see signatures.py."
                         )
                     if matched_text is None:
                         continue

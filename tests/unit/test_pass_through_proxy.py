@@ -1,12 +1,22 @@
 """Wrapper-contract tests for the pass-through (non-MITM) proxy module.
 
-The pass-through script's pure logic (asyncio CONNECT tunnel, origin-form HTTP
-forwarding) is stdlib-only and is validated by a real run on the Windows host -
-not mocked (project principle 3). These tests cover the no-tool paths and the
-exact powershell launch/stop command shapes, matching test_mitmproxy_capture.py.
+The pass-through script's pure logic (asyncio CONNECT tunnel, absolute-form ->
+origin-form HTTP rewrite) is stdlib-only, so these tests exercise the SHIPPED
+script for real, end-to-end against loopback sockets (a genuine execution of the
+real code, not a mock - principle 3), in addition to the no-tool wrapper paths
+and the exact powershell launch/stop command shapes (matching
+test_mitmproxy_capture.py). The Windows-host run remains the integration record
+for the device path itself; these local runs guard the script's own logic - the
+device's ONLY outbound path on WSL2 - against regressions the compile+substring
+check below cannot catch.
 """
 
+import contextlib
+import socket
 import subprocess
+import sys
+import threading
+import time
 
 import pytest
 
@@ -22,6 +32,137 @@ def test_script_template_is_valid_python_and_handles_connect():
     assert "200 Connection established" in ptp._PASSTHROUGH_SCRIPT
     assert "urlsplit" in ptp._PASSTHROUGH_SCRIPT
     assert "asyncio.start_server" in ptp._PASSTHROUGH_SCRIPT
+
+
+def _free_port() -> int:
+    """A currently-free loopback TCP port (bind :0, read it back, release)."""
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+@contextlib.contextmanager
+def _running_passthrough(tmp_path):
+    """Start the REAL embedded pass-through script as a subprocess on a free
+    loopback port and yield that port. stdlib-only, so it runs anywhere with no
+    device/Windows host - a genuine execution of the shipped script, not a mock
+    (principle 3). Terminates the subprocess on exit."""
+    port = _free_port()
+    script = tmp_path / "pt.py"
+    ptp._write_windows_passthrough(script)
+    proc = subprocess.Popen([sys.executable, str(script), str(port)])
+    try:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+                break
+            except OSError:
+                time.sleep(0.05)
+        else:
+            raise RuntimeError("embedded pass-through proxy did not start listening")
+        yield port
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def test_passthrough_script_rewrites_absolute_form_to_origin_form(tmp_path):
+    # Real end-to-end run of the SHIPPED script (not a mock): a client sends an
+    # absolute-form request line (the form a client sends to an EXPLICIT proxy,
+    # RFC 7230 5.3.2 - what commit 062a59329 corrected the docstring to), and the
+    # upstream must receive it rewritten to ORIGIN form with the query intact.
+    # This is the device's ONLY internet path on WSL2, so a regression here (a
+    # dropped query, a lost path-fallback, or forwarding absolute-form verbatim)
+    # silently breaks every capture run - the compile/substring test above catches
+    # none of those.
+    captured = {}
+    up_port = _free_port()
+
+    def _upstream():
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", up_port))
+        srv.listen(1)
+        srv.settimeout(10)
+        conn, _ = srv.accept()
+        conn.settimeout(5)
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        captured["raw"] = data
+        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
+        conn.close()
+        srv.close()
+
+    t = threading.Thread(target=_upstream, daemon=True)
+    t.start()
+    with _running_passthrough(tmp_path) as proxy_port:
+        cli = socket.create_connection(("127.0.0.1", proxy_port), timeout=5)
+        cli.sendall(
+            f"GET http://127.0.0.1:{up_port}/path?q=1 HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{up_port}\r\n\r\n".encode())
+        cli.settimeout(5)
+        resp = b""
+        try:
+            while True:
+                buf = cli.recv(4096)
+                if not buf:
+                    break
+                resp += buf
+        except socket.timeout:
+            pass
+        cli.close()
+    t.join(timeout=5)
+
+    first_line = captured.get("raw", b"").split(b"\r\n", 1)[0]
+    assert first_line == b"GET /path?q=1 HTTP/1.1"   # origin-form, query intact
+    assert b"http://" not in first_line              # absolute-form NOT leaked upstream
+    assert resp.startswith(b"HTTP/1.1 200 OK")       # upstream reply tunneled back
+
+
+def test_passthrough_script_connect_tunnels_bytes_transparently(tmp_path):
+    # The HTTPS path: CONNECT must open a TRANSPARENT byte tunnel - no cert swap,
+    # no decryption (that is the whole point of the pass-through vs the capture
+    # proxy: pinning apps must keep working). Prove raw bytes flow both ways after
+    # the 200 against a real echo upstream; a regression that altered/MITM'd the
+    # stream would fail the byte-for-byte echo.
+    up_port = _free_port()
+
+    def _echo_upstream():
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", up_port))
+        srv.listen(1)
+        srv.settimeout(10)
+        conn, _ = srv.accept()
+        conn.settimeout(5)
+        conn.sendall(conn.recv(4096))  # echo whatever the tunnel delivers
+        conn.close()
+        srv.close()
+
+    t = threading.Thread(target=_echo_upstream, daemon=True)
+    t.start()
+    with _running_passthrough(tmp_path) as proxy_port:
+        cli = socket.create_connection(("127.0.0.1", proxy_port), timeout=5)
+        cli.sendall(f"CONNECT 127.0.0.1:{up_port} HTTP/1.1\r\n\r\n".encode())
+        cli.settimeout(5)
+        established = cli.recv(4096)
+        assert established.startswith(b"HTTP/1.1 200"), established  # tunnel opened
+        cli.sendall(b"PING-THROUGH-TUNNEL")
+        echoed = cli.recv(4096)
+        cli.close()
+    t.join(timeout=5)
+
+    assert echoed == b"PING-THROUGH-TUNNEL"  # raw bytes tunneled untouched (no MITM)
 
 
 def test_write_windows_passthrough_writes_script(tmp_path):

@@ -1648,8 +1648,11 @@ def _capture_stage(flows):
 
 
 class _Flow:
-    def __init__(self, host, method, path, status):
+    def __init__(self, host, method, path, status, scheme="https"):
         self.host, self.method, self.path, self.status = host, method, path, status
+        # A flow captured (decrypted) through the MITM proxy is HTTPS; default to
+        # that so the existing decrypted-HTTPS pinning-defeat assertions still hold.
+        self.scheme = scheme
 
 
 def test_captured_traffic_strong_claim_only_when_ssl_confirmed(tmp_path):
@@ -1719,7 +1722,7 @@ def test_handshake_line_reconciles_captured_flows(tmp_path):
     # not _Flow objects. The host list must derive from those dicts - a Python
     # getattr(dict, 'host') is always None and would blank the "(hosts: ...)"
     # preview. Pin that regression here.
-    dict_flows = [{"host": "api.propertyguru.com", "method": "GET", "path": "/v1/data", "status": 304}]
+    dict_flows = [{"host": "api.propertyguru.com", "method": "GET", "path": "/v1/data", "status": 304, "scheme": "https"}]
     dict_note = generate_report(
         run_id="cap-hs-dict", apk_hash="cap004", timestamp="2026-08-21T12:00:00",
         metadata={"hashes": {"sha256": "cap004"}, "package": {"package_name": "app"}},
@@ -1734,6 +1737,96 @@ def test_handshake_line_reconciles_captured_flows(tmp_path):
     )
     dict_text = dict_note.read_text(encoding="utf-8")
     assert "hosts: api.propertyguru.com" in dict_text
+
+
+# --- Capture transport (http vs https): never mislabel cleartext as a pinning
+# --- defeat proof (Principle 3 / ADR-0006) -------------------------------------
+
+
+def test_capture_all_https_flows_render_decrypted_transport_no_cleartext_callout(tmp_path):
+    # All captured flows are proxy-decrypted HTTPS: the pinning-defeat header is
+    # correct, every row's Transport reads "HTTPS (decrypted)", and no cleartext
+    # callout appears (there was no cleartext HTTP to warn about).
+    flows = [
+        {"host": "api.example.com", "method": "GET", "path": "/v1/me", "status": 200, "scheme": "https"},
+        {"host": "cdn.example.com", "method": "GET", "path": "/asset.js", "status": 200, "scheme": "https"},
+    ]
+    out = generate_report(
+        run_id="cap-https", apk_hash="caphttps", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "caphttps"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={}),
+        correlation=None,
+        stage_results=[_capture_stage(flows)], output_dir=tmp_path,
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "live proof that SSL-pinning was actually defeated" in text
+    assert "HTTPS (decrypted)" in text
+    assert "HTTP (cleartext)" not in text
+    assert "Cleartext HTTP observed" not in text
+
+
+def test_capture_mixed_http_https_distinguishes_transport_and_flags_cleartext(tmp_path):
+    # A run that captured BOTH a decrypted HTTPS flow and a cleartext HTTP flow:
+    # the table distinguishes the two transports; the decrypted HTTPS flow still
+    # carries the pinning-defeat claim; and the cleartext HTTP flow gets a distinct
+    # callout that (a) says it is NOT pinning-defeat proof and (b) surfaces the
+    # sensitive URL query parameter sent in the clear - the finding this phase
+    # exists to surface, never mislabeled as decrypted-HTTPS proof.
+    flows = [
+        {"host": "api.example.com", "method": "GET", "path": "/v1/me", "status": 200, "scheme": "https"},
+        {"host": "analytics.example.com", "method": "POST", "path": "/track?uid=SECRET", "status": 200, "scheme": "http"},
+    ]
+    out = generate_report(
+        run_id="cap-mixed", apk_hash="capmixed", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "capmixed"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={}),
+        correlation=None,
+        stage_results=[_capture_stage(flows)], output_dir=tmp_path,
+    )
+    text = out.read_text(encoding="utf-8")
+    # Both transports are rendered distinctly in the table.
+    assert "HTTPS (decrypted)" in text
+    assert "HTTP (cleartext)" in text
+    # The decrypted HTTPS flow still carries the pinning-defeat claim.
+    assert "live proof that SSL-pinning was actually defeated" in text
+    # The cleartext HTTP flow gets its own callout: explicitly NOT pinning-defeat
+    # proof, and it surfaces the query parameter exposed in the clear.
+    assert "Cleartext HTTP observed" in text
+    assert "were sent WITHOUT TLS" in text
+    assert "including URL query parameters" in text
+    assert "uid=SECRET" in text
+
+
+def test_capture_all_cleartext_http_never_claims_pinning_defeat(tmp_path):
+    # THE honesty defect this change fixes: a run whose ONLY captured flows are
+    # cleartext HTTP must never render "SSL-pinning was actually defeated" - even
+    # when the dynamic stage's own verdict confirmed SSL bypass by OTHER evidence
+    # (ssl_bypassed=True). The capture section reports what the CAPTURE showed:
+    # zero HTTPS decrypted this run, so the capture is not the pinning-defeat proof
+    # (nothing was decrypted - no TLS), and the cleartext transmission is itself a
+    # finding.
+    flows = [
+        {"host": "analytics.example.com", "method": "POST", "path": "/track?uid=SECRET", "status": 200, "scheme": "http"},
+    ]
+    out = generate_report(
+        run_id="cap-clear", apk_hash="capclear", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "capclear"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={}),
+        correlation=None,
+        stage_results=[_capture_stage(flows)], output_dir=tmp_path,
+    )
+    text = out.read_text(encoding="utf-8")
+    # The exact strong-claim phrase is unique to the decrypted-HTTPS header (line
+    # 384); the synthesizer note's "root/SSL check was actually defeated" does not
+    # match it, so this assertion is precisely scoped.
+    assert "SSL-pinning was actually defeated" not in text
+    assert "No HTTPS flow was decrypted this run" in text
+    assert "This is not proof of SSL-pinning defeat" in text
+    assert "HTTP (cleartext)" in text
+    assert "Cleartext HTTP observed" in text
 
 
 # --- G2: report names which decompiler(s) actually produced the sources --------

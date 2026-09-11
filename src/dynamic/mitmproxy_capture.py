@@ -146,6 +146,11 @@ class FlowSummary:
     method: str
     path: str
     status: str
+    # Transport scheme ("http" / "https", "" if unparseable). A cleartext http://
+    # flow is NOT proxy-decrypted HTTPS and is NOT proof of pinning defeat, so the
+    # report must be able to tell the two apart (default keeps direct construction
+    # in older callers/tests working unchanged).
+    scheme: str = ""
 
 
 def _count_client_connections(text: str) -> int:
@@ -249,6 +254,9 @@ def _parse_flow_detail(text: str) -> list[FlowSummary]:
                 parsed = urlsplit(url)
                 host = parsed.hostname or ""
                 path = parsed.path or "/"
+                # Transport scheme (http vs https): a cleartext http:// flow must
+                # not be rendered as a proxy-decrypted HTTPS pinning-defeat proof.
+                scheme = (parsed.scheme or "").lower()
                 # Preserve the query string: it is part of the request target the
                 # app actually put on the wire, and for a traffic-capture security
                 # tool it is often the whole point - an auth token, session id, or
@@ -261,7 +269,7 @@ def _parse_flow_detail(text: str) -> list[FlowSummary]:
                 if parsed.query:
                     path = f"{path}?{parsed.query}"
             except ValueError:
-                host, path = "", "/"
+                host, path, scheme = "", "/", ""
             # A new request while one is still pending means the prior request
             # never got its response line before this one arrived (HTTP/2
             # multiplexing or connection reuse can interleave two request lines
@@ -275,7 +283,7 @@ def _parse_flow_detail(text: str) -> list[FlowSummary]:
             # this only ever fires on the native interleaved path.)
             if pending is not None:
                 flows.append(pending)
-            pending = FlowSummary(host=host, method=method, path=path, status="")
+            pending = FlowSummary(host=host, method=method, path=path, status="", scheme=scheme)
     # Flush a request that never got a response line (e.g. failed handshake).
     if pending is not None:
         flows.append(pending)
@@ -698,7 +706,7 @@ def run_capture_stage(
                 "hosts": hosts,
                 "flow_summary": [
                     {"host": f.host, "method": f.method, "path": f.path,
-                     "status": f.status} for f in flows
+                     "status": f.status, "scheme": f.scheme} for f in flows
                 ],
                 "flows_path": str(flows_path),
                 "system_ca": system_ca,

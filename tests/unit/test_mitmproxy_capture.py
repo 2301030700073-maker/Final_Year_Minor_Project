@@ -61,6 +61,42 @@ def test_parse_flow_detail_preserves_query_string():
     assert flows[0].status == "200"
 
 
+def test_parse_flow_detail_captures_transport_scheme():
+    # A cleartext http:// flow and a proxy-decrypted https:// flow are captured as
+    # DISTINCT transports so the report never renders a cleartext HTTP request as
+    # decrypted-HTTPS pinning-defeat proof (principle 3 / ADR-0006). scheme is
+    # lowercased at parse time.
+    text = (
+        "127.0.0.1:1: GET https://api.example.com/v1/me HTTP/2.0\n"
+        " << HTTP/2.0 200 OK 12b\n"
+        "127.0.0.1:2: POST http://analytics.example.com/track?uid=SECRET HTTP/1.1\n"
+        " << HTTP/1.1 200 OK 0b\n"
+    )
+    flows = mitmproxy_capture._parse_flow_detail(text)
+    assert len(flows) == 2
+    assert flows[0].scheme == "https"
+    assert flows[1].scheme == "http"
+    # The two flows in FIXTURE_DETAIL are both HTTPS.
+    fixture = mitmproxy_capture._parse_flow_detail(FIXTURE_DETAIL)
+    assert [f.scheme for f in fixture] == ["https", "https"]
+
+
+def test_parse_flow_detail_malformed_url_yields_empty_scheme():
+    # A URL that fails to parse (malformed IPv6 literal -> urlsplit raises
+    # ValueError) hits the except path: the request is still recorded (never
+    # silently dropped - principle 3), but with an empty scheme so it can never be
+    # counted as a decrypted-HTTPS flow and never inflate a pinning-defeat claim.
+    text = (
+        "127.0.0.1:1: GET http://[::1/broken HTTP/1.1\n"
+        " << HTTP/1.1 200 OK 0b\n"
+    )
+    flows = mitmproxy_capture._parse_flow_detail(text)
+    assert len(flows) == 1
+    assert flows[0].scheme == ""
+    assert flows[0].host == ""
+    assert flows[0].method == "GET"
+
+
 def test_parse_flow_detail_reads_the_wsl2_addon_reason_phraseless_response(tmp_path):
     # PRODUCER <-> CONSUMER format contract. On WSL2 the flow log is written by the
     # baked-in mitmdump addon (_write_windows_addon / _ADDON_TEMPLATE), NOT by a
@@ -377,6 +413,10 @@ def test_run_capture_stage_success_records_real_flows(monkeypatch, tmp_path):
     assert result.evidence["flows_count"] == 2
     assert result.evidence["hosts"] == ["api.example.com", "example.com"]
     assert result.evidence["flows_path"].endswith(".mitm")
+    # Transport scheme round-trips into the stored evidence so the report can tell
+    # a proxy-decrypted HTTPS flow from a cleartext HTTP one (principle 3). Both
+    # FIXTURE_DETAIL flows are HTTPS.
+    assert [f["scheme"] for f in result.evidence["flow_summary"]] == ["https", "https"]
 
 
 def test_run_capture_stage_fails_honestly_when_no_flows(monkeypatch, tmp_path):

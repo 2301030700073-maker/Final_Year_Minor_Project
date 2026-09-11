@@ -379,19 +379,26 @@ string in this APK; only its *ownership* is unverified.
 ## Captured Traffic
 
 {% if capture_flows -%}
+{% if capture_decrypted_flows -%}
 {% if verification and verification.ssl_bypassed is true -%}
-Real decrypted HTTPS flows observed while the app ran through the mitmproxy capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`). This is the live proof that SSL-pinning was actually defeated - the app sent plaintext (proxy-decrypted) requests the device accepted:
+Real decrypted HTTPS flows observed while the app ran through the mitmproxy capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`). This is the live proof that SSL-pinning was actually defeated - the app sent HTTPS requests the proxy decrypted (Transport = HTTPS below) and the device accepted:
 {% else -%}
-The app accepted proxy-decrypted HTTPS flows through the capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`) - SSL pinning was not enforced on the hosts below. This is partial evidence, not full confirmation: the app's own pin-check was not confirmed in this run ({{ 'inconclusive' if verification and verification.ssl_bypassed is none else 'not verified' }}), so a pinned endpoint that never spoke during the run is not ruled out.
+The app accepted proxy-decrypted HTTPS flows through the capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`) - SSL pinning was not enforced on the HTTPS hosts below (Transport = HTTPS). This is partial evidence, not full confirmation: the app's own pin-check was not confirmed in this run ({{ 'inconclusive' if verification and verification.ssl_bypassed is none else 'not verified' }}), so a pinned endpoint that never spoke during the run is not ruled out.
+{% endif -%}
+{% else -%}
+No HTTPS flow was decrypted this run - every captured flow below was sent over cleartext HTTP (or a non-HTTPS transport). **This is not proof of SSL-pinning defeat**: there was no TLS handshake to pin or bypass. The cleartext transmission is itself a finding (see below).
 {% endif %}
 
-| Host | Method | Path | Status |
-|---|---|---|---|
+| Host | Transport | Method | Path | Status |
+|---|---|---|---|---|
 {% for f in capture_flows -%}
-| {{ f.host | md }} | {{ f.method | md }} | {{ f.path | md }} | {{ f.status | md }} |
+| {{ f.host | md }} | {% if f.scheme == 'https' %}HTTPS (decrypted){% elif f.scheme == 'http' %}HTTP (cleartext){% else %}{{ f.scheme | md }}{% endif %} | {{ f.method | md }} | {{ f.path | md }} | {{ f.status | md }} |
 {% endfor %}
 
 Raw flow file: `{{ capture_flows_path }}`
+{% if capture_cleartext_flows -%}
+> **Cleartext HTTP observed ({{ capture_cleartext_flows | length }} flow(s)):** the `HTTP (cleartext)` rows above were sent WITHOUT TLS. They are **not** evidence of SSL-pinning defeat (there was no TLS handshake to pin or bypass), but cleartext transmission is itself a finding: any credential, token, session id, or PII in those requests — **including URL query parameters** — was exposed in plaintext on the wire to any on-path observer.
+{% endif -%}
 {% if capture_bypass_script_errors %}
 > **Partial capture:** the injected pinning-bypass script raised {{ capture_bypass_script_errors | length }} uncaught error(s) during this otherwise-successful capture ({{ capture_bypass_script_errors | join("; ") }}). Flows were still decrypted, but a crashed hook can leave some pinned endpoints unbypassed and therefore uncaptured — **treat the flow list above as a lower bound, not a complete inventory of the app's traffic.**
 {% endif -%}
@@ -811,6 +818,11 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
         return {
             "capture_present": False, "capture_reason": None,
             "capture_flows": [], "capture_hosts": [],
+            # No capture stage ran, so there are no flows to split by transport
+            # scheme: empty lists keep the SAME key set as the present path
+            # (RPT-TMPLCOV1) so the template's decrypted-header and cleartext-callout
+            # gates never reference an undefined var.
+            "capture_decrypted_flows": [], "capture_cleartext_flows": [],
             "capture_flows_path": None, "capture_system_ca": None,
             "capture_proxy": None,
             # No capture stage ran this run, so no device-side reachability probe
@@ -842,6 +854,19 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
         }
     evidence = capture_stage.evidence or {}
     flows = evidence.get("flow_summary") or []
+    # Split captured flows by transport so the report can scope its pinning-defeat
+    # claim to the flows that were ACTUALLY decrypted (https) and surface cleartext
+    # http as a distinct finding that is NOT pinning-defeat proof (no TLS handshake
+    # to pin/bypass). A flow whose URL did not parse has scheme "" and counts as
+    # NEITHER - it can never inflate a decrypted-HTTPS pinning-defeat claim.
+    # Mirror _flow_host's dict-or-object access below: production flow_summary
+    # rows are dicts, but the template reads f.scheme via Jinja's dict fallback,
+    # so a bare Python .get() here would crash on an object-shaped flow. Lowercase
+    # to match the scheme captured at parse time and stay case-robust.
+    def _flow_scheme(f) -> str:
+        return ((f.get("scheme") if isinstance(f, dict) else getattr(f, "scheme", None)) or "").lower()
+    decrypted_flows = [f for f in flows if _flow_scheme(f) == "https"]
+    cleartext_flows = [f for f in flows if _flow_scheme(f) == "http"]
     return {
         "capture_present": True,
         "capture_reason": evidence.get("reason"),
@@ -861,6 +886,8 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
         "capture_not_applicable": capture_stage.status == "skipped",
         "capture_not_applicable_reason": evidence.get("not_applicable_reason"),
         "capture_flows": flows,
+        "capture_decrypted_flows": decrypted_flows,
+        "capture_cleartext_flows": cleartext_flows,
         "capture_hosts": evidence.get("hosts") or [],
         "capture_flows_path": evidence.get("flows_path"),
         "capture_system_ca": evidence.get("system_ca"),

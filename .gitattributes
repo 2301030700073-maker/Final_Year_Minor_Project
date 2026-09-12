@@ -1,0 +1,52 @@
+# Line-ending policy (single source of truth for every platform).
+#
+# Why this file exists: the project is edited on Windows and run on WSL2
+# Ubuntu. With no .gitattributes and core.autocrlf=true on the Windows side,
+# git synthesized CRLF on checkout there while the same files are LF on Linux,
+# so `git status` reported a pile of files as "modified" that had not changed
+# by a single byte (`git hash-object <f>` == `git rev-parse HEAD:<f>`). That
+# noise makes a real change hard to spot, which is exactly what the project's
+# fail-loud discipline exists to prevent.
+#
+# The repository already stores LF (verified: zero 0x0d bytes in the tracked
+# blobs), so `eol=lf` states the existing truth rather than rewriting history.
+# Nothing is normalized on the way in or out, and the working tree stops
+# disagreeing with the index.
+
+# Default: text files are stored as LF and checked out as LF everywhere, so the
+# Windows and Ubuntu checkouts of the same commit are byte-identical.
+* text=auto eol=lf
+
+# Shell scripts must be LF. A CRLF shebang (`#!/bin/sh\r`) makes the kernel
+# look for a interpreter literally named "sh\r" and the script fails to run on
+# the Linux side. These are executed directly in the reference environment.
+*.sh text eol=lf
+
+# Windows-only launchers must stay CRLF - cmd.exe tolerates a bare LF poorly
+# and the vendored jadx/apktool wrappers are expected to look native there.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Source, config and docs: LF, consistent with the rest of the tree.
+*.py     text eol=lf
+*.md     text eol=lf
+*.txt    text eol=lf
+*.json   text eol=lf
+*.ya?ml  text eol=lf
+*.toml   text eol=lf
+*.ini    text eol=lf
+*.cfg    text eol=lf
+*.js     text eol=lf
+
+# Binary - never touch these. An APK re-encoded as text is a corrupt APK, and
+# the .so files inside are ELF images, not text.
+*.apk    binary
+*.jar    binary
+*.zip    binary
+*.so     binary
+*.dex    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.webp   binary
+*.ico    binary

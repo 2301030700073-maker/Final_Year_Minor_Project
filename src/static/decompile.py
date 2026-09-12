@@ -34,6 +34,17 @@ from pathlib import Path
 
 from common import StageResult, sha256_bytes, elapsed_ms, require_tool
 
+# The host platform, captured ONCE at import. WINLAUNCH1 needs the launcher
+# order to differ per platform, but `_launcher_candidates` must not read
+# `os.name` live: tests that need to exercise the Windows branch would have to
+# monkeypatch `os.name`, and `monkeypatch.setattr(decompile.os, "name", "nt")`
+# mutates the ONE global `os` module process-wide - which flips pathlib into
+# instantiating WindowsPath on a POSIX host and crashes pytest's own cache
+# teardown ("cannot instantiate 'WindowsPath' on your system"). An import-time
+# constant is a single source of truth AND is stubbable per-module without
+# touching global interpreter state.
+IS_WINDOWS = os.name == "nt"
+
 STATUS_SIDECAR_NAME = "decompile_status.json"
 
 # D1: hard ceilings so a hung tool fails loudly instead of hanging forever.
@@ -125,7 +136,7 @@ def _launcher_candidates(base: Path, stem: str) -> list[Path]:
     Fix: order candidates by platform. On Windows try the `.bat`/`.cmd`/`.exe`
     forms first; on POSIX try the extensionless form first. Extensionless stays
     in both lists so a repo that vendors only one form still resolves."""
-    if os.name == "nt":
+    if IS_WINDOWS:
         order = [f"{stem}.bat", f"{stem}.cmd", f"{stem}.exe", stem]
     else:
         order = [stem, f"{stem}.sh", f"{stem}.bat", f"{stem}.cmd"]

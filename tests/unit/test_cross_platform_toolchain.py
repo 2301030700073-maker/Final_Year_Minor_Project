@@ -38,7 +38,11 @@ from static.decompile import _launcher_candidates
 def test_launcher_candidates_prefers_bat_on_windows(monkeypatch):
     import static.decompile as d
 
-    monkeypatch.setattr(d.os, "name", "nt", raising=False)
+    # Patch the module's own import-time platform flag. Do NOT patch os.name:
+    # `d.os` IS the global os module, so that would flip pathlib into
+    # instantiating WindowsPath on a POSIX host and crash pytest's cache
+    # teardown with "cannot instantiate 'WindowsPath' on your system".
+    monkeypatch.setattr(d, "IS_WINDOWS", True)
     cands = _launcher_candidates(Path("/repo/tools/jadx/bin"), "jadx")
     # The Windows-executable form must come FIRST on Windows - an extensionless
     # POSIX script is not executable there (WinError 193).
@@ -71,7 +75,9 @@ def test_find_jadx_returns_windows_executable_form(tmp_path, monkeypatch):
     (bin_dir / "jadx").write_text("#!/bin/sh\n", encoding="utf-8")
     (bin_dir / "jadx.bat").write_text("@echo off\n", encoding="utf-8")
 
-    monkeypatch.setattr(d.os, "name", "nt", raising=False)
+    # WINLAUNCH1 branch under test is Windows; patch the module flag, not the
+    # global os.name (see test_launcher_candidates_prefers_bat_on_windows).
+    monkeypatch.setattr(d, "IS_WINDOWS", True)
     # _find_jadx computes <repo> from Path(__file__).resolve().parents[2]. Point
     # __file__ at <tmp>/src/static/decompile.py so parents[2] is <tmp>, which
     # contains the tools/jadx/bin tree created above.

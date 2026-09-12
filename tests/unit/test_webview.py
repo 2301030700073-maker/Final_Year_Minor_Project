@@ -1,5 +1,6 @@
 """Pure WebView JS-bridge / remote-JS detection - no device, no toolchain, testable anywhere."""
 
+import os
 from pathlib import Path
 
 from static import webview
@@ -112,14 +113,29 @@ def test_empty_corpus():
 
 
 def test_skips_unreadable_file(tmp_path):
-    p = _write(tmp_path, "J.java", 'web.loadUrl("https://x.example.com/");')
-    p.chmod(0o000)
-    try:
-        sites, remote = webview.find_webview_js([p])
-        assert sites == []
-        assert remote is False
-    finally:
-        p.chmod(0o644)
+    # NFR: an unreadable source degrades per-file, never raises the scan.
+    #
+    # PLATFORM: chmod(0o000) is the natural way to make a file unreadable, but
+    # it is a NO-OP on Windows - the mode reads back 0o444 (the read-only
+    # attribute) and read_text still succeeds, so an unconditional chmod
+    # assertion exercises nothing there. A DIRECTORY in place of a file raises
+    # OSError on every platform, so it pins the same skip branch everywhere;
+    # the chmod case is kept for POSIX, where it is the real mechanism.
+    unreadable = tmp_path / "J_unreadable.java"
+    unreadable.mkdir()
+    sites, remote = webview.find_webview_js([unreadable])
+    assert sites == []
+    assert remote is False
+
+    if os.name == "posix":
+        p = _write(tmp_path, "J.java", 'web.loadUrl("https://x.example.com/");')
+        p.chmod(0o000)
+        try:
+            sites, remote = webview.find_webview_js([p])
+            assert sites == []
+            assert remote is False
+        finally:
+            p.chmod(0o644)
 
 
 def _write_at(tmp_path: Path, relpath: str, text: str) -> Path:

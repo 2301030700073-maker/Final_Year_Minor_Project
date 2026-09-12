@@ -100,7 +100,7 @@ def test_decompile_takes_lazy_per_dex_path_for_real_zip(tmp_path, monkeypatch):
     # Prepend bindir so shutil.which finds the fakes, but KEEP the system PATH so
     # the fakes' own internals (mkdir/echo) still resolve - replacing PATH
     # outright breaks the #!/bin/sh helper scripts' commands.
-    monkeypatch.setenv("PATH", f"{bindir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(bindir), os.environ.get("PATH", "")]))
 
     result = decompile(apk, tmp_path, apk_hash)
     assert result.status == "success"
@@ -139,7 +139,7 @@ def test_per_dex_partial_jadx_exit_degrades_completeness(tmp_path, monkeypatch):
     )
     (bindir / "jadx").chmod(0o755)
     (bindir / "apktool").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bindir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(bindir), os.environ.get("PATH", "")]))
 
     result = decompile(apk, tmp_path, apk_hash)
     assert result.evidence.get("lazy_decompile") is True
@@ -196,7 +196,7 @@ def test_per_dex_cfr_recovery_lifts_aggregate_to_clean(tmp_path, monkeypatch):
         "exit 1\n"  # jadx writes a real file but reports failure (AndroidX bug)
     )
     jadx.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bindir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(bindir), os.environ.get("PATH", "")]))
 
     rc, count, units, fb = dm._decompile_dexes(apk, tmp_path / "tgt", dex_entries, str(jadx))
     assert rc == 0                                  # recovered dex is not a hole
@@ -227,7 +227,7 @@ def test_per_dex_unrecovered_jadx_failure_stays_partial(tmp_path, monkeypatch):
         "exit 1\n"
     )
     jadx.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bindir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(bindir), os.environ.get("PATH", "")]))
 
     rc, count, units, fb = dm._decompile_dexes(apk, tmp_path / "tgt2", dex_entries, str(jadx))
     assert rc == 1

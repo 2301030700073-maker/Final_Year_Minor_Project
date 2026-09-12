@@ -6,6 +6,7 @@ the STRICT conservative JNI-name matching (never a false `resolved` - ADR-0006),
 and the coverage degradation an unresolved binding forces. Pure module: fixtures
 only, no toolchain (NFR)."""
 
+import os
 from pathlib import Path
 
 from static.jnibridge import (
@@ -75,13 +76,25 @@ def test_extract_dedupes_same_class_method_across_modules(tmp_path):
 
 def test_extract_skips_unreadable_file(tmp_path):
     # NFR: an unreadable/missing file degrades per-file, never raises the extract.
-    f = tmp_path / "A.java"
-    f.write_text("package p;\nclass A { native void x(); }\n")
-    f.chmod(0o000)
-    try:
-        assert extract_declared_natives([f, tmp_path / "missing.java"]) == []
-    finally:
-        f.chmod(0o644)
+    #
+    # PLATFORM: chmod(0o000) is a NO-OP on Windows (the mode reads back 0o444 and
+    # the read still succeeds), so an unconditional chmod assertion would leave
+    # the skip branch untested there. A directory in place of a file raises
+    # OSError on every platform and pins the same branch; the missing-file case
+    # covers the other half of that OSError path and works everywhere. The chmod
+    # case is kept under POSIX, where it is the real mechanism.
+    unreadable = tmp_path / "A_unreadable.java"
+    unreadable.mkdir()
+    assert extract_declared_natives([unreadable, tmp_path / "missing.java"]) == []
+
+    if os.name == "posix":
+        f = tmp_path / "A.java"
+        f.write_text("package p;\nclass A { native void x(); }\n")
+        f.chmod(0o000)
+        try:
+            assert extract_declared_natives([f, tmp_path / "missing.java"]) == []
+        finally:
+            f.chmod(0o644)
 
 
 def test_resolve_binds_exact_jni_export():

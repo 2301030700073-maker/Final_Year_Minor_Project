@@ -19,16 +19,19 @@ no-ops (principle 3).
 from __future__ import annotations
 
 import concurrent.futures
+import fnmatch
 import hashlib
 import os
 import re
+import shutil
 import subprocess
+import zipfile
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import yaml
 
-from common import CATEGORIES, KNOWN_NATIVE_LIBS, Evidence, atomic_json_write, load_json_cache, load_yaml_entries, sha256_file, require_tool, read_text_ignore
+from common import CATEGORIES, KNOWN_NATIVE_LIBS, Evidence, atomic_json_write, load_json_cache, load_yaml_entries, sha256_file, read_text_ignore
 from static.coverage import _min_coverage
 from static.indicators import find_native_indicator_categories
 from static.signatures import (
@@ -1084,30 +1087,53 @@ def unaccounted_native_loads(load_targets: list[str], analyzed_names: set[str]) 
 
 def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
     """Extract lib/<abi>/*.so (and, boundary-4, assets/*.so) from the APK into
-    dest_root. Returns the .so paths. Uses `unzip` (present in the reference
-    toolchain); fails loudly if absent. Two structured, dir-PRESERVING passes
-    only (H5) - a previous `-j` flatten pass dumped ABI-less copies into the same
-    dir, which rglob picked up with abi="unknown", dragging a clean native surface
-    down via _min_coverage. assets/*.so keeps its assets/ dir (abi reads
-    "unknown"), so a loaded-from-assets lib is examined rather than silently
-    missed; callers gate which assets libs to analyze on actual System.load
-    targets (find_external_native_loads) to avoid analyzing never-loaded assets."""
-    unzip = require_tool("unzip")
+    dest_root. Returns the .so paths. Prefers `unzip` when present (the reference
+    toolchain) and falls back to the stdlib `zipfile` module otherwise - an APK
+    IS a zip, so the in-process path is a complete substitute, not a degraded
+    one (WINBINUTILS1). Two structured, dir-PRESERVING passes only (H5) - a
+    previous `-j` flatten pass dumped ABI-less copies into the same dir, which
+    rglob picked up with abi="unknown", dragging a clean native surface down via
+    _min_coverage. assets/*.so keeps its assets/ dir (abi reads "unknown"), so a
+    loaded-from-assets lib is examined rather than silently missed; callers gate
+    which assets libs to analyze on actual System.load targets
+    (find_external_native_loads) to avoid analyzing never-loaded assets."""
+    unzip = shutil.which("unzip")
     dest_root = Path(dest_root)
     dest_root.mkdir(parents=True, exist_ok=True)
-    try:
-        subprocess.run(
-            [unzip, "-o", str(apk_path), "lib/*/*.so", "-d", str(dest_root)],
-            check=False, capture_output=True, text=True, timeout=UNZIP_TIMEOUT,
-        )
-        # Boundary-4: also pull native libs bundled under assets/ (a real
-        # non-standard packaging - loaded via System.load("assets/x.so")).
-        subprocess.run(
-            [unzip, "-o", str(apk_path), "assets/*.so", "-d", str(dest_root)],
-            check=False, capture_output=True, text=True, timeout=UNZIP_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
-        raise NativeToolError(f"unzip timed out after {UNZIP_TIMEOUT:.0f}s extracting {apk_path}") from None
+    # The two globs are the ONLY difference between the shell and stdlib paths -
+    # keep them in one place so both stay in sync.
+    patterns = ("lib/*/*.so", "assets/*.so")
+    if unzip is not None:
+        try:
+            for pattern in patterns:
+                subprocess.run(
+                    [unzip, "-o", str(apk_path), pattern, "-d", str(dest_root)],
+                    check=False, capture_output=True, text=True, timeout=UNZIP_TIMEOUT,
+                )
+        except subprocess.TimeoutExpired:
+            raise NativeToolError(f"unzip timed out after {UNZIP_TIMEOUT:.0f}s extracting {apk_path}") from None
+    else:
+        # Stdlib fallback: walk the APK as a zip and extract matching members
+        # preserving their in-archive paths (so lib/<abi>/ is retained exactly as
+        # unzip would). A member that fails to read is skipped rather than
+        # aborting the whole extraction - the same "nothing to scan" tolerance
+        # the unzip path has. A non-zip APK raises BadZipFile, which is surfaced
+        # as a real error (never a silent empty list).
+        try:
+            with zipfile.ZipFile(apk_path) as z:
+                members = z.namelist()
+                for pattern in patterns:
+                    for member in members:
+                        if not fnmatch.fnmatch(member, pattern):
+                            continue
+                        if member.endswith("/"):
+                            continue
+                        try:
+                            z.extract(member, dest_root)
+                        except (OSError, zipfile.BadZipFile):
+                            continue
+        except zipfile.BadZipFile as exc:
+            raise NativeToolError(f"{apk_path} is not a readable APK/zip: {exc}") from None
     # Note: unzip's return code is deliberately NOT checked here - it exits
     # non-zero when nothing matches 'lib/*/*.so' (an APK with no native libs),
     # which is a legitimate 'nothing to scan', not a failure.
@@ -1117,6 +1143,43 @@ def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
     # unscannable. is_file() guarantees only real ELF libs are analyzed.
     so_files = sorted(f for f in dest_root.rglob("*.so") if f.is_file())
     return so_files
+
+
+def _py_strings(so_path: Path, min_len: int = 4) -> list[str] | None:
+    """Pure-Python printable-string extractor (WINBINUTILS1) - the in-process
+    equivalent of `strings`, used when the POSIX binutils are not on the host.
+
+    Mirrors the classic `strings` contract: runs of printable ASCII (0x20-0x7E)
+    at least `min_len` bytes long, decoded as UTF-8 with errors ignored. The
+    native scanner matches signature patterns against this corpus, so a
+    byte-identical extraction is what matters, not binutils' exact flag surface.
+    Returns None when the file cannot be read, so the caller keeps the existing
+    fail-loud path for a genuinely unreadable lib (H1/H4).
+
+    Why this exists: `analyze_so` is documented to try its arch-agnostic
+    pyelftools path FIRST with readelf/nm as a fallback, but it called
+    require_tool("readelf"/"nm"/"strings") unconditionally at the top - so on a
+    host without binutils (any Windows dev box, a minimal container) the whole
+    native stage hard-failed before the pure-Python path could run, and the
+    pipeline halted. Decoupling the symbol layer (pyelftools) from the string
+    layer (this) means a binutils-less host still analyzes native libs
+    completely instead of refusing to scan them at all."""
+    try:
+        data = so_path.read_bytes()
+    except OSError:
+        return None
+    out: list[str] = []
+    run = bytearray()
+    for byte in data:
+        if 0x20 <= byte <= 0x7E:
+            run.append(byte)
+        else:
+            if len(run) >= min_len:
+                out.append(run.decode("utf-8", errors="ignore"))
+            run.clear()
+    if len(run) >= min_len:
+        out.append(run.decode("utf-8", errors="ignore"))
+    return out
 
 
 def _try_read_dynsym_pyelftools(so_path: Path) -> list[str] | None:
@@ -1381,9 +1444,20 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
     function bodies decompiled even with NO Java_* export, recovering a
     technique hidden inside a body (e.g. the `fork` of the ptrace/fork
     anti-debug combo)."""
-    readelf = require_tool("readelf")
-    nm = require_tool("nm")
-    strings_tool = require_tool("strings")
+    # WINBINUTILS1: readelf/nm/strings are POSIX binutils and are NOT required
+    # for a correct scan - the pyelftools symbol/section path and _py_strings
+    # are pure Python and arch-agnostic. Resolve them optionally: present -> use
+    # them (proven, battle-tested output shapes); absent -> use the in-process
+    # equivalents. Previously these were require_tool() calls, which hard-failed
+    # the native stage on any host without binutils BEFORE the pure-Python path
+    # could run - halting the whole pipeline and reporting a misleading "only
+    # runs on the reference WSL2 environment" error for what is really just a
+    # missing optional tool. Fail-loud is preserved for the cases that matter: a
+    # genuinely unreadable .so still raises NativeToolError below when neither
+    # path can read it.
+    readelf = shutil.which("readelf")
+    nm = shutil.which("nm")
+    strings_tool = shutil.which("strings")
 
     abi = so_path.parent.name if so_path.parent.name in KNOWN_ABIS else "unknown"
     name = so_path.name
@@ -1432,7 +1506,7 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
             # pyelftools read the .dynsym table arch-agnostically - the same
             # dynamic table nm -D surfaces and the source of truth for stripped.
             exports = pe_dyn
-        else:
+        elif readelf is not None:
             exports = parse_readelf_symbols(
                 _run_tool([readelf, "-Ws", str(effective_path)], READELF_TIMEOUT, "readelf")
             )
@@ -1450,18 +1524,35 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
             except NativeToolError:
                 pass  # nm unavailable for this arch: readelf exports above are complete.
             exports = dyn_exports or exports  # dynamic table is the source of truth for stripped
+        else:
+            # No pyelftools .dynsym AND no readelf: the symbol layer cannot be
+            # read here. Raise so the outer handler runs its Ghidra last-resort
+            # recovery, and if that also fails the lib is honestly unscannable -
+            # never silently treated as having no exports (which would falsely
+            # certify a confident negative, ADR-0006).
+            raise NativeToolError(
+                f"no symbol layer available for {effective_path.name}: pyelftools "
+                "returned no .dynsym and readelf is not installed"
+            )
         jni_exports = [e for e in exports if _is_jni_export(e)]
         jni_onload = bool(_JNI_LOAD_SYMBOLS & set(exports))
-        embedded = parse_strings(
-            _run_tool([strings_tool, str(effective_path)], STRINGS_TIMEOUT, "strings")
+        embedded = (
+            parse_strings(_run_tool([strings_tool, str(effective_path)], STRINGS_TIMEOUT, "strings"))
+            if strings_tool is not None
+            else (_py_strings(effective_path) or [])
         )
         # Stripped detection: pyelftools reads .symtab presence arch-agnostically
         # when available; otherwise fall back to readelf -S (G10).
         if pe_has_symtab is not None:
             stripped = not pe_has_symtab
-        else:
+        elif readelf is not None:
             sections = _run_tool([readelf, "-S", str(so_path)], READELF_TIMEOUT, "readelf")
             stripped = _is_stripped(exports, sections)
+        else:
+            # No .symtab view available at all: assume stripped (the conservative
+            # direction - a stripped lib is the more-degraded, lower-confidence
+            # state) rather than claiming a rich symbol table we never observed.
+            stripped = True
     except NativeToolError as exc:
         # We could not read this file with pyelftools/readelf/nm/strings. Before
         # certifying it `unscannable` - a confident lower bound that abandons the

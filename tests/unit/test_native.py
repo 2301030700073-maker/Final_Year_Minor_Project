@@ -681,7 +681,10 @@ def test_analyze_so_returns_unscannable_on_tool_failure(tmp_path, monkeypatch):
     def fake_run(cmd, **kwargs):
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=60)
 
-    monkeypatch.setattr(native_mod, "require_tool", fake_which)
+    # WINBINUTILS1: readelf/nm/strings are resolved with shutil.which now
+    # (they are optional - the pyelftools path runs first), so pin `which`
+    # to simulate the reference host having them.
+    monkeypatch.setattr(native_mod.shutil, "which", fake_which)
     monkeypatch.setattr(native_mod.subprocess, "run", fake_run)
 
     lib = native_mod.analyze_so(so)
@@ -708,7 +711,10 @@ def test_analyze_so_marks_unscannable_on_nonzero_returncode(tmp_path, monkeypatc
     def fake_run(cmd, **kwargs):
         return FakeProc()
 
-    monkeypatch.setattr(native_mod, "require_tool", fake_which)
+    # WINBINUTILS1: readelf/nm/strings are resolved with shutil.which now
+    # (they are optional - the pyelftools path runs first), so pin `which`
+    # to simulate the reference host having them.
+    monkeypatch.setattr(native_mod.shutil, "which", fake_which)
     monkeypatch.setattr(native_mod.subprocess, "run", fake_run)
 
     lib = native_mod.analyze_so(so)
@@ -1060,7 +1066,9 @@ def test_analyze_so_ghidra_last_resort_recovers_tool_failure(tmp_path, monkeypat
     def fake_run(cmd, **kwargs):
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=60)  # symbol layer fails
 
-    monkeypatch.setattr(native_mod, "require_tool", lambda name: f"/usr/bin/{name}")
+    # WINBINUTILS1: pin the optional-binutils lookup so readelf/nm/strings
+    # resolve as they would on the reference host.
+    monkeypatch.setattr(native_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(native_mod.subprocess, "run", fake_run)
     monkeypatch.setattr(
         native_mod, "ghidra_decompile",
@@ -1088,7 +1096,9 @@ def test_analyze_so_ghidra_last_resort_falls_back_to_unscannable_when_ghidra_fai
     def fake_run(cmd, **kwargs):
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=60)
 
-    monkeypatch.setattr(native_mod, "require_tool", lambda name: f"/usr/bin/{name}")
+    # WINBINUTILS1: pin the optional-binutils lookup so readelf/nm/strings
+    # resolve as they would on the reference host.
+    monkeypatch.setattr(native_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(native_mod.subprocess, "run", fake_run)
     monkeypatch.setattr(
         native_mod, "ghidra_decompile",
@@ -1202,8 +1212,13 @@ def test_analyze_so_many_preserves_order(monkeypatch):
     monkeypatch.setattr(native_mod, "analyze_so", fake)
     paths = [Path(f"/tmp/lib{i}.so") for i in range(5)]
     out = native_mod.analyze_so_many(paths, max_workers=3)
+    # analyze_so_many must return results in input order. That is the contract.
     assert [o.name for o in out] == [f"lib{i}.so" for i in range(5)]
-    assert seen == [f"lib{i}.so" for i in range(5)]
+    # Invocation order is NOT part of the contract: ThreadPoolExecutor.map
+    # schedules tasks as workers free up, so `seen` may interleave. Assert the
+    # set was covered exactly once instead of asserting a specific sequence.
+    assert sorted(seen) == sorted(f"lib{i}.so" for i in range(5))
+    assert len(seen) == 5
 
 
 def test_analyze_so_many_bounds_concurrency(monkeypatch):

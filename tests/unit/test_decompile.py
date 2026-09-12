@@ -31,6 +31,29 @@ def _stub_jadx_lookup(monkeypatch):
     monkeypatch.setattr("static.decompile._jadx_version", lambda jadx: "test-jadx")
 
 
+@pytest.fixture(autouse=True)
+def _pin_tool_resolution(request, monkeypatch):
+    """Pin jadx/apktool resolution for EVERY test in this module (WINLAUNCH1).
+
+    decompile() prefers the repo-vendored launcher (tools/jadx/bin/jadx[.bat])
+    over PATH, and _find_jadx() is now platform-aware. Several tests in this
+    module stub `require_tool` and fake `cmd[0].endswith("jadx")`, which only
+    worked when the repo happened to have NO vendored tools/ - a machine with a
+    real vendored jadx resolved a different path, the fake never matched, and
+    jadx was reported as a generic success, silently breaking the assertion.
+
+    Pinning the lookup here makes the module's behaviour independent of whether
+    the working tree vendors a toolchain, which is the property the suite needs:
+    unit tests must exercise decompile()'s LOGIC regardless of the host install
+    (ADR-0007). A test that must exercise the real probe opts out with
+    @pytest.mark.real_tool_resolution."""
+    if request.node.get_closest_marker("real_tool_resolution"):
+        return
+    monkeypatch.setattr("static.decompile._find_jadx", lambda: "/usr/bin/jadx")
+    monkeypatch.setattr("static.decompile._jadx_version", lambda jadx: "test-jadx")
+    monkeypatch.setattr("static.decompile.require_tool", lambda name: f"/usr/bin/{name}")
+
+
 def test_decompile_surfaces_real_stderr_not_just_the_generic_exit_message(tmp_path, monkeypatch):
     # A real incident this pins down: jadx exited 1 on a large real-world
     # APK, but the report only ever showed Python's generic "returned
@@ -855,11 +878,17 @@ def test_dir_size_sums_recursive_file_bytes(tmp_path):
     assert _dir_size(tmp_path) == 10
 
 
+@pytest.mark.real_tool_resolution
 def test_jadx_version_takes_first_line_and_degrades_to_unknown(monkeypatch):
     # _jadx_version: the short jadx version token for the per-DEX cache key. A
     # toolchain upgrade must invalidate cached decompiles; a probe failure must
     # degrade to 'unknown' (the key becomes less specific, NEVER more wrong).
     # Had zero coverage.
+    #
+    # real_tool_resolution: this test asserts on _jadx_version's own subprocess
+    # handling, so it must NOT inherit the module-wide _pin_tool_resolution stub
+    # (which replaces _jadx_version entirely). It stubs subprocess.run itself,
+    # so it still needs no real jadx.
     import subprocess as _sp
     from static.decompile import _jadx_version
 

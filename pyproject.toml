@@ -32,3 +32,9 @@ pythonpath = ["src", "scripts"]
 # recorded by each phase's real handoff bundle, not pytest.
 testpaths = ["tests/unit"]
 norecursedirs = ["tools", ".git", ".venv", "__pycache__"]
+markers = [
+    # Opt-out of the module-wide hermetic tool-resolution pin in
+    # tests/unit/test_decompile.py: a test marked this way exercises the REAL
+    # _find_jadx/_jadx_version/require_tool resolution instead of the stubs.
+    "real_tool_resolution: test exercises real toolchain resolution (not stubbed)",
+]

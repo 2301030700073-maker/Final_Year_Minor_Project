@@ -357,6 +357,27 @@ KNOWN_NATIVE_LIBS = frozenset({
 _NON_NS_SEGMENTS = ("sources", "resources", "smali")
 
 
+def _path_segments(path: str) -> list[str]:
+    """Split a path into segments on EITHER separator, so decompiler-layout
+    markers are found regardless of platform (WINSEP1).
+
+    Every path-splitting site in this project was written against POSIX paths
+    because the reference environment is WSL2/Linux (ADR-0007). On Windows
+    `str(Path(...))` emits backslashes, and a bare `split("/")` then yields the
+    whole path as one segment - the marker is never found and the namespace
+    silently becomes None. Both callers below depend on that marker, so a
+    separator-blind split is a correctness bug, not a cosmetic one.
+
+    A no-op for POSIX input (no backslashes to replace), so the reference
+    platform is unaffected. Also strips a Windows drive prefix ("C:") so it
+    cannot be mistaken for a package segment."""
+    segs = path.replace("\\", "/").split("/")
+    # A leading drive letter ("C:") is not a package segment.
+    if segs and len(segs[0]) == 2 and segs[0][1] == ":":
+        segs = segs[1:]
+    return segs
+
+
 def _is_ns_marker(seg: str) -> bool:
     """True for decompiler/apktool layout markers that are not package segments:
     'sources', 'resources', 'smali', and the multi-dex 'smali_classes2',
@@ -385,10 +406,19 @@ def derive_namespace(file: str) -> str | None:
       -> 'com.google.android.gms.common.net'
     'sources/sg/vantagepoint/a/c.java' -> 'sg.vantagepoint.a'
     'smali_classes2/coil/util/-SvgUtils.smali' -> 'coil.util'
-    """
+
+    WINSEP1 (2026-09-12): separators are normalized to '/' BEFORE splitting. On
+    Windows `str(Path(...))` yields backslashes, so the old bare `split("/")`
+    returned the whole path as ONE segment, found no `sources`/`classes-*` marker,
+    and returned None. `is_known_third_party(None)` is False, so EVERY bundled-SDK
+    file silently read as app-owned and was scanned as the app's own evidence -
+    the exact false-positive direction DYNLOAD-VENDOR1 / WEBVIEW-VENDOR1 exist to
+    prevent, and the reason the README's "Python-only pieces work anywhere" claim
+    failed on Windows. On POSIX paths this is a no-op (no backslashes present), so
+    the reference-platform behaviour is byte-for-byte unchanged."""
     if not file:
         return None
-    segs = file.split("/")
+    segs = _path_segments(file)
     start = 0
     for i, seg in enumerate(segs):
         if _is_ns_marker(seg):
@@ -443,8 +473,13 @@ def namespace_of_decompiled_path(path: str) -> str | None:
     `cfr` segment is treated as the anchor ONLY when the segment before it is the
     64-hex APK hash, so a genuine package segment named `cfr` is never mistaken
     for the output dir. Single source of truth for the java coverage-limited
-    scans that walk the jadx+CFR corpus (dynload, webview) so they cannot drift."""
-    parts = path.split("/")
+    scans that walk the jadx+CFR corpus (dynload, webview) so they cannot drift.
+
+    WINSEP1 (2026-09-12): segments are split on either separator (_path_segments)
+    so the `cfr`/<hash> anchor is found on Windows too; the remainder is
+    re-joined with '/' because derive_namespace now splits on either separator
+    anyway. POSIX behaviour is unchanged."""
+    parts = _path_segments(path)
     for i, seg in enumerate(parts):
         if (
             seg == "cfr"

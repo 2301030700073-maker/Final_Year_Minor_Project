@@ -98,10 +98,59 @@ def _resolve_nsc_path(network_security_config: str | None, resource_root: Path |
     return p if p.exists() else None
 
 
+def is_decoded_manifest(manifest_path: Path) -> bool:
+    """True when `manifest_path` holds a DECODED (human-readable) XML manifest -
+    i.e. it is safe to hand to `parse_manifest`. APKTOOL-XML1.
+
+    A bare `path.exists()` is NOT this predicate, and using it as one is how a
+    binary manifest reached `ET.parse` and failed the whole manifest stage. An
+    apktool invocation that could not decode the resource table - notably the
+    `apktool d --no-res` smali fallback (`decompile.py`), which logs
+    "Copying raw manifest" - still WRITES a file at
+    `<apktool_dir>/AndroidManifest.xml`; that file is the APK's original BINARY
+    AXML, not XML. `ET.parse` then raises ParseError ("not well-formed (invalid
+    token): line 1, column 0") and the stage fails even though the robust
+    binary-manifest reader (`parse_manifest_apk`) would have succeeded from the
+    same APK.
+
+    Binary AXML is a chunked format whose first two bytes are the little-endian
+    RES_XML_TYPE (0x0003) resChunk_type. We therefore sniff the leading bytes
+    rather than trusting the extension: a decoded manifest begins with '<'
+    (possibly after a BOM) or whitespace, and an EMPTY/missing file is treated as
+    not-decoded so the caller falls back rather than parsing nothing."""
+    try:
+        with manifest_path.open("rb") as fh:
+            # Enough bytes to clear any BOM plus a run of leading whitespace
+            # before the XML declaration. A 4-byte read missed the '<' on a
+            # newline-and-spaces prefix, so a perfectly good decoded manifest
+            # was classed binary and re-read from the APK (caught by
+            # test_is_decoded_manifest_accepts_utf8_bom_and_leading_space).
+            head = fh.read(64)
+    except OSError:
+        return False
+    if not head:
+        return False
+    # UTF-8 / UTF-16 BOMs, then optional leading whitespace, then the XML decl.
+    if head.startswith(b"\xef\xbb\xbf"):
+        return True
+    if head[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return True
+    # Binary AXML: the RES_XML_TYPE chunk header. Checked explicitly so a file
+    # that is neither XML nor AXML is still refused (returns False) rather than
+    # being handed to ET.parse to fail with a less actionable error.
+    if len(head) >= 2 and int.from_bytes(head[:2], "little") == 0x0003:
+        return False
+    return head.lstrip()[:1] == b"<"
+
+
 def parse_manifest(manifest_path: Path, resource_root: Path | None = None) -> ManifestInfo:
     """Parse a DECODED (human-readable) AndroidManifest.xml - produced by apktool
     (or a fixture). Delegates to `_parse_manifest_root` so the binary-manifest
-    path (`parse_manifest_apk`) and the decoded path share one parser."""
+    path (`parse_manifest_apk`) and the decoded path share one parser.
+
+    The caller MUST gate this on `is_decoded_manifest` (APKTOOL-XML1): handing
+    it a binary AXML manifest raises ParseError, and the binary reader
+    (`parse_manifest_apk`) handles that case from the APK directly."""
     return _parse_manifest_root(ET.parse(manifest_path).getroot(), resource_root)
 
 

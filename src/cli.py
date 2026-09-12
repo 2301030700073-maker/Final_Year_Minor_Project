@@ -94,7 +94,12 @@ from static.deobfuscate import find_mapping_file, parse_mapping
 from static.decision_engine import DEFAULT_THRESHOLD, classify
 from static.androguard_scanner import BrokenSignatureError, scan_dex_strings
 from static.decompile import decompile
-from static.manifest import ManifestInfo, parse_manifest, parse_manifest_apk
+from static.manifest import (
+    ManifestInfo,
+    is_decoded_manifest,
+    parse_manifest,
+    parse_manifest_apk,
+)
 from static.native import (
     compute_degradation,
     extract_native_libs,
@@ -1373,11 +1378,41 @@ def run(
     # (limitation 9). The binary path still honors apktool_output as the resource
     # root when present; without it, a declared NSC degrades the manifest surface
     # to partial rather than certifying clean (ADR-0006).
-    if manifest_path.exists():
+    #
+    # APKTOOL-XML1: the predicate is "is this file DECODED XML", not "does it
+    # exist". An apktool run that could not decode the resource table - notably
+    # the `apktool d --no-res` smali fallback in decompile.py, which logs
+    # "Copying raw manifest" - still WRITES apktool/AndroidManifest.xml, but the
+    # bytes are the APK's original BINARY AXML. `exists()` was therefore true for
+    # a binary manifest, `parse_manifest` (ET.parse) raised ParseError ("not
+    # well-formed (invalid token): line 1, column 0"), and the manifest stage
+    # FAILED even though parse_manifest_apk reads that exact APK successfully
+    # (it resolves the NSC resource-ID itself and honors apktool_output as the
+    # resource root, so the fallback loses no capability). The bug was invisible
+    # to the unit suite because its e2e fixture writes a well-formed "<manifest/>".
+    # `is_decoded_manifest` sniffs the leading bytes so the choice is made on
+    # content, and the try/except is the safety net for a manifest that looks
+    # like XML but still will not parse - either way we degrade to the binary
+    # reader rather than failing a stage we can satisfy.
+    if is_decoded_manifest(manifest_path):
         _manifest_callable, _manifest_args = parse_manifest, (manifest_path, apktool_output)
+        manifest_stage, manifest_info = _wrap_stage(
+            "manifest_parse", _manifest_callable, *_manifest_args
+        )
+        if manifest_stage.status == "failed":
+            # A file that sniffed as XML but did not parse (truncated decode,
+            # mixed encoding). Re-read from the APK rather than losing the whole
+            # manifest signal; the retry's own failure is what gets reported.
+            _manifest_callable = parse_manifest_apk
+            _manifest_args = (apk, apktool_output)
+            manifest_stage, manifest_info = _wrap_stage(
+                "manifest_parse", _manifest_callable, *_manifest_args
+            )
     else:
         _manifest_callable, _manifest_args = parse_manifest_apk, (apk, apktool_output)
-    manifest_stage, manifest_info = _wrap_stage("manifest_parse", _manifest_callable, *_manifest_args)
+        manifest_stage, manifest_info = _wrap_stage(
+            "manifest_parse", _manifest_callable, *_manifest_args
+        )
     stage_results.append(manifest_stage)
     _print_stage(manifest_stage)
     # 5-1: a successful manifest parse now feeds the SSL evidence (NSC presence)

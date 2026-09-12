@@ -663,3 +663,87 @@ def test_resources_complete_degrades_when_nsc_without_resource_root(tmp_path):
     info = parse_manifest(manifest_path)  # resource_root=None
     assert info.resources_complete is False
     assert info.network_security_config == "@xml/network_security_config"
+
+
+# --- APKTOOL-XML1: distinguish a DECODED manifest from a binary AXML ---------
+# An apktool run that cannot decode the resource table - the `apktool d --no-res`
+# smali fallback (decompile.py) - still writes <apktool_dir>/AndroidManifest.xml,
+# but its bytes are the APK's original BINARY AXML. The CLI used bare
+# `manifest_path.exists()` to choose the decoded parser, so a binary manifest was
+# handed to ET.parse and failed the whole manifest stage with ParseError while the
+# binary reader (parse_manifest_apk) would have read the same APK fine.
+
+def _binary_axml_bytes() -> bytes:
+    """The leading bytes of a real binary AXML: the little-endian RES_XML_TYPE
+    (0x0003) resChunk_header aapt2 emits. Enough shape for a content sniff."""
+    return b"\x03\x00\x08\x00" + b"\x70\x06\x00\x00" + b"\x00" * 16
+
+
+def test_is_decoded_manifest_accepts_a_real_decoded_manifest(tmp_path):
+    from static.manifest import is_decoded_manifest
+
+    p = tmp_path / "AndroidManifest.xml"
+    p.write_text(MANIFEST_WITH_NSC, encoding="utf-8")
+    assert is_decoded_manifest(p) is True
+
+
+def test_is_decoded_manifest_rejects_binary_axml(tmp_path):
+    # The regression: this is what apktool's --no-res fallback writes, and what
+    # used to be fed to ET.parse.
+    from static.manifest import is_decoded_manifest
+
+    p = tmp_path / "AndroidManifest.xml"
+    p.write_bytes(_binary_axml_bytes())
+    assert is_decoded_manifest(p) is False
+
+
+def test_binary_axml_manifest_would_fail_the_decoded_parser(tmp_path):
+    # Establishes the defect the predicate exists to prevent, so the test cannot
+    # silently pass on a future refactor that re-widens the decoded-path call.
+    import xml.etree.ElementTree as ET
+
+    p = tmp_path / "AndroidManifest.xml"
+    p.write_bytes(_binary_axml_bytes())
+    with pytest.raises(ET.ParseError):
+        parse_manifest(p)
+
+
+def test_is_decoded_manifest_rejects_empty_and_missing(tmp_path):
+    from static.manifest import is_decoded_manifest
+
+    empty = tmp_path / "AndroidManifest.xml"
+    empty.write_bytes(b"")
+    assert is_decoded_manifest(empty) is False
+    assert is_decoded_manifest(tmp_path / "does-not-exist.xml") is False
+
+
+def test_is_decoded_manifest_accepts_utf8_bom_and_leading_space(tmp_path):
+    from static.manifest import is_decoded_manifest
+
+    bom = tmp_path / "bom.xml"
+    bom.write_bytes(b"\xef\xbb\xbf" + MANIFEST_MINIMAL.encode("utf-8"))
+    assert is_decoded_manifest(bom) is True
+
+    padded = tmp_path / "padded.xml"
+    padded.write_bytes(b"\n   " + MANIFEST_MINIMAL.encode("utf-8"))
+    assert is_decoded_manifest(padded) is True
+
+
+def test_binary_manifest_input_falls_back_to_the_apk_reader(tmp_path):
+    # End-to-end shape of the fix: given a binary manifest on disk, the CLI's
+    # predicate routes to parse_manifest_apk, which reads the manifest from the
+    # APK itself. Assert the two halves compose - the predicate says "not
+    # decoded" and the fallback reader is the one that succeeds.
+    from static.manifest import is_decoded_manifest, parse_manifest_apk
+
+    repo = Path(__file__).resolve().parents[2]
+    apk = next((repo / "APK_Test").glob("*.apk"), None)
+    if apk is None:
+        pytest.skip("no real APK present to exercise the fallback reader")
+
+    binary = tmp_path / "AndroidManifest.xml"
+    binary.write_bytes(_binary_axml_bytes())
+    assert is_decoded_manifest(binary) is False
+    # ...and the fallback the CLI now selects reads the real APK fine.
+    info = parse_manifest_apk(apk)
+    assert isinstance(info.package_name, str) and info.package_name

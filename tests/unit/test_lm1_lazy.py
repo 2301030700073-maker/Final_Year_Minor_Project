@@ -5,17 +5,39 @@ whole APK, so a hang/OOM on one DEX discarded the whole run. The fix decompiles
 per DEX (classes*.dex) with a per-DEX disk cache keyed by dex-stable identity
 (name + content hash), so one DEX failing preserves its siblings. Pure helpers
 are fixture-testable; the orchestration takes the per-DEX path only for a real
-readable zip and otherwise falls back to the proven whole-APK path."""
+readable zip and otherwise falls back to the proven whole-APK path.
+
+PLATFORM: the three `decompile(...)` tests below write fake `jadx`/`apktool`
+scripts and rely on the product spawning them. That requires a POSIX toolchain
+resolution, which the product states explicitly - common.require_tool raises
+"required tool 'jadx' not found on PATH - this stage only runs on the reference
+WSL2 environment". Off-POSIX it cannot work at all, for two independent reasons:
+shutil.which does not resolve an extensionless name (PATHEXT needs .exe/.bat),
+and SubprocessError/OSError WinError 193 blocks exec of a shebang script.
+Per ADR-0007 WSL2/Linux is the only supported runtime, so this module skips
+(rather than fails) off-POSIX. The pure-helper tests above still run everywhere."""
 
 import os
 import zipfile
 from pathlib import Path
+
+import pytest
 
 from static.decompile import (
     _dex_cache_key,
     _list_dex_entries,
     _run_dex_fallback,
     decompile,
+)
+
+# True only where an extensionless executable on PATH is both resolvable and
+# spawnable - i.e. the POSIX environment these orchestration tests require.
+_POSIX_TOOLCHAIN = os.name == "posix"
+
+_requires_posix_toolchain = pytest.mark.skipif(
+    not _POSIX_TOOLCHAIN,
+    reason="needs POSIX toolchain resolution (ADR-0007); Windows cannot resolve "
+           "or exec an extensionless #!/bin/sh tool script",
 )
 
 
@@ -65,6 +87,7 @@ def test_dex_cache_key_is_stable_and_content_sensitive():
     assert _dex_cache_key(a, "1.5.1") != _dex_cache_key(a, "1.5.6")
 
 
+@_requires_posix_toolchain
 def test_decompile_takes_lazy_per_dex_path_for_real_zip(tmp_path, monkeypatch):
     # A real (readable) zip APK with two DEX units must exercise the lazy path:
     # jadx runs once per DEX, each into its own dex-key subdir, and the evidence
@@ -112,6 +135,7 @@ def test_decompile_takes_lazy_per_dex_path_for_real_zip(tmp_path, monkeypatch):
     assert result.evidence["jadx_file_count"] == 2   # one .java per dex-key subdir
 
 
+@_requires_posix_toolchain
 def test_per_dex_partial_jadx_exit_degrades_completeness(tmp_path, monkeypatch):
     # Honesty rule (principle 3): a DEX whose jadx wrote .java but STILL exited
     # non-zero is a partial decompile - the run must not be laundered into
@@ -171,6 +195,7 @@ def test_run_dex_fallback_is_loud_when_cfr_absent(tmp_path, monkeypatch):
     assert res["fallback_file_count"] == 0
 
 
+@_requires_posix_toolchain
 def test_per_dex_cfr_recovery_lifts_aggregate_to_clean(tmp_path, monkeypatch):
     # A jadx-failed DEX that a secondary engine (dex2jar+CFR) independently
     # re-read with material output is NOT a hole - the aggregate returncode lifts

@@ -108,6 +108,30 @@ def apktool_timeout_for_size(size_bytes: int) -> int:
 
 
 
+def _launcher_candidates(base: Path, stem: str) -> list[Path]:
+    """Candidate launcher files for a vendored tool, platform-appropriately and
+    in preference order (WINLAUNCH1).
+
+    The jadx/apktool distributions ship BOTH a POSIX shell launcher (`jadx`,
+    extensionless) and a Windows batch launcher (`jadx.bat`). On POSIX the
+    extensionless script is the executable; on Windows an extensionless shell
+    script is NOT executable - CreateProcess rejects it with
+    OSError [WinError 193] '%1 is not a valid Win32 application'. Preferring the
+    extensionless name unconditionally therefore silently breaks every jadx
+    invocation on Windows: the per-DEX path catches that OSError and records a
+    generic 'jadx failed', degrading the Java surface to partial (0 files) with
+    no actionable cause on the report.
+
+    Fix: order candidates by platform. On Windows try the `.bat`/`.cmd`/`.exe`
+    forms first; on POSIX try the extensionless form first. Extensionless stays
+    in both lists so a repo that vendors only one form still resolves."""
+    if os.name == "nt":
+        order = [f"{stem}.bat", f"{stem}.cmd", f"{stem}.exe", stem]
+    else:
+        order = [stem, f"{stem}.sh", f"{stem}.bat", f"{stem}.cmd"]
+    return [base / name for name in order]
+
+
 def _find_jadx() -> str:
     """Prefer the repo-pinned jadx (tools/jadx/bin/jadx) over whatever is on PATH.
 
@@ -117,11 +141,15 @@ def _find_jadx() -> str:
     InsecureBankv2 finishes with 2 errors, rc=1, so the Java surface degrades to
     partial), while the pinned 1.5.6 decompiles them cleanly (rc=0) - upgrading
     genuinely raises completeness without weakening any coverage claim. Falls
-    back to PATH (via _require_tool, which fails loudly) when not vendored."""
+    back to PATH (via _require_tool, which fails loudly) when not vendored.
+
+    Launcher selection is platform-aware (WINLAUNCH1): on Windows the vendored
+    `.bat` launcher is chosen over the POSIX extensionless script, which cannot
+    be executed by CreateProcess."""
     root = Path(__file__).resolve().parents[2]  # <repo>/src/static -> <repo>
-    vendored = root / "tools" / "jadx" / "bin" / "jadx"
-    if vendored.exists():
-        return str(vendored)
+    for candidate in _launcher_candidates(root / "tools" / "jadx" / "bin", "jadx"):
+        if candidate.exists():
+            return str(candidate)
     return require_tool("jadx")
 
 
@@ -683,7 +711,14 @@ def _decompile_dexes(
                 jadx_timeout_for_size(entry["size"]), "jadx",
             )
         except (OSError, zipfile.BadZipFile, KeyError) as exc:
-            rc, log = -1, str(exc)
+            # WINLAUNCH1: an OSError here (notably WinError 193, 'not a valid
+            # Win32 application') means the resolved jadx launcher is not
+            # executable on this platform - a toolchain/configuration fault, not
+            # a decompile failure. Surface the real cause in the error tail
+            # (principle 3: fail loud) instead of the bare str(exc), so the
+            # report says WHY jadx could never run rather than only that the
+            # DEX ended up empty.
+            rc, log = -1, f"spawn failed for {jadx!r}: {type(exc).__name__}: {exc}"
         files = _count_java_files(out_dir)
         # A DEX that wrote .java but whose jadx still exited non-zero is a
         # PARTIAL decompile, not a clean one. Whether it is a *covered* DEX (no

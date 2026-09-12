@@ -8,6 +8,7 @@ These tests only cover the no-tool paths and the exact adb/proxy command shapes.
 """
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -554,7 +555,12 @@ def test_run_capture_stage_wsl2_records_real_flows(monkeypatch, tmp_path):
         "emulator-5554", "com.example.app", tmp_path, capture_window=0.1)
     assert result.status == "success"
     assert result.evidence["flows_count"] == 2
-    assert result.evidence["flows_path"] == "/mnt/c/Users/Public/12345.mitm"
+    # The wsl2 branch deliberately binds the flows file to a WSL2 /mnt/c path (so
+    # Windows mitmdump can write it). Build the expectation the same way the
+    # product does - str(Path("/mnt/c/...") / ...) - because that is '\'-separated
+    # if this test is ever run off-POSIX, and the value is the product's real
+    # output rather than one platform's spelling of it.
+    assert result.evidence["flows_path"] == str(Path("/mnt/c/Users/Public") / "12345.mitm")
     assert result.evidence["hosts"] == ["api.example.com", "example.com"]
 
 

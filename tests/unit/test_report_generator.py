@@ -2121,7 +2121,12 @@ def test_hooks_engaged_real_script_resolves_to_full_path():
     assert out["hooks_handauthored_scripts"] == ["root_bypass_v1.js"]
     expected = str(_SCRIPT_DIR / "root_bypass_v1.js")
     assert out["hooks_handauthored_script_paths"] == [expected]
-    assert expected.endswith("src/dynamic/scripts/root_bypass_v1.js")
+    # The resolved path must really point into the shipped script dir. Compare on
+    # the normalised form so this holds regardless of the host separator (on
+    # Windows str(Path(...)) is '\'-separated, and the true contract here is
+    # "ends with src/dynamic/scripts/root_bypass_v1.js", not which slash the OS
+    # happens to use).
+    assert expected.replace("\\", "/").endswith("src/dynamic/scripts/root_bypass_v1.js")
 
 
 def test_generate_report_renders_hooks_engaged_audit(tmp_path):
@@ -2152,7 +2157,10 @@ def test_generate_report_renders_hooks_engaged_audit(tmp_path):
     assert "Bypass hooks engaged (auditable, this run)" in content
     # the bypass script that did the work is named with its full on-disk path
     assert "Bypass script(s) used (full path):" in content
-    assert "src/dynamic/scripts/root_bypass_v1.js`" in content
+    # The rendered path is the real on-disk path, so normalise the separator
+    # before matching - on Windows it is 'src\dynamic\scripts\...'. The contract
+    # is that the shipped script dir and filename appear, not the slash used.
+    assert "src/dynamic/scripts/root_bypass_v1.js`" in content.replace("\\", "/")
     assert "`root_su_binary_paths`" in content            # driving signature named
     assert "1 root probeHit(s)" in content                # real behavioral count
     assert "`ssl-pin-check`=2" in content                 # real effect count

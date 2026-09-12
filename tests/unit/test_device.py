@@ -668,13 +668,20 @@ def test_push_system_ca_issues_push_root_bindmount_cp_chmod_and_returns_system_p
         return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    got = device.push_system_ca("emulator-5554", Path("/tmp/cert.pem"))
+    cert = Path("/tmp/cert.pem")
+    got = device.push_system_ca("emulator-5554", cert)
     assert got == "/system/etc/security/cacerts/1a2b3c4d.0"
     # Exact order: wait-for-device, push (with retry), then adb root, then a
     # single bind-mount shell command that makes the read-only system store
     # writable (no remount, no reboot), then the cp + chmod into the mounted store.
+    #
+    # SEPARATOR: the product pushes str(cert_path) verbatim, so the expectation
+    # is derived the same way rather than hardcoding the POSIX spelling - on
+    # Windows str(Path("/tmp/cert.pem")) is "\\tmp\\cert.pem", which is the
+    # correct value to compare against. The device-side targets stay POSIX
+    # (they are paths on the Android device, not on the host).
     assert calls[0][3:] == ["wait-for-device"]
-    assert calls[1][3:] == ["push", "/tmp/cert.pem", "/data/local/tmp/1a2b3c4d.0"]
+    assert calls[1][3:] == ["push", str(cert), "/data/local/tmp/1a2b3c4d.0"]
     assert calls[2][3:] == ["root"]
     assert calls[3][0] == "adb"
     assert calls[3][3] == "shell"

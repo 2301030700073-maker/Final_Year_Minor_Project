@@ -9,6 +9,8 @@ neither engine ever read (ADR-0006). These tests pin the walk to the full root
 list and confirm the conservative gates (suffix + binary probe) still hold.
 """
 
+import os
+
 from cli import _scan_binary_bundles
 
 
@@ -86,6 +88,13 @@ def test_scan_binary_bundles_reports_root_relative_paths(tmp_path):
     # anchored by derive_namespace in report/attribution.py (same failure mode as
     # CFR-NS1), so a bundle under a bundled SDK's resource subtree was always
     # counted app-owned.
+    #
+    # SEPARATOR: the contract is "relative, not absolute" - the engine builds the
+    # path with str(relative_to()), which is '\'-separated on Windows. That is not
+    # drift: derive_namespace splits on either separator (WINSEP1), so both forms
+    # derive the identical namespace (asserted below). Normalise to '/' purely so
+    # the expected literal is readable, rather than asserting one platform's
+    # separator and failing on the other.
     from common import derive_namespace, is_known_third_party
 
     root = tmp_path / "outputs" / "analysis" / ("a" * 64) / "apktool"
@@ -94,11 +103,22 @@ def test_scan_binary_bundles_reports_root_relative_paths(tmp_path):
     (vendor / "index.android.bundle").write_bytes(b"\x00isRooted\x00" + b"x" * 32)
     _has, matches = _scan_binary_bundles([root])
     files = {f for _sig, _cat, _txt, f in matches}
-    assert files == {"assets/com/braze/js/index.android.bundle"}
+    normalised = {f.replace("\\", "/") for f in files}
+    assert normalised == {"assets/com/braze/js/index.android.bundle"}
     for f in files:
-        assert "outputs/analysis" not in f
-        # Anchoring now works: the vendor namespace is recoverable from the path.
-        assert is_known_third_party(derive_namespace(f.replace("assets/", "", 1)))
+        # Relative, never absolute - the outputs/ layout must not leak.
+        assert "outputs/analysis" not in f.replace("\\", "/")
+        # Not absolute on either platform (a drive letter or a leading slash).
+        assert not f.startswith(("/", "\\"))
+        assert not (len(f) > 1 and f[1] == ":")
+        # Anchoring works: the vendor namespace is recoverable once the
+        # `assets/` container dir is dropped (it is not part of the package -
+        # without stripping it the namespace is 'assets.com.braze.js', which
+        # matches no vendor prefix). Same result on the native and posix forms.
+        native = f.replace("assets" + os.sep, "", 1)
+        posix = f.replace("\\", "/").replace("assets/", "", 1)
+        assert is_known_third_party(derive_namespace(native))
+        assert is_known_third_party(derive_namespace(posix))
 
 
 def test_scan_binary_bundles_handles_missing_and_none_roots(tmp_path):

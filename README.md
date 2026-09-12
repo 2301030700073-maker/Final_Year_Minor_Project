@@ -4,7 +4,9 @@ Automated detection and empirically-verified bypass of Android root-detection an
 
 ## Environment split
 
-This is developed on one machine and **executed/tested on a separate reference machine**: WSL2 Ubuntu 24.04, 4 vCPU / 11 GB RAM allocated, RTX 5070 GPU, ~930 GB free (see ADR-0007 in `docs/plans/adr/`). If you're pulling this repo to test it, the steps below assume you're on (or setting up) that reference environment. If your hardware differs, the Python-only pieces (steps 1-2) work anywhere; the Android toolchain and dynamic-analysis pieces (steps 3+) assume WSL2/Linux specifically and will need adaptation otherwise — flag it back if so.
+This is developed on one machine and **executed/tested on a separate reference machine**: WSL2 Ubuntu 24.04, 4 vCPU / 11 GB RAM allocated, RTX 5070 GPU, ~930 GB free (see ADR-0007 in `docs/plans/adr/`). If you're pulling this repo to test it, the steps below assume you're on (or setting up) that reference environment. If your hardware differs, step 1 (the Python environment) works anywhere; the Android toolchain and dynamic-analysis pieces (steps 3+) assume WSL2/Linux specifically and will need adaptation otherwise — flag it back if so.
+
+One caveat on step 2: the unit suite runs on Windows, but a handful of tests exercise genuinely POSIX behaviour and will fail there — fixtures that write `#!/bin/sh` fakes the product spawns via `subprocess.run(["jadx", ...])` (which cannot exec on Windows), a few assertions about WSL2 paths, and the one test needing `androguard`. Those failures are the platform, not your checkout. Run step 2 on WSL2/Linux for a clean signal.
 
 ## 1. Python environment (`uv`)
 

@@ -406,6 +406,18 @@ def test_run_capture_stage_success_records_real_flows(monkeypatch, tmp_path):
     monkeypatch.setattr(device, "set_http_proxy", lambda serial, host, port: None)
     monkeypatch.setattr(mitmproxy_capture, "_launch_app", lambda serial, package: None)
     monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
 
     result = mitmproxy_capture.run_capture_stage(
         "emulator-5554", "com.example.app", tmp_path, capture_window=0.1,
@@ -449,6 +461,18 @@ def test_run_capture_stage_fails_honestly_when_no_flows(monkeypatch, tmp_path):
     monkeypatch.setattr(device, "set_http_proxy", lambda serial, host, port: None)
     monkeypatch.setattr(mitmproxy_capture, "_launch_app", lambda serial, package: None)
     monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
 
     result = mitmproxy_capture.run_capture_stage("emulator-5554", "com.example.app", tmp_path)
     assert result.status == "failed"
@@ -550,6 +574,18 @@ def test_run_capture_stage_wsl2_records_real_flows(monkeypatch, tmp_path):
     monkeypatch.setattr(device, "set_http_proxy", lambda serial, host, port: None)
     monkeypatch.setattr(mitmproxy_capture, "_launch_app", lambda serial, package: None)
     monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
 
     result = mitmproxy_capture.run_capture_stage(
         "emulator-5554", "com.example.app", tmp_path, capture_window=0.1)
@@ -577,6 +613,18 @@ def _mock_native_run(monkeypatch, tmp_path, frida_mocks=None):
     monkeypatch.setattr(device, "adb_reverse", lambda *a, **k: None)
     monkeypatch.setattr(device, "set_http_proxy", lambda *a: None)
     monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
 
     class FakeProc:
         def terminate(self):
@@ -839,6 +887,18 @@ def test_run_capture_stage_no_flows_names_crashed_bypass_script(monkeypatch, tmp
     monkeypatch.setattr(device, "adb_reverse", lambda serial, dp, hp, add=True: None)
     monkeypatch.setattr(device, "set_http_proxy", lambda serial, host, port: None)
     monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
 
     class FakeDevice:
         def resume(self, pid):
@@ -896,6 +956,18 @@ def test_run_capture_stage_no_flows_clean_bypass_keeps_plain_reason(monkeypatch,
     monkeypatch.setattr(device, "adb_reverse", lambda serial, dp, hp, add=True: None)
     monkeypatch.setattr(device, "set_http_proxy", lambda serial, host, port: None)
     monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
 
     class FakeDevice:
         def resume(self, pid):
@@ -944,6 +1016,18 @@ def test_run_capture_stage_success_records_bypass_script_errors(monkeypatch, tmp
     monkeypatch.setattr(device, "adb_reverse", lambda serial, dp, hp, add=True: None)
     monkeypatch.setattr(device, "set_http_proxy", lambda serial, host, port: None)
     monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
+    # CAPREACH1: the pre-flight device->proxy probe runs real adb. Stub it to
+    # the route-UP verdict so these flow tests exercise what they are about
+    # (flow parsing / script-error attribution), not adb. The probe's own
+    # verdict semantics are covered by its dedicated tests below.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
 
     class FakeDevice:
         def resume(self, pid):
@@ -1020,3 +1104,97 @@ def test_cleanup_reports_windows_mitmdump_stop_failure(monkeypatch):
     monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
     warns2 = mitmproxy_capture._cleanup("serial", 8081, None)
     assert not any("stray" in w for w in warns2), warns2
+
+
+# --- CAPREACH1: pre-flight device->proxy reachability probe -----------------
+#
+# A zero-flow capture used to carry a hedge ("either the device could not reach
+# mitmdump ... or the app made no requests"), leaving the operator to guess. The
+# probe answers it up front. Its verdict feeds both the reason text and cli's
+# capture reclassification, so its "unknown" case must never be read as either
+# extreme.
+
+def _probe(monkeypatch, *, rc=None, stdout="", stderr="", raises=None, seen=None):
+    """Run _device_reaches_proxy against a fake adb invocation."""
+    import subprocess as _sp
+    from dynamic import mitmproxy_capture as mc
+
+    monkeypatch.setattr(mc.device, "_require_adb", lambda: "/usr/bin/adb")
+
+    def fake_run(cmd, capture_output, text, timeout):
+        if seen is not None:
+            seen.append(cmd)
+        if raises is not None:
+            raise raises
+        class R:
+            returncode = rc
+        r = R()
+        r.stdout, r.stderr = stdout, stderr
+        return r
+
+    monkeypatch.setattr(mc.subprocess, "run", fake_run)
+    return mc._device_reaches_proxy("emulator-5554", 8081)
+
+
+def test_reachability_probe_does_not_use_the_nonexistent_nc_z_flag(monkeypatch):
+    # CAPREACH1 regression, MEASURED on the Android 11 emulator: /system/bin/nc
+    # is a symlink to toybox, and toybox netcat has NO `-z` ("nc: Unknown option
+    # 'z'"). The original probe used `nc -z -w 3`, which exits 1 on EVERY device -
+    # it reported a healthy route as DOWN, i.e. exactly the misleading diagnosis
+    # the probe exists to eliminate. Assert the portable connect form instead.
+    seen = []
+    _probe(monkeypatch, rc=0, seen=seen)
+    assert seen, "probe never invoked adb"
+    shell_cmd = seen[0][-1]
+    assert " -z " not in f" {shell_cmd} ", (
+        "toybox nc has no -z; the probe must not use it")
+    assert "| nc " in shell_cmd and "-w 3" in shell_cmd
+
+
+def test_reachability_probe_route_up(monkeypatch):
+    # A successful connect exits 0 -> the route the APP uses is up.
+    assert _probe(monkeypatch, rc=0) is True
+
+
+def test_reachability_probe_route_down(monkeypatch):
+    # Non-zero WITH a refusal signature -> the connection was refused: a real
+    # routing break. (MEASURED: toybox prints "nc: connect: Connection refused".)
+    assert _probe(
+        monkeypatch, rc=1,
+        stderr="nc: connect 127.0.0.1:8081 failed: Connection refused") is False
+
+
+def test_reachability_probe_unknown_when_the_device_nc_rejects_our_flags(monkeypatch):
+    # If the on-device netcat cannot be driven the way we need, we learned
+    # nothing about the route. Returning False here would invent a wiring
+    # failure out of a tool limitation (toybox prints this and exits 1).
+    assert _probe(
+        monkeypatch, rc=1,
+        stderr="nc: Unknown option 'z' (see \"nc --help\")") is None
+
+
+def test_reachability_probe_unknown_when_nc_is_absent(monkeypatch):
+    # A missing `nc` on the device exits non-zero, but that is "we could not
+    # probe", NOT "the route is down". Reading it as down would block the honest
+    # app-silence downgrade; reading it as up would assert an unmeasured
+    # reachability. It must be None.
+    assert _probe(monkeypatch, rc=127, stderr="/system/bin/sh: nc: inaccessible or not found") is None
+
+
+def test_reachability_probe_unknown_on_an_unexplained_nonzero_exit(monkeypatch):
+    # A bare non-zero exit with no recognisable cause must NOT be upgraded into
+    # a "route is down" verdict - that would fabricate a wiring failure.
+    assert _probe(monkeypatch, rc=2) is None
+
+
+def test_reachability_probe_unknown_when_adb_cannot_run(monkeypatch):
+    # No adb resolvable / adb exploded -> unknown, never a fabricated verdict.
+    assert _probe(monkeypatch, raises=OSError("no adb")) is None
+    assert _probe(monkeypatch, raises=RuntimeError("adb not found")) is None
+
+
+def test_reachability_probe_never_raises_on_timeout(monkeypatch):
+    # A probe must not be able to fail the capture stage; a subprocess timeout
+    # degrades to unknown.
+    import subprocess as _sp
+    assert _probe(monkeypatch, raises=_sp.TimeoutExpired("nc", 30)) is None

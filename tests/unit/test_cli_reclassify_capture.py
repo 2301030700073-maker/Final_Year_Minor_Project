@@ -232,3 +232,48 @@ def test_client_connection_signal_needs_internet():
     out = _reclassify_empty_capture(
         _capture(client_connections=5), None, None)
     assert out.status == "failed"
+
+
+def test_preflight_route_down_never_reclassified_as_app_silence():
+    """CAPREACH1: a pre-flight probe that found the device->proxy route DOWN is a
+    definitive routing failure - the device could not open a socket to the proxy
+    before a single request was made. It must stay FAILED even though the post-hoc
+    connection count is 0 (which the app-silence branch would otherwise read as
+    'device reached proxy, app quiet'). Downgrading it would hide a real
+    environment break behind a tidy 'skipped'.
+
+    Measured context: on the WSL2 reference environment the capture stage
+    auto-launches mitmdump on the Windows host, and a stale/absent Windows
+    mitmdump leaves the route dead - exactly the case that produced a 62s empty
+    capture on PropertyGuru with an elided diagnosis.
+    """
+    capture = _capture(status="failed", client_connections=0,
+                       device_reached_proxy_preflight=False)
+    m = _manifest(_INTERNET)
+    out = _reclassify_empty_capture(capture, m, dynamic_stage=None)
+    assert out.status == "failed"
+    assert "reclassified_from" not in (out.evidence or {})
+
+
+def test_preflight_route_up_still_allows_the_app_silence_verdict():
+    """CAPREACH1 must not make the honest app-silence downgrade unreachable: when
+    the route was proven UP and the device connected, an empty capture with no
+    in-process SSL signal really is app-silence, and stays `skipped`."""
+    capture = _capture(status="failed", client_connections=3,
+                       device_reached_proxy_preflight=True)
+    m = _manifest(_INTERNET)
+    out = _reclassify_empty_capture(capture, m, dynamic_stage=None)
+    assert out.status == "skipped"
+    assert out.evidence["reclassified_from"] == "failed"
+
+
+def test_preflight_unknown_is_treated_as_unknown_not_as_down():
+    """A probe that could not be RUN (no `nc` on the device, adb error) is None -
+    unknown. It must NOT be read as a down route (which would block the legitimate
+    app-silence downgrade) nor as up (which would assert a reachability we never
+    measured). The pre-existing signal-3 behavior therefore applies unchanged."""
+    capture = _capture(status="failed", client_connections=2,
+                       device_reached_proxy_preflight=None)
+    m = _manifest(_INTERNET)
+    out = _reclassify_empty_capture(capture, m, dynamic_stage=None)
+    assert out.status == "skipped"

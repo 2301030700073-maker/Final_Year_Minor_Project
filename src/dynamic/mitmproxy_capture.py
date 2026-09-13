@@ -153,6 +153,66 @@ class FlowSummary:
     scheme: str = ""
 
 
+def _device_reaches_proxy(serial: str, proxy_port: int) -> bool | None:
+    """Pre-flight device->proxy reachability probe (CAPREACH1).
+
+    Answers "can the device open a TCP connection to the capture proxy?" BEFORE
+    the capture window, so a zero-flow result can be attributed correctly. Without
+    it, a zero-flow capture is only diagnosable from the client-connection count
+    after the fact, and when the device never even tried (app-silence) that count
+    is 0 - indistinguishable from a genuine wiring break in the reason text.
+
+    Runs `nc` on the device against 127.0.0.1:<port>, which is exactly the route
+    the app uses (adb reverse maps device-localhost -> adb-server host).
+    Returns:
+      True   - the device opened a TCP connection to the proxy (route is UP)
+      False  - the connection was refused/timed out (route is DOWN)
+      None   - the probe could not be RUN (no usable `nc`, adb error) - unknown,
+               never asserted either way. A caller must treat None as unknown, not
+               as False, so an unprobeable device never fabricates a verdict.
+
+    MEASURED on the Android 11 emulator this targets: `nc` is a symlink to
+    **toybox**, whose netcat has NO `-z` flag ("nc: Unknown option 'z'"). The
+    obvious `nc -z -w 3 host port` therefore exits 1 on EVERY device - it reports
+    a perfectly healthy route as DOWN, which is precisely the misleading diagnosis
+    this probe exists to remove. So the connect is done the portable way: an
+    explicit empty payload (`echo '' | nc -w 3 host port`), where toybox/BSD/GNU
+    netcat alike exit 0 on a successful connect and non-zero on ECONNREFUSED.
+
+    Caveat, stated rather than papered over: a tool that *accepts* the TCP
+    connect but this probe still cannot run is indistinguishable from a refusal
+    by exit code alone, so the "Unknown option"/"not found"/"inaccessible"
+    signatures are also sniffed and mapped to None (unknown) rather than False.
+
+    Never raises: a reachability probe must not be able to fail the capture
+    stage. Deliberately a *pre-flight* check so the report can say whether the
+    route was up at capture time rather than inferring it afterwards."""
+    try:
+        adb = device._require_adb()
+        # `echo '' |` gives netcat an EOF-bound stdin so it connects, sends
+        # nothing, and exits - a pure reachability check with no -z needed.
+        res = subprocess.run(
+            [adb, "-s", serial, "shell", f"echo '' | nc -w 3 127.0.0.1 {proxy_port}"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError, RuntimeError):
+        # RuntimeError = _require_adb could not resolve adb. Unknown, not down.
+        return None
+    blob = f"{res.stdout}\n{res.stderr}".lower()
+    if "unknown option" in blob or "not found" in blob or "inaccessible" in blob:
+        # The on-device netcat could not be used the way we need - we learned
+        # nothing about the route. Unknown, never "down".
+        return None
+    # A successful connect exits 0; ECONNREFUSED/timeout exits non-zero. Only
+    # treat it as a definite DOWN when the refusal is actually reported, so an
+    # unrelated non-zero exit is not silently upgraded to a wiring verdict.
+    if res.returncode == 0:
+        return True
+    if "refused" in blob or "timed out" in blob or "unreachable" in blob:
+        return False
+    return None
+
+
 def _count_client_connections(text: str) -> int:
     """How many client TCP connections actually reached the proxy this run.
     Proxy-independent reachability signal: >0 with zero flows means the device
@@ -609,6 +669,13 @@ def run_capture_stage(
         device.adb_reverse(serial, proxy_port, proxy_port, add=True)
         device.set_http_proxy(serial, "127.0.0.1", proxy_port)
 
+        # CAPREACH1: probe the route we just built, BEFORE the capture window, so
+        # a zero-flow result can be attributed. True => route is up, so zero flows
+        # later means app-silence/CA-refusal, never a wiring break. False => the
+        # route is already broken (capture is guaranteed to yield nothing).
+        # None => could not probe; unknown, and never reported as a break.
+        reachable = _device_reaches_proxy(serial, proxy_port)
+
         frida_messages: list = []
         if bypass_script:
             # "With script" arm: spawn the app under Frida (paused), load the
@@ -655,14 +722,35 @@ def run_capture_stage(
             # only the dynamic stage), so `error` blamed device/app alone -
             # misdiagnosing a script crash as a wiring or app-silence failure.
             script_errors = _describe_script_errors(frida_messages)
-            device_or_app_cause = (
-                "no traffic captured through the proxy - either the device "
-                f"could not reach mitmdump at 127.0.0.1:{proxy_port} "
-                "(on WSL2 the adb-server host must expose localhost:"
-                f"{proxy_port}; the stage auto-launched mitmdump on the "
-                "Windows host) or the app made no network requests during "
-                "the capture window"
-            )
+            # CAPREACH1: name the ACTUAL cause using the pre-flight probe, instead
+            # of the old "either the device could not reach mitmdump ... or the app
+            # made no network requests" hedge that left the operator to guess.
+            if reachable is True:
+                device_or_app_cause = (
+                    "no traffic captured through the proxy - the device COULD "
+                    f"reach mitmdump at 127.0.0.1:{proxy_port} (pre-flight probe "
+                    "succeeded), so the route is not the problem: the app made no "
+                    "network requests during the capture window, or a pinned "
+                    "request refused the proxy CA (interactive capture needed)"
+                )
+            elif reachable is False:
+                device_or_app_cause = (
+                    "no traffic captured through the proxy - the device could NOT "
+                    f"reach mitmdump at 127.0.0.1:{proxy_port} (pre-flight probe "
+                    "was refused/timed out), so this IS a real device->proxy "
+                    "routing failure: check the adb reverse tunnel and that "
+                    "mitmdump is still listening on the adb-server host"
+                )
+            else:
+                device_or_app_cause = (
+                    "no traffic captured through the proxy - either the device "
+                    f"could not reach mitmdump at 127.0.0.1:{proxy_port} "
+                    "(on WSL2 the adb-server host must expose localhost:"
+                    f"{proxy_port}; the stage auto-launched mitmdump on the "
+                    "Windows host) or the app made no network requests during "
+                    "the capture window (pre-flight reachability probe was "
+                    "unavailable, so this could not be narrowed further)"
+                )
             if bypass_applied and script_errors:
                 error = (
                     "the pinning-bypass script raised "
@@ -688,6 +776,12 @@ def run_capture_stage(
                     # reached the proxy, app was silent (app-silence, not a wiring
                     # failure); 0 => device never reached the proxy (real failure).
                     "client_connections": client_connections,
+                    # CAPREACH1: the PRE-FLIGHT probe verdict (True route up /
+                    # False route down / None not probeable). Recorded separately
+                    # from client_connections because it is measured before the
+                    # window: it says whether the route was ever usable, which the
+                    # post-hoc connection count cannot distinguish from app-silence.
+                    "device_reached_proxy_preflight": reachable,
                     # Uncaught bypass-script errors (empty unless the script threw);
                     # a non-empty list is the true, prominent cause named in `error`.
                     "bypass_script_errors": script_errors,

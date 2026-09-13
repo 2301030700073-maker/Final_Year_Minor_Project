@@ -858,6 +858,14 @@ def _reclassify_empty_capture(
     # genuine reachability failure and MUST stay loud (never downgrade a real break).
     # A missing count (older addon / non-WSL2 path that didn't record it) is absent,
     # not zero, so it never fabricates a reachability claim - stays failed.
+    # CAPREACH1: a pre-flight probe that found the route DOWN is a definitive
+    # routing failure (the device could not open a socket to the proxy before a
+    # single request was made). Never reclassify that as app-silence: it is the
+    # one case where the network path - not the app - is proven broken, and
+    # downgrading it would hide a real environment break behind a tidy "skipped".
+    if evidence.get("device_reached_proxy_preflight") is False:
+        return capture_stage
+
     client_connections = evidence.get("client_connections")
     if has_internet and isinstance(client_connections, int) and client_connections > 0:
         return StageResult(

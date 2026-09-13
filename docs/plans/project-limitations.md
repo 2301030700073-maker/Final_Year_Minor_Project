@@ -64,7 +64,7 @@ These are **not open work items**. They are properties of the problem, surfaced 
 
 ## 7. Resolved code / tooling gaps
 
-Everything in the phase-1-4 review (G1–G22), the L-M1…L-M11 resolution plan, and the ~50 gap/boundary items in the working-memory index has landed. Highlights, each verifiable in git history and covered by the 1418-test unit suite:
+Everything in the phase-1-4 review (G1–G22), the L-M1…L-M11 resolution plan, and the ~50 gap/boundary items in the working-memory index has landed. Highlights, each verifiable in git history and covered by the 1,600+-test unit suite:
 
 - Subprocess timeouts (G2/G9); partial-evidence-on-failure ingest (G3); v4 signing + multi-signer (G4/LIM-3); non-APK zip-magic reject; named tool errors; loud signature-load failure (G8); per-category thresholds from `settings.yaml` (G1); **hash-chained tamper-evident audit log** + `verify-audit-log` (G15).
 - **Native `.so` + smali + hybrid-suffix scanning; multi-engine CFR fallback** (G6/G7/L-M1/L-M6); **119-entry signature corpus** (L-M3, DEX-verified); **NSC XML parsing** as a first-class SSL signal (L-M5); **case-fold + multiline matching** (S5/L-M9); **synthesized bypass for unknown targets** (L-M2).

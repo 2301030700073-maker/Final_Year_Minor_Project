@@ -850,10 +850,37 @@ def test_scan_skips_apktool_original_binary_archival_subtree(tmp_path, monkeypat
     assert evidence.unreadable_files == []
 
 
+def _advancing_monotonic(step):
+    """A fake ``time.monotonic`` that advances by ``step`` seconds on EVERY call, so a
+    budget guard measuring any interval observes at least ``step`` elapsed -
+    deterministically, on every platform. The ReDoS-budget tests below previously
+    zeroed the budget and relied on real ``time.monotonic()`` yielding a strictly
+    positive elapsed; on a coarse-clock OS (Windows, ~15 ms resolution) a trivial scan
+    rounds elapsed to exactly ``0.0``, so ``0.0 > 0.0`` is false and the guard never
+    fires - a platform-dependent test of the clock, not of the guard. Simulating time
+    exercises the guard's real comparison directly and removes the wall-clock
+    dependency (audit finding C1)."""
+    t = 0.0
+
+    def monotonic():
+        nonlocal t
+        t += step
+        return t
+
+    return monotonic
+
+
 def test_scan_raises_loudly_on_regex_backtracking_budget(tmp_path, monkeypatch):
-    # it - proving the guard fires, independent of regex linearity.
+    # Drive the per-line ReDoS budget guard by SIMULATED time - advance the clock by
+    # more than one budget per read - instead of a zeroed budget plus real wall-clock.
+    # The first measured interval then exceeds the (real) budget on every platform and
+    # the guard fires, proving the guard logic independent of clock resolution or
+    # regex linearity.
     import static.signatures as sig_mod
-    monkeypatch.setattr(sig_mod, "LINE_MATCH_BUDGET_SECONDS", 0.0)
+    monkeypatch.setattr(
+        sig_mod.time, "monotonic",
+        _advancing_monotonic(sig_mod.LINE_MATCH_BUDGET_SECONDS + 1.0),
+    )
     (tmp_path / "Main.java").write_text("public class Main { void m() {} }\n")
 
     bad = tmp_path / "bad.yaml"
@@ -888,7 +915,10 @@ def test_scan_per_line_budget_message_does_not_misattribute_to_linear_signature(
     # against the shipped code before the fix: the old message falsely blamed this
     # innocent linear signature and told the operator to linearize a non-regex.
     import static.signatures as sig_mod
-    monkeypatch.setattr(sig_mod, "LINE_MATCH_BUDGET_SECONDS", 0.0)
+    monkeypatch.setattr(
+        sig_mod.time, "monotonic",
+        _advancing_monotonic(sig_mod.LINE_MATCH_BUDGET_SECONDS + 1.0),
+    )
     (tmp_path / "Main.java").write_text("class A { String s = \"x\"; }\n")
 
     innocent = tmp_path / "innocent.yaml"
@@ -914,14 +944,17 @@ def test_scan_per_line_budget_message_does_not_misattribute_to_linear_signature(
 
 
 def test_scan_raises_loudly_on_multiline_regex_backtracking_budget(tmp_path, monkeypatch):
-    # signatures.py:452: the MULTILINE path's own ReDoS budget guard. The
-    # sibling test above zeroes the budget on a non-multiline signature, which
-    # fires the per-line guard (424) - the multiline whole-text guard was left
-    # uncovered. A multiline regex signature routes past the per-line loop (416)
-    # to the whole-text pass, where a zeroed budget must raise TimeoutError
-    # naming the multiline path specifically. Fail-loud (NFR-1), never silent.
+    # The MULTILINE path has its own ReDoS budget guard (the whole-text pass in
+    # signatures.scan(), distinct from the per-line guard the sibling tests above
+    # exercise). A multiline regex signature routes past the per-line loop to the
+    # whole-text pass, where a simulated over-budget interval must raise TimeoutError
+    # naming the multiline path specifically. Fail-loud (NFR-1), never silent. Driven
+    # by simulated time (see _advancing_monotonic) so it fires on every platform.
     import static.signatures as sig_mod
-    monkeypatch.setattr(sig_mod, "LINE_MATCH_BUDGET_SECONDS", 0.0)
+    monkeypatch.setattr(
+        sig_mod.time, "monotonic",
+        _advancing_monotonic(sig_mod.LINE_MATCH_BUDGET_SECONDS + 1.0),
+    )
     (tmp_path / "Main.java").write_text("public class Main { void m() {} }\n")
 
     bad = tmp_path / "bad.yaml"

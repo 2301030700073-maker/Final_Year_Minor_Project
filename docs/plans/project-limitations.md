@@ -27,7 +27,7 @@ The 2026-07-31 version of this file claimed "only `.java`/`.xml`" and "12 hand-a
 
 | # | Was claimed | Current reality |
 |---|---|---|
-| S1 | Scans only `.java`/`.xml` | `SCANNED_SUFFIXES` = `.java .xml .smali .js .jsbundle .bundle .json .properties .txt .html .htm`; the apktool **smali tree is scanned**; **native `.so`** analyzed via `static.native` (ELF symbols + capstone decompiled bodies + UPX unpack); **RN/Hermes JS bundles**, **Flutter assets**, and **WebView `.html`** containers scanned. |
+| S1 | Scans only `.java`/`.xml` | `SCANNED_SUFFIXES` = `.java .xml .smali .js .jsbundle .bundle .json .properties .txt .html .htm`; the apktool **smali tree is scanned**; **native `.so`** analyzed via `static.native` (ELF symbols + **Ghidra**-decompiled function bodies — capstone disassembly fallback when Ghidra is absent — plus UPX unpack); **RN/Hermes JS bundles**, **Flutter assets**, and **WebView `.html`** containers scanned. |
 | S2 | 12 hand-authored patterns (7 root, 5 ssl) | **119 signature entries**: 48 root, 51 SSL, 12 native, 8 packers — every one DEX-verified against a real APK before adding (never padded). Matching is case-folding by default (`case_sensitive` opt-in) with a multiline regex pass. Detection-shaped code matching **no** signature is surfaced as **coverage-limited (unknown)**, never a silent confident negative. |
 | S4 | Remote attestation (SafetyNet / Play Integrity) out of scope | **Still a documented non-goal** — not defeatable purely client-side. Play Integrity *verdict tokens* are now a detection signal; defeating the attestation itself remains out of scope by design (arms race, ADR). |
 | S5 | Single-line, case-sensitive regex | **Resolved:** case-folding default + multiline pass (`_line_matches`, signatures.py). |
@@ -64,7 +64,7 @@ These are **not open work items**. They are properties of the problem, surfaced 
 
 ## 7. Resolved code / tooling gaps
 
-Everything in the phase-1-4 review (G1–G22), the L-M1…L-M11 resolution plan, and the ~50 gap/boundary items in the working-memory index has landed. Highlights, each verifiable in git history and covered by the 1,600+-test unit suite:
+Everything in the phase-1-4 review (G1–G22), the L-M1…L-M11 resolution plan, and the ~50 gap/boundary items in the working-memory index has landed. Highlights, each verifiable in git history and covered by the 1,642-test unit suite:
 
 - Subprocess timeouts (G2/G9); partial-evidence-on-failure ingest (G3); v4 signing + multi-signer (G4/LIM-3); non-APK zip-magic reject; named tool errors; loud signature-load failure (G8); per-category thresholds from `settings.yaml` (G1); **hash-chained tamper-evident audit log** + `verify-audit-log` (G15).
 - **Native `.so` + smali + hybrid-suffix scanning; multi-engine CFR fallback** (G6/G7/L-M1/L-M6); **119-entry signature corpus** (L-M3, DEX-verified); **NSC XML parsing** as a first-class SSL signal (L-M5); **case-fold + multiline matching** (S5/L-M9); **synthesized bypass for unknown targets** (L-M2).

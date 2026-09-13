@@ -9,7 +9,7 @@ Full context lives in:
 - `docs/plans/requirements/functional-requirements.md` and `non-functional-requirements.md`
 - `docs/plans/adr/` — the *why* behind every consequential decision below
 - `docs/plans/architecture/high-level-architecture.md` — full target architecture (all 7 phases)
-- `docs/plans/architecture/low-level-design-core-phases-1-4.md` — concrete module design for the part currently being built
+- `docs/plans/architecture/low-level-design-core-phases-1-4.md` — concrete module design for the deterministic core (Phases 1-4 — **built and validated end-to-end**; Phases 5-7, the AI layer, are intentionally deferred per ADR-0003)
 
 (Everything above lives under `docs/plans/` rather than a flatter `docs/` layout because of a project-wide hook constraint — see the note in this repo's git history/first commit if that looks odd; it's cosmetic, not a statement that these are provisional "plans".)
 
@@ -30,10 +30,19 @@ These were arrived at deliberately, after critiquing an earlier, over-scoped ver
 
 ## Tech stack
 
-- Python, dependency-managed via `uv` (lockfile committed — see ADR-0007), SQLite + SQLAlchemy, Pydantic, Typer, Rich
-- Static analysis: jadx, apktool, androguard, aapt2, readelf/strings, capstone
-- Dynamic analysis: adb, Frida, objection, mitmproxy
-- Signature rules: hand-authored YAML, versioned
+- Python `>=3.11`, dependency-managed via `uv` (lockfile committed — see ADR-0007). The runtime dependencies (constraints in `pyproject.toml`, resolved versions in `uv.lock`) and their role:
+  - **Typer** 0.27 + **Rich** 15 — CLI surface and console rendering
+  - **PyYAML** 6 — loads the versioned signature rules
+  - **Jinja2** 3.1 — renders the Markdown/HTML reports (`report/generator.py`)
+  - **SQLAlchemy** 2.0 over stdlib `sqlite3` — run/APK persistence (`storage/`)
+  - **androguard** 4.1 — DEX + binary-manifest scanning
+  - **pyelftools** 0.33 — native ELF (`.so`) parsing; **capstone** 5.0 — native disassembly (capstone is the pure-Python fallback; Ghidra headless is the primary body decompiler, below)
+  - **pyaxmlparser** 0.3 — binary `AndroidManifest.xml` decoding
+  - **frida** 16.7 + **objection** 1.12 — dynamic instrumentation / bypass
+  - Internal data models are plain stdlib `@dataclass` (see `src/common.py`) — **not** Pydantic.
+- Static-analysis tooling (system-level, version-pinned in `README.md`, **not** `uv`-managed): jadx, apktool, androguard, aapt2, readelf/strings, capstone, **Ghidra headless** (native function-body decompilation), **UPX** (native unpacking).
+- Dynamic-analysis tooling: adb, Frida, objection, mitmproxy.
+- Signature rules: hand-authored YAML, versioned (`config/signatures/` — 119 entries: 48 root, 51 ssl, 12 native, 8 packers).
 - AI (Phase 5+ only, not present in the core): local models via Ollama for code-reasoning/hypothesis work; a large-context model for report synthesis; a vision model for screenshot verification. Specific model selection is deferred to each phase's build time, not committed now.
 
 ## Development / execution environment split

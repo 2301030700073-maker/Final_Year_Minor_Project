@@ -942,6 +942,20 @@ def test_unaccounted_native_loads_empty():
     assert unaccounted_native_loads(["libfoo"], {"libfoo.so"}) == []
 
 
+def test_unaccounted_native_loads_dedups_repeated_target():
+    # The same target loaded from several call sites (e.g. loadLibrary("log") in
+    # many RN modules) is one unexamined surface, not N - the report shows it
+    # once. Order is preserved and the first occurrence wins.
+    assert unaccounted_native_loads(["log", "log"], set()) == ["log"]
+    assert unaccounted_native_loads(["log", "ssl", "log", "crypto"], set()) == [
+        "log",
+        "ssl",
+        "crypto",
+    ]
+    # Dedup collapses only exact repeats; genuinely distinct targets are kept.
+    assert unaccounted_native_loads(["a", "b", "a"], {"libz.so"}) == ["a", "b"]
+
+
 # --- Fix 3: SHA-256 byte-dedup -----------------------------------------------
 
 def _write_so(tmp_path, name, data):

@@ -1074,13 +1074,19 @@ def unaccounted_native_loads(load_targets: list[str], analyzed_names: set[str]) 
     coverage to partial rather than certify a confident negative (ADR-0006)."""
     analyzed = set(analyzed_names)
     unaccounted: list[str] = []
+    seen: set[str] = set()
     for t in load_targets:
         base = os.path.basename(t)
         if not base.endswith(".so"):
             # loadLibrary("foo") -> libfoo.so (Android's loadLibrary naming rule).
             base = base if base.startswith("lib") else "lib" + base
             base += ".so"
-        if base not in analyzed:
+        # One row per distinct unexamined surface: the same target loaded from
+        # several call sites (e.g. loadLibrary("log") in many RN modules) is one
+        # surface, not N. Dedup by exact target, first occurrence wins. Coverage
+        # gates on presence, never on count, so this only de-noises the report.
+        if base not in analyzed and t not in seen:
+            seen.add(t)
             unaccounted.append(t)
     return unaccounted
 

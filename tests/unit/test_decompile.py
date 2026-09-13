@@ -52,6 +52,31 @@ def _pin_tool_resolution(request, monkeypatch):
     monkeypatch.setattr("static.decompile._find_jadx", lambda: "/usr/bin/jadx")
     monkeypatch.setattr("static.decompile._jadx_version", lambda jadx: "test-jadx")
     monkeypatch.setattr("static.decompile.require_tool", lambda name: f"/usr/bin/{name}")
+    # APKTOOL-STALL1: apktool now runs through _run_tool_until_stalled (progress-
+    # based timeout, Popen), not _run_tool_logged (subprocess.run). Dozens of tests
+    # in this module drive decompile() by faking only `subprocess.run`, so without
+    # this bridge they would silently stop intercepting apktool and fail for a
+    # harness reason rather than a real one. The bridge asks the SAME fake to run
+    # the command, writing its streamed output to the log exactly as the real
+    # runner does, then reports the fake's returncode - so every existing fake
+    # keeps working unchanged. The stall/ceiling policy itself is covered by its
+    # own tests, which must exercise the REAL runner and so opt out of this bridge
+    # with @pytest.mark.real_stall_runner (the bridge would otherwise replace the
+    # very behavior they assert).
+    if request.node.get_closest_marker("real_stall_runner"):
+        return
+
+    def _bridge(cmd, log_path, ceiling_s, stall_s, what):
+        with open(log_path, "w", encoding="utf-8") as logf:
+            try:
+                proc = subprocess.run(
+                    cmd, stdout=logf, stderr=subprocess.STDOUT, timeout=ceiling_s)
+            except subprocess.TimeoutExpired:
+                logf.write(f"\n[{what} timed out after {ceiling_s}s]\n")
+                return -9, ""
+        return proc.returncode, ""
+
+    monkeypatch.setattr("static.decompile._STALL_RUNNER", _bridge)
 
 
 def test_decompile_surfaces_real_stderr_not_just_the_generic_exit_message(tmp_path, monkeypatch):
@@ -947,17 +972,139 @@ def test_apktool_timeout_scales_with_size_and_caps():
     # apktool counterpart of jadx_timeout_for_size. Small APKs fail a hung
     # apktool fast (floor), large ones get proportional headroom, and a hard cap
     # bounds the worst case. Had zero coverage.
+    #
+    # APKTOOL-TIMEOUT1: asserts the SCALED RELATIONSHIP against the module's own
+    # constants rather than hardcoded magic numbers. The old test pinned the rate
+    # at 1.5 s/MB and so had to be edited when the rate was corrected - a test
+    # that restates a tunable constant tests nothing about the behavior it claims
+    # to cover. What matters is floor/linear/cap/monotonic, whatever the rate.
     from static.decompile import (
         apktool_timeout_for_size,
-        APKTOOL_TIMEOUT_FLOOR, APKTOOL_TIMEOUT_CAP,
+        APKTOOL_TIMEOUT_FLOOR, APKTOOL_TIMEOUT_CAP, APKTOOL_TIMEOUT_PER_MB,
     )
     assert apktool_timeout_for_size(0) == APKTOOL_TIMEOUT_FLOOR  # tiny -> floor
-    # 10 MB: floor + 10*1.5 = 195 (scales linearly in the middle)
-    assert apktool_timeout_for_size(10 * 1024 * 1024) == APKTOOL_TIMEOUT_FLOOR + 15
+    # 10 MB scales linearly: floor + 10 * rate.
+    assert apktool_timeout_for_size(10 * 1024 * 1024) == int(
+        APKTOOL_TIMEOUT_FLOOR + 10 * APKTOOL_TIMEOUT_PER_MB)
     # huge -> capped, never unbounded
     assert apktool_timeout_for_size(5000 * 1024 * 1024) == APKTOOL_TIMEOUT_CAP
     # monotonic non-decreasing in size
     assert apktool_timeout_for_size(50 * 1024 * 1024) >= apktool_timeout_for_size(10 * 1024 * 1024)
+
+
+def test_apktool_ceiling_clears_the_measured_propertyguru_runtime():
+    # APKTOOL-STALL1 regression. MEASURED LIVE on the PropertyGuru APK (150MB,
+    # 6 DEX, 21,139 resources): apktool `d --no-res` ran a HEALTHY 5,435 s (90
+    # minutes) and produced 53,426 files. The old wall-clock budget for that APK
+    # was 405 s (rate 1.5 s/MB), which killed it at ~4,000 files - ~7.5% of the
+    # real output - discarding the entire smali surface for a decode that was
+    # working perfectly. The outer ceiling must clear a measured legitimate
+    # runtime of this magnitude, or a healthy large decode is still destroyed.
+    from static.decompile import apktool_timeout_for_size, APKTOOL_STALL_SECONDS
+    pg = 150 * 1024 * 1024
+    assert apktool_timeout_for_size(pg) >= 5435, "must clear the measured 5435s run"
+    # ...and the old budget did NOT (this is the specific regression).
+    assert apktool_timeout_for_size(pg) > 405
+    # The stall window is what actually detects a hang, and must be far below the
+    # ceiling so a wedged tool dies in minutes, not hours.
+    assert APKTOOL_STALL_SECONDS < apktool_timeout_for_size(pg)
+
+
+@pytest.mark.real_stall_runner
+def test_run_tool_until_stalled_lets_a_slow_but_progressing_tool_finish(tmp_path):
+    # APKTOOL-STALL1 core: a tool that keeps writing must NEVER be killed for
+    # being slow - that is the whole point (a healthy PropertyGuru decode needs
+    # 90 minutes). Its total runtime here deliberately exceeds the stall window.
+    import sys
+    from static.decompile import _run_tool_until_stalled
+
+    script = (
+        "import sys,time\n"
+        "for i in range(6):\n"
+        "    print('working', i, flush=True)\n"
+        "    time.sleep(0.4)\n"
+        "print('DONE', flush=True)\n"
+    )
+    log = tmp_path / "slow.log"
+    # stall_s=1.0 but the tool writes every 0.4s -> never stalls; ceiling generous.
+    rc, tail = _run_tool_until_stalled(
+        [sys.executable, "-c", script], log, ceiling_s=60, stall_s=1.0, what="fake")
+    assert rc == 0
+    assert "DONE" in tail
+
+
+@pytest.mark.real_stall_runner
+def test_run_tool_until_stalled_kills_a_hung_tool(tmp_path):
+    # The complement: a tool that goes silent forever is a hang and must be killed
+    # after the stall window (not left running to the ceiling). This is the case
+    # the old wall-clock timeout conflated with "slow".
+    import sys
+    from static.decompile import _run_tool_until_stalled, _TIMEOUT_RC
+
+    script = "import time; print('started', flush=True); time.sleep(300)"
+    log = tmp_path / "hung.log"
+    rc, tail = _run_tool_until_stalled(
+        [sys.executable, "-c", script], log, ceiling_s=600, stall_s=2.0, what="fake")
+    assert rc == _TIMEOUT_RC
+    assert "stalled/hung" in tail
+
+
+@pytest.mark.real_stall_runner
+def test_run_tool_until_stalled_ceiling_names_itself_as_not_a_hang(tmp_path):
+    # A tool that keeps progressing but outgrows the ABSOLUTE ceiling is a
+    # different failure from a hang, and says so - otherwise the operator cannot
+    # tell "raise the cap" from "this tool is wedged".
+    import sys
+    from static.decompile import _run_tool_until_stalled, _TIMEOUT_RC
+
+    script = (
+        "import time\n"
+        "for i in range(200):\n"
+        "    print('working', i, flush=True)\n"
+        "    time.sleep(0.5)\n"
+    )
+    log = tmp_path / "ceiling.log"
+    # ceiling_s=1 is far below the ~100s this would take, and stall_s=30 is far
+    # above the 0.5s write interval - so the ceiling must be what fires, not the
+    # stall window. (Getting this backwards is what an earlier version of this
+    # test did: 200*0.1s finished before a 2s ceiling, proving nothing.)
+    rc, tail = _run_tool_until_stalled(
+        [sys.executable, "-c", script], log, ceiling_s=1, stall_s=30, what="fake")
+    assert rc == _TIMEOUT_RC
+    assert "absolute ceiling" in tail
+    assert "NOT a hang" in tail
+    assert "stalled/hung" not in tail, (
+        "a tool that was still producing output must never be reported as a hang")
+
+
+def test_ceiling_is_enforced_even_while_the_tool_keeps_producing_output():
+    # APKTOOL-STALL1 regression: an earlier loop did `continue` immediately after
+    # observing output growth, which SKIPPED the ceiling check entirely. A tool
+    # that chatters forever was therefore never capped - the outer backstop was
+    # unreachable for exactly the run-forever case it exists for. Assert the
+    # ordering structurally so a future edit cannot reintroduce the skip.
+    import inspect
+    import re
+    from static import decompile
+
+    src = inspect.getsource(decompile._run_tool_until_stalled)
+    # The progress branch must not short-circuit the loop.
+    assert not re.search(r"last_growth = now\s*\n\s*continue", src), (
+        "progress must not `continue`: it would skip the ceiling check")
+    # And the ceiling check must precede the stall check.
+    assert src.index("elapsed >= ceiling_s") < src.index("stalled_for >= stall_s"), (
+        "the ceiling must be evaluated before the stall window")
+
+
+def test_runs_timed_out_distinguishes_our_kill_from_a_real_exit_code():
+    # APKTOOL-TIMEOUT1: a run killed by OUR timeout and a run that genuinely
+    # crashed both surfaced as a bare integer inside a text log tail, so a partial
+    # degrade could not be attributed ("needs a bigger budget" vs "tool is broken").
+    from static.decompile import _runs_timed_out, _TIMEOUT_RC
+    assert _runs_timed_out(_TIMEOUT_RC) is True
+    assert _runs_timed_out(1, 0, _TIMEOUT_RC) is True
+    assert _runs_timed_out(0, 1, 137) is False
+    assert _runs_timed_out() is False
 
 
 def test_run_tool_logged_streams_output_and_returns_rc(tmp_path, monkeypatch):
@@ -1111,3 +1258,139 @@ def test_dex_unit_covered_jadx_empty_dex_is_not_laundered_by_minimal_recovery():
     # A clean jadx unit that nonetheless wrote zero files is likewise not covered
     # (nothing scannable), matching the pre-existing behavior on that edge.
     assert _dex_unit_covered(rc=0, files=0, recovered=False, recovered_count=0) is False
+
+
+def test_extract_assets_recovers_bundles_from_the_apk(tmp_path):
+    """ASSET-DROP1: the asset surface must be extracted straight from the APK.
+
+    Measured live on PropertyGuru (150MB React Native): the lazy per-DEX jadx
+    path hands jadx a bare `dex_sources/classesN.dex`, never the APK, so every
+    unit writes an EMPTY resources/ and the shipped
+    `assets/index.android.bundle` (20MB Hermes bytecode, which scans to
+    root-detection evidence) landed in no scan root at all. apktool could not
+    cover it either - it is killed mid-smali on an APK this size. Net effect: the
+    app's primary root/SSL surface was read by NOTHING while `js` still reported
+    `fully_analyzed`. `extract_assets` is the single place that guarantees the
+    surface exists on disk regardless of which jadx path ran.
+    """
+    import zipfile
+
+    from static.decompile import extract_assets
+
+    apk = tmp_path / "app.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("classes.dex", b"dex\n035\x00")
+        z.writestr("assets/index.android.bundle", b"\xc6\x1f\xbc\x03\xc1\x03\x19\x1f" + b"\x00" * 64)
+        z.writestr("assets/nested/deep/thing.js", b"var a = 1;")
+        z.writestr("assets/", b"")  # a directory entry must not be written as a file
+        z.writestr("res/values/strings.xml", b"<resources/>")
+
+    target = tmp_path / "analysis"
+    written = extract_assets(apk, target)
+
+    # Both real asset files (the directory entry is skipped), and the bundle is
+    # byte-identical to the APK member - not re-encoded.
+    assert written == 2
+    bundle = target / "assets" / "index.android.bundle"
+    assert bundle.is_file()
+    assert bundle.read_bytes()[:8] == b"\xc6\x1f\xbc\x03\xc1\x03\x19\x1f"
+    assert (target / "assets" / "nested" / "deep" / "thing.js").is_file()
+    # Non-asset members are NOT extracted (this is the asset surface only).
+    assert not (target / "classes.dex").exists()
+    assert not (target / "res").exists()
+
+
+def test_extract_assets_is_non_fatal_on_a_non_zip(tmp_path):
+    """A non-APK path must degrade to 0, never raise: `decompile()` calls this
+    unconditionally, and the unit suite calls decompile() with fake paths. A
+    raise here would discard an otherwise-good decompile over an asset copy."""
+    from static.decompile import extract_assets
+
+    fake = tmp_path / "not-an-apk.apk"
+    fake.write_bytes(b"this is not a zip")
+    assert extract_assets(fake, tmp_path / "out") == 0
+    # An absent path is likewise 0, not an exception.
+    assert extract_assets(tmp_path / "missing.apk", tmp_path / "out") == 0
+
+
+def test_extract_assets_returns_zero_when_apk_has_no_assets(tmp_path):
+    """An APK genuinely without assets/ yields 0 - so the sidecar's
+    `asset_surface_extracted` reads False for a real absence too. That is the
+    honest behavior: the caller degrades `js` to partial (unknown, not absent)
+    rather than claiming the surface was cleared."""
+    import zipfile
+
+    from static.decompile import extract_assets
+
+    apk = tmp_path / "noassets.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("classes.dex", b"dex\n035\x00")
+    assert extract_assets(apk, tmp_path / "out") == 0
+
+
+def test_extract_assets_recovers_bundles_from_the_apk(tmp_path):
+    """ASSET-DROP1: the asset surface must be extracted straight from the APK.
+
+    Measured live on PropertyGuru (150MB React Native): the lazy per-DEX jadx
+    path hands jadx a bare `dex_sources/classesN.dex`, never the APK, so every
+    unit writes an EMPTY resources/ and the shipped
+    `assets/index.android.bundle` (20MB Hermes bytecode, which scans to
+    root-detection evidence) landed in no scan root at all. apktool could not
+    cover it either - it is killed mid-smali on an APK this size. Net effect: the
+    app's primary root/SSL surface was read by NOTHING while `js` still reported
+    `fully_analyzed`. `extract_assets` is the single place that guarantees the
+    surface exists on disk regardless of which jadx path ran.
+    """
+    import zipfile
+
+    from static.decompile import extract_assets
+
+    apk = tmp_path / "app.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("classes.dex", b"dex\n035\x00")
+        z.writestr("assets/index.android.bundle", b"\xc6\x1f\xbc\x03\xc1\x03\x19\x1f" + b"\x00" * 64)
+        z.writestr("assets/nested/deep/thing.js", b"var a = 1;")
+        z.writestr("assets/", b"")  # a directory entry must not be written as a file
+        z.writestr("res/values/strings.xml", b"<resources/>")
+
+    target = tmp_path / "analysis"
+    written = extract_assets(apk, target)
+
+    # Both real asset files (the directory entry is skipped), and the bundle is
+    # byte-identical to the APK member - not re-encoded.
+    assert written == 2
+    bundle = target / "assets" / "index.android.bundle"
+    assert bundle.is_file()
+    assert bundle.read_bytes()[:8] == b"\xc6\x1f\xbc\x03\xc1\x03\x19\x1f"
+    assert (target / "assets" / "nested" / "deep" / "thing.js").is_file()
+    # Non-asset members are NOT extracted (this is the asset surface only).
+    assert not (target / "classes.dex").exists()
+    assert not (target / "res").exists()
+
+
+def test_extract_assets_is_non_fatal_on_a_non_zip(tmp_path):
+    """A non-APK path must degrade to 0, never raise: `decompile()` calls this
+    unconditionally, and the unit suite calls decompile() with fake paths. A
+    raise here would discard an otherwise-good decompile over an asset copy."""
+    from static.decompile import extract_assets
+
+    fake = tmp_path / "not-an-apk.apk"
+    fake.write_bytes(b"this is not a zip")
+    assert extract_assets(fake, tmp_path / "out") == 0
+    # An absent path is likewise 0, not an exception.
+    assert extract_assets(tmp_path / "missing.apk", tmp_path / "out") == 0
+
+
+def test_extract_assets_returns_zero_when_apk_has_no_assets(tmp_path):
+    """An APK genuinely without assets/ yields 0 - so the sidecar's
+    `asset_surface_extracted` reads False for a real absence too. That is the
+    honest behavior: the caller degrades `js` to partial (unknown, not absent)
+    rather than claiming the surface was cleared."""
+    import zipfile
+
+    from static.decompile import extract_assets
+
+    apk = tmp_path / "noassets.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("classes.dex", b"dex\n035\x00")
+    assert extract_assets(apk, tmp_path / "out") == 0

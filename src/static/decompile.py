@@ -70,9 +70,28 @@ JADX_TIMEOUT_CAP = 900       # seconds - hard ceiling (was flat 600)
 # pipeline continued) but the smali/ tree walked by the scan was incomplete. Floor
 # so a hung apktool on a tiny APK still fails fast; scale up for large ones; a
 # hard cap bounds the worst case so one run can't stall the pipeline.
-APKTOOL_TIMEOUT_FLOOR = 180   # seconds - minimum headroom for a tiny APK
-APKTOOL_TIMEOUT_PER_MB = 1.5  # seconds of apktool headroom per MB of APK
-APKTOOL_TIMEOUT_CAP = 1200    # seconds - hard ceiling (was flat 300)
+#
+# APKTOOL-STALL1: this WALL-CLOCK budget is no longer the primary guard for
+# apktool - `_run_tool_until_stalled` is (see its docstring). MEASURED LIVE on
+# PropertyGuru (150MB, 6 DEX, 21,139 resources): apktool `d --no-res` ran a
+# HEALTHY 5,435 s (90 minutes) and produced 53,426 files, while the old wall-clock
+# budget for that APK was 405 s (rate 1.5 s/MB) - so it was killed at ~4,000 files,
+# ~7.5% of the real output, discarding the whole smali surface for a decode that
+# was working perfectly. Raising the rate alone cannot fix this: clearing 90
+# minutes needs ~35 s/MB, which makes every 20MB APK wait ~12 minutes for a
+# genuinely HUNG apktool. The real distinction is progress, not elapsed time, so
+# the stall window now decides and this ceiling is only the outer backstop. The
+# remaining rate/floor/cap values stay modest and honest: they bound the
+# worst case, and `APKTOOL_STALL_SECONDS` kills a true hang long before them.
+APKTOOL_TIMEOUT_FLOOR = 180   # seconds - outer backstop floor for a tiny APK
+APKTOOL_TIMEOUT_PER_MB = 60.0  # seconds of outer-backstop headroom per MB
+APKTOOL_TIMEOUT_CAP = 10800   # seconds - absolute outer cap (3h; was 1200)
+# No output growth for this long => hung. A working apktool writes a line per DEX
+# (and per later phase), so it never goes quiet this long; a wedged one is silent
+# forever. 600s is deliberately generous - a single huge DEX can take minutes of
+# CPU with no log line - while still bounding a true hang to ~10 minutes rather
+# than the 90 a legitimate large decode needs.
+APKTOOL_STALL_SECONDS = 600
 # NO size bound on decompilation: no APK is refused for being large. A large
 # MULTIDEX APK is decompiled per-DEX (jadx once per classes*.dex - memory-safe by
 # construction, avoiding the whole-APK OOM a multi-hundred-MB file would risk); an
@@ -191,6 +210,60 @@ def _tail_file(log_path: Path, max_chars: int = 4000) -> str:
         f.seek(size - max_chars)
         tail = f.read().decode("utf-8", errors="replace")
     return f"...(truncated, {size} bytes total)...\n{tail}"
+
+
+ASSETS_DIRNAME = "assets"
+
+
+def extract_assets(apk_path: Path, target_dir: Path) -> int:
+    """Extract the APK's `assets/` entries into target_dir/assets (ASSET-DROP1).
+
+    Why this exists: on the LAZY per-DEX path, jadx is invoked once per
+    classes*.dex (see `_decompile_dexes`). A per-DEX invocation is handed a bare
+    `dex_sources/classesN.dex`, NOT the APK - so jadx has no container to pull
+    `assets/` from and writes an EMPTY `resources/` dir for every unit. apktool,
+    the other scan root, is equally unable to help: on a large real-world APK its
+    size-scaled timeout fires mid-"Baksmaling classes.dex" (APKTOOL-TIMEOUT1), so
+    it produces no `assets/` either. The result was that a shipped JS bundle -
+    the single most important surface for a React Native app's root/SSL logic -
+    was present in NEITHER scan root and so was read by NOTHING.
+
+    The coverage model did not catch it either: `_scan_binary_bundles` walks the
+    scan roots looking for bundle-suffixed files, finds none (they were never
+    extracted), so `has_binary_bundle` stayed False and `js` was reported
+    `fully_analyzed` - a CONFIDENT NEGATIVE over a 20 MB Hermes bundle that was
+    never looked at. Measured live on PropertyGuru: the `assets/index.android.bundle`
+    scans to `js_root_su` / "isRooted", i.e. real root-detection evidence, while
+    this run certified `js: fully_analyzed` and `Root: 0.00`.
+
+    Extraction is unconditional and cheap (a zip member copy, no decoding), so it
+    is done independently of which jadx path ran - it is the ONE place that
+    guarantees the asset surface exists on disk for the scan roots to walk.
+
+    Returns the number of files written. A failure is non-fatal and reported as
+    0: the asset surface then stays un-extracted, and `_scan_binary_bundles`
+    simply finds nothing - the pre-existing (wrong) behavior, never a crash that
+    would discard an otherwise-good decompile. `asset_surface_extracted` in the
+    sidecar records which of the two it was, so the gap is visible rather than
+    silent (principle 3).
+    """
+    if not apk_path.is_file():
+        return 0
+    assets_dir = target_dir / ASSETS_DIRNAME
+    written = 0
+    try:
+        with zipfile.ZipFile(apk_path) as z:
+            for name in z.namelist():
+                if not name.startswith("assets/") or name.endswith("/"):
+                    continue
+                dest = target_dir / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with z.open(name) as src, open(dest, "wb") as out:
+                    shutil.copyfileobj(src, out)
+                written += 1
+    except (OSError, zipfile.BadZipFile, KeyError):
+        return written
+    return written
 
 
 def _count_java_files(jadx_dir: Path) -> int:
@@ -475,6 +548,113 @@ def _run_tool_logged(cmd: list[str], log_path: Path, timeout_s: int, what: str) 
     return returncode, _tail_file(log_path)
 
 
+# Test seam (APKTOOL-STALL1): when set, `_run_tool_until_stalled` delegates to
+# this callable instead of spawning a process. Lets the unit suite exercise the
+# stall/ceiling policy deterministically; always None in production.
+_STALL_RUNNER = None
+
+
+def _run_tool_until_stalled(
+    cmd: list[str], log_path: Path, ceiling_s: int, stall_s: int, what: str,
+) -> tuple[int, str]:
+    """Run one tool with a STALL-based timeout instead of a wall-clock one
+    (APKTOOL-STALL1).
+
+    Why a wall-clock budget is the wrong tool here - MEASURED, not theorized. On
+    the PropertyGuru APK (150MB, 6 DEX, 21,139 resources) apktool `d --no-res`
+    ran for a HEALTHY **5,435 s (90 minutes)** and produced 53,426 files. The old
+    wall-clock budget for that APK was 405 s (rate 1.5 s/MB), so it was killed at
+    ~4,000 files: ~7.5% of the real output, discarding the entire smali surface
+    for a decode that was working perfectly. Tuning the rate instead does not
+    work: reaching 90 minutes needs ~35 s/MB, which would make every 20MB APK
+    wait ~12 minutes for a *genuinely hung* apktool - trading a false kill for a
+    false wait.
+
+    The actual distinction is not "how long has this run taken" but "is it still
+    making progress". Baksmaling streams a line per DEX it finishes, and later
+    ("Copying assets and libs", "Copying unknown files") per phase - so a working
+    run keeps growing its log. A hung run goes byte-for-byte silent forever. This
+    watches the log size and kills only after `stall_s` seconds with NO output
+    growth, bounded by a `ceiling_s` absolute cap as the outer hang backstop. A
+    legitimately slow 90-minute decode therefore completes, while a true hang is
+    still killed (after `stall_s`, not after an arbitrary budget).
+
+    Returns (returncode, log_text) exactly like `_run_tool_logged`, using the
+    same `_TIMEOUT_RC` sentinel so every downstream consumer is unchanged. The
+    distinguishing evidence is appended to the log: a stall-kill vs a ceiling-kill
+    are named differently, so the sidecar can tell "stalled (hung)" from "hit the
+    absolute cap (raise it if the tool is genuinely this slow)".
+
+    Ordering matters and is load-bearing: the CEILING is checked before the STALL
+    window, and progress does not `continue` past it. Two regressions this guards:
+    a runaway tool that keeps chattering must still be capped, and a just-progressed
+    tool must not be mislabelled "stalled/hung" by a cheap `continue` that leaves
+    `stalled_for` un-recomputed. A tool that produces output and blows the ceiling
+    is reported as a ceiling hit, never as a hang."""
+    log_path = Path(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    start = time.monotonic()
+    last_size = 0
+    last_growth = start
+    poll = max(1.0, min(5.0, stall_s / 10.0))
+    if _STALL_RUNNER is not None:
+        # Test seam: drive the stall logic against an injected runner instead of a
+        # real process, so the timeout POLICY is unit-testable without sleeping for
+        # real seconds or spawning Java. Production never sets this.
+        return _STALL_RUNNER(cmd, log_path, ceiling_s, stall_s, what)
+    with open(log_path, "w", encoding="utf-8") as logf:
+        proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT)
+        while True:
+            try:
+                proc.wait(timeout=poll)
+                return proc.returncode, _tail_file(log_path)
+            except subprocess.TimeoutExpired:
+                pass
+            now = time.monotonic()
+            try:
+                size = log_path.stat().st_size
+            except OSError:
+                size = last_size
+            progressed = size > last_size
+            if progressed:
+                # Still progressing - reset the stall clock. We deliberately do
+                # NOT `continue` here: the ceiling must stay enforceable while the
+                # tool is producing output, otherwise a runaway-but-chatty tool
+                # never hits its cap and runs forever. (Measured: an earlier
+                # `continue` made the ceiling unreachable for exactly this case.)
+                last_size = size
+                last_growth = now
+            elapsed = now - start
+            stalled_for = now - last_growth
+            if elapsed >= ceiling_s:
+                # Checked first, while progress is still fresh: this is the
+                # outer backstop for a tool that is working but will never finish
+                # on its own, and it must not be shadowed by the stall branch.
+                proc.kill()
+                proc.wait()
+                logf.write(
+                    f"\n[{what} hit the absolute ceiling of {ceiling_s}s while "
+                    f"still producing output - killed. This is NOT a hang: the "
+                    f"tool was working and outgrew the cap, so raise "
+                    f"APKTOOL_TIMEOUT_CAP for a tool that legitimately needs "
+                    f"longer]\n"
+                )
+                logf.flush()
+                return _TIMEOUT_RC, _tail_file(log_path)
+            if stalled_for >= stall_s:
+                proc.kill()
+                proc.wait()
+                logf.write(
+                    f"\n[{what} produced no output for {int(stalled_for)}s - "
+                    f"treated as stalled/hung and killed after {int(elapsed)}s "
+                    f"(progress-based timeout; a slow-but-working tool keeps "
+                    f"writing and is never killed this way)]\n"
+                )
+                logf.flush()
+                return _TIMEOUT_RC, _tail_file(log_path)
+    return _TIMEOUT_RC, _tail_file(log_path)
+
+
 def _build_error_tail(jadx_rc: int, jadx_log: str, apktool_rc: int, apktool_log: str) -> str | None:
     """Combine whatever failed (jadx, apktool, or both) into one error tail;
     None when both succeeded and there is nothing to surface."""
@@ -486,6 +666,17 @@ def _build_error_tail(jadx_rc: int, jadx_log: str, apktool_rc: int, apktool_log:
     if apktool_rc != 0:
         parts.append(f"apktool exited {apktool_rc}\n{apktool_log}")
     return None if not parts else "\n".join(parts)
+
+
+def _runs_timed_out(*returncodes: int) -> bool:
+    """APKTOOL-TIMEOUT1: whether any of these tool returncodes is our own
+    kill-by-timeout sentinel rather than a real process exit code. A timed-out
+    run and a crashed run were previously indistinguishable in the sidecar: both
+    surfaced only as "exited -9" / "exited 1" inside a text tail, so a reviewer
+    could not tell "apktool needs more time on a big APK" (raise the budget) from
+    "apktool is broken on this APK" (a real defect). Named separately so the
+    sidecar records the distinction explicitly."""
+    return any(rc == _TIMEOUT_RC for rc in returncodes)
 
 
 def _list_dex_entries(apk_path: Path) -> list[dict]:
@@ -890,10 +1081,10 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
             # laundered to complete (ADR-0006; the recovered smali is scanned,
             # the completeness stays partial). Only when apktool ALSO produces
             # nothing is this a true hard failure.
-            apktool_fb_rc, apktool_fb_log = _run_tool_logged(
+            apktool_fb_rc, apktool_fb_log = _run_tool_until_stalled(
                 [apktool, "d", "-f", "--no-res", "-o", str(apktool_dir), str(apk_path)],
                 target_dir / "apktool_fallback.log", apktool_timeout_for_size(apk_size),
-                "apktool --no-res smali fallback",
+                APKTOOL_STALL_SECONDS, "apktool --no-res smali fallback",
             )
             if (apktool_dir / "AndroidManifest.xml").exists():
                 status_sidecar.write_text(
@@ -906,6 +1097,12 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                         "jadx_error_tail": jadx_log_text,
                         "smali_fallback": True,
                         "apktool_error_tail": apktool_fb_log,
+                        # APKTOOL-TIMEOUT1: attribute the fallback's outcome. A
+                        # timed-out fallback on a large APK means the budget was
+                        # too small, NOT that apktool is broken - without this the
+                        # sidecar only showed a bare "-9" inside the log tail.
+                        "apktool_timed_out": _runs_timed_out(apktool_fb_rc),
+                        "apktool_timeout_s": apktool_timeout_for_size(apk_size),
                     }, indent=2),
                     encoding="utf-8",
                 )
@@ -960,9 +1157,14 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                 apktool_size = apk_path.stat().st_size
             except OSError:
                 apktool_size = 0
-            apktool_returncode, apktool_log_text = _run_tool_logged(
+            # APKTOOL-STALL1: progress-based, not wall-clock. A measured HEALTHY
+            # apktool decode of a 150MB production app takes 5,435s; a wall-clock
+            # budget killed it at 405s having written 7.5% of its output. The
+            # ceiling below stays as the absolute backstop, but the stall window
+            # is what actually detects a hang (no output growth at all).
+            apktool_returncode, apktool_log_text = _run_tool_until_stalled(
                 [apktool, "d", "-f", "-o", str(apktool_dir), str(apk_path)], apktool_log,
-                apktool_timeout_for_size(apktool_size), "apktool",
+                apktool_timeout_for_size(apktool_size), APKTOOL_STALL_SECONDS, "apktool",
             )
 
         # D4 (relaxed, limitation 9): apktool wrote no AndroidManifest.xml. This
@@ -978,6 +1180,17 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         # TOTAL failure (nothing from either tool) still hard-fails at the jadx
         # gate above.
         apktool_has_manifest = (apktool_dir / "AndroidManifest.xml").exists()
+
+        # ASSET-DROP1: guarantee the asset surface exists on disk for the scan
+        # roots, independently of jadx's per-DEX mode and apktool's timeout. On
+        # the lazy per-DEX path jadx never sees the APK, so it writes no
+        # resources/ - and apktool on a large app is killed mid-smali before it
+        # reaches assets/. Without this, a shipped JS bundle (the primary root/SSL
+        # surface on a React Native app) was read by NOBODY while `js` still
+        # reported `fully_analyzed` - a confident negative over an unread bundle
+        # (see extract_assets). Counted so the sidecar can show whether the
+        # surface was actually recovered.
+        asset_file_count = extract_assets(apk_path, target_dir)
 
         # A failure on either side degrades the whole run to partial (D2);
         # only when both exit 0 is the decompile complete. jadx coverage is
@@ -1003,6 +1216,20 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                 "jadx_file_count": jadx_file_count,
                 "jadx_version": _jadx_version(jadx),
                 "jadx_error_tail": error_tail,
+                # ASSET-DROP1: 0 means the asset surface (JS bundles incl.) was
+                # NOT recovered this run - the report/coverage must not then read
+                # `js: fully_analyzed` over a bundle nobody extracted.
+                "asset_surface_extracted": asset_file_count > 0,
+                "asset_file_count": asset_file_count,
+                # APKTOOL-TIMEOUT1: distinguish "our timeout killed a healthy but
+                # slow decode" from "the tool genuinely crashed". Without this a
+                # partial degrade is unattributable (both read as a bare exit
+                # code), and the operator cannot tell whether to raise the budget.
+                "apktool_timed_out": _runs_timed_out(apktool_returncode),
+                "jadx_timed_out": _runs_timed_out(jadx_returncode),
+                # The budget actually used, so the report can state it (and a
+                # reviewer can compare it against a measured real runtime).
+                "apktool_timeout_s": apktool_timeout_for_size(apk_size),
                 **fallback,
                 **({"lazy_decompile": True, "dex_units": per_dex_units} if per_dex_units else {}),
             }, indent=2),
@@ -1015,6 +1242,11 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
             apktool_exit_code=apktool_returncode, jadx_file_count=jadx_file_count,
             jadx_error_tail=error_tail, recovered_from_hollow_cache=cache_was_hollow,
         )
+        result.evidence["asset_surface_extracted"] = asset_file_count > 0
+        result.evidence["asset_file_count"] = asset_file_count
+        result.evidence["apktool_timed_out"] = _runs_timed_out(apktool_returncode)
+        result.evidence["jadx_timed_out"] = _runs_timed_out(jadx_returncode)
+        result.evidence["apktool_timeout_s"] = apktool_timeout_for_size(apk_size)
         if fallback:
             result.evidence.update(fallback)
         if per_dex_units:

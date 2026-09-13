@@ -37,4 +37,9 @@ markers = [
     # tests/unit/test_decompile.py: a test marked this way exercises the REAL
     # _find_jadx/_jadx_version/require_tool resolution instead of the stubs.
     "real_tool_resolution: test exercises real toolchain resolution (not stubbed)",
+    # Opt-out of the module-wide subprocess.run->stall-runner bridge in the same
+    # file (APKTOOL-STALL1): a test marked this way drives the REAL
+    # _run_tool_until_stalled progress/ceiling policy instead of the bridge that
+    # lets the older fakes keep intercepting apktool.
+    "real_stall_runner: test exercises the real stall-based timeout runner",
 ]

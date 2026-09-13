@@ -1248,6 +1248,17 @@ def run(
 
     # --- static signature scan + manifest ---
     static_roots = [jadx_output, apktool_output]
+    # ASSET-DROP1: the assets/ tree extracted straight from the APK (decompile.py
+    # -> extract_assets). On the lazy per-DEX path jadx is handed a bare .dex and
+    # never sees the APK, and apktool can be killed mid-smali on a large app - so
+    # neither scans root carries assets/ on a real React Native APK. Without
+    # this root the shipped JS bundle was read by NOBODY while `js` still read
+    # `fully_analyzed` (a confident negative over an unread bundle). Added only
+    # when the extraction actually produced files, so a genuine absence stays an
+    # absence rather than an empty-but-present root.
+    assets_output = jadx_output.parent / "assets"
+    if assets_output.is_dir():
+        static_roots.append(assets_output)
     # L-M1: a secondary decompiler fallback that recovered classes jadx missed
     # leaves its output in fallback_output - scan it too, so the recovered source
     # is actually walked (otherwise the recovery would have no detection effect).
@@ -1691,7 +1702,13 @@ def run(
     # js/root/ssl NEITHER is never a confident negative over bundle-hidden logic
     # (ADR-0006). Always set (fully_analyzed when no binary bundle), because `js` is
     # now a governing surface in coverage.py.
-    coverage_map["js"] = js_surface_coverage(has_binary_bundle)
+    # ASSET-DROP1: an asset surface that was never extracted makes has_binary_bundle
+    # meaningless (a bundle in the APK is invisible to every scan root), so `js`
+    # must degrade to partial rather than certify a confident negative over it.
+    _asset_surface_extracted = bool(
+        decompile_result.evidence.get("asset_surface_extracted", True)
+    )
+    coverage_map["js"] = js_surface_coverage(has_binary_bundle, _asset_surface_extracted)
     # Flutter/Dart-AOT: a release Flutter app compiles its Dart logic (the real
     # root/SSL detection surface) into a native snapshot blob - libapp.so /
     # dart.so - that native symbol/string/Ghidra tooling cannot analyze like a

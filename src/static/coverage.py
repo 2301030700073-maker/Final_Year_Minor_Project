@@ -182,14 +182,29 @@ def dart_aot_coverage(
     return coverage
 
 
-def js_surface_coverage(has_binary_bundle: bool) -> Coverage:
+def js_surface_coverage(
+    has_binary_bundle: bool,
+    asset_surface_extracted: bool = True,
+) -> Coverage:
     """Real-world gap A1: a Hermes/bytecode JS bundle (React Native release
     `assets/index.android.bundle`, `.hbc`) is binary, so the text engine skips it
     and jadx only reads DEX. We can recover its string-constant table, not the
     surrounding JS control flow - so its surface is `partial`, never a confident
     negative over root/SSL logic that lives in the bundle. With no binary bundle
     present the surface is vacuously `fully_analyzed` (either no JS, or plain-text
-    JS the signature engine already scans)."""
+    JS the signature engine already scans).
+
+    ASSET-DROP1: `has_binary_bundle` is only trustworthy if the asset surface was
+    actually put on disk for the scan roots to walk. When it was NOT extracted
+    (asset_surface_extracted=False - e.g. the lazy per-DEX jadx path, which never
+    sees the APK, combined with an apktool that timed out mid-smali), a bundle
+    that IS in the APK is invisible: `has_binary_bundle` reads False and the
+    surface would read `fully_analyzed` over a bundle nobody read. That is the
+    exact confident-negative-over-an-unread-surface failure ADR-0006 forbids, so
+    an un-extracted asset surface degrades `js` to `partial` (unknown, not
+    absent) instead. This can only ever make the verdict more conservative."""
+    if not asset_surface_extracted:
+        return "partial"
     return "partial" if has_binary_bundle else "fully_analyzed"
 
 

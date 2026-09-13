@@ -171,6 +171,21 @@ def test_js_surface_coverage_degrades_only_on_binary_bundle():
     assert js_surface_coverage(True) == "partial"
 
 
+def test_js_surface_coverage_degrades_when_asset_surface_missing():
+    # ASSET-DROP1: has_binary_bundle is only meaningful if the assets/ tree was
+    # actually put on disk for the scan roots. Measured live on PropertyGuru: the
+    # lazy per-DEX jadx path never sees the APK (so writes no resources/) and
+    # apktool timed out mid-smali, so a shipped 20MB Hermes bundle
+    # (assets/index.android.bundle, which scans to root-detection evidence) was
+    # present in NEITHER root. has_binary_bundle then read False and `js` read
+    # `fully_analyzed` - a confident negative over a bundle nobody read. The
+    # un-extracted surface must degrade instead.
+    assert js_surface_coverage(False, asset_surface_extracted=False) == "partial"
+    assert js_surface_coverage(True, asset_surface_extracted=False) == "partial"
+    # The extracted case keeps the original, bundle-sensitive semantics.
+    assert js_surface_coverage(False, asset_surface_extracted=True) == "fully_analyzed"
+
+
 def test_is_dart_aot_lib_recognizes_flutter_snapshots():
     # A release Flutter APK compiles its Dart logic into libapp.so (or dart.so) -
     # a packed blob native tooling cannot analyze like a normal .so.

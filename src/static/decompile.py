@@ -47,6 +47,21 @@ IS_WINDOWS = os.name == "nt"
 
 STATUS_SIDECAR_NAME = "decompile_status.json"
 
+# The sidecar is written once, on a cold run, and never rewritten - every later
+# run reads it back on a cache hit. So a sidecar written by an older version of
+# this module keeps being read by the current one, and any evidence field added
+# since is simply absent from what the cache-hit path rebuilds. That is exactly
+# how the ASSET-DROP1 fields went missing on the PropertyGuru run: the writer
+# had recorded asset_surface_extracted/asset_file_count since that fix, but the
+# APK's 2026-08-26 sidecar predated it, so the reader defaulted the field and
+# the coverage certified `js: fully_analyzed` over an asset surface nobody had
+# extracted. Bump this whenever the sidecar's shape changes in a way the reader
+# must not default around; a sidecar recording an older tag - or none at all,
+# which means it predates the field - is re-decompiled for real instead of read
+# blind. Same discipline as _DEX_STRING_CACHE_VERSION in androguard_scanner.py
+# and _ANALYZE_CACHE_VERSION in native.py.
+_SIDECAR_SCHEMA_VERSION = 2
+
 # D1: hard ceilings so a hung tool fails loudly instead of hanging forever.
 # jadx gets more headroom - it is the slower, more memory-hungry of the two,
 # and large/obfuscated APKs (the module's own PropertyGuru note) push it.
@@ -345,7 +360,12 @@ def _cached_status_is_clean(status_sidecar: Path, current_jadx_version: str = ""
     actually failed. A missing/unreadable sidecar returns True: _cached_result
     then reports 'unknown' completeness honestly (not laundered to 'complete'),
     and forcing a re-decompile there would only break the toolchain-free cache
-    path for no benefit."""
+    path for no benefit.
+
+    A readable sidecar must additionally record the current
+    _SIDECAR_SCHEMA_VERSION. An older one predates evidence fields the reader
+    would otherwise default around (see that constant), so it is re-decompiled
+    for real rather than read with the missing fields papered over."""
     try:
         data = json.loads(status_sidecar.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -362,6 +382,11 @@ def _cached_status_is_clean(status_sidecar: Path, current_jadx_version: str = ""
     # semantics). With a real version supplied, a sidecar that records a
     # different version - or none at all (predates the field) - is stale.
     if current_jadx_version and data.get("jadx_version") != current_jadx_version:
+        return False
+    # Evidence-schema staleness, unconditional: unlike the toolchain check above,
+    # there is no caller for which reading a wrong-schema sidecar is the right
+    # answer (see _SIDECAR_SCHEMA_VERSION).
+    if data.get("schema_version") != _SIDECAR_SCHEMA_VERSION:
         return False
     return data.get("jadx_exit_code", 0) == 0 and data.get("apktool_exit_code", 0) == 0
 
@@ -1089,6 +1114,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
             if (apktool_dir / "AndroidManifest.xml").exists():
                 status_sidecar.write_text(
                     json.dumps({
+                        "schema_version": _SIDECAR_SCHEMA_VERSION,
                         "decompile_completeness": "partial",
                         "jadx_exit_code": jadx_returncode,
                         "apktool_exit_code": apktool_fb_rc,
@@ -1210,6 +1236,10 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         error_tail = _build_error_tail(jadx_returncode, jadx_log_text, apktool_returncode, apktool_log_text)
         status_sidecar.write_text(
             json.dumps({
+                # See _SIDECAR_SCHEMA_VERSION - the reader refuses a sidecar
+                # written under an older evidence schema instead of defaulting
+                # the fields the current reader expects.
+                "schema_version": _SIDECAR_SCHEMA_VERSION,
                 "decompile_completeness": completeness,
                 "jadx_exit_code": jadx_returncode,
                 "apktool_exit_code": apktool_returncode,
@@ -1311,7 +1341,13 @@ def _cached_result(start: float, jadx_dir: Path, apktool_dir: Path, status_sidec
             )
             for key in ("fallback_engine", "fallback_unavailable", "fallback_recovered",
                         "fallback_output", "fallback_error_tail", "fallback_file_count",
-                        "lazy_decompile", "dex_units", "smali_fallback"):
+                        "lazy_decompile", "dex_units", "smali_fallback",
+                        # ASSET-DROP1 and APKTOOL-TIMEOUT1 evidence: the writer puts
+                        # these in the sidecar, so a cache hit has to carry them
+                        # forward too. A field dropped here reads at its consumer as
+                        # absent - the same failure a missing sidecar field caused.
+                        "asset_surface_extracted", "asset_file_count",
+                        "apktool_timed_out", "jadx_timed_out", "apktool_timeout_s"):
                 if key in data:
                     result.evidence[key] = data[key]
             return result

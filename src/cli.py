@@ -1735,8 +1735,14 @@ def run(
     # ASSET-DROP1: an asset surface that was never extracted makes has_binary_bundle
     # meaningless (a bundle in the APK is invisible to every scan root), so `js`
     # must degrade to partial rather than certify a confident negative over it.
+    # Default False, not True. An absent field means this surface's evidence was
+    # never recorded on the path that produced it, and "we did not record it" has
+    # to degrade the surface - never license `js: fully_analyzed` over assets
+    # nobody extracted. The sidecar schema guard in decompile.py is what stops a
+    # stale cache from creating that absence; this default is the second,
+    # consumer-side guard on the same failure.
     _asset_surface_extracted = bool(
-        decompile_result.evidence.get("asset_surface_extracted", True)
+        decompile_result.evidence.get("asset_surface_extracted", False)
     )
     coverage_map["js"] = js_surface_coverage(has_binary_bundle, _asset_surface_extracted)
     # Flutter/Dart-AOT: a release Flutter app compiles its Dart logic (the real

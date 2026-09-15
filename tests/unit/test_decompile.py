@@ -365,14 +365,18 @@ def test_decompile_redecompiles_stale_partial_cache(tmp_path, monkeypatch):
 
 
 def test_cached_status_is_clean_requires_both_tools_zero(tmp_path):
-    from static.decompile import _cached_status_is_clean
+    from static.decompile import _SIDECAR_SCHEMA_VERSION, _cached_status_is_clean
 
     partial = tmp_path / "partial.json"
-    partial.write_text(json.dumps({"jadx_exit_code": 1, "apktool_exit_code": 0}))
+    # The current schema tag: this fixture exercises the exit-code gate, so it
+    # must not also read as schema-stale.
+    partial.write_text(json.dumps({"schema_version": _SIDECAR_SCHEMA_VERSION,
+                                   "jadx_exit_code": 1, "apktool_exit_code": 0}))
     assert _cached_status_is_clean(partial) is False
 
     clean = tmp_path / "clean.json"
-    clean.write_text(json.dumps({"jadx_exit_code": 0, "apktool_exit_code": 0}))
+    clean.write_text(json.dumps({"schema_version": _SIDECAR_SCHEMA_VERSION,
+                                 "jadx_exit_code": 0, "apktool_exit_code": 0}))
     assert _cached_status_is_clean(clean) is True
 
     # Missing/unreadable sidecar: reused as 'unknown' by _cached_result, so not
@@ -391,11 +395,13 @@ def test_cached_status_is_clean_version_mismatch_forces_redecompile(tmp_path):
     # over-claim this branch exists to prevent. The comparison only binds when the
     # caller supplies the current version; "" keeps legacy callers (older tests)
     # on exit-code-only semantics.
-    from static.decompile import _cached_status_is_clean
+    from static.decompile import _SIDECAR_SCHEMA_VERSION, _cached_status_is_clean
 
     clean_1_5_6 = tmp_path / "v156.json"
     clean_1_5_6.write_text(json.dumps(
-        {"jadx_exit_code": 0, "apktool_exit_code": 0, "jadx_version": "jadx 1.5.6"}))
+        {"schema_version": _SIDECAR_SCHEMA_VERSION,   # orthogonal: this fixture
+         "jadx_exit_code": 0,                         # tests the TOOLCHAIN gate
+         "apktool_exit_code": 0, "jadx_version": "jadx 1.5.6"}))
 
     # Same version the sidecar recorded -> the clean output is reused.
     assert _cached_status_is_clean(clean_1_5_6, current_jadx_version="jadx 1.5.6") is True
@@ -409,7 +415,12 @@ def test_cached_status_is_clean_version_mismatch_forces_redecompile(tmp_path):
     # cached output matches the current toolchain, so with a version supplied it
     # is treated as stale (re-decompile), not reused.
     no_version = tmp_path / "noverz.json"
-    no_version.write_text(json.dumps({"jadx_exit_code": 0, "apktool_exit_code": 0}))
+    # Tagged with the current evidence schema so the only thing this fixture
+    # lacks is the jadx version - the guard under test here. An untagged sidecar
+    # is stale for the separate schema reason, which does bind legacy callers;
+    # that case lives in test_decompile_sidecar_schema.py.
+    no_version.write_text(json.dumps({"schema_version": _SIDECAR_SCHEMA_VERSION,
+                                      "jadx_exit_code": 0, "apktool_exit_code": 0}))
     assert _cached_status_is_clean(no_version, current_jadx_version="jadx 1.5.6") is False
     # ...but a legacy caller (no current version) keeps exit-code-only semantics:
     # the recorded-clean sidecar is reused regardless of any version field, so the

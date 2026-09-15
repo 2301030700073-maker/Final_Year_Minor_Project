@@ -1271,72 +1271,10 @@ def test_dex_unit_covered_jadx_empty_dex_is_not_laundered_by_minimal_recovery():
     assert _dex_unit_covered(rc=0, files=0, recovered=False, recovered_count=0) is False
 
 
-def test_extract_assets_recovers_bundles_from_the_apk(tmp_path):
-    """ASSET-DROP1: the asset surface must be extracted straight from the APK.
-
-    Measured live on PropertyGuru (150MB React Native): the lazy per-DEX jadx
-    path hands jadx a bare `dex_sources/classesN.dex`, never the APK, so every
-    unit writes an EMPTY resources/ and the shipped
-    `assets/index.android.bundle` (20MB Hermes bytecode, which scans to
-    root-detection evidence) landed in no scan root at all. apktool could not
-    cover it either - it is killed mid-smali on an APK this size. Net effect: the
-    app's primary root/SSL surface was read by NOTHING while `js` still reported
-    `fully_analyzed`. `extract_assets` is the single place that guarantees the
-    surface exists on disk regardless of which jadx path ran.
-    """
-    import zipfile
-
-    from static.decompile import extract_assets
-
-    apk = tmp_path / "app.apk"
-    with zipfile.ZipFile(apk, "w") as z:
-        z.writestr("classes.dex", b"dex\n035\x00")
-        z.writestr("assets/index.android.bundle", b"\xc6\x1f\xbc\x03\xc1\x03\x19\x1f" + b"\x00" * 64)
-        z.writestr("assets/nested/deep/thing.js", b"var a = 1;")
-        z.writestr("assets/", b"")  # a directory entry must not be written as a file
-        z.writestr("res/values/strings.xml", b"<resources/>")
-
-    target = tmp_path / "analysis"
-    written = extract_assets(apk, target)
-
-    # Both real asset files (the directory entry is skipped), and the bundle is
-    # byte-identical to the APK member - not re-encoded.
-    assert written == 2
-    bundle = target / "assets" / "index.android.bundle"
-    assert bundle.is_file()
-    assert bundle.read_bytes()[:8] == b"\xc6\x1f\xbc\x03\xc1\x03\x19\x1f"
-    assert (target / "assets" / "nested" / "deep" / "thing.js").is_file()
-    # Non-asset members are NOT extracted (this is the asset surface only).
-    assert not (target / "classes.dex").exists()
-    assert not (target / "res").exists()
 
 
-def test_extract_assets_is_non_fatal_on_a_non_zip(tmp_path):
-    """A non-APK path must degrade to 0, never raise: `decompile()` calls this
-    unconditionally, and the unit suite calls decompile() with fake paths. A
-    raise here would discard an otherwise-good decompile over an asset copy."""
-    from static.decompile import extract_assets
-
-    fake = tmp_path / "not-an-apk.apk"
-    fake.write_bytes(b"this is not a zip")
-    assert extract_assets(fake, tmp_path / "out") == 0
-    # An absent path is likewise 0, not an exception.
-    assert extract_assets(tmp_path / "missing.apk", tmp_path / "out") == 0
 
 
-def test_extract_assets_returns_zero_when_apk_has_no_assets(tmp_path):
-    """An APK genuinely without assets/ yields 0 - so the sidecar's
-    `asset_surface_extracted` reads False for a real absence too. That is the
-    honest behavior: the caller degrades `js` to partial (unknown, not absent)
-    rather than claiming the surface was cleared."""
-    import zipfile
-
-    from static.decompile import extract_assets
-
-    apk = tmp_path / "noassets.apk"
-    with zipfile.ZipFile(apk, "w") as z:
-        z.writestr("classes.dex", b"dex\n035\x00")
-    assert extract_assets(apk, tmp_path / "out") == 0
 
 
 def test_extract_assets_recovers_bundles_from_the_apk(tmp_path):

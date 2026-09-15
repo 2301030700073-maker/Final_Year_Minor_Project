@@ -176,7 +176,7 @@ Per-surface bound of this scan - a `partial`/`unscannable` surface is a lower bo
 > **Native:** unscannable means the APK had no scannable `.so` (or none at all) - a native NEITHER is not proof a native root/SSL check is absent.
 {% endif %}
 {% if coverage.get("js") == "partial" -%}
-> **JS:** partial means the app ships a binary Hermes/bytecode bundle whose control flow can't be read (React Native release bundle) - we recover only its string constants, so a js root/SSL NEITHER is not proof a root/SSL check in the bundle is absent. Mirrors the native callout above.
+> **JS:** partial means the app ships a binary Hermes/bytecode bundle whose control flow can't be read (React Native release bundle) - we recover only its string constants, so a js root/SSL NEITHER is not proof a root/SSL check in the bundle is absent.{% if coverage.get("native") == "unscannable" %} Mirrors the native callout above.{% endif %}
 {% endif %}
 {# COV-HEAVY-JAVA1: gate on the ACTUAL java state, not `obfuscation_level` alone. Under heavy obfuscation java_coverage() returns `partial` from a complete/partial decompile but `unscannable` from an unknown-completeness (cached/regenerated) run (coverage.py). Firing on `heavy` alone printed "the Java surface is `partial`" beneath a coverage table showing java=`unscannable` - a false specific fact. The heavy+unknown case is already carried by the decompile-completeness=="unknown" Limitations branch; here the caveat fires only where its own assertion is true. #}{% if obfuscation_level == "heavy" and coverage.get("java") == "partial" -%}
 > **Heavy obfuscation:** the Java surface is `partial` even on a complete decompile - encrypted/unreachable strings mean a clean Java NEITHER is not proof of absence (N1/G-C).

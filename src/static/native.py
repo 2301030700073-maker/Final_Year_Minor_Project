@@ -206,6 +206,13 @@ class NativeScanResult:
     # layer handles it identically to Java indicators. Empty when no app-owned
     # lib carries an unrecognized native detection idiom.
     unattributed_indicators: dict[str, bool] = field(default_factory=dict)
+    # PLATFORM-LIB1 transparency: the platform-library basenames this scan saw
+    # loaded and deliberately did NOT report as unaccounted (the OS provides
+    # them, the APK does not ship them). Recorded so a reader can tell "this app
+    # loads nothing outside the APK" apart from "loads were exempted as OS
+    # libraries" - without it the exemption is invisible and an empty
+    # unaccounted_loads list overstates what was covered.
+    platform_libs_exempted: list[str] = field(default_factory=list)
     # Boundary-4: System.load/loadLibrary targets whose .so we did NOT analyze -
     # native code the app loads from outside the covered lib/<abi>/ set (assets/,
     # an absolute path, or a name no extracted lib provides). A loaded-but-
@@ -1090,6 +1097,42 @@ _PLATFORM_NATIVE_LIBS = frozenset({
 })
 
 
+def _load_target_basename(target: str) -> str:
+    """The .so basename a System.load/loadLibrary target resolves to: a
+    loadLibrary("foo") becomes libfoo.so (Android's loadLibrary naming rule), and
+    a path becomes its basename. Shared by the unaccounted-loads check and the
+    platform-library exemption record so the two can never disagree about which
+    library a target names."""
+    base = os.path.basename(target)
+    if not base.endswith(".so"):
+        base = base if base.startswith("lib") else "lib" + base
+        base += ".so"
+    return base
+
+
+def platform_libs_exempted(load_targets: list[str], shipped_names: set[str]) -> list[str]:
+    """The platform-library basenames this scan exempted from the unaccounted list.
+
+    PLATFORM-LIB1 keeps OS-provided libraries out of the unaccounted-loads
+    report, which is correct - they are not app surfaces - but on its own it is
+    invisible: a report showing no unaccounted loads cannot be distinguished from
+    one where loads were seen and excluded. This returns exactly what was
+    excluded, so the report can say so.
+
+    Same two conditions as the exemption itself, so the record cannot drift from
+    the decision: the resolved basename must be a known platform library, and the
+    APK must not ship it (a shipped library is an app surface and is accounted
+    for by name membership, never exempted). Sorted and deduped - the report
+    names distinct OS libraries, not call sites."""
+    shipped = set(shipped_names)
+    exempted: list[str] = []
+    for t in load_targets:
+        base = _load_target_basename(t)
+        if base not in shipped and base in _PLATFORM_NATIVE_LIBS and base not in exempted:
+            exempted.append(base)
+    return sorted(exempted)
+
+
 def unaccounted_native_loads(load_targets: list[str], shipped_names: set[str]) -> list[str]:
     """The load targets whose library the APK does not contain at all.
 
@@ -1114,11 +1157,7 @@ def unaccounted_native_loads(load_targets: list[str], shipped_names: set[str]) -
     unaccounted: list[str] = []
     seen: set[str] = set()
     for t in load_targets:
-        base = os.path.basename(t)
-        if not base.endswith(".so"):
-            # loadLibrary("foo") -> libfoo.so (Android's loadLibrary naming rule).
-            base = base if base.startswith("lib") else "lib" + base
-            base += ".so"
+        base = _load_target_basename(t)
         # One row per distinct unexamined surface: the same target loaded from
         # several call sites (e.g. loadLibrary("log") in many RN modules) is one
         # surface, not N. Dedup by exact target, first occurrence wins. Coverage

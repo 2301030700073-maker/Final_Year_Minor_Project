@@ -218,6 +218,11 @@ can confirm what these actually load.
 | `{{ t | md }}` |
 {% endfor %}
 {% endif %}
+{% if platform_libs_exempted -%}
+### Platform libraries exempted from the unaccounted list (boundary #4)
+
+The app requests {% for b in platform_libs_exempted %}`{{ b | md }}`{% if not loop.last %}, {% endif %}{% endfor %} by name and the APK does not ship that library, so the OS provides it (an Android platform library). It is not an unexamined app surface and native coverage is **not** degraded for it. Listed here because the unaccounted-loads section above would otherwise read as "this app loads nothing outside the APK" — these loads were seen and deliberately excluded. Nothing in them is this app's code, so a match found inside such a library would not be attributable to the app.
+{% endif %}
 {% if dynamic_loads -%}
 ### Dynamic code loading (coverage-limited)
 
@@ -531,6 +536,7 @@ def generate_report(
     justification: str | None = None,
     jni_bindings: list | None = None,
     unaccounted_loads: list | None = None,
+    platform_libs_exempted: list | None = None,
     dynamic_loads: list | None = None,
     js_evidence: list | None = None,
     webview_sites: list | None = None,
@@ -574,6 +580,7 @@ def generate_report(
         justification=justification,
         jni_bindings=jni_bindings,
         unaccounted_loads=unaccounted_loads,
+        platform_libs_exempted=platform_libs_exempted,
         dynamic_loads=dynamic_loads,
         js_evidence=js_evidence,
         webview_sites=webview_sites,

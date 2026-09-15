@@ -233,6 +233,7 @@ def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
     from static.native import (
         NativeScanResult, _clone_lib_for_path, analyze_so_many,
         find_external_native_loads, group_identical_so_files, security_triggers,
+        platform_libs_exempted,
         unaccounted_native_loads,
     )
     # Native-analysis disk cache: keyed on .so bytes' SHA-256 + analysis version
@@ -256,14 +257,13 @@ def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
         # System.load("/data/local/tmp/x.so") has a real unexamined native
         # surface and must still degrade to partial. Returning early without this
         # would have turned the vacuous-coverage upgrade into a false negative.
+        _loads = find_external_native_loads(java_files) if java_files else []
         return NativeScanResult(
             libraries=[],
             abi_coverage={},
             native_libs_absent=True,
-            unaccounted_loads=unaccounted_native_loads(
-                find_external_native_loads(java_files) if java_files else [],
-                set(),
-            ),
+            unaccounted_loads=unaccounted_native_loads(_loads, set()),
+            platform_libs_exempted=platform_libs_exempted(_loads, set()),
         )
     # Load signatures BEFORE the scan so the Gap-1 body-decompilation gate can be
     # driven by the actual detection corpus: a stripped lib whose exports/strings
@@ -333,10 +333,12 @@ def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
     # for them (see _native_unexamined in the pipeline). lib/<abi>/*.so AND
     # assets/*.so are both extracted+analyzed, so an assets-loaded lib is
     # accounted for - only genuinely missing/absolute-path loads surface here.
-    result.unaccounted_loads = unaccounted_native_loads(
-        find_external_native_loads(java_files) if java_files else [],
-        {so.name for so in so_files},
-    )
+    _loads = find_external_native_loads(java_files) if java_files else []
+    _shipped = {so.name for so in so_files}
+    result.unaccounted_loads = unaccounted_native_loads(_loads, _shipped)
+    # PLATFORM-LIB1 transparency: the same inputs, so what is reported as
+    # exempted is exactly what the check above exempted.
+    result.platform_libs_exempted = platform_libs_exempted(_loads, _shipped)
     return result
 
 
@@ -2330,6 +2332,9 @@ def run(
         unaccounted_loads=(
             native_evidence.unaccounted_loads if native_evidence is not None else None
         ),
+        platform_libs_exempted=(
+            native_evidence.platform_libs_exempted if native_evidence is not None else None
+        ),
         dynamic_loads=dynamic_loads or None,
         js_evidence=js_matches or None,
         webview_sites=webview_sites or None,
@@ -2831,6 +2836,7 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         obfuscation_level=run.obfuscation_level,
         jni_bindings=causes.get("jni_bindings"),
         unaccounted_loads=causes.get("unaccounted_loads"),
+        platform_libs_exempted=causes.get("platform_libs_exempted"),
         dynamic_loads=causes.get("dynamic_loads"),
         js_evidence=causes.get("js_evidence"),
         webview_sites=causes.get("webview_sites"),

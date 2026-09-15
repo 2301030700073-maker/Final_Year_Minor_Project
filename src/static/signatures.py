@@ -339,6 +339,47 @@ def _is_binary(path: Path) -> bool:
         return False
 
 
+# The evidence table lives at outputs/analysis/<apk_hash>/xref.sqlite, so it is
+# keyed by APK, not by run - and it was only ever appended to. Re-running a target
+# (or re-scanning it after the signature corpus changed) stacked a second full set
+# of rows on top of the first, and no column recorded which run or which corpus
+# wrote a row, so nothing downstream could tell them apart. Measured on the real
+# outputs before this fix: 12 of 17 tables held duplicates - the PropertyGuru run's
+# table 86 rows for 28 distinct matches, one test APK 593 rows for 13. L-M1 sells
+# this table as a complete, queryable cross-reference, and a reader of it would
+# have been reading a union of several runs as one run's findings.
+#
+# Bumping this discards a table written by an older shape rather than appending
+# into it, which is what makes a future column change safe. Same discipline as
+# _SIDECAR_SCHEMA_VERSION in decompile.py and _DEX_STRING_CACHE_VERSION below.
+_EVIDENCE_TABLE_SCHEMA_VERSION = 1
+
+
+def _prepare_evidence_table(con: sqlite3.Connection) -> None:
+    """Create this scan's evidence table, discarding whatever an earlier scan of
+    the same APK left behind.
+
+    The DROP on a version mismatch is not belt-and-braces: a table written by an
+    older shape would otherwise survive CREATE TABLE IF NOT EXISTS and fail (or
+    silently mis-map) the INSERTs below. Everything here is committed with the
+    matches themselves at the end of scan(), so a scan that dies mid-way leaves
+    the previous table intact rather than a half-cleared one."""
+    con.execute("CREATE TABLE IF NOT EXISTS scan_meta (key TEXT PRIMARY KEY, value TEXT)")
+    row = con.execute("SELECT value FROM scan_meta WHERE key = 'schema_version'").fetchone()
+    if row is None or row[0] != str(_EVIDENCE_TABLE_SCHEMA_VERSION):
+        con.execute("DROP TABLE IF EXISTS evidence")
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS evidence ("
+        "file TEXT, signature_id TEXT, category TEXT, line INTEGER, matched_text TEXT)"
+    )
+    con.execute("DELETE FROM evidence")
+    con.execute(
+        "INSERT INTO scan_meta(key, value) VALUES ('schema_version', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (str(_EVIDENCE_TABLE_SCHEMA_VERSION),),
+    )
+
+
 def scan(
     decompiled_roots: Path | list[Path],
     signatures: list[Signature],
@@ -355,6 +396,11 @@ def scan(
     the in-memory Evidence lists stay capped at MAX_EVIDENCE_PER_SIGNATURE so a
     large corpus doesn't accumulate unbounded rows in RAM. The in-memory return
     is unchanged, so the report pipeline is untouched.
+
+    The table describes THIS scan, and only this scan: it is cleared before the
+    first match is recorded, so a re-run of the same APK replaces the previous
+    rows instead of stacking on top of them (F-3 - see
+    _EVIDENCE_TABLE_SCHEMA_VERSION for what that cost in practice).
 
     L-M3 (mapping.txt deobfuscation): when `mapping` is provided (a parsed R8/
     ProGuard mapping from deobfuscate.parse_mapping), each .java file is ALSO
@@ -375,10 +421,7 @@ def scan(
         # instead of aborting the whole pipeline (principle 3 - fail loud on a
         # real error, not on transient contention).
         con = sqlite3.connect(str(sqlite_path), timeout=30)
-        con.execute(
-            "CREATE TABLE IF NOT EXISTS evidence ("
-            "file TEXT, signature_id TEXT, category TEXT, line INTEGER, matched_text TEXT)"
-        )
+        _prepare_evidence_table(con)
     # RESID-4C: record how many files were actually walked, so a negative from
     # a near-empty corpus is distinguishable from a full-scan clean result.
     evidence.scanned_file_count = len(files)

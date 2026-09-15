@@ -8,12 +8,68 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: ~40 files, **15,742 LOC**. Largest: cli (2210), native (1243),
-  synthesizer (1117), decompile (986), generator (791), device (771),
-  frida_runner (642), attestation (571), signatures (523).
+- `src/`: 51 files, **20,323 LOC**. Largest: cli (3,112), native (1,794), decompile (1,365), synthesizer (1,192), generator (1,143), mitmproxy_capture (976), common (784), device (779), signatures (717), attestation (695).
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
-- `tests/`: 61 files, **18,812 LOC** (more test than source).
-- `scripts/`: 6 files, 906 LOC.
+- `tests/`: 92 files, **29,824 LOC** (more test than source; informational, see §Currency).
+- `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
+
+## Currency — what each ✅ covers
+
+The audit was driven module by module, so every row was written against the
+module's size at that moment. **A ✅ certifies that row's conclusion at the
+`✅ at` figure below, and nothing about code added since.** It is not a
+statement that the module is still as audited: 31 of 35 rows have
+changed since, and the `Now` column is measured, not estimated. `Re-read since`
+gives the date the row's conclusion was last checked against live source (a
+date is not a fresh full read — where a row says so, only the named seam was
+re-checked; `—` means the row has NOT been re-read since its original audit and
+holds only at its `✅ at` size).
+
+Re-measure and re-issue this table with `scripts/`-free one-liners —
+`python -c "from pathlib import Path; fs=sorted(Path('src').rglob('*.py')); print(len(fs), sum(len(p.read_text(errors='replace').splitlines()) for p in fs))"`
+— the guard `tests/unit/test_audit_ledger_currency.py` fails when a row's module
+no longer matches the figure recorded here, so this table cannot go stale
+silently: it must be updated, in a commit that says the audit did or did not
+follow. The `src/` denominator above is bound EXACTLY - it is what the audit covers, and a module growing is what earns a new row - while the `tests/` and `scripts/` figures are context only and are held to within 10%, so ordinary test churn does not fail the suite but a scope that has moved on does. (Bound: the guard compares LOC, a coarse proxy — an edit that leaves a
+module's line count unchanged escapes it.)
+
+| Row | ✅ at | Now | Δ | Re-read since |
+|---|---|---|---|---|
+| `androguard_scanner.py` | 335 | 387 | +52 | — |
+| `audit/attestation.py` | 571 | 695 | +124 | 2026-09-07 |
+| `calibration/*.py` | 510 | 571 | +61 | 2026-09-07 |
+| `cli.py` | 2,530 | 3,112 | +582 | 2026-09-09 (regen seam only) |
+| `common.py` | 466 | 784 | +318 | — |
+| `correlation.py` | 82 | 140 | +58 | — |
+| `coverage.py` | 342 | 527 | +185 | 2026-09-07 |
+| `decision_engine.py` | 75 | 75 | +0 | 2026-09-07 |
+| `decompile.py` | 986 | 1,365 | +379 | — |
+| `deobfuscate.py` | 117 | 157 | +40 | — |
+| `device.py` | 771 | 779 | +8 | — |
+| `dynload.py` | 70 | 97 | +27 | — |
+| `frida_runner.py` | 642 | 679 | +37 | — |
+| `hermes.py` | 198 | 235 | +37 | 2026-09-09 |
+| `indicators.py` | 192 | 267 | +75 | 2026-09-09 |
+| `ingest/metadata.py` | 324 | 343 | +19 | 2026-09-07 |
+| `ingest/normalize.py` | 174 | 208 | +34 | 2026-09-07 |
+| `jnibridge.py` | 175 | 202 | +27 | 2026-09-09 |
+| `manifest.py` | 457 | 544 | +87 | — |
+| `mitmproxy_capture.py` | 487 | 976 | +489 | 2026-09-15 (fix-scoped) |
+| `native.py` | 1,243 | 1,794 | +551 | 2026-09-15 (fix-scoped) |
+| `obfuscation.py` | 261 | 282 | +21 | 2026-09-09 |
+| `packers.py` | 157 | 157 | +0 | — |
+| `pass_through_proxy.py` | 245 | 277 | +32 | — |
+| `report/attribution.py` | 220 | 220 | +0 | 2026-09-07 |
+| `report/generator.py` | 791 | 1,143 | +352 | 2026-09-08, 2026-09-15 |
+| `signatures.py` | 523 | 717 | +194 | — |
+| `storage/db.py` | 195 | 210 | +15 | 2026-09-09 |
+| `storage/results.py` | 218 | 250 | +32 | 2026-09-09 |
+| `stringrecover.py` | 315 | 374 | +59 | 2026-09-09 |
+| `success_checks/*.py` | 800 | 924 | +124 | re-read (undated) |
+| `synthesizer.py` | 1,117 | 1,192 | +75 | 2026-09-10 |
+| `ui_liveness.py` | 308 | 396 | +88 | — |
+| `upx.py` | 128 | 128 | +0 | — |
+| `webview.py` | 98 | 116 | +18 | — |
 
 ## Methodology
 

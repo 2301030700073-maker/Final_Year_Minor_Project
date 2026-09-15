@@ -2,7 +2,7 @@ from common import (
     Action, CategoryVerdict, ClassificationResult, CorrelationResult, Evidence,
     StageResult, VerificationResult,
 )
-from report.generator import generate_report
+from report.generator import _forced_dynamic, generate_report
 
 
 def _classification():
@@ -12,6 +12,74 @@ def _classification():
     )
     ssl = CategoryVerdict(confidence=0.2, detected=False, evidence=[])
     return ClassificationResult(action=Action.ROOT_ONLY, root=root, ssl=ssl)
+
+
+def test_forced_dynamic_helper_detects_operator_forced_dynamic_stage():
+    # _forced_dynamic reads the dynamic stage's OWN evidence (where cli.py stamps the
+    # override), so the provenance survives the DB store -> regenerate seam without a
+    # schema change. It must fire only for a dynamic stage actually carrying the stamp.
+    forced = StageResult(stage="dynamic", status="success",
+                         evidence={"forced_dynamic": True, "static_action": "NEITHER"})
+    assert _forced_dynamic([forced]) is True
+    # a normal dynamic run (no stamp) is not forced; a non-dynamic stage carrying a
+    # stray key must never be read as a forced dynamic run; empty list is not forced.
+    assert _forced_dynamic([StageResult(stage="dynamic", status="success", evidence={})]) is False
+    assert _forced_dynamic([StageResult(stage="static", status="success", evidence={"forced_dynamic": True})]) is False
+    assert _forced_dynamic([]) is False
+
+
+def test_generate_report_operator_forced_banner_keeps_static_verdict_neither(tmp_path):
+    # --force-dynamic end to end in the report: an operator forced the dynamic stage
+    # over a coverage-limited NEITHER (PropertyGuru's Hermes-bundled root checks). The
+    # report must (1) show the operator-forced banner, (2) keep naming the static
+    # verdict NEITHER and say it is unchanged (never promoted by the forced run),
+    # (3) use the coverage-limited wording because classification.unknown_uncovered is
+    # set, and (4) still land the confirmed bypass in the COVERAGE-CONFIRMED tier - a
+    # filled coverage gap, not a static promotion (ADR-0006 tier fidelity).
+    classification = ClassificationResult(
+        action=Action.NEITHER,
+        root=CategoryVerdict(confidence=0.2, detected=False, evidence=[]),
+        ssl=CategoryVerdict(confidence=0.1, detected=False, evidence=[]),
+        unknown_uncovered=["root"],
+    )
+    forced_stage = StageResult(
+        stage="dynamic", status="success",
+        evidence={"forced_dynamic": True, "effective_dynamic_action": "BOTH", "static_action": "NEITHER"},
+    )
+    verification = VerificationResult(
+        root_bypassed=True, ssl_bypassed=None,
+        evidence_lines={"root": "root probe hit: File.exists(/system/bin/su) -> false"},
+    )
+    correlation = CorrelationResult(
+        matches=False, mismatches=[], unverified=[],
+        coverage_confirmed=["dynamic confirmed a root-detection bypass in a coverage-limited category"],
+    )
+    report_path = generate_report(
+        run_id="forced1", apk_hash="pg0001", timestamp="2026-09-14T12:00:00",
+        metadata={"hashes": {"sha256": "pg0001"}, "package": {"package_name": "com.allproperty.android.consumer.my"}},
+        classification=classification, verification=verification, correlation=correlation,
+        stage_results=[forced_stage], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Operator-forced dynamic stage" in content
+    assert "The static verdict is **NEITHER** and is **unchanged**" in content
+    assert "**coverage-limited** — a lower bound over surfaces" in content
+    assert "gated on **real observed behaviour**" in content
+    assert "- Verdict: COVERAGE-CONFIRMED" in content
+
+
+def test_generate_report_no_forced_banner_on_normal_run(tmp_path):
+    # Negative control: without the operator-forced stamp the banner must NOT appear -
+    # it is provenance for an override, never boilerplate printed on every run.
+    report_path = generate_report(
+        run_id="normal1", apk_hash="nrm001", timestamp="2026-09-14T12:00:00",
+        metadata={"hashes": {"sha256": "nrm001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[StageResult(stage="dynamic", status="success", evidence={})],
+        output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Operator-forced dynamic stage" not in content
 
 
 def test_generate_report_names_unreadable_files_in_caution(tmp_path):

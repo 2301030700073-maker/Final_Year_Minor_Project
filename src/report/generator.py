@@ -322,7 +322,10 @@ evidence is retained rather than discarded - each match is a real hit on a real
 string in this APK; only its *ownership* is unverified.
 {% endif %}
 ## Dynamic Verification
+{% if forced_dynamic %}
+> **⚠ Operator-forced dynamic stage (`--force-dynamic`).** The static verdict is **{{ classification.action.value }}** and is **unchanged** by this run — the deterministic engine did not detect root/SSL above the threshold, and this run did not change that. An authorized operator explicitly directed an empirical bypass attempt because this target's static verdict is {% if forced_dynamic_coverage_limited %}**coverage-limited** — a lower bound over surfaces the engine could not fully analyze (e.g. a React-Native/Hermes bundle), so a NEITHER here is "unknown, not absent" (ADR-0006){% else %}a **confident negative** — all governing surfaces were fully analyzed and nothing matched, so forcing a bypass here is unusual{% endif %}. The result below is gated on **real observed behaviour**: a `dynamically_confirmed` bypass means the app's own root/pin check was actually exercised and neutralised, **not** that static detection changed. This dynamic run happened *because it was forced*, never because static promoted a finding.
 
+{% endif %}
 - Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}bypass not verified (see stage status and evidence below){% endif %}{% endif %}
 - SSL bypassed: {% if verification %}{% if verification.ssl_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.ssl_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}bypass not verified (see stage status and evidence below){% endif %}{% endif %}
 {% if self_termination_note -%}
@@ -473,6 +476,22 @@ This run's decompilation completed successfully ({{ jadx_file_count }} source fi
 """)
 
 
+def _forced_dynamic(stage_results: list[StageResult]) -> bool:
+    """True when the dynamic stage was OPERATOR-FORCED via --force-dynamic - cli.py
+    threaded Action.BOTH into synthesis/deployment while the static verdict stayed
+    NEITHER (ADR-0005 operator override). The fact lives in the dynamic stage's own
+    evidence (its natural home) and so is auto-persisted in stage_results_json: a
+    regenerated report reproduces the provenance banner with no schema change and no
+    separate generate_report parameter, since both the live and regen render paths
+    already pass stage_results. Derived here, never inferred from action+status
+    (an install failure on a normal NEITHER run also yields a failed dynamic stage -
+    the explicit flag is the only unambiguous signal)."""
+    for s in stage_results:
+        if s.stage == "dynamic" and (s.evidence or {}).get("forced_dynamic"):
+            return True
+    return False
+
+
 def generate_report(
     run_id: str,
     apk_hash: str,
@@ -503,6 +522,12 @@ def generate_report(
     output_dir = Path(output_dir) / apk_hash
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = output_dir / f"{run_id}.md"
+
+    forced_dynamic = _forced_dynamic(stage_results)
+    # Coverage-limited vs confident-negative wording reuses the classification's own
+    # unknown_uncovered marker - the same signal the live Decision-line caveat gates
+    # on (cli.py) - not a parallel predicate (caveat-gate-matches-its-text).
+    forced_dynamic_coverage_limited = bool(getattr(classification, "unknown_uncovered", None))
 
     content = TEMPLATE.render(
         run_id=run_id,
@@ -536,6 +561,8 @@ def generate_report(
         dart_aot_libs=dart_aot_libs,
         dex_attribution_degraded=dex_attribution_degraded,
         regenerated_from_stored_data=regenerated_from_stored_data,
+        forced_dynamic=forced_dynamic,
+        forced_dynamic_coverage_limited=forced_dynamic_coverage_limited,
         confidence_bound=confidence_bound,
         verdict_label=verdict_label,
     )

@@ -113,10 +113,41 @@ def test_both_capture_branches_record_the_refusals():
     assert _MODULE_SRC.read_text().count('"tls_failed_clients"') == 2
 
 
-def test_native_placement_reports_unknown_rather_than_zero_refusals():
-    # The addon runs only on the WSL2 placement, so a native capture has no
-    # refusal records AT ALL - reading its empty list as "no client refused our
-    # CA" would assert something that placement cannot observe. The sentinel is
-    # the gate that keeps the two apart.
-    src = _MODULE_SRC.read_text()
-    assert 'if wsl2 else None' in src
+def test_native_placement_refusals_are_read_from_mitmdumps_own_line():
+    # No addon runs on the native placement, so the marker never appears there -
+    # but mitmdump's own flow_detail=2 writes the same refusal at column 0
+    # (verified live against 8.1.1), so the question is answerable on both
+    # placements from the text the stage already reads.
+    text = _log(
+        "127.0.0.1:52680: client connect",
+        "127.0.0.1:52680: server connect localhost:18082 (127.0.0.1:18082)",
+        "127.0.0.1:52680: Client TLS handshake failed. The client does not trust "
+        "the proxy's certificate for localhost (tlsv1 alert unknown ca)",
+        "127.0.0.1:52680: client disconnect",
+    )
+    got = _count_tls_failed_clients(text)
+    assert len(got) == 1
+    assert got[0]["host"] == "localhost"
+    assert "unknown ca" in got[0]["error"]
+    # and the line is neither a connection nor a flow
+    assert _count_client_connections(text) == 1
+    assert _parse_flow_detail(text) == []
+
+
+def test_both_placement_sources_are_read_from_one_text():
+    # Only one source is ever present in a real capture, but the counter reads
+    # both from the same text, and each must survive the other's format.
+    text = _log(
+        "@@TLS_FAILED_CLIENT@@ a.test | refused",
+        "127.0.0.1:1: Client TLS handshake failed. The client does not trust the "
+        "proxy's certificate for b.test (tlsv1 alert unknown ca)",
+    )
+    assert [r["host"] for r in _count_tls_failed_clients(text)] == ["a.test", "b.test"]
+
+
+def test_an_indented_quote_of_the_phrase_is_not_a_refusal():
+    # The native gate is the same column-0 discipline the flow parser uses: a
+    # header value that happens to contain mitmproxy's wording must not register
+    # a refusal that no client made.
+    text = _log("    X-Note: client tls handshake failed. for evil.test")
+    assert _count_tls_failed_clients(text) == []

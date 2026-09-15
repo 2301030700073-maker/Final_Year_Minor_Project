@@ -19,6 +19,7 @@ mitmdump placement (both reachable from the device via adb reverse):
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import time
@@ -181,6 +182,14 @@ _CLIENT_CONNECT_MARKER = "@@CLIENT_CONNECT@@"
 # parsed as a flow (see _parse_flow_detail, and _count_tls_failed_clients).
 _TLS_FAILED_CLIENT_MARKER = "@@TLS_FAILED_CLIENT@@"
 
+# mitmproxy's own wording when the CLIENT refuses the certificate, as
+# flow_detail=2 puts it on stdout on the native placement (measured on 8.1.1).
+# Lowercased for the comparison: that capitalisation is mitmproxy's and is not a
+# contract we can hold them to.
+_TLS_HANDSHAKE_FAILED_PHRASE = "tls handshake failed"
+# The host inside that message ("... certificate for <host> (tlsv1 alert ...)").
+_TLS_FAILED_HOST_RE = re.compile(r"\bfor\s+([^\s(]+)")
+
 
 @dataclass
 class FlowSummary:
@@ -302,10 +311,11 @@ def _count_tls_failed_clients(text: str) -> list[dict[str, str]]:
     does not trust a user-installed CA, looks like too - the record says a CA was
     refused, it does not by itself name which pinning implementation).
 
-    Only the WSL2 addon emits these records, so a caller on the native placement
-    must NOT read the empty list this returns as "no refusal was observed" - it
-    means the signal was never produced there. That caller passes None instead;
-    this function reports only what the text actually contains.
+    Two sources, one per placement, and only one is ever present in a given
+    capture: the WSL2 addon writes the marker, and native mitmdump's own
+    flow_detail=2 writes the equivalent lifecycle line. An empty result therefore
+    means no refusal was observed on either path, not that one path could not
+    look.
 
     Pure and fixture-testable (no mitmproxy needed). Matched by PREFIX, not
     equality, because the marker carries a detail suffix; the prefix test is also
@@ -313,10 +323,21 @@ def _count_tls_failed_clients(text: str) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     for raw in text.splitlines():
         line = raw.strip()
-        if not line.startswith(_TLS_FAILED_CLIENT_MARKER):
+        if line.startswith(_TLS_FAILED_CLIENT_MARKER):
+            host, _, err = line[len(_TLS_FAILED_CLIENT_MARKER):].strip().partition("|")
+            out.append({"host": host.strip(), "error": err.strip()})
             continue
-        host, _, err = line[len(_TLS_FAILED_CLIENT_MARKER):].strip().partition("|")
-        out.append({"host": host.strip(), "error": err.strip()})
+        # Native placement: no addon runs there, but mitmdump's own flow_detail=2
+        # writes the same refusal at column 0 as a lifecycle line. Matched on the
+        # phrase rather than the line's shape so a format change costs the detail
+        # and not the count, and gated on the raw line being un-indented so a
+        # header value that merely quotes the phrase cannot register a refusal.
+        # The host exists only inside the message text, so it is extracted
+        # best-effort: a miss leaves it empty and the refusal still counts.
+        if _TLS_HANDSHAKE_FAILED_PHRASE in line.lower() and not raw[0].isspace():
+            match = _TLS_FAILED_HOST_RE.search(line)
+            detail = line.split("failed.", 1)[1].strip() if "failed." in line else line
+            out.append({"host": match.group(1) if match else "", "error": detail})
     return out
 
 
@@ -792,15 +813,12 @@ def run_capture_stage(
 
         flows = _parse_flow_detail(stdout_text or "")
 
-        # Proxy-side TLS-refusal signal (see the addon's tls_failed_client hook),
-        # computed ONCE here so both the success and empty-flow arms record the
-        # same observation - they read the same capture text. Only the WSL2 addon
-        # writes these records, so on the native placement this is None, NOT []:
-        # an empty list there would read as "no client refused our CA", a claim
-        # that placement cannot make because it never ran the addon that observes
-        # refusals. Same not-captured sentinel discipline as the other
-        # co-sourced signals.
-        tls_failed = _count_tls_failed_clients(stdout_text or "") if wsl2 else None
+        # Certificate refusals observed in this capture, computed ONCE here so
+        # both the success and empty-flow arms report the same observation - they
+        # read the same text. Both placements are covered (the WSL2 addon marker
+        # and native mitmdump's own flow_detail line), so neither reports a zero
+        # it could not have seen.
+        tls_failed = _count_tls_failed_clients(stdout_text or "")
         if not flows:
             client_connections = _count_client_connections(stdout_text or "")
             # A crashed pinning-bypass script is a THIRD, concrete cause of zero
@@ -890,9 +908,8 @@ def run_capture_stage(
                     # reached the proxy, app was silent (app-silence, not a wiring
                     # failure); 0 => device never reached the proxy (real failure).
                     "client_connections": client_connections,
-                    # Proxy-side refusals observed by the addon (None when the
-                    # addon did not run, i.e. the native placement - see
-                    # _count_tls_failed_clients).
+                    # Certificate refusals this capture observed, from whichever
+                    # source this placement writes (see _count_tls_failed_clients).
                     "tls_failed_clients": tls_failed,
                     # CAPREACH1: the PRE-FLIGHT probe verdict (True route up /
                     # False route down / None not probeable). Recorded separately
@@ -916,9 +933,8 @@ def run_capture_stage(
             evidence={
                 "flows_count": len(flows),
                 "hosts": hosts,
-                # Proxy-side refusals observed by the addon (None when the
-                # addon did not run, i.e. the native placement - see
-                # _count_tls_failed_clients).
+                # Certificate refusals this capture observed, from whichever
+                # source this placement writes (see _count_tls_failed_clients).
                 "tls_failed_clients": tls_failed,
                 "flow_summary": [
                     {"host": f.host, "method": f.method, "path": f.path,

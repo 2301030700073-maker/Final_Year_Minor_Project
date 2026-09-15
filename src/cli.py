@@ -957,6 +957,23 @@ def _finalize_run(
     return report_path
 
 
+def _effective_dynamic_action(action: Action, force_dynamic: bool) -> Action:
+    """The action that DRIVES bypass synthesis + on-device deployment, which may
+    differ from the static verdict `action` ONLY under the operator override
+    --force-dynamic (ADR-0005). A NEITHER static verdict normally skips the dynamic
+    stage entirely (frida_runner.run_dynamic_stage: `if action == Action.NEITHER:
+    return skipped`), so a coverage-limited miss - e.g. PropertyGuru's React-Native/
+    Hermes root checks, a documented false negative - never gets an empirical
+    attempt. When the operator explicitly forces it, drive synthesis/deployment
+    with Action.BOTH so the universal root+SSL bypass envelope is generated and
+    loaded, WITHOUT mutating the static verdict: confidence, calibration, storage,
+    and correlation all keep reading classification.action. No-op when the flag is
+    off and for any already-detected action (those already run the dynamic stage)."""
+    if force_dynamic and action == Action.NEITHER:
+        return Action.BOTH
+    return action
+
+
 @app.command("run")
 def run(
     apk: Path = typer.Option(..., "--apk", exists=True, help="Path to the APK to analyze"),
@@ -973,6 +990,19 @@ def run(
             "report as real SSL-bypass proof. Requires a rooted device and "
             "mitmdump reachable from the adb-server host. Off by default so "
             "normal runs never touch the device's proxy settings."
+        ),
+    ),
+    force_dynamic: bool = typer.Option(
+        False, "--force-dynamic",
+        help=(
+            "Operator override (ADR-0005): deploy the universal root+SSL bypass on a "
+            "NEITHER target - a static verdict that normally skips the dynamic stage. "
+            "Does NOT change the static verdict, confidence, or calibration; the "
+            "dynamic result stays gated on real observed behaviour (dynamically_confirmed "
+            "only on a real probe-hit / pin-check+handshake, else UNVERIFIED). Intended "
+            "for coverage-limited misses (e.g. a React-Native/Hermes app whose root "
+            "checks the signature engine cannot attribute). No-op with --skip-dynamic or "
+            "when a category was already detected."
         ),
     ),
     device_serial: Optional[str] = typer.Option(None, "--device", help="Specific device/emulator serial"),
@@ -1749,6 +1779,18 @@ def run(
         classification, static_evidence.unattributed_indicators
     )
 
+    # --force-dynamic (ADR-0005 operator override): compute the action that will
+    # DRIVE bypass synthesis + deployment. It differs from classification.action
+    # ONLY when the operator forces a bypass on a NEITHER verdict (-> Action.BOTH);
+    # the static verdict is never mutated, so every static / confidence / calibration
+    # / correlation consumer below keeps reading classification.action unchanged.
+    # Gated on `not skip_dynamic` so --force-dynamic is a true no-op alongside
+    # --skip-dynamic (the flag's documented contract).
+    dynamic_action = _effective_dynamic_action(
+        classification.action, force_dynamic and not skip_dynamic
+    )
+    forced_dynamic = dynamic_action != classification.action
+
     console.print(f"[bold]Decision: {classification.action.value}[/bold]")
     # Mirror report/generator.py's Decision-line caveat live: when a governing
     # surface was not fully analyzed (coverage_limited) or detection-shaped code
@@ -1884,6 +1926,14 @@ def run(
         _halt(stage_results)
 
     # --- dynamic analysis ---
+    if forced_dynamic:
+        console.print(
+            "[bold yellow]OPERATOR-FORCED DYNAMIC (--force-dynamic): static verdict "
+            f"{classification.action.value} is unchanged; deploying the universal "
+            "root+SSL bypass at operator direction. The result is gated on real "
+            "observed behaviour (dynamically_confirmed only on a real probe-hit / "
+            "pin-check+handshake), never on static detection.[/bold yellow]"
+        )
     verification: Optional[VerificationResult] = None
     correlation_result = None
     # Honest reason for the report's "Not evaluated" correlation line when
@@ -1907,7 +1957,7 @@ def run(
     # the record. This makes the synthesizer provably exercised against a real
     # classification (never "only unit-verified") and keeps the generated script
     # in the run evidence even when no device can deploy it.
-    synth = synthesize(classification, classification.action)
+    synth = synthesize(classification, dynamic_action)
     if skip_dynamic:
         dynamic_stage = StageResult(
             stage="dynamic", status="skipped",
@@ -1998,9 +2048,22 @@ def run(
             # device deploys.
             try:
                 dynamic_stage = frida_runner.run_dynamic_stage(
-                    serial, package_name, classification.action, target=target_canonical,
+                    serial, package_name, dynamic_action, target=target_canonical,
                     synthesized={"source": synth.source, "applied_hooks": synth.applied_hooks},
                 )
+                if forced_dynamic:
+                    # Record the override on the dynamic stage's OWN evidence so the
+                    # report's operator-forced banner (generator._forced_dynamic)
+                    # fires on the live run AND on any later regenerated report - it
+                    # round-trips in stage_results_json, needing no schema change
+                    # (ADR-0005 provenance: a NEITHER target that ran a bypass must
+                    # say plainly why).
+                    dynamic_stage.evidence = {
+                        **(dynamic_stage.evidence or {}),
+                        "forced_dynamic": True,
+                        "effective_dynamic_action": dynamic_action.value,
+                        "static_action": classification.action.value,
+                    }
             except Exception as exc:
                 # GAP-2 on an UNEXPECTED dynamic-stage exception: run_dynamic_stage
                 # returns clean failed/skipped StageResults for its known failure
@@ -2327,6 +2390,8 @@ def run(
                 f"root_bypassed={verification.root_bypassed}, ssl_bypassed={verification.ssl_bypassed}"
                 if verification else "not run"
             ),
+            force_dynamic=forced_dynamic,
+            effective_dynamic_action=dynamic_action.value,
         ),
     )
 

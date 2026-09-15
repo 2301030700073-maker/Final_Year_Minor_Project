@@ -12,6 +12,7 @@ from cli import (
     _completeness_console_caveat,
     _correlation_from_json,
     _correlation_skip_reason_for_failed_stage,
+    _effective_dynamic_action,
     _git_commit_hash,
     _git_last_commit_touching,
     _halt,
@@ -20,8 +21,41 @@ from cli import (
     _stage_from_json,
     _wrap_stage,
 )
-from common import StageResult, StaticEvidence
+from common import Action, CategoryVerdict, ClassificationResult, StageResult, StaticEvidence
 from static.manifest import ManifestInfo
+
+
+def test_effective_dynamic_action_forces_only_neither():
+    # --force-dynamic (ADR-0005 operator override) deploys the universal bypass on a
+    # NEITHER target by driving synthesis/deployment with Action.BOTH - and must be a
+    # strict no-op for every already-detected action (dynamic already runs there) and
+    # whenever the flag is off. If it ever forced a detected action too it would be a
+    # meaningless relabel; if it forced with the flag off, --force-dynamic would not
+    # be opt-in.
+    assert _effective_dynamic_action(Action.NEITHER, True) == Action.BOTH
+    assert _effective_dynamic_action(Action.NEITHER, False) == Action.NEITHER
+    assert _effective_dynamic_action(Action.ROOT_ONLY, True) == Action.ROOT_ONLY
+    assert _effective_dynamic_action(Action.SSL_ONLY, True) == Action.SSL_ONLY
+    assert _effective_dynamic_action(Action.BOTH, True) == Action.BOTH
+    for a in (Action.NEITHER, Action.ROOT_ONLY, Action.SSL_ONLY, Action.BOTH):
+        assert _effective_dynamic_action(a, False) == a  # flag off is always identity
+
+
+def test_effective_dynamic_action_does_not_mutate_classification():
+    # The honesty guarantee (ADR-0006): the static verdict is computed from
+    # classification.action and must be byte-identical with/without the flag. The
+    # override lives ONLY in the separate returned action; the classification the
+    # rest of the pipeline (confidence, calibration, storage, correlation) reads is
+    # never rewritten. Passing classification.action in and getting BOTH out must
+    # leave the classification object's own action untouched.
+    cls = ClassificationResult(
+        action=Action.NEITHER,
+        root=CategoryVerdict(confidence=0.2, detected=False, evidence=[]),
+        ssl=CategoryVerdict(confidence=0.1, detected=False, evidence=[]),
+    )
+    effective = _effective_dynamic_action(cls.action, True)
+    assert effective == Action.BOTH        # the deployment action is overridden
+    assert cls.action == Action.NEITHER    # ...but the static verdict is not
 
 
 def test_correlation_from_json_roundtrips_unverified():

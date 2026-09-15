@@ -158,6 +158,26 @@ def test_synthesize_neither_is_empty():
     assert synthesize(_cls(Action.NEITHER), Action.NEITHER).source == ""
 
 
+def test_force_dynamic_neither_classification_with_both_action_yields_universal():
+    # The --force-dynamic mechanic (cli._effective_dynamic_action) hinges on this:
+    # a NEITHER-scored classification, when synthesis is driven with Action.BOTH,
+    # must produce the full universal root+SSL envelope - a non-empty script, both
+    # categories, >=1 hook each. This is exactly the call the operator override
+    # makes to bypass a coverage-limited target (e.g. PropertyGuru's Hermes-bundled
+    # root checks) WITHOUT the static verdict ever changing. Contrast directly with
+    # test_synthesize_neither_is_empty above: same classification, but the *action*
+    # passed is what turns an empty skip into a real, deployable bypass attempt.
+    res = synthesize(_cls(Action.NEITHER), Action.BOTH)
+    assert res.source, "forced BOTH on a NEITHER classification must not be empty"
+    assert res.strategy == "universal"
+    assert "root" in res.universal_categories
+    assert "ssl" in res.universal_categories
+    assert res.root_hook_count >= 1
+    assert res.ssl_hook_count >= 1
+    assert "/system/bin/su" in res.source        # universal root path-hiding
+    assert "checkServerTrusted" in res.source     # universal ssl trust-neutralization
+
+
 def test_all_recipe_hooks_are_well_formed():
     # Every hand-authored hook must be a structurally balanced snippet - a malformed
     # hook would be a silent runtime failure in the Frida session (principle 3).

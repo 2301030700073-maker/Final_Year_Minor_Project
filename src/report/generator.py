@@ -442,6 +442,19 @@ This report is produced by a deterministic, signature-based pipeline (ADR-0001) 
 {% else -%}
 This run's decompilation completed successfully ({{ jadx_file_count }} source files) - static findings reflect a full scan of the decompiled output.
 {% endif %}
+{# F-1: provenance for the output the static findings above were drawn from. Gates on
+the recorded tri-state, never on truthiness - `decompile_cached` is True (reused from
+the APK-hash cache), False (decompiled during this run) or None (a persisted record
+older than the field), and None must not read as a fresh decompile. The decompile
+stage's `cached` evidence key existed but had no consumer, so a replay rendered as
+"this run's decompilation completed successfully". #}
+{% if decompile_cached is true -%}
+**Decompile provenance: REUSED FROM CACHE.** The decompiled output the static findings above were drawn from was read from this APK's cache entry - jadx and apktool were **not** re-run for this report. The completeness, exit code and file count stated above are the ones the original decompile recorded in its sidecar, not values measured now; a sidecar recording an older evidence schema is refused and re-decompiled for real rather than read (see `decompile.py`).
+{% elif decompile_cached is false -%}
+**Decompile provenance: decompiled during this run.** jadx (and apktool) produced the sources the static findings above were drawn from during this run, not from the APK-hash cache.
+{% else -%}
+**Decompile provenance: not recorded for this run.** The persisted decompile evidence for this run predates the field that records cache reuse, so whether the output above came from a cache replay or from a run that decompiled now is not recoverable from the record. Treat it as unverified provenance - not as evidence that a decompile ran for this report.
+{% endif %}
 
 **Decompiler(s) used this run:** {{ decompiler_used }}. Recorded from the decompile stage's own evidence so this run's Java-side coverage is reproducible - the secondary CFR pass is discovered per-machine (ADR-0007), and naming whether it ran is what explains a coverage difference between two environments rather than leaving it silent.
 
@@ -632,6 +645,7 @@ def _decompile_summary(stage_results: list[StageResult]) -> dict:
         # run always halts before generate_report() if decompile failed.
         return {"decompile_completeness": "unknown", "jadx_exit_code": None,
                 "jadx_file_count": None, "decompiler_used": "unknown",
+                "decompile_cached": None,
                 "class_recovery_ratio": None, "class_recovery_pct": None,
                 "smali_top_level_classes": None}
     evidence = decompile_stage.evidence or {}
@@ -643,6 +657,14 @@ def _decompile_summary(stage_results: list[StageResult]) -> dict:
         # G2: name the decompiler(s) that produced these sources so coverage is
         # reproducible across machines, not silently CFR-availability-dependent.
         "decompiler_used": _decompiler_used(evidence),
+        # F-1: `_result` has recorded cache reuse in the evidence all along, but
+        # nothing read it, so a cache replay rendered as "this run's decompilation
+        # completed successfully" - a statement about a run that did not happen.
+        # Passed through un-defaulted on purpose: None (an older persisted record
+        # with no such field) is a third fact and must not render as a fresh
+        # decompile, exactly as the sidecar-schema guard must not default a
+        # missing evidence field (see decompile.py _SIDECAR_SCHEMA_VERSION).
+        "decompile_cached": evidence.get("cached"),
         # G1: quantify HOW partial a partial decompile is (approximate top-level
         # class recovery). pct is derived here so the template stays declarative;
         # 0.0 is a real value (jadx got nothing, apktool has classes) - guard on

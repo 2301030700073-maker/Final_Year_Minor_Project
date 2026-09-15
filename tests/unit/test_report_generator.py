@@ -1520,6 +1520,10 @@ def test_decompile_summary_all_branches():
     assert _decompile_summary([]) == {
         "decompile_completeness": "unknown", "jadx_exit_code": None, "jadx_file_count": None,
         "decompiler_used": "unknown",
+        # F-1: exact equality is the point of this assertion - the cache-reuse
+        # tri-state belongs in it so a future field cannot be added to the summary
+        # without this list being revisited.
+        "decompile_cached": None,
         "class_recovery_ratio": None, "class_recovery_pct": None,
         "smali_top_level_classes": None,
     }

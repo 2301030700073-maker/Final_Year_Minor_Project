@@ -202,8 +202,30 @@ def _summarize(message: dict, limit: int = _PAYLOAD_TRUNCATE) -> str:
 # third-party confirmations that the injected agent hooked native functions; they
 # are engagement evidence, not a bypass pass (root/ssl stay None - only a
 # target-specific live SuccessCheck can confirm the app's own check was defeated).
+# The injected script's own report of a hook it could NOT install, e.g.
+# "[synth] no SSL_CTX_set_verify in libssl.so". Unlike the [OK] markers below -
+# which are engagement evidence - these are the script telling us part of the
+# bypass is a no-op, and on a production target the native SSL arm is exactly
+# that: BoringSSL ships with its verify symbols stripped, so findExportByName
+# fails for every one of them. Collected so the report can say so instead of
+# leaving the reader to infer a cause for a stalled startup from evidence that
+# does not carry one (F-9).
+_SYNTH_LOG_MARKER = "[synth] "
 _VENDOR_ROOT_MARKER = "[OK] [ROOT]"
 _VENDOR_SSL_MARKER = "[OK] [SSL]"
+
+
+def _native_hook_installation_line(uninstalled: list[str], captured: bool) -> str:
+    """Tri-state on purpose: "the script reported no failure" and "the script's
+    output was not captured" are different facts, and only the first says anything
+    about whether a hook went in. An empty or absent message list is reported as
+    not-captured, never as a clean install."""
+    if not captured:
+        return "not captured (no Frida script output this run)"
+    if not uninstalled:
+        return ("the injected script reported no failed hook installation this run "
+                "(it lists a hook only when a lookup for it failed)")
+    return ("hook(s) the injected script could NOT install: " + "; ".join(uninstalled))
 
 
 class TechnologyHooksEngagedCheck:
@@ -248,6 +270,7 @@ class TechnologyHooksEngagedCheck:
         engaged: list[str] = []
         root_probe_hits: list[str] = []
         effects: list[str] = []
+        not_installed: list[str] = []
         for m in messages:
             if not isinstance(m, dict):
                 continue
@@ -270,6 +293,10 @@ class TechnologyHooksEngagedCheck:
                 eff = payload.get("bypassEffect")
                 if eff and eff not in effects:
                     effects.append(str(eff))
+            elif isinstance(payload, str) and _SYNTH_LOG_MARKER in payload:
+                line = payload.strip()
+                if line not in not_installed:
+                    not_installed.append(line)
             elif isinstance(payload, str) and (
                 _VENDOR_ROOT_MARKER in payload or _VENDOR_SSL_MARKER in payload
             ):
@@ -346,6 +373,15 @@ class TechnologyHooksEngagedCheck:
             # handshake and must not be reported under a "handshakes completed"
             # heading - a mislabeled line for any real app whose only effect is the
             # pin-check.
+            # F-9: what the injected script reported it could NOT install. The
+            # native SSL arm is the case that matters - on a production target its
+            # verify symbols are stripped, so the arm is a no-op and the report
+            # used to omit that entirely while explaining a stalled startup with a
+            # cause the evidence did not carry. Rendered generically (the report
+            # loops evidence_lines), so no template change is needed.
+            "Native hook installation (script's own report)": (
+                _native_hook_installation_line(not_installed, captured=bool(messages))
+            ),
             "TLS handshakes completed post-bypass": (
                 "yes (a TLS handshake completed through the neutralized stack)"
                 if "ssl-handshake" in effects

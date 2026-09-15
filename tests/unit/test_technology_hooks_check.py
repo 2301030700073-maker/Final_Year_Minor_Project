@@ -404,3 +404,51 @@ def test_summarize_renders_script_error_detail_not_error_null():
     assert "error:null" not in out
     # a bare error with no description still names itself, never blanks
     assert _summarize({"type": "error"}) == "error:unspecified Frida script error"
+
+
+# --- F-9: the injected script's own report of what it could NOT install -------
+
+_HOOK_INSTALL_KEY = "Native hook installation (script's own report)"
+
+
+def _install_line(messages):
+    return TechnologyHooksEngagedCheck().check(messages).evidence_lines[_HOOK_INSTALL_KEY]
+
+
+def test_native_hook_line_not_captured_without_script_output():
+    # No script output says NOTHING about whether hooks installed - an empty list
+    # must read as not-captured, never as a clean install.
+    assert "not captured" in _install_line(None)
+    assert "not captured" in _install_line([])
+
+
+def test_native_hook_line_reports_the_empty_native_ssl_arm():
+    # The real shape: on a production target BoringSSL's verify symbols are
+    # stripped, so the script's lookup fails for every one of them and it says so
+    # on the console. That fact used to reach the console only.
+    msgs = [{"type": "log", "payload": f"[synth] no {sym} in libssl.so"}
+            for sym in ("SSL_CTX_set_verify", "SSL_CTX_set_cert_verify_callback",
+                        "SSL_CTX_set_custom_verify", "SSL_set_custom_verify")]
+    line = _install_line(msgs)
+    assert "could NOT install" in line
+    for sym in ("SSL_CTX_set_verify", "SSL_set_custom_verify"):
+        assert sym in line
+
+
+def test_native_hook_line_dedupes_repeated_reports():
+    msgs = [{"type": "log", "payload": "[synth] no SSL_CTX_set_verify in libssl.so"}] * 3
+    assert _install_line(msgs).count("SSL_CTX_set_verify") == 1
+
+
+def test_native_hook_line_clean_when_the_script_reports_nothing_failed():
+    msgs = [{"type": "send", "payload": {"hook": "okhttp_certificate_pinner"}}]
+    line = _install_line(msgs)
+    assert "no failed hook installation" in line
+    assert "could NOT install" not in line
+
+
+def test_native_hook_line_does_not_shadow_vendor_engagement_evidence():
+    # A vendor [OK] marker is engagement, not a failure - it must not be filed as
+    # an uninstalled hook.
+    msgs = [{"type": "log", "payload": "[OK] [SSL] libssl.SSL_CTX_set_cert_cb native"}]
+    assert "could NOT install" not in _install_line(msgs)

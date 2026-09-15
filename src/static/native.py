@@ -1075,12 +1075,12 @@ def find_external_native_loads(java_files: list) -> list[str]:
 # (CALIB-NATIVE-VACUOUS). Verified live: a PropertyGuru run's only unaccounted
 # entry was `log`.
 #
-# The exemption is sound in the adversarial case: a library the app SHIPS lands in
-# the APK and is analyzed, so its basename is in analyzed_names and it never
-# reaches this check - only a library absent from the APK, i.e. the platform's,
-# can be exempted. Residual: an APK shipping its own liblog.so whose analysis
-# failed would be exempted here; the set is deliberately small and OS-only
-# (libc++_shared.so is NOT here - it ships inside APKs) to keep that window narrow.
+# The exemption can only fire for a library the APK does NOT ship. A library the
+# app ships is accounted for by name membership before this check is reached -
+# whatever its analysis did - so an APK carrying its own liblog.so is never
+# exempted here. The set stays deliberately small and OS-only (libc++_shared.so
+# is NOT here - it ships inside APKs) so that it can only ever describe libraries
+# the OS actually provides.
 _PLATFORM_NATIVE_LIBS = frozenset({
     "libc.so", "libm.so", "libdl.so", "liblog.so", "libz.so", "libstdc++.so",
     "libandroid.so", "libjnigraphics.so", "libEGL.so", "libGLESv1_CM.so",
@@ -1090,16 +1090,27 @@ _PLATFORM_NATIVE_LIBS = frozenset({
 })
 
 
-def unaccounted_native_loads(load_targets: list[str], analyzed_names: set[str]) -> list[str]:
-    """The load targets whose library we did NOT analyze. `analyzed_names` is the
-    set of analyzed .so basenames (e.g. "libfoo.so"). A loadLibrary("foo") maps
-    to libfoo.so; a load path maps to its basename. Any target not covered is a
-    loaded-but-unexamined native surface - the caller must degrade native
-    coverage to partial rather than certify a confident negative (ADR-0006).
+def unaccounted_native_loads(load_targets: list[str], shipped_names: set[str]) -> list[str]:
+    """The load targets whose library the APK does not contain at all.
+
+    `shipped_names` is the set of .so basenames the APK SHIPS - every extracted
+    lib/<abi>/*.so and assets/*.so - NOT the subset that was successfully
+    analyzed. The distinction is load-bearing and the parameter used to be named
+    `analyzed_names`, which invites the opposite reading: a library that IS in the
+    APK is accounted for by its presence in that set alone, so it is never
+    reported here even if its analysis failed or its ABI was never analyzed. Only
+    a target the APK does not ship (an absolute-path load, a load of another
+    app's library, or an OS library) reaches the unaccounted list. A loadLibrary
+    ("foo") maps to libfoo.so; a load path maps to its basename; any target not
+    covered is a loaded-but-unexamined native surface, and the caller must
+    degrade native coverage to partial rather than certify a confident negative
+    (ADR-0006).
 
     PLATFORM-LIB1: a target resolving to an OS-provided platform library is not
-    an app surface and is not reported (see _PLATFORM_NATIVE_LIBS)."""
-    analyzed = set(analyzed_names)
+    an app surface and is not reported (see _PLATFORM_NATIVE_LIBS). Because a
+    shipped library is already accounted for above, the exemption can only ever
+    apply to a library the APK does not ship - i.e. one the OS provides."""
+    shipped = set(shipped_names)
     unaccounted: list[str] = []
     seen: set[str] = set()
     for t in load_targets:
@@ -1112,7 +1123,8 @@ def unaccounted_native_loads(load_targets: list[str], analyzed_names: set[str]) 
         # several call sites (e.g. loadLibrary("log") in many RN modules) is one
         # surface, not N. Dedup by exact target, first occurrence wins. Coverage
         # gates on presence, never on count, so this only de-noises the report.
-        if base not in analyzed and base not in _PLATFORM_NATIVE_LIBS and t not in seen:
+        if (base not in shipped and base not in _PLATFORM_NATIVE_LIBS
+                and t not in seen):
             seen.add(t)
             unaccounted.append(t)
     return unaccounted

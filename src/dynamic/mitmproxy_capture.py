@@ -131,6 +131,40 @@ def clientconnect(layer):
     # client_connected; this keeps the addon working if the host mitmproxy is
     # older, rather than silently logging no connections).
     _mark_connect()
+
+
+def tls_failed_client(flow):
+    # mitmproxy >=8 hook: fires when the CLIENT refuses OUR certificate - an
+    # unknown CA, or an app pinning to its own trust anchor. Without this hook a
+    # pinned app is INVISIBLE here: client_connected logs its marker, no request
+    # line follows, and the WSL2 stage cannot tell "the client refused our CA"
+    # apart from "the client connected and sent nothing" - which is exactly the
+    # question an empty capture has to answer. mitmproxy 8 hands this hook a
+    # TlsData whose .conn is the client connection; its .error is the client's
+    # OWN reason string, e.g. "The client does not trust the proxy's certificate
+    # for <host> (tlsv1 alert unknown ca)" - the refusal, in the client's words,
+    # which is the strongest available evidence that pinning is why nothing
+    # decrypted. On an older mitmproxy (where this hook gets a Client instead)
+    # the attribute lookups raise, the detail comes back empty, and the bare
+    # marker is still written - the COUNT is the load-bearing signal and must
+    # survive even when the detail cannot be extracted.
+    try:
+        conn = flow.conn
+        host = getattr(conn, "sni", "") or ""
+        err = getattr(conn, "error", "") or ""
+    except Exception:
+        host, err = "", ""
+    # Collapse all whitespace before writing. The error text is remote-influenced
+    # (it can quote a value the peer supplied), and an embedded newline would
+    # split the record into a second line that the WSL2 parser reads as its own
+    # entry - a forged flow line at column 0, the phantom-flow class the parser
+    # already guards against. One record, always one line.
+    detail = " ".join("{} | {}".format(host, err).split())
+    try:
+        with open(_LOG_PATH, "a", buffering=1) as f:
+            f.write("@@TLS_FAILED_CLIENT@@ " + detail + "\\n")
+    except Exception:
+        pass
 '''
 
 
@@ -138,6 +172,14 @@ def clientconnect(layer):
 # addon's client_connected hook). Counted by _count_client_connections and
 # skipped by _parse_flow_detail so it is never mistaken for a decrypted flow.
 _CLIENT_CONNECT_MARKER = "@@CLIENT_CONNECT@@"
+
+# TLS-refusal marker the addon writes when a client REJECTS our certificate (see
+# the addon's tls_failed_client hook). Distinct from _CLIENT_CONNECT_MARKER: that
+# one says the device reached the proxy, this one says the proxy's certificate was
+# refused - the proxy-side signature of pinning, and the only place the refusal
+# itself is recorded. Carries "" or "<sni> | <client's own error text>"; never
+# parsed as a flow (see _parse_flow_detail, and _count_tls_failed_clients).
+_TLS_FAILED_CLIENT_MARKER = "@@TLS_FAILED_CLIENT@@"
 
 
 @dataclass
@@ -248,6 +290,36 @@ def _count_client_connections(text: str) -> int:
     return count
 
 
+def _count_tls_failed_clients(text: str) -> list[dict[str, str]]:
+    """Parse the addon's TLS-refusal records into {host, error} per refusal.
+
+    Proxy-side complement to _count_client_connections: a client-connection count
+    alone cannot separate "the app connected and sent no request" from "the app
+    connected and REFUSED our certificate" - both log a connect marker and then
+    nothing. This is the second case, recorded by the proxy at the instant the
+    client aborts the handshake, which is what certificate pinning looks like
+    from the proxy's side (and what an app with a custom trust store, or one that
+    does not trust a user-installed CA, looks like too - the record says a CA was
+    refused, it does not by itself name which pinning implementation).
+
+    Only the WSL2 addon emits these records, so a caller on the native placement
+    must NOT read the empty list this returns as "no refusal was observed" - it
+    means the signal was never produced there. That caller passes None instead;
+    this function reports only what the text actually contains.
+
+    Pure and fixture-testable (no mitmproxy needed). Matched by PREFIX, not
+    equality, because the marker carries a detail suffix; the prefix test is also
+    what keeps a detail string from ever reaching the flow parser."""
+    out: list[dict[str, str]] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith(_TLS_FAILED_CLIENT_MARKER):
+            continue
+        host, _, err = line[len(_TLS_FAILED_CLIENT_MARKER):].strip().partition("|")
+        out.append({"host": host.strip(), "error": err.strip()})
+    return out
+
+
 # The single implementation of this honesty-critical formatting now lives in
 # common.describe_frida_script_errors, shared with the report hooks-audit
 # (generator._hooks_engaged) so the two can never drift. Kept bound to the
@@ -277,6 +349,14 @@ def _parse_flow_detail(text: str) -> list[FlowSummary]:
         # Skip connection lifecycle noise, including our own reachability marker
         # (@@CLIENT_CONNECT@@ is counted by _count_client_connections, never a flow).
         if line == _CLIENT_CONNECT_MARKER:
+            continue
+        if line.startswith(_TLS_FAILED_CLIENT_MARKER):
+            # A certificate-refusal record, not a flow. Prefix (not equality):
+            # the marker carries a detail suffix. This test has to come BEFORE
+            # the request-line branch below, which is the branch that would
+            # otherwise parse it - the addon collapses the detail to one line,
+            # but a prefix test is what makes that a structural guarantee rather
+            # than a property of what the client happened to send.
             continue
         if ("client connect" in line or "client disconnect" in line
                 or "server connect" in line or "server disconnect" in line):
@@ -711,6 +791,16 @@ def run_capture_stage(
             proc = None
 
         flows = _parse_flow_detail(stdout_text or "")
+
+        # Proxy-side TLS-refusal signal (see the addon's tls_failed_client hook),
+        # computed ONCE here so both the success and empty-flow arms record the
+        # same observation - they read the same capture text. Only the WSL2 addon
+        # writes these records, so on the native placement this is None, NOT []:
+        # an empty list there would read as "no client refused our CA", a claim
+        # that placement cannot make because it never ran the addon that observes
+        # refusals. Same not-captured sentinel discipline as the other
+        # co-sourced signals.
+        tls_failed = _count_tls_failed_clients(stdout_text or "") if wsl2 else None
         if not flows:
             client_connections = _count_client_connections(stdout_text or "")
             # A crashed pinning-bypass script is a THIRD, concrete cause of zero
@@ -725,7 +815,31 @@ def run_capture_stage(
             # CAPREACH1: name the ACTUAL cause using the pre-flight probe, instead
             # of the old "either the device could not reach mitmdump ... or the app
             # made no network requests" hedge that left the operator to guess.
-            if reachable is True:
+            if tls_failed:
+                # The refusal is DIRECT evidence, so it outranks the pre-flight
+                # probe and the connection count in the diagnosis: a client can
+                # only refuse our certificate after completing a TCP connection
+                # and starting a handshake, so this simultaneously proves the
+                # device->proxy route WORKED. Naming it here is the whole point
+                # of recording it - without this the count would be evidence no
+                # consumer reads.
+                refused_hosts = sorted({f["host"] for f in tls_failed if f["host"]})
+                hosts_note = (
+                    " (" + ", ".join(refused_hosts) + ")" if refused_hosts
+                    else " (the client's SNI was not captured for these)"
+                )
+                device_or_app_cause = (
+                    f"no traffic was decrypted, but the capture proxy recorded "
+                    f"{len(tls_failed)} client TLS handshake(s) it REFUSED its "
+                    f"certificate for{hosts_note} - the app rejected the capture "
+                    "CA, which is the proxy-side signature of certificate pinning "
+                    "(or a custom/limited trust store). This also proves the "
+                    "device->proxy route worked: a refusal requires the "
+                    "connection. So this is NOT a wiring failure and NOT "
+                    "app-silence - the pinned host(s) above refused the proxy and "
+                    "their traffic was never decryptable by this route"
+                )
+            elif reachable is True:
                 device_or_app_cause = (
                     "no traffic captured through the proxy - the device COULD "
                     f"reach mitmdump at 127.0.0.1:{proxy_port} (pre-flight probe "
@@ -776,6 +890,10 @@ def run_capture_stage(
                     # reached the proxy, app was silent (app-silence, not a wiring
                     # failure); 0 => device never reached the proxy (real failure).
                     "client_connections": client_connections,
+                    # Proxy-side refusals observed by the addon (None when the
+                    # addon did not run, i.e. the native placement - see
+                    # _count_tls_failed_clients).
+                    "tls_failed_clients": tls_failed,
                     # CAPREACH1: the PRE-FLIGHT probe verdict (True route up /
                     # False route down / None not probeable). Recorded separately
                     # from client_connections because it is measured before the
@@ -798,6 +916,10 @@ def run_capture_stage(
             evidence={
                 "flows_count": len(flows),
                 "hosts": hosts,
+                # Proxy-side refusals observed by the addon (None when the
+                # addon did not run, i.e. the native placement - see
+                # _count_tls_failed_clients).
+                "tls_failed_clients": tls_failed,
                 "flow_summary": [
                     {"host": f.host, "method": f.method, "path": f.path,
                      "status": f.status, "scheme": f.scheme} for f in flows

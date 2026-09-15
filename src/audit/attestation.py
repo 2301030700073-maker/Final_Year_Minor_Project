@@ -285,6 +285,8 @@ def record_run_completion(
     stage_statuses: dict,
     verification: str,
     tool_version: str = "0.1.0",
+    force_dynamic: bool = False,
+    effective_dynamic_action: str | None = None,
 ) -> StageResult:
     """Append the run-outcome record (LIM-A). ADR-0005 demands every analysis
     attempt be traceable, but the trail previously recorded only authorization
@@ -306,6 +308,15 @@ def record_run_completion(
         "stage_statuses": stage_statuses,
         "verification": verification,
     }
+    # ADR-0005: when an operator forced the dynamic stage over a NEITHER static
+    # verdict (--force-dynamic), the IMMUTABLE log itself must say so - not just the
+    # DB/report. `action` above stays the true static verdict (never promoted);
+    # these fields record WHY a bypass was deployed anyway and which action drove
+    # synthesis/deployment. Emitted only on a forced run, so a normal run's outcome
+    # record is byte-identical to before this feature.
+    if force_dynamic:
+        record["force_dynamic"] = True
+        record["effective_dynamic_action"] = effective_dynamic_action
     return _append_outcome(audit_log_path, record, start)
 
 

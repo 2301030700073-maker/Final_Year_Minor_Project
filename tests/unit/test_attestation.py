@@ -130,6 +130,52 @@ def test_record_run_completion_appends_chained_outcome_record(tmp_path):
     assert verified["chained"] == 2  # completion chains onto the authorization record
 
 
+def test_record_run_completion_records_operator_forced_override(tmp_path):
+    # ADR-0005: --force-dynamic deploys a bypass on a NEITHER static verdict. The
+    # IMMUTABLE log (not just the DB/report) must record that this happened and why:
+    # the static `action` stays NEITHER (never promoted), and the forced provenance
+    # rides along as its own fields. A reader of the audit trail ALONE can then see a
+    # bypass ran on a NEITHER target because an operator explicitly forced it.
+    log_path = tmp_path / "audit_log.jsonl"
+    record_authorization(log_path, "OWN_APP", "pg01", "op", "c1", run_id="run-forced")
+
+    result = record_run_completion(
+        audit_log_path=log_path,
+        run_id="run-forced", apk_hash="pg01",
+        justification="OWN_APP", operator="op", git_commit="c1",
+        action="NEITHER",
+        stage_statuses={"ingest": "success", "audit": "success", "dynamic": "success"},
+        verification="root_bypassed=True, ssl_bypassed=None",
+        force_dynamic=True,
+        effective_dynamic_action="BOTH",
+    )
+
+    assert result.status == "success"
+    rec = json.loads(log_path.read_text(encoding="utf-8").splitlines()[1])
+    assert rec["action"] == "NEITHER"                    # static verdict NEVER promoted
+    assert rec["force_dynamic"] is True                  # ...but the override is on record
+    assert rec["effective_dynamic_action"] == "BOTH"
+    assert verify_audit_log(log_path)["valid"] is True   # extra fields stay hash-chained
+
+
+def test_record_run_completion_omits_force_fields_on_normal_run(tmp_path):
+    # Negative control: a normal (unforced) run's outcome record must be free of the
+    # forced-override fields entirely - they are provenance for an override, never
+    # keys present on every record. Guards the byte-identical-when-unforced promise.
+    log_path = tmp_path / "audit_log.jsonl"
+    record_authorization(log_path, "OWN_APP", "h1", "op", "c1", run_id="run-normal")
+    record_run_completion(
+        audit_log_path=log_path,
+        run_id="run-normal", apk_hash="h1",
+        justification="OWN_APP", operator="op", git_commit="c1",
+        action="ROOT_ONLY", stage_statuses={"dynamic": "success"},
+        verification="root_bypassed=True, ssl_bypassed=None",
+    )
+    rec = json.loads(log_path.read_text(encoding="utf-8").splitlines()[1])
+    assert "force_dynamic" not in rec
+    assert "effective_dynamic_action" not in rec
+
+
 def test_authorized_engagement_requires_non_blank_id(tmp_path):
     # LIM-C: self-attested engagement id must be non-blank - a bare prefix or
     # a prefix + whitespace-only id must be rejected.

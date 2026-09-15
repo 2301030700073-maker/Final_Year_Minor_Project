@@ -52,15 +52,22 @@ def test_note_silent_when_observer_saw_a_handshake():
     assert _handshake_capture_note(ver, {"capture_flows": [{"host": "x"}]}) is None
 
 
-def test_note_silent_on_attempted_but_rejected_state():
-    # Emitter state #2 ("none completed - ATTEMPTED but rejected"): that line
-    # already explains itself and is deliberately NOT the none-observed state, so
-    # the reconciliation note must stay silent (it keys on none-observed only).
+def test_note_fires_on_attempted_but_rejected_state_too():
+    # Emitter state #2 ("none completed - ATTEMPTED but rejected"). This test used
+    # to require the note to stay SILENT here, reasoning that the line "already
+    # explains itself". A real run disproved that: a PropertyGuru run emitted this
+    # exact line and the report rendered it directly above a table of 23 decrypted
+    # flows - the contradiction the note exists to reconcile ("every decrypted flow
+    # REQUIRED a completed TLS handshake through the CA"). Naming a mechanism is
+    # not the same as being consistent with the capture, and the state that
+    # contradicts the capture is the one the note is for. The wording stays a
+    # literal here because this is the coupling test: it exists to catch drift
+    # between the emitter's string and the note's gate.
     ver = _ver(
         "none completed - handshakes were ATTEMPTED but rejected on the cert "
         "trust path (SSL bypass did not neutralize them; see startup-TLS signal)"
     )
-    assert _handshake_capture_note(ver, {"capture_flows": [{"host": "x"}]}) is None
+    assert "x" in _handshake_capture_note(ver, {"capture_flows": [{"host": "x"}]})
 
 
 def test_note_silent_when_none_observed_but_no_flows():

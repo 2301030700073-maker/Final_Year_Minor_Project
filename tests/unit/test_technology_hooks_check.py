@@ -237,14 +237,28 @@ def test_app_still_running_not_captured_is_honest():
 
 
 def test_tls_line_crossrefs_tls_block_signal():
-    """When the startup-TLS signal fired, 'no handshake reached' must not imply
-    no TLS activity - say handshakes were attempted but rejected on the trust
-    path (honest cross-reference, ADR-0006)."""
-    from common import VerificationResult
+    """When the startup-TLS signal fired, the line must not imply no TLS activity.
+    A generic handshake failure does not license naming the certificate cause, so
+    the line cross-references the signal and leaves the mechanism unattributed -
+    the bare none-observed wording asserts no TLS activity at all and is what must
+    not be used here (ADR-0006)."""
+    from common import TLS_HANDSHAKE_OBSERVER_NONE_TLS_FAILED
     check = TechnologyHooksEngagedCheck()
     r = check.check([], ui_liveness={"tls_blocked": True})
     line = r.evidence_lines["TLS handshakes completed post-bypass"]
-    assert "attempted but rejected" in line.lower()
+    assert line == TLS_HANDSHAKE_OBSERVER_NONE_TLS_FAILED
+    assert "startup-tls signal" in line.lower()
+    assert "cert trust" not in line.lower()          # no unattributed mechanism
+    assert "attempted but rejected" not in line.lower()
+
+
+def test_tls_line_names_cert_rejection_only_on_cert_evidence():
+    # The mirror of the test above: when the logcat DOES carry a certificate
+    # rejection, the report names it - that is the case the wording is for.
+    from common import TLS_HANDSHAKE_REJECTED
+    check = TechnologyHooksEngagedCheck()
+    r = check.check([], ui_liveness={"tls_blocked": True, "tls_cert_rejected": True})
+    assert r.evidence_lines["TLS handshakes completed post-bypass"] == TLS_HANDSHAKE_REJECTED
 
 
 def test_tls_line_plain_when_no_tls_block():

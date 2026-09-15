@@ -32,7 +32,7 @@ could send - a real signal."""
 
 from __future__ import annotations
 
-from common import TLS_HANDSHAKE_NONE_OBSERVED, VerificationResult, describe_frida_script_errors
+from common import TLS_HANDSHAKE_REJECTED, TLS_HANDSHAKE_NONE_OBSERVED, TLS_HANDSHAKE_OBSERVER_NONE_TLS_FAILED, VerificationResult, describe_frida_script_errors
 
 # Cap on how many raw frida messages are surfaced into the report so the
 # engagement evidence stays bounded and auditable (ADR-0006), never a dump.
@@ -107,8 +107,17 @@ def _summarize_ui_liveness(ui: dict) -> str:
         if sample:
             line = sample[0]
             quote = " - " + (line[-90:] if len(line) > 90 else line)
-        parts.append("startup TLS blocked:yes (cert trust rejected on Conscrypt/"
-                     "okhttp path; SSL bypass did not neutralize it)" + quote)
+        # The mechanism is named only when the matched line actually establishes
+        # it. A generic SSLHandshakeException is a handshake failure, not a
+        # certificate rejection - reporting one as the other asserted a cause the
+        # evidence does not carry (see _TLS_CERT_REJECT_MARKERS).
+        if ui.get("tls_cert_rejected"):
+            parts.append("startup TLS blocked:yes (cert trust rejected on Conscrypt/"
+                         "okhttp path; SSL bypass did not neutralize it)" + quote)
+        else:
+            parts.append("startup TLS blocked:yes (a TLS handshake failed; the logged "
+                         "failure does not establish a certificate/pin rejection, so "
+                         "the cause is not attributed here)" + quote)
     nodes = ui.get("clickable_nodes")
     parts.append(f"interactive nodes:{nodes if nodes is not None else 'not captured'}")
     # The honest screen-state label (splash/loading vs interactive page) from
@@ -341,11 +350,18 @@ class TechnologyHooksEngagedCheck:
                 "yes (a TLS handshake completed through the neutralized stack)"
                 if "ssl-handshake" in effects
                 else (
-                    "none completed - handshakes were ATTEMPTED but rejected on "
-                    "the cert trust path (SSL bypass did not neutralize them; "
-                    "see startup-TLS signal)"
-                    if (ui_liveness or {}).get("tls_blocked")
-                    else TLS_HANDSHAKE_NONE_OBSERVED
+                    TLS_HANDSHAKE_REJECTED
+                    if (ui_liveness or {}).get("tls_cert_rejected")
+                    else (
+                        # A TLS failure was logged but it is not a certificate
+                        # rejection: no completed handshake was observed and the
+                        # mechanism is not established. The bare none-observed
+                        # wording would read as "no TLS activity", which the logged
+                        # failure contradicts (ADR-0006).
+                        TLS_HANDSHAKE_OBSERVER_NONE_TLS_FAILED
+                        if (ui_liveness or {}).get("tls_blocked")
+                        else TLS_HANDSHAKE_NONE_OBSERVED
+                    )
                 )
             ),
             # Confirmed SSL bypass, on the app's own observable behavior: its pin-

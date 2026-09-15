@@ -48,13 +48,28 @@ _ANR_MARKERS = (
 # app that logs only that exception form. Kept lowercase here so the intended
 # case-insensitive match actually holds for all five markers, not just the two
 # that happened to be all-lowercase.
-_TLS_BLOCK_MARKERS = (
+# Split by the claim each group licenses, because they are NOT the same failure.
+# A CERTIFICATE-VALIDATION failure is what the bypass is built to neutralize, and
+# it is the only evidence that supports the report naming a cert-trust rejection.
+# A generic HANDSHAKE failure (SSLHandshakeException, a timed-out handshake)
+# establishes only that the handshake did not complete - equally consistent with
+# an upstream proxy-path failure or the client aborting - so the certificate
+# cause must not be named from it. Verified live: a PropertyGuru run logged
+# `SSLHandshakeException: Read error: ssl=0x...: Failure in SSL library, usually
+# a protocol error` and the report rendered that as "cert trust rejected on
+# Conscrypt/okhttp path" - a mechanism that line does not establish.
+_TLS_CERT_REJECT_MARKERS = (
     "trust anchor for certification path not found",
     "certpathvalidatorexception",
-    "sslhandshakeexception",
     "could not validate",
+)
+_TLS_HANDSHAKE_FAIL_MARKERS = (
+    "sslhandshakeexception",
     "handshake timed out",
 )
+# The union, unchanged: this is what "a TLS block was observed" means, and every
+# existing consumer keeps that meaning.
+_TLS_BLOCK_MARKERS = _TLS_CERT_REJECT_MARKERS + _TLS_HANDSHAKE_FAIL_MARKERS
 
 
 def _parse_activity_resumed(dumpsys_activities: str, package: str) -> bool:
@@ -146,6 +161,13 @@ def _parse_tls_block(logcat: str, package: str, pid: str | None = None) -> list[
         if any(marker in ln.lower() for marker in _TLS_BLOCK_MARKERS):
             hits.append(ln.strip())
     return hits
+
+
+def _tls_cert_rejection(lines: list[str]) -> bool:
+    """True when one of the matched lines is a CERTIFICATE-VALIDATION failure,
+    as opposed to a generic handshake failure. Only this licenses the report's
+    "cert trust rejected" wording - see _TLS_CERT_REJECT_MARKERS."""
+    return any(m in ln.lower() for ln in lines for m in _TLS_CERT_REJECT_MARKERS)
 
 
 def _parse_clickable_nodes(uiautomator_xml: str) -> int:
@@ -297,6 +319,10 @@ def check_ui_liveness(serial: str, package: str, adb: str | None = None) -> dict
         tls = _parse_tls_block(out, package, pid)
         result["tls_blocked"] = bool(tls)
         result["tls_block_lines"] = tls[:2]
+        # Co-sourced from the same logcat read as tls_blocked above, so it takes
+        # the same not-captured sentinel below - a consumer must not read the two
+        # in different states for the same IO call.
+        result["tls_cert_rejected"] = _tls_cert_rejection(tls)
     except Exception as e:
         # The ANR scan and the TLS-trust-block scan both derive from THIS single
         # `logcat -d` call. When it fails, degrade BOTH to the None "not captured"
@@ -310,6 +336,7 @@ def check_ui_liveness(serial: str, package: str, adb: str | None = None) -> dict
         # boundary this module exists to hold, quietly not held for the TLS cause.
         result["anr_detected"] = None
         result["tls_blocked"] = None
+        result["tls_cert_rejected"] = None
         result["_errors"] = result.get("_errors", []) + [f"logcat: {e}"]
 
     # 4) interactive UI hierarchy. Only trust the catted dump if uiautomator

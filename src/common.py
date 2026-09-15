@@ -711,6 +711,33 @@ class SuccessCheck(Protocol):
 # close. One constant referenced by both emitter and consumer makes that drift
 # impossible, the same de-drift discipline as describe_frida_script_errors below.
 TLS_HANDSHAKE_NONE_OBSERVED = "none observed (no TLS handshake reached during the run)"
+# The other wording the same line can carry: the observer saw no completed
+# handshake AND the logcat shows a CERTIFICATE-VALIDATION failure. Shared for the
+# same reason as the constant above - the report's _handshake_capture_note gates
+# on this line's text, and a wording that is not recognised silently disables the
+# reconciliation (verified: a PropertyGuru run hit this path, so the note that
+# exists to reconcile "no handshake" against 23 decrypted flows never fired).
+TLS_HANDSHAKE_REJECTED = ("none completed - handshakes were ATTEMPTED but rejected on "
+                          "the cert trust path (SSL bypass did not neutralize them; "
+                          "see startup-TLS signal)")
+# The third state: the in-app observer saw no completed handshake AND a TLS failure
+# was logged, but the line does not establish a certificate/pin rejection. Kept
+# distinct from TLS_HANDSHAKE_NONE_OBSERVED because that constant's text ("no TLS
+# handshake reached during the run") asserts no TLS activity at all - which both a
+# logged handshake failure and any decrypted flow in the capture section contradict.
+TLS_HANDSHAKE_OBSERVER_NONE_TLS_FAILED = (
+    "none observed by the in-app SSL observer; a TLS handshake failure WAS logged but "
+    "the line does not establish a certificate/pin rejection (cause not attributed "
+    "here; see startup-TLS signal)")
+# Every wording above that reports NO completed handshake. The report's
+# _handshake_capture_note reconciles the observer against the capture proxy for all
+# of them, so a wording missing from this tuple silently disables that reconciliation
+# - the failure this tuple exists to make impossible.
+TLS_HANDSHAKE_NO_COMPLETION_WORDINGS = (
+    TLS_HANDSHAKE_NONE_OBSERVED,
+    TLS_HANDSHAKE_REJECTED,
+    TLS_HANDSHAKE_OBSERVER_NONE_TLS_FAILED,
+)
 
 # Checkpoint token emitted by the synthesized bypass (synthesizer._environment_normalization
 # via _join_script) when the emulator/tamper build-prop scrub is deployed on the

@@ -9,7 +9,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 from calibration.report import CalibrationReport
-from common import ClassificationResult, CorrelationResult, ENV_NORMALIZATION_CHECKPOINT, StageResult, TLS_HANDSHAKE_NONE_OBSERVED, VerificationResult, describe_frida_script_errors
+from common import ClassificationResult, CorrelationResult, ENV_NORMALIZATION_CHECKPOINT, StageResult, TLS_HANDSHAKE_REJECTED, TLS_HANDSHAKE_NONE_OBSERVED, TLS_HANDSHAKE_NO_COMPLETION_WORDINGS, VerificationResult, describe_frida_script_errors
 from report import attribution as attribution_module
 from static.coverage import confidence_bound, verdict_label
 from static.manifest import ManifestInfo
@@ -983,7 +983,10 @@ def _handshake_capture_note(verification, capture_summary: dict) -> str | None:
     if verification is None:
         return None
     hs = verification.evidence_lines.get("TLS handshakes completed post-bypass", "")
-    if TLS_HANDSHAKE_NONE_OBSERVED not in hs:
+    # "No completed handshake" has two wordings; the note's job is to reconcile
+    # the observer's view with the capture either way. Gating on only one of them
+    # disabled the reconciliation in exactly the case it was written for.
+    if not any(w in hs for w in TLS_HANDSHAKE_NO_COMPLETION_WORDINGS):
         return None
     flows = capture_summary.get("capture_flows") or []
     if not flows:

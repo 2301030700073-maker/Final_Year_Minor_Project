@@ -287,14 +287,29 @@ def record_run_completion(
     tool_version: str = "0.1.0",
     force_dynamic: bool = False,
     effective_dynamic_action: str | None = None,
+    # F-8: declared last because it defaults - all params before it are required.
+    stage_statuses_list: list | None = None,
 ) -> StageResult:
     """Append the run-outcome record (LIM-A). ADR-0005 demands every analysis
     attempt be traceable, but the trail previously recorded only authorization
     and ingest failures - never whether a run completed or what it found, so a
     completed analysis was untraceable end-to-end. This closes start -> end by
     recording the run id, per-stage statuses, the decision action, and the
-    dynamic-verification result."""
+    dynamic-verification result.
+
+    F-8: `stage_statuses` is keyed by stage NAME, so stages sharing a name collapse
+    into one entry - and this pipeline runs three separate `audit` stages
+    (authorization, run-outcome, post-decision attestation), so two of the three
+    outcomes were dropped from a record ADR-0005 requires to be traceable. The
+    ordered `stage_statuses_list` is what preserves every stage, and the record
+    names the collapsed names explicitly rather than leaving a reader to assume one
+    entry means one stage ran."""
     start = time.monotonic()
+    ordered = list(stage_statuses_list) if stage_statuses_list is not None else []
+    _seen: dict[str, int] = {}
+    for _name, _status in ordered:
+        _seen[_name] = _seen.get(_name, 0) + 1
+    collapsed = sorted(_name for _name, _count in _seen.items() if _count > 1)
     record = {
         "event": "run_completed",
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -306,6 +321,14 @@ def record_run_completion(
         "git_commit": git_commit,
         "action": action,
         "stage_statuses": stage_statuses,
+        # F-8: the same facts in pipeline order with every occurrence kept. An empty
+        # list means the caller recorded no ordered list, never that no stage ran -
+        # the name-keyed dict above is the older, lossy view and stays as-is for the
+        # records already in the log.
+        "stage_statuses_list": [{"stage": n, "status": s} for n, s in ordered],
+        # The names that appeared more than once, so a reader of the name-keyed view
+        # knows exactly which stages it is not showing in full.
+        "stage_statuses_collapsed": collapsed,
         "verification": verification,
     }
     # ADR-0005: when an operator forced the dynamic stage over a NEITHER static

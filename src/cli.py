@@ -2392,6 +2392,12 @@ def run(
             git_commit=git_commit,
             action=classification.action.value,
             stage_statuses={s.stage: s.status for s in stage_results},
+            # F-8: the dict above is keyed by stage name, so the three `audit`
+            # stages (authorization, run-outcome, attestation) collapse to one
+            # entry and two outcomes vanish from the immutable record. This ordered
+            # list is the complete one; the record names the collapsed names too,
+            # so the lossy view cannot be mistaken for the whole set.
+            stage_statuses_list=[(s.stage, s.status) for s in stage_results],
             verification=(
                 f"root_bypassed={verification.root_bypassed}, ssl_bypassed={verification.ssl_bypassed}"
                 if verification else "not run"

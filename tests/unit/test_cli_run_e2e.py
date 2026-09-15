@@ -859,3 +859,59 @@ def test_merge_dex_evidence_dedupes_and_skips_unknown_category():
     assert static.ssl_confidence == 0.4
     assert [e.signature_id for e in static.root_evidence] == ["existing_root", "root_a"]
     assert [e.signature_id for e in static.ssl_evidence] == ["ssl_a"]
+
+
+def test_technology_check_raise_preserves_static_report_and_exits_nonzero(run_setup, monkeypatch):
+    """The unknown-target technology check was the one success check with no
+    guard. A raise out of it escaped run() as a raw traceback and discarded a run
+    whose static half AND on-device bypass had both already finished - the
+    report-losing failure mode GAP-2 fixed for the known-target arm, which guards
+    the identical call (success_check.check) with the identical rationale. Both
+    are the same dynamic surface, so both get the same treatment: record the
+    failed success-check stage, still write the static report, exit non-zero."""
+    from dynamic import device as device_mod
+
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
+    monkeypatch.setattr(
+        cli, "synthesize",
+        lambda classification, action: SimpleNamespace(source="root", applied_hooks=[]),
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner.run_dynamic_stage",
+        lambda *a, **kw: _ok("dynamic", frida_messages=[{"type": "send", "payload": {}}]),
+    )
+    monkeypatch.setattr(device_mod, "clear_logcat", lambda serial: None)
+    monkeypatch.setattr(device_mod, "capture_logcat", lambda serial: "")
+
+    def _boom(self, *a, **kw):
+        raise RuntimeError("technology check exploded")
+
+    # Patch the METHOD, not the class: the guard's scope matches its sibling arm's
+    # (the .check() call), so the raise has to come from the check itself.
+    monkeypatch.setattr(cli.TechnologyHooksEngagedCheck, "check", _boom)
+
+    captured = []
+    original_print = cli.console.print
+    cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
+    try:
+        with pytest.raises(typer.Exit) as excinfo:
+            cli.run(
+                apk=run_setup / "fixture.apk",
+                justification="ACADEMIC_TRAINING_TARGET",
+                skip_dynamic=False,
+                capture_traffic=False,
+                device_serial=None,
+                target="propertyguru",  # unknown target -> the technology-check arm
+            )
+    finally:
+        cli.console.print = original_print
+
+    assert excinfo.value.exit_code == 1
+    # A coded exit rather than the traceback is half the point; the other half is
+    # that the completed static work still reached disk.
+    assert any("success-check" in line and "FAILED" in line for line in captured)
+    report_files = sorted((run_setup / "reports").rglob("*.md"))
+    assert report_files, "the static report must still be written"
+    assert "Root-detection" in report_files[0].read_text(encoding="utf-8")

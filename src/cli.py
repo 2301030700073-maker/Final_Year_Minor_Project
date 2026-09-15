@@ -760,6 +760,19 @@ def _reclassify_empty_capture(
          apply. -> skipped (the host rejected our CA; a pinning result, not a
          capture fault).
 
+      P. The capture's own pre-flight probe found the device->proxy route DOWN
+         (evidence["device_reached_proxy_preflight"] is False; the producer
+         records that only for a refused/timed-out connect). Direct evidence
+         about the ROUTE rather than an inference about the app, so like 0 it is
+         decided ahead of signal 2 - whose observers fire inside a live
+         connection's TLS stage, so a device that cannot open the socket produces
+         their silence whether or not the app tried, and the "their silence rules
+         out a proxy-reachability failure" step does not hold on a route already
+         proven dead. It does not override a connection the capture WATCHED:
+         client_connections > 0 is the proxy having really accepted one, which
+         outranks a single probe of an earlier instant, so a contradicted down
+         verdict falls through to 3. -> failed (a real environment break).
+
       1. Manifest declares NO android.permission.INTERNET -> the app cannot open a
          socket, so zero flows is guaranteed regardless of proxy state. Sound
          invariant (no INTERNET => no traffic). -> skipped (not applicable).
@@ -788,8 +801,10 @@ def _reclassify_empty_capture(
     or a pin-check/verify that fired for a host) + 0 flows is a REAL capture-path
     failure (the app made the request, nothing reached the proxy);
     INTERNET + 0 client connections is a genuine reachability failure (the device
-    never reached the proxy); and INTERNET with no dynamic signal AND no connection
-    count at all cannot rule a proxy problem out, so all remain loud. A missing
+    never reached the proxy); a route the pre-flight probe found DOWN and no
+    observed connection contradicted is that same failure, proven before the
+    window; and INTERNET with no dynamic signal AND no connection count at all
+    cannot rule a proxy problem out, so all remain loud. A missing
     client_connections is treated as absent (not zero) - it never invents a
     reachability verdict. A non-empty (success) capture and a hard setup failure
     (Windows mitmdump missing, no usable device) are returned untouched - only an
@@ -855,6 +870,36 @@ def _reclassify_empty_capture(
             error=None, duration_ms=capture_stage.duration_ms,
         )
 
+    # CAPREACH1 / pre-flight route verdict, decided BEFORE Signal 2 - because
+    # Signal 2 is an inference about the APP that a proven-dead ROUTE invalidates.
+    # The producer records False only after a refused or timed-out connect ("the
+    # route is already broken, the capture is guaranteed to yield nothing"), and
+    # Signal 2's observers (the app's own CertificatePinner.check /
+    # TrustManagerImpl.verifyChain, plus the recipe checkpoints they emit) fire
+    # INSIDE a live connection's TLS stage - so a device that cannot open the
+    # socket to the proxy produces their silence whether or not the app ever
+    # tried. That is exactly the proxy-reachability failure Signal 2's own text
+    # claims the silence rules out. Left after Signal 2 this guard's promise
+    # ("never reclassify that as app-silence") was unenforceable: on any run whose
+    # dynamic stage succeeded, Signal 2 fired first and reported a dead route as
+    # "the app did not exercise its network/SSL path ... not a proxy failure" -
+    # naming the app for an environment break, in a reason that is false twice
+    # over.
+    #
+    # The verdict is direct evidence about the route, but it is one sample taken
+    # BEFORE the capture window (mitmdump may not have been listening yet), so it
+    # may not override a connection the capture actually observed:
+    # client_connections counts the connections the proxy really accepted during
+    # the window, and >0 is proof the route was usable. A down verdict the
+    # capture's own log contradicts therefore falls through to Signal 3 rather
+    # than asserting a wiring break that log disproves. 0 (or absent) leaves it
+    # uncontradicted and the stage loud; None is unknown and never asserts either
+    # way.
+    client_connections = evidence.get("client_connections")
+    _observed_connection = isinstance(client_connections, int) and client_connections > 0
+    if evidence.get("device_reached_proxy_preflight") is False and not _observed_connection:
+        return capture_stage
+
     # Signal 2: INTERNET + dynamic ran + NO in-process signal that the app exercised
     # its SSL path -> app-silence. "Exercised" is any of: the synthesized bypass's
     # bypassEffect ('ssl-pin-check'/'ssl-handshake'), OR the predefined
@@ -907,16 +952,7 @@ def _reclassify_empty_capture(
     # genuine reachability failure and MUST stay loud (never downgrade a real break).
     # A missing count (older addon / non-WSL2 path that didn't record it) is absent,
     # not zero, so it never fabricates a reachability claim - stays failed.
-    # CAPREACH1: a pre-flight probe that found the route DOWN is a definitive
-    # routing failure (the device could not open a socket to the proxy before a
-    # single request was made). Never reclassify that as app-silence: it is the
-    # one case where the network path - not the app - is proven broken, and
-    # downgrading it would hide a real environment break behind a tidy "skipped".
-    if evidence.get("device_reached_proxy_preflight") is False:
-        return capture_stage
-
-    client_connections = evidence.get("client_connections")
-    if has_internet and isinstance(client_connections, int) and client_connections > 0:
+    if has_internet and _observed_connection:
         return StageResult(
             stage="capture-traffic", status="skipped",
             evidence={**evidence, "reclassified_from": "failed",
@@ -2213,41 +2249,73 @@ def run(
                 # "not a bypass confirmation". Correlation is not attempted (no
                 # target-specific success check). Never a fake pass (ADR-0006).
                 tech_check = TechnologyHooksEngagedCheck()
-                verification = tech_check.check(
-                    dynamic_stage.evidence.get("frida_messages", []),
-                    app_still_running=dynamic_stage.evidence.get("app_still_running"),
-                    ui_liveness=dynamic_stage.evidence.get("ui_liveness"),
-                )
-                engaged = verification.evidence_lines.get("bypass hooks engaged", "none")
-                check_stage = StageResult(
-                    stage="success-check",
-                    status=(
-                        "success"
-                        if engaged != "none (no hook checkpoint observed)"
-                        else "skipped"
-                    ),
-                    evidence={
-                        "target": target,
-                        "bypass_hooks_engaged": engaged,
-                        "note": (
-                            "no target-specific success check; this stage reports "
-                            "technology-level hooks-engaged. The technology check "
-                            "also computes the root/ssl verification, reported "
-                            "separately in Dynamic Verification; correlation is "
-                            "not attempted"
+                check_stage: StageResult | None = None
+                try:
+                    verification = tech_check.check(
+                        dynamic_stage.evidence.get("frida_messages", []),
+                        app_still_running=dynamic_stage.evidence.get("app_still_running"),
+                        ui_liveness=dynamic_stage.evidence.get("ui_liveness"),
+                    )
+                except Exception as exc:
+                    # The known-target arm below guards the identical call
+                    # (success_check.check) because an unexpected exception out of
+                    # a success check must never discard the already-complete
+                    # static analysis (GAP-2). This arm is the same dynamic
+                    # surface and was the one success check left unwrapped: a
+                    # raise here escaped run() as a raw traceback, losing the
+                    # report AND the audit completion record for a run whose
+                    # static half and on-device bypass had both already finished.
+                    # The check's own engine is defensive precisely because its
+                    # inputs are device- and Frida-shaped, which is why the
+                    # surrounding stages treat a raise from it as reachable. Same
+                    # treatment, same reason: record the failure, keep the static
+                    # report, exit non-zero after it is written.
+                    dynamic_failed = True
+                    verification = None
+                    correlation_result = None
+                    correlation_skip_reason = (
+                        "technology hooks-engaged check raised an unexpected "
+                        "exception - correlation not attempted"
+                    )
+                    check_stage = StageResult(
+                        stage="success-check", status="failed",
+                        evidence={"reason": "unexpected technology-check exception"},
+                        error=(
+                            "technology hooks-engaged check raised unexpectedly: "
+                            f"{exc}"
                         ),
-                    },
-                )
-                # Dynamic RAN here (technology hooks-engaged tier, real root/ssl
-                # evidence surfaced under Dynamic Verification) - it was not
-                # skipped. Correlation needs a target-specific verification to
-                # compare static findings against, so state that reason honestly
-                # instead of the report defaulting to "dynamic stage skipped".
-                correlation_skip_reason = (
-                    "dynamic used the technology-level hooks-engaged check (no "
-                    "target-specific success check for this app); correlation "
-                    "requires a target-specific verification"
-                )
+                    )
+                if check_stage is None:
+                    engaged = verification.evidence_lines.get("bypass hooks engaged", "none")
+                    check_stage = StageResult(
+                        stage="success-check",
+                        status=(
+                            "success"
+                            if engaged != "none (no hook checkpoint observed)"
+                            else "skipped"
+                        ),
+                        evidence={
+                            "target": target,
+                            "bypass_hooks_engaged": engaged,
+                            "note": (
+                                "no target-specific success check; this stage reports "
+                                "technology-level hooks-engaged. The technology check "
+                                "also computes the root/ssl verification, reported "
+                                "separately in Dynamic Verification; correlation is "
+                                "not attempted"
+                            ),
+                        },
+                    )
+                    # Dynamic RAN here (technology hooks-engaged tier, real root/ssl
+                    # evidence surfaced under Dynamic Verification) - it was not
+                    # skipped. Correlation needs a target-specific verification to
+                    # compare static findings against, so state that reason honestly
+                    # instead of the report defaulting to "dynamic stage skipped".
+                    correlation_skip_reason = (
+                        "dynamic used the technology-level hooks-engaged check (no "
+                        "target-specific success check for this app); correlation "
+                        "requires a target-specific verification"
+                    )
                 stage_results.append(check_stage)
                 _print_stage(check_stage)
             else:

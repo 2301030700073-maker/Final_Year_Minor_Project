@@ -329,3 +329,49 @@ def test_signal_3_no_longer_offers_a_refusal_it_has_already_excluded():
     reason = out.evidence["not_applicable_reason"]
     assert "no certificate refusal" in reason
     assert "refused the CA after" not in reason
+
+
+# --- CAPREACH1 ordering: direct evidence about the ROUTE beats an inference ---
+
+def test_preflight_route_down_outranks_the_app_silence_inference():
+    """Signal 2 is an inference about the APP, and a proven-dead ROUTE
+    invalidates it: its observers (the app's own CertificatePinner.check /
+    TrustManagerImpl.verifyChain, and the recipe checkpoints they emit) fire
+    INSIDE a live connection's TLS stage, so a device that cannot open the socket
+    to the proxy produces their silence whether or not the app ever tried. With
+    the pre-flight verdict consulted only after Signal 2, a run whose dynamic
+    stage succeeded reported a dead route as "the app did not exercise its
+    network/SSL path ... not a proxy failure" - naming the app for an environment
+    break. The probe's own producer records False only on a refused/timed-out
+    connect ("the route is already broken, the capture is guaranteed to yield
+    nothing"), so it decides first, like Signal 0's recorded refusal."""
+    capture = _capture(status="failed", client_connections=0,
+                       device_reached_proxy_preflight=False)
+    out = _reclassify_empty_capture(capture, _manifest(_INTERNET), _dynamic([]))
+    assert out.status == "failed"
+    assert "reclassified_from" not in (out.evidence or {})
+
+
+def test_preflight_route_up_leaves_the_app_silence_inference_intact():
+    """The reorder must not make the honest app-silence downgrade unreachable:
+    route proven UP, no in-process SSL signal, dynamic ran -> app-silence."""
+    capture = _capture(status="failed", client_connections=0,
+                       device_reached_proxy_preflight=True)
+    out = _reclassify_empty_capture(capture, _manifest(_INTERNET), _dynamic([]))
+    assert out.status == "skipped"
+    assert "did not exercise" in out.evidence["not_applicable_reason"]
+
+
+def test_a_connection_the_capture_watched_outranks_a_down_probe():
+    """The pre-flight verdict is direct evidence about the route, but it is ONE
+    sample taken before the capture window (mitmdump may not have been listening
+    yet). client_connections counts the connections the proxy really accepted
+    during the window, so >0 is proof the route was usable - a down verdict the
+    capture's own log contradicts must not assert a wiring break that log
+    disproves. It falls through to Signal 3, which reports what was seen."""
+    capture = _capture(status="failed", client_connections=4,
+                       device_reached_proxy_preflight=False)
+    out = _reclassify_empty_capture(
+        capture, _manifest(_INTERNET), _dynamic([], status="skipped"))
+    assert out.status == "skipped"
+    assert "4 client" in out.evidence["not_applicable_reason"]

@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from common import Action, CATEGORIES, ClassificationResult
+from common import Action, CATEGORIES, ClassificationResult, ENV_NORMALIZATION_CHECKPOINT
 
 # --- deterministic recipe catalog --------------------------------------------
 # Each entry maps a detected technique (the signature_id the static engine can
@@ -1159,7 +1159,7 @@ def synthesize(classification: ClassificationResult, action: Action) -> Synthesi
         # A distinct, auditable checkpoint so the "hooks engaged" audit shows the
         # environment scrub actually attached - kept out of universal_categories and
         # applied_hooks so it never inflates the root/ssl bypass accounting.
-        checkpoint_ids.append("env:emulator-scrub")
+        checkpoint_ids.append(ENV_NORMALIZATION_CHECKPOINT)
     source = _join_script(all_hooks, checkpoint_ids)
     # The effect observer (pin-check + handshake behavioral evidence) is embedded
     # in UNIVERSAL_SSL, so a fully-covered targeted SSL bypass needs it appended

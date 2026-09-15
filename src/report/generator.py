@@ -9,7 +9,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 from calibration.report import CalibrationReport
-from common import ClassificationResult, CorrelationResult, StageResult, TLS_HANDSHAKE_NONE_OBSERVED, VerificationResult, describe_frida_script_errors
+from common import ClassificationResult, CorrelationResult, ENV_NORMALIZATION_CHECKPOINT, StageResult, TLS_HANDSHAKE_NONE_OBSERVED, VerificationResult, describe_frida_script_errors
 from report import attribution as attribution_module
 from static.coverage import confidence_bound, verdict_label
 from static.manifest import ManifestInfo
@@ -459,6 +459,9 @@ This run's decompilation completed successfully ({{ jadx_file_count }} source fi
 - Bypass script(s) used (full path): {% for s in hooks_handauthored_script_paths %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}.
 {% endif -%}
 - Readiness checkpoints delivered: {% if hooks_checkpoints_fired %}{% for c in hooks_checkpoints_fired %}`{{ c }}`{% if not loop.last %}, {% endif %}{% endfor %}{% else %}none observed{% endif %}.
+{% if hooks_env_normalization -%}
+- Environment normalization deployed (`env:emulator-scrub`): before the root/SSL hooks, the run injected the conditional emulator/tamper build-prop scrub — `Build.HARDWARE`/`PRODUCT`/`FINGERPRINT` emulator markers (sdk_gphone/goldfish/ranchu) → retail values, `TAGS`/`FINGERPRINT` test-keys → release-keys, and the native `ro.build.*` counterpart — so a target that defensively stalls or crashes on its splash the moment it detects an emulator advances far enough to actually run (and thus expose) its root/SSL checks. This neutralizes an anti-analysis **environment gate**; it is **not** a root/SSL bypass — it carries no `probeHit`/`bypassEffect` and never promotes a bypass, and each scrub is conditional and a no-op on a genuine retail device (ADR-0006). If the app's own root/SSL checks still did not run this run, read the UI-liveness evidence above: a target still stalled here gates on a surface this scrub does not cover, not a defeated check.
+{% endif -%}
 - Behavioral engagement (the app's own check hitting a hook): {{ hooks_root_probe_hits }} root probeHit(s){% if hooks_ssl_effects %}; SSL effects {% for k, v in hooks_ssl_effects.items() %}`{{ k }}`={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}; 0 SSL effects{% endif %}. A probeHit is not attributed to a single signature - the union hooks serve many signatures at once, so a 1:1 claim would be fabricated.
 {% if hooks_loaded_not_engaged -%}
 - Loaded but readiness not observed this run: {% for s in hooks_loaded_not_engaged %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %} (the hook was attached; the app's own check may simply not have exercised it - engagement is a lower bound, not a confirmed absence).
@@ -673,7 +676,7 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
         "hooks_handauthored_scripts": [], "hooks_handauthored_script_paths": [],
         "hooks_loaded_not_engaged": [],
         "hooks_root_probe_hits": 0, "hooks_ssl_effects": {},
-        "hooks_script_errors": [],
+        "hooks_script_errors": [], "hooks_env_normalization": False,
     }
     if dynamic_stage is None:
         return absent
@@ -758,6 +761,11 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
         "hooks_root_probe_hits": root_probe_hits,
         "hooks_ssl_effects": dict(sorted(ssl_effects.items())),
         "hooks_script_errors": script_errors,
+        # A source-only environment scrub (not a detected technique) fired iff its
+        # shared checkpoint token is in the delivered checkpoints. Surfaced as its own
+        # boolean so the report can EXPLAIN it (an anti-emulator/tamper gate was
+        # neutralized, not a bypass) instead of leaving a cryptic token in the list.
+        "hooks_env_normalization": ENV_NORMALIZATION_CHECKPOINT in checkpoints,
     }
 
 

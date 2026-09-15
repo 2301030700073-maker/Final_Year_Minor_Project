@@ -1235,6 +1235,53 @@ def test_generate_report_annotates_dynamic_success_with_unverified_bypass(tmp_pa
     assert "success (machinery ran" not in content2
 
 
+def test_generate_report_explains_environment_normalization_scrub(tmp_path):
+    # The --force-dynamic universal envelope emits a shared checkpoint
+    # (env:emulator-scrub) when it deploys the emulator/tamper build-prop scrub. The
+    # report must EXPLAIN it as an anti-analysis ENVIRONMENT-gate neutralizer - NOT a
+    # root/SSL bypass - so a reader never mistakes the cryptic token for a defeated
+    # check, and it must never inflate the behavioral-engagement counts (no probeHit /
+    # bypassEffect comes from the scrub).
+    from common import VerificationResult, ENV_NORMALIZATION_CHECKPOINT
+    with_scrub = StageResult(
+        stage="dynamic", status="success",
+        evidence={"frida_messages": [
+            {"type": "send", "payload": {"hook": ENV_NORMALIZATION_CHECKPOINT}},
+            {"type": "send", "payload": {"hook": "universal:root"}},
+            {"type": "send", "payload": {"hook": "universal:ssl"}},
+        ]},
+        duration_ms=500,
+    )
+    unresolved = VerificationResult(root_bypassed=None, ssl_bypassed=None, evidence_lines={})
+    report_path = generate_report(
+        run_id="env-scrub", apk_hash="env1", timestamp="2026-09-15T12:00:00",
+        metadata={"hashes": {"sha256": "env1"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=unresolved, correlation=None,
+        stage_results=[with_scrub], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Environment normalization deployed" in content
+    assert "`env:emulator-scrub`" in content
+    assert "anti-analysis **environment gate**" in content
+    assert "not** a root/SSL bypass" in content
+    # Fired as a checkpoint, but promoted NO behavioral engagement.
+    assert "0 root probeHit(s)" in content
+
+    # A run WITHOUT the scrub must not render the explanation line at all.
+    without = StageResult(
+        stage="dynamic", status="success",
+        evidence={"frida_messages": [{"type": "send", "payload": {"hook": "universal:ssl"}}]},
+        duration_ms=500,
+    )
+    report_path2 = generate_report(
+        run_id="no-scrub", apk_hash="env2", timestamp="2026-09-15T12:00:00",
+        metadata={"hashes": {"sha256": "env2"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=unresolved, correlation=None,
+        stage_results=[without], output_dir=tmp_path,
+    )
+    assert "Environment normalization deployed" not in report_path2.read_text(encoding="utf-8")
+
+
 def test_generate_report_states_no_internet_as_capture_failure_cause(tmp_path):
     # Report-completeness gap: a failed capture is only ever explained by the
     # generic dual hypothesis, even when the cause is provable from the app's
@@ -1979,7 +2026,7 @@ def test_hooks_engaged_absent_without_dynamic_stage():
         "hooks_handauthored_scripts": [], "hooks_handauthored_script_paths": [],
         "hooks_loaded_not_engaged": [],
         "hooks_root_probe_hits": 0, "hooks_ssl_effects": {},
-        "hooks_script_errors": [],
+        "hooks_script_errors": [], "hooks_env_normalization": False,
     }
 
 

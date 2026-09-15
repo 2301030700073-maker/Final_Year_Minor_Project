@@ -712,6 +712,15 @@ class SuccessCheck(Protocol):
 # impossible, the same de-drift discipline as describe_frida_script_errors below.
 TLS_HANDSHAKE_NONE_OBSERVED = "none observed (no TLS handshake reached during the run)"
 
+# Checkpoint token emitted by the synthesized bypass (synthesizer._environment_normalization
+# via _join_script) when the emulator/tamper build-prop scrub is deployed on the
+# universal/forced fallback path, and matched by the report hooks-audit
+# (generator._hooks_engaged) to explain that an anti-analysis ENVIRONMENT gate - not a
+# root/SSL bypass - was neutralized so the app could advance past its splash. Shared so
+# the emitter and the report can never drift: a rename on one side only would silently
+# blank the report line, the Jinja-Undefined trap ADR-0006 honesty discipline warns about.
+ENV_NORMALIZATION_CHECKPOINT = "env:emulator-scrub"
+
 
 def describe_frida_script_errors(frida_messages: list) -> list[str]:
     """Human-readable descriptions of uncaught Frida ``{'type': 'error'}`` messages.

@@ -8,7 +8,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 51 files, **20,529 LOC**. Largest: cli (3,231), native (1,879), decompile (1,365), synthesizer (1,192), generator (1,143), mitmproxy_capture (978), common (784), device (779), signatures (717), attestation (695).
+- `src/`: 51 files, **20,572 LOC**. Largest: cli (3,231), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,143), mitmproxy_capture (978), common (784), device (779), signatures (717), attestation (695).
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
 - `tests/`: 92 files, **29,824 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
@@ -43,7 +43,7 @@ module's line count unchanged escapes it.)
 | `correlation.py` | 82 | 140 | +58 | — |
 | `coverage.py` | 342 | 527 | +185 | 2026-09-07 |
 | `decision_engine.py` | 75 | 75 | +0 | 2026-09-07 |
-| `decompile.py` | 986 | 1,365 | +379 | — |
+| `decompile.py` | 986 | 1,408 | +422 | 2026-09-15 (full re-read) |
 | `deobfuscate.py` | 117 | 157 | +40 | — |
 | `device.py` | 771 | 779 | +8 | — |
 | `dynload.py` | 70 | 97 | +27 | — |

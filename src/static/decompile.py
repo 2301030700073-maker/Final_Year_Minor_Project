@@ -255,6 +255,10 @@ def extract_assets(apk_path: Path, target_dir: Path) -> int:
     is done independently of which jadx path ran - it is the ONE place that
     guarantees the asset surface exists on disk for the scan roots to walk.
 
+    A member whose name escapes target_dir (an `assets/../..` traversal) is
+    refused rather than written - see the guard at the copy below - and is not
+    counted, so the returned count describes only what is really on disk.
+
     Returns the number of files written. A failure is non-fatal and reported as
     0: the asset surface then stays un-extracted, and `_scan_binary_bundles`
     simply finds nothing - the pre-existing (wrong) behavior, never a crash that
@@ -270,6 +274,19 @@ def extract_assets(apk_path: Path, target_dir: Path) -> int:
         with zipfile.ZipFile(apk_path) as z:
             for name in z.namelist():
                 if not name.startswith("assets/") or name.endswith("/"):
+                    continue
+                # The member name is attacker-controlled, and this is the ONE
+                # extractor in the tree that hand-rolls the copy instead of
+                # calling ZipFile.extract - the per-DEX read above and
+                # native.extract_native_libs both use the stdlib call, whose
+                # member sanitizer drops ".." components. Copying by raw name
+                # meant an APK shipping `assets/../../../../<anywhere>` chose
+                # both the destination path and the bytes, writing outside
+                # target_dir - in a tool whose entire input is the hostile APKs
+                # it exists to analyse. Refuse any name that escapes; the rule
+                # mirrored here is the stdlib's own, applied because this loop
+                # bypasses the call that would have applied it.
+                if ".." in Path(name).parts:
                     continue
                 dest = target_dir / name
                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1128,6 +1145,14 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                         # too small, NOT that apktool is broken - without this the
                         # sidecar only showed a bare "-9" inside the log tail.
                         "apktool_timed_out": _runs_timed_out(apktool_fb_rc),
+                        # The jadx half of the same attribution. This gate is
+                        # only reached with jadx_file_count == 0, but the units
+                        # still hold why each DEX failed - folding them in keeps
+                        # a per-DEX timeout visible on the sidecar that records
+                        # the worst run, instead of absent from it.
+                        "jadx_timed_out": _runs_timed_out(
+                            jadx_returncode,
+                            *(u.get("exit", 0) for u in (per_dex_units or []))),
                         "apktool_timeout_s": apktool_timeout_for_size(apk_size),
                     }, indent=2),
                     encoding="utf-8",
@@ -1234,6 +1259,19 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
             else "partial"
         )
         error_tail = _build_error_tail(jadx_returncode, jadx_log_text, apktool_returncode, apktool_log_text)
+        # APKTOOL-TIMEOUT1's jadx half, answered on BOTH paths. The per-DEX path
+        # folds every unit's exit code into a 0/1 aggregate - that returncode is
+        # a COVERAGE verdict (did any DEX stay a hole), not a process outcome -
+        # so on the one path every real multidex APK takes,
+        # _runs_timed_out(jadx_returncode) was structurally False: a jadx killed
+        # by its own budget on classes2.dex read as "did not time out" while the
+        # unit held the real -9 unread. Each unit keeps its own exit code, so the
+        # question is answered from those; on the whole-APK path there are no
+        # units and the aggregate IS the process rc, exactly as before. The field
+        # exists to tell an operator "raise the budget" from "the tool is broken",
+        # so it must not be answerable only on the path real APKs do not take.
+        jadx_timed_out = _runs_timed_out(
+            jadx_returncode, *(u.get("exit", 0) for u in (per_dex_units or [])))
         status_sidecar.write_text(
             json.dumps({
                 # See _SIDECAR_SCHEMA_VERSION - the reader refuses a sidecar
@@ -1256,7 +1294,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                 # partial degrade is unattributable (both read as a bare exit
                 # code), and the operator cannot tell whether to raise the budget.
                 "apktool_timed_out": _runs_timed_out(apktool_returncode),
-                "jadx_timed_out": _runs_timed_out(jadx_returncode),
+                "jadx_timed_out": jadx_timed_out,
                 # The budget actually used, so the report can state it (and a
                 # reviewer can compare it against a measured real runtime).
                 "apktool_timeout_s": apktool_timeout_for_size(apk_size),
@@ -1275,7 +1313,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         result.evidence["asset_surface_extracted"] = asset_file_count > 0
         result.evidence["asset_file_count"] = asset_file_count
         result.evidence["apktool_timed_out"] = _runs_timed_out(apktool_returncode)
-        result.evidence["jadx_timed_out"] = _runs_timed_out(jadx_returncode)
+        result.evidence["jadx_timed_out"] = jadx_timed_out
         result.evidence["apktool_timeout_s"] = apktool_timeout_for_size(apk_size)
         if fallback:
             result.evidence.update(fallback)
@@ -1342,6 +1380,11 @@ def _cached_result(start: float, jadx_dir: Path, apktool_dir: Path, status_sidec
             for key in ("fallback_engine", "fallback_unavailable", "fallback_recovered",
                         "fallback_output", "fallback_error_tail", "fallback_file_count",
                         "lazy_decompile", "dex_units", "smali_fallback",
+                        # Written by the same branch, into the same sidecar, as
+                        # smali_fallback - carrying one and dropping the other
+                        # made a cache hit describe that run differently from the
+                        # cold run that wrote the identical file.
+                        "apktool_error_tail",
                         # ASSET-DROP1 and APKTOOL-TIMEOUT1 evidence: the writer puts
                         # these in the sidecar, so a cache hit has to carry them
                         # forward too. A field dropped here reads at its consumer as

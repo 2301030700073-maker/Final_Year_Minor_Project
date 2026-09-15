@@ -1271,12 +1271,6 @@ def test_dex_unit_covered_jadx_empty_dex_is_not_laundered_by_minimal_recovery():
     assert _dex_unit_covered(rc=0, files=0, recovered=False, recovered_count=0) is False
 
 
-
-
-
-
-
-
 def test_extract_assets_recovers_bundles_from_the_apk(tmp_path):
     """ASSET-DROP1: the asset surface must be extracted straight from the APK.
 
@@ -1343,3 +1337,75 @@ def test_extract_assets_returns_zero_when_apk_has_no_assets(tmp_path):
     with zipfile.ZipFile(apk, "w") as z:
         z.writestr("classes.dex", b"dex\n035\x00")
     assert extract_assets(apk, tmp_path / "out") == 0
+
+
+def test_extract_assets_refuses_a_member_that_escapes_the_target(tmp_path):
+    """The member name is attacker-controlled, and this loop is the one extractor
+    in the tree that copies by raw name rather than calling ZipFile.extract (the
+    per-DEX read below and native.extract_native_libs both use the stdlib call,
+    whose member sanitizer strips ".." components). `assets/../../..` therefore
+    resolved outside target_dir - an APK choosing both the destination path and
+    the bytes, in a tool whose entire input is hostile APKs.
+    """
+    import zipfile
+
+    from static.decompile import extract_assets
+
+    apk = tmp_path / "app.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("assets/../../escaped.txt", b"pwned")
+        z.writestr("assets/real.js", b"var a = 1;")
+
+    target = tmp_path / "analysis" / "apktool"  # two levels deep, like the real one
+    written = extract_assets(apk, target)
+
+    assert not (tmp_path / "analysis" / "escaped.txt").exists()
+    assert not (tmp_path / "escaped.txt").exists()
+    # The honest member still lands, and the count describes only what is on disk.
+    assert written == 1
+    assert (target / "assets" / "real.js").is_file()
+
+
+def test_a_per_dex_jadx_timeout_is_recorded_as_a_timeout(tmp_path, monkeypatch):
+    """`jadx_timed_out` was answered from the aggregate per-DEX returncode, and
+    that aggregate is a COVERAGE verdict folded to 0/1 - so on the path every
+    real multidex APK takes the field could never be True, and a jadx killed by
+    its own budget on classes2.dex was recorded as not having timed out while the
+    unit's own -9 sat in dex_units unread. The field exists to separate "raise
+    the budget" from "the tool is broken", so it has to answer from the exit
+    codes the units kept."""
+    import zipfile
+    from pathlib import Path
+
+    from static import decompile as d
+
+    apk = tmp_path / "app.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("classes.dex", b"dex\n035\x00" + b"\x00" * 16)
+        z.writestr("classes2.dex", b"dex\n035\x00" + b"\x01" * 16)
+
+    def _run(cmd, log_path, timeout_s, what):
+        out_dir = Path(cmd[2])  # [jadx, "-d", <out_dir>, <dex_file>]
+        if cmd[3].endswith("classes2.dex"):
+            return d._TIMEOUT_RC, "killed after its budget"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "Foo.java").write_text("class Foo {}")
+        return 0, "ok"
+
+    monkeypatch.setattr(d, "_find_jadx", lambda: "/fake/jadx")
+    monkeypatch.setattr(d, "require_tool", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(d, "_run_tool_logged", _run)
+    monkeypatch.setattr(d, "_run_tool_until_stalled", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(d, "_run_dex_fallback", lambda *a, **k: {
+        "fallback_engine": None, "fallback_unavailable": True,
+        "fallback_recovered": False, "fallback_file_count": 0,
+        "fallback_error_tail": "secondary decompiler unavailable",
+    })
+
+    result = d.decompile(apk, tmp_path / "outputs", "hash")
+
+    assert result.status == "success"
+    assert result.evidence["jadx_timed_out"] is True
+    # The aggregate is untouched: it is the coverage verdict, not the process one.
+    assert result.evidence["jadx_exit_code"] == 1
+    assert result.evidence["decompile_completeness"] == "partial"

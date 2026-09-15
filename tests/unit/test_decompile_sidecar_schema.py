@@ -89,3 +89,21 @@ def test_cache_hit_without_asset_evidence_leaves_it_absent(tmp_path):
                              asset_file_count=None)
     result = _cached_result(0.0, jadx_dir, apktool_dir, sidecar)
     assert "asset_surface_extracted" not in result.evidence
+
+
+def test_cache_hit_carries_the_smali_fallback_apktool_tail(tmp_path):
+    # The smali-fallback branch writes smali_fallback AND apktool_error_tail into
+    # the same sidecar, so a reader that carried one forward and dropped the other
+    # described that identical run two different ways depending on whether the
+    # output came from the cache.
+    jadx_dir = tmp_path / "jadx"
+    jadx_dir.mkdir()
+    apktool_dir = tmp_path / "apktool"
+    apktool_dir.mkdir()
+    sidecar = _write_sidecar(
+        tmp_path / "s.json", smali_fallback=True,
+        apktool_error_tail="apktool --no-res fallback produced nothing")
+    result = _cached_result(0.0, jadx_dir, apktool_dir, sidecar)
+    assert result.evidence["smali_fallback"] is True
+    assert result.evidence["apktool_error_tail"] == (
+        "apktool --no-res fallback produced nothing")

@@ -861,9 +861,11 @@ def run_capture_stage(
                 device_or_app_cause = (
                     "no traffic captured through the proxy - the device COULD "
                     f"reach mitmdump at 127.0.0.1:{proxy_port} (pre-flight probe "
-                    "succeeded), so the route is not the problem: the app made no "
-                    "network requests during the capture window, or a pinned "
-                    "request refused the proxy CA (interactive capture needed)"
+                    "succeeded), so the route is not the problem, and no client "
+                    "certificate refusal was recorded on either source, so nothing "
+                    "this capture saw says a client rejected our CA: the app made no "
+                    "network requests during the capture window (interactive capture "
+                    "needed)"
                 )
             elif reachable is False:
                 device_or_app_cause = (

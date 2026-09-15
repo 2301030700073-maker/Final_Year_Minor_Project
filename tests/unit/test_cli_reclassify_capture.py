@@ -13,6 +13,9 @@ whenever a real proxy/wiring problem cannot be ruled out. Only a proxy-independe
 signal that PROVES the empty capture inapplicable/expected downgrades it to
 `skipped`:
   - no android.permission.INTERNET  => app cannot open a socket (guaranteed empty)
+  - a client certificate refusal recorded by the capture proxy (Signal 0: direct
+    evidence, decided before any inference - a refusal requires the connection, so
+    it proves the route worked and that the app exercised its network path)
   - INTERNET + dynamic ran-success + NO in-process SSL-exercised signal (neither
     the synthesized bypass's bypassEffect nor the predefined bypass's pin-check/
     verify firing for a concrete host) => app-silence (the in-process Frida
@@ -277,3 +280,52 @@ def test_preflight_unknown_is_treated_as_unknown_not_as_down():
     m = _manifest(_INTERNET)
     out = _reclassify_empty_capture(capture, m, dynamic_stage=None)
     assert out.status == "skipped"
+
+
+# --- Signal 0: a recorded certificate refusal decides on its own ---------------
+
+def test_recorded_refusal_decides_over_the_app_silence_inference():
+    # The dynamic stage ran and recorded no in-process SSL signal - which is
+    # Signal 2's "the app did not exercise its network path". But the proxy WATCHED
+    # a client refuse our certificate, and it can only do that after connecting, so
+    # the app DID exercise that path. The refusal must decide, and the reason must
+    # name the host instead of re-offering app-silence as a live possibility.
+    out = _reclassify_empty_capture(
+        _capture(tls_failed_clients=[{"host": "api.example.com", "error": "unknown ca"}]),
+        _manifest(_INTERNET), _dynamic([]))
+    assert out.status == "skipped"
+    assert out.evidence["reclassified_from"] == "failed"
+    assert out.error is None
+    reason = out.evidence["not_applicable_reason"]
+    assert "api.example.com" in reason
+    assert "refused its certificate" in reason
+    assert "neither a wiring failure nor app-silence" in reason
+
+
+def test_refusal_reason_states_its_attribution_bound_when_no_host_was_captured():
+    # The reason attributes a refusal to the target app by its SNI host. With no
+    # host recorded it is only "some client on the device" (the proxy is set
+    # device-globally), and the reason must say so rather than imply the app.
+    out = _reclassify_empty_capture(
+        _capture(tls_failed_clients=[{"host": "", "error": "unknown ca"}]),
+        _manifest(_INTERNET), None)
+    reason = out.evidence["not_applicable_reason"]
+    assert "host not captured" in reason
+    assert "some client on the device" in reason
+
+
+def test_an_empty_refusal_list_is_not_evidence():
+    # The field is written on every capture now, so an empty list means NO refusal
+    # was recorded. Reading its presence as a refusal would fabricate one; the
+    # branch tests the list, and with nothing else deciding the stage stays loud.
+    out = _reclassify_empty_capture(
+        _capture(tls_failed_clients=[]), _manifest(_INTERNET), None)
+    assert out.status == "failed"
+
+
+def test_signal_3_no_longer_offers_a_refusal_it_has_already_excluded():
+    out = _reclassify_empty_capture(
+        _capture(client_connections=2), _manifest(_INTERNET), None)
+    reason = out.evidence["not_applicable_reason"]
+    assert "no certificate refusal" in reason
+    assert "refused the CA after" not in reason

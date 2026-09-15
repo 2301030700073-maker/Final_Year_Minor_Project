@@ -748,8 +748,17 @@ def _reclassify_empty_capture(
 
     This mirrors the report body's capture cross-reference (report/generator.py) so
     the CLI stage line and the report agree on the cause instead of the stage line
-    saying FAILED while the report explains it was expected. The two disambiguating
-    signals, both independent of the mitmproxy path:
+    saying FAILED while the report explains it was expected. One recorded fact
+    decides on its own; three inference signals disambiguate what it does not:
+
+      0. The capture proxy RECORDED a client refusing its certificate
+         (evidence["tls_failed_clients"], written by whichever source this run's
+         placement has). Direct evidence rather than an inference, so it is checked
+         before all three below: a TLS refusal requires the connection, which proves
+         both that the route worked and that the app exercised its network path -
+         making signal 2's "did not exercise" reason false whenever both would
+         apply. -> skipped (the host rejected our CA; a pinning result, not a
+         capture fault).
 
       1. Manifest declares NO android.permission.INTERNET -> the app cannot open a
          socket, so zero flows is guaranteed regardless of proxy state. Sound
@@ -809,6 +818,43 @@ def _reclassify_empty_capture(
             error=None, duration_ms=capture_stage.duration_ms,
         )
 
+    # Signal 0 (checked before every inference below, because it is not one): the
+    # capture proxy RECORDED a client refusing its certificate this run - direct
+    # evidence, from whichever source this placement writes, of why the capture is
+    # empty. Without this branch that record had no consumer in the function that
+    # owns the empty-capture verdict: a capture that came back empty BECAUSE the app
+    # rejected our CA was reclassified with a hedge ("app-silence or a pinned
+    # request that refused the CA") that the evidence in hand had already resolved -
+    # naming app-silence as a live possibility on a run where the proxy watched the
+    # client refuse. It must also precede Signal 2, whose reason ("the app did not
+    # exercise its network path") is false here: a client can only refuse our
+    # certificate after opening the connection and starting a handshake.
+    refusals = evidence.get("tls_failed_clients")
+    if isinstance(refusals, list) and refusals:
+        hosts = sorted({
+            r.get("host") for r in refusals
+            if isinstance(r, dict) and r.get("host")
+        })
+        where = ", ".join(hosts) if hosts else "host not captured (no SNI recorded)"
+        return StageResult(
+            stage="capture-traffic", status="skipped",
+            evidence={**evidence, "reclassified_from": "failed",
+                      "not_applicable_reason": (
+                          f"the capture proxy recorded {len(refusals)} client TLS "
+                          f"handshake(s) it refused its certificate for ({where}) - the "
+                          "client rejected the capture CA, the proxy-side signature of "
+                          "certificate pinning (or a custom/limited trust store). A "
+                          "refusal requires the connection, so the device->proxy route "
+                          "worked AND the app exercised its network path: this is neither "
+                          "a wiring failure nor app-silence, and the host(s) above were "
+                          "not decryptable by this route - a pinning result, not a "
+                          "capture fault. Attribution bound: the proxy is set "
+                          "device-globally for a capture, so a refusal is attributed to "
+                          "the target app by its recorded SNI host; with no host "
+                          "captured it is only some client on the device")},
+            error=None, duration_ms=capture_stage.duration_ms,
+        )
+
     # Signal 2: INTERNET + dynamic ran + NO in-process signal that the app exercised
     # its SSL path -> app-silence. "Exercised" is any of: the synthesized bypass's
     # bypassEffect ('ssl-pin-check'/'ssl-handshake'), OR the predefined
@@ -852,8 +898,9 @@ def _reclassify_empty_capture(
     # is now decidable by the capture addon's client-connection count, which is
     # proxy-path-independent in the OTHER direction: it proves whether the device
     # actually REACHED mitmdump at all. connections>0 + 0 flows => the device opened
-    # a connection to the proxy but no request produced a decrypted flow (app-silence,
-    # or a pinned request that refused the CA after connecting) - NOT a device->proxy
+    # a connection to the proxy but no request produced a decrypted flow (app-silence
+    # - a refusal would have been decided by Signal 0 above, so it is not among the
+    # remaining causes) - NOT a device->proxy
     # wiring failure, so the loud "failed" would be a false alarm -> skipped. It is
     # only consulted when Signals 1-2 did not already decide, and ONLY the >0 case
     # downgrades: connections==0 means the device never reached the proxy, which is a
@@ -875,10 +922,14 @@ def _reclassify_empty_capture(
             evidence={**evidence, "reclassified_from": "failed",
                       "not_applicable_reason": (
                           f"device reached the proxy ({client_connections} client "
-                          "connection(s)) but no request produced a decrypted flow - "
-                          "app-silence or a pinned request that refused the CA after "
-                          "connecting, not a device->proxy reachability failure "
-                          "(interactive capture needed)")},
+                          "connection(s)) but no request produced a decrypted flow, and "
+                          "the proxy recorded no certificate refusal on either source - "
+                          "nothing this capture saw says a client rejected our CA, so "
+                          "what is left is the app staying silent on the network path "
+                          "this run (interactive capture needed) or a request this "
+                          "parser could not read (a non-standard verb is the known "
+                          "residual of the _METHODS enumeration). This is NOT a "
+                          "device->proxy reachability failure")},
             error=None, duration_ms=capture_stage.duration_ms,
         )
 

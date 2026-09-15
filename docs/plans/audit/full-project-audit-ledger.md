@@ -8,7 +8,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 51 files, **20,323 LOC**. Largest: cli (3,112), native (1,794), decompile (1,365), synthesizer (1,192), generator (1,143), mitmproxy_capture (976), common (784), device (779), signatures (717), attestation (695).
+- `src/`: 51 files, **20,376 LOC**. Largest: cli (3,163), native (1,794), decompile (1,365), synthesizer (1,192), generator (1,143), mitmproxy_capture (978), common (784), device (779), signatures (717), attestation (695).
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
 - `tests/`: 92 files, **29,824 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
@@ -38,7 +38,7 @@ module's line count unchanged escapes it.)
 | `androguard_scanner.py` | 335 | 387 | +52 | — |
 | `audit/attestation.py` | 571 | 695 | +124 | 2026-09-07 |
 | `calibration/*.py` | 510 | 571 | +61 | 2026-09-07 |
-| `cli.py` | 2,530 | 3,112 | +582 | 2026-09-09 (regen seam only) |
+| `cli.py` | 2530 | 3,163 | +633 | 2026-09-09 (regen seam only) |
 | `common.py` | 466 | 784 | +318 | — |
 | `correlation.py` | 82 | 140 | +58 | — |
 | `coverage.py` | 342 | 527 | +185 | 2026-09-07 |
@@ -54,8 +54,8 @@ module's line count unchanged escapes it.)
 | `ingest/normalize.py` | 174 | 208 | +34 | 2026-09-07 |
 | `jnibridge.py` | 175 | 202 | +27 | 2026-09-09 |
 | `manifest.py` | 457 | 544 | +87 | — |
-| `mitmproxy_capture.py` | 487 | 976 | +489 | 2026-09-15 (fix-scoped) |
-| `native.py` | 1,243 | 1,794 | +551 | 2026-09-15 (fix-scoped) |
+| `mitmproxy_capture.py` | 487 | 978 | +491 | 2026-09-15 (fix-scoped) |
+| `native.py` | 1243 | 1,794 | +551 | 2026-09-15 (fix-scoped) |
 | `obfuscation.py` | 261 | 282 | +21 | 2026-09-09 |
 | `packers.py` | 157 | 157 | +0 | — |
 | `pass_through_proxy.py` | 245 | 277 | +32 | — |
@@ -66,7 +66,7 @@ module's line count unchanged escapes it.)
 | `storage/results.py` | 218 | 250 | +32 | 2026-09-09 |
 | `stringrecover.py` | 315 | 374 | +59 | 2026-09-09 |
 | `success_checks/*.py` | 800 | 924 | +124 | re-read (undated) |
-| `synthesizer.py` | 1,117 | 1,192 | +75 | 2026-09-10 |
+| `synthesizer.py` | 1117 | 1,192 | +75 | 2026-09-10 |
 | `ui_liveness.py` | 308 | 396 | +88 | — |
 | `upx.py` | 128 | 128 | +0 | — |
 | `webview.py` | 98 | 116 | +18 | — |

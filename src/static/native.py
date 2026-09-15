@@ -19,7 +19,6 @@ no-ops (principle 3).
 from __future__ import annotations
 
 import concurrent.futures
-import fnmatch
 import hashlib
 import os
 import re
@@ -123,11 +122,19 @@ class NativeLibrary:
     # entry point. Even with no Java_* export, such a lib can register native
     # methods Java calls, so it has a JNI security surface worth body-decompiling.
     jni_onload: bool = False
-    # Gap-4: this lib is executable-packed (UPX). The real code is hidden behind
-    # a compressed stub, so it reads partial (like obfuscated) unless we were
-    # able to unpack it - a packed lib is never read as a clean lib (ADR-0006).
+    # Gap-4: this lib is executable-packed (UPX) IN THE APK. Its real code is
+    # behind a compressed stub, so it reads partial (like obfuscated) unless we
+    # recovered that code - see `unpacked`. A packed lib whose stub could not be
+    # unpacked is never read as a clean lib (ADR-0006).
     packed: bool = False
     packer: str | None = None
+    # Gap-4: the packed lib WAS unpacked, and every analysis field above describes
+    # the recovered code rather than the stub (exports/strings/stripped/
+    # body_scanned/ghidra_* were all read from the unpacked file). `packed` alone
+    # cannot tell "packed and never read" apart from "packed, recovered, then read
+    # completely", so _lib_coverage would hold the second at partial - an
+    # under-claim over code it did examine. Set only on a genuine unpack.
+    unpacked: bool = False
     # L-M6: Ghidra headless decompilation of this lib's function bodies.
     # ghidra_decompiled is True ONLY when Ghidra genuinely produced functions -
     # that is the honest "native = scanned" signal that upgrades a stripped/
@@ -564,9 +571,12 @@ def _lib_coverage(lib: NativeLibrary) -> str:
       2. Ghidra hit its per-lib function cap (ghidra_truncated) -> `partial`: only
          a bounded prefix of the bodies was examined, so the tail stays unread.
       3. capstone fully disassembled the executable sections (body_scanned) AND
-         the lib is neither obfuscated nor packed -> `fully_analyzed`: a stripped
-         lib whose whole call+string detection surface was read (Fix-2).
-         Obfuscated/packed libs are EXCLUDED here and fall through to `partial`.
+         the lib is neither obfuscated nor packed-and-still-unread ->
+         `fully_analyzed`: a stripped lib whose whole call+string detection
+         surface was read (Fix-2). Obfuscated libs, and packed libs whose stub we
+         could not unpack, are EXCLUDED here and fall through to `partial`; a
+         packed lib we DID unpack is not, because body_scanned then describes the
+         recovered real code.
       4. a tool failed on the lib (H1/H4, unscannable) -> `unscannable`: we could
          not read it at all, so it can't certify a negative.
       5. stripped/obfuscated/packed with NO body upgrade above -> `partial`
@@ -599,7 +609,7 @@ def _lib_coverage(lib: NativeLibrary) -> str:
         # confident negative. Honest cap: bounds the pathological giant-lib
         # case without falsely certifying an unexamined tail as scanned.
         return "partial"
-    elif lib.body_scanned and not lib.obfuscated and not lib.packed:
+    elif lib.body_scanned and not lib.obfuscated and (not lib.packed or lib.unpacked):
         # Fix-2: capstone genuinely disassembled this lib's executable code
         # (a complete instruction-level scan - body_scanned is only True on
         # actual disassembly). Root/SSL detection is call+string based: an
@@ -608,10 +618,13 @@ def _lib_coverage(lib: NativeLibrary) -> str:
         # non-obfuscated, non-packed stripped lib's entire detection surface
         # has been examined (symbols + embedded strings + every call/branch
         # target), which is the same honest "scanned" claim Ghidra makes - a
-        # stripped lib whose code was read reads fully_analyzed. Obfuscated or
-        # packed libs are excluded below and stay partial: inline/encrypted
-        # logic is a genuine limit a call-surface scan cannot see through
-        # (ADR-0006), so a confident negative over one is never certified.
+        # stripped lib whose code was read reads fully_analyzed. Obfuscated libs,
+        # and packed libs whose stub we could not unpack, stay partial: the bytes
+        # body_scanned describes are the stub's, and inline/encrypted logic behind
+        # it is a genuine limit a call-surface scan cannot see through (ADR-0006),
+        # so a confident negative over one is never certified. A packed lib we DID
+        # unpack is not held back here - body_scanned describes the recovered real
+        # code, the same instruction-level scan this branch certifies elsewhere.
         return "fully_analyzed"
     elif lib.unscannable:
         return "unscannable"
@@ -1169,6 +1182,13 @@ def unaccounted_native_loads(load_targets: list[str], shipped_names: set[str]) -
     return unaccounted
 
 
+# The name _analyze_so_uncached gives the library it recovers from a UPX-packed
+# .so. It is written next to the packed lib, i.e. inside the APK's own extraction
+# tree, because upx.py reuses it across runs; extraction filters the spelling back
+# out so the work file can never be returned as something the APK ships.
+_UNPACKED_WORK_SUFFIX = ".unpacked.so"
+
+
 def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
     """Extract lib/<abi>/*.so (and, boundary-4, assets/*.so) from the APK into
     dest_root. Returns the .so paths. Prefers `unzip` when present (the reference
@@ -1180,13 +1200,39 @@ def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
     _min_coverage. assets/*.so keeps its assets/ dir (abi reads "unknown"), so a
     loaded-from-assets lib is examined rather than silently missed; callers gate
     which assets libs to analyze on actual System.load targets
-    (find_external_native_loads) to avoid analyzing never-loaded assets."""
+    (find_external_native_loads) to avoid analyzing never-loaded assets.
+
+    The APK's own member list - not the destination directory - decides what is
+    returned. dest_root is per-APK and reused by every re-run of that APK, so it
+    also holds files no member produced: the `.unpacked.so` a previous run's UPX
+    unpack wrote there. Globbing the tree alone returned that work file as a
+    library the APK ships, and - for an APK that ships no .so at all - suppressed
+    the genuinely-empty answer CALIB-NATIVE-VACUOUS rests on."""
     unzip = shutil.which("unzip")
     dest_root = Path(dest_root)
     dest_root.mkdir(parents=True, exist_ok=True)
     # The two globs are the ONLY difference between the shell and stdlib paths -
-    # keep them in one place so both stay in sync.
+    # keep them in one place so both stay in sync. They are compiled with UNZIP's
+    # glob semantics (`*` crosses `/`, unlike fnmatch's), because unzip is the
+    # primary path: matching members any other way would make the two paths
+    # extract different sets from the same APK while this comment claims they
+    # differ only in the tool used.
     patterns = ("lib/*/*.so", "assets/*.so")
+    member_res = [
+        re.compile("^" + re.escape(p).replace(r"\*", ".*") + "$") for p in patterns
+    ]
+    # What this APK actually ships. dest_root exists to hold the extraction, but
+    # it is reused across runs, so its contents are not evidence of membership.
+    try:
+        with zipfile.ZipFile(apk_path) as z:
+            shipped = {
+                m for m in z.namelist()
+                if not m.endswith("/") and any(r.match(m) for r in member_res)
+            }
+    except (zipfile.BadZipFile, OSError) as exc:
+        # Surfaced as a real error, never a silent empty list: an unreadable APK
+        # must not be reported as an APK with no native libraries.
+        raise NativeToolError(f"{apk_path} is not a readable APK/zip: {exc}") from None
     if unzip is not None:
         try:
             for pattern in patterns:
@@ -1201,23 +1247,14 @@ def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
         # preserving their in-archive paths (so lib/<abi>/ is retained exactly as
         # unzip would). A member that fails to read is skipped rather than
         # aborting the whole extraction - the same "nothing to scan" tolerance
-        # the unzip path has. A non-zip APK raises BadZipFile, which is surfaced
-        # as a real error (never a silent empty list).
-        try:
-            with zipfile.ZipFile(apk_path) as z:
-                members = z.namelist()
-                for pattern in patterns:
-                    for member in members:
-                        if not fnmatch.fnmatch(member, pattern):
-                            continue
-                        if member.endswith("/"):
-                            continue
-                        try:
-                            z.extract(member, dest_root)
-                        except (OSError, zipfile.BadZipFile):
-                            continue
-        except zipfile.BadZipFile as exc:
-            raise NativeToolError(f"{apk_path} is not a readable APK/zip: {exc}") from None
+        # the unzip path has. (A non-zip APK was already rejected by the member
+        # read above, as a real error, never a silent empty list.)
+        with zipfile.ZipFile(apk_path) as z:
+            for member in shipped:
+                try:
+                    z.extract(member, dest_root)
+                except (OSError, zipfile.BadZipFile):
+                    continue
     # Note: unzip's return code is deliberately NOT checked here - it exits
     # non-zero when nothing matches 'lib/*/*.so' (an APK with no native libs),
     # which is a legitimate 'nothing to scan', not a failure.
@@ -1225,7 +1262,10 @@ def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
     # Ghidra work_dir from an older keying) would otherwise match the glob and be
     # fed to readelf/strings as a "lib", erroring and dragging native coverage to
     # unscannable. is_file() guarantees only real ELF libs are analyzed.
-    so_files = sorted(f for f in dest_root.rglob("*.so") if f.is_file())
+    so_files = sorted(
+        f for f in dest_root.rglob("*.so")
+        if f.is_file() and f.relative_to(dest_root).as_posix() in shipped
+    )
     return so_files
 
 
@@ -1398,7 +1438,14 @@ def _should_decompile_body(
 # cached v2 entry therefore holds both stale body_calls (recovered under the wrong
 # encoding) and a stale body_scanned that over-claims coverage; without this bump
 # every already-analysed APK would keep serving them.
-_ANALYZE_CACHE_VERSION = "native-analyze-v3"
+# v4 (2026-09-15): the stripped check's readelf -S fallback now reads the file
+# actually analysed (effective_path - the UPX-recovered code) rather than the
+# packed original, and a successful unpack is recorded (NativeLibrary.unpacked)
+# so _lib_coverage can certify the recovered code instead of holding it partial.
+# A v3 entry holds a stripped verdict taken from the packed stub and no unpacked
+# flag, so without this bump an already-analysed packed APK would keep being
+# served an entry that describes bytes we no longer analyse.
+_ANALYZE_CACHE_VERSION = "native-analyze-v4"
 
 
 def _ghidra_fingerprint() -> str:
@@ -1562,10 +1609,17 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
     effective_path = so_path
     packed = False
     packer: str | None = None
+    unpacked = False
     if is_upx_packed(so_path):
         packed = True
         packer = "UPX"
-        unpacked_path = so_path.parent / f"{so_path.stem}.unpacked.so"
+        # The recovered file is a work product of this analysis, not an APK member,
+        # and it lands in the same directory the APK's own libs were extracted into
+        # - a tree a later run of the same APK walks again. Its spelling is exactly
+        # what extract_native_libs filters back out (_UNPACKED_WORK_SUFFIX there),
+        # so it can stay on disk for reuse without ever being returned as a library
+        # the APK ships.
+        unpacked_path = so_path.parent / f"{so_path.stem}{_UNPACKED_WORK_SUFFIX}"
         ok, err = unpack_upx(so_path, unpacked_path)
         if not ok:
             return NativeLibrary(
@@ -1575,6 +1629,7 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
                 sha256=so_digest,
             )
         effective_path = unpacked_path
+        unpacked = True
 
     try:
         # Arch-agnostic pure-Python symbol + section read first: host readelf/nm
@@ -1600,13 +1655,21 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
             # degradation, not an unreadable lib, so fall back to readelf exports
             # rather than marking the lib unscannable (H1/H4 preserved for a real
             # unreadable file by the outer except below).
+            # nm is optional exactly like readelf/strings (WINBINUTILS1), and this
+            # was the one call site that did not say so: on a host with no `nm`
+            # binary, `nm` is None here and _run_tool was handed [None, "-D",
+            # path] - a TypeError, which the NativeToolError catch below does not
+            # cover, so the whole native stage died for a tool that is not
+            # required. The readelf exports above are already complete; a missing
+            # optional tool is a degradation, not a stage failure.
             dyn_exports: list[str] = []
-            try:
-                dyn_exports = parse_nm_symbols(
-                    _run_tool([nm, "-D", str(effective_path)], NM_TIMEOUT, "nm")
-                )
-            except NativeToolError:
-                pass  # nm unavailable for this arch: readelf exports above are complete.
+            if nm is not None:
+                try:
+                    dyn_exports = parse_nm_symbols(
+                        _run_tool([nm, "-D", str(effective_path)], NM_TIMEOUT, "nm")
+                    )
+                except NativeToolError:
+                    pass  # nm unavailable for this arch: readelf exports above are complete.
             exports = dyn_exports or exports  # dynamic table is the source of truth for stripped
         else:
             # No pyelftools .dynsym AND no readelf: the symbol layer cannot be
@@ -1620,17 +1683,38 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
             )
         jni_exports = [e for e in exports if _is_jni_export(e)]
         jni_onload = bool(_JNI_LOAD_SYMBOLS & set(exports))
-        embedded = (
-            parse_strings(_run_tool([strings_tool, str(effective_path)], STRINGS_TIMEOUT, "strings"))
-            if strings_tool is not None
-            else (_py_strings(effective_path) or [])
-        )
+        if strings_tool is not None:
+            embedded = parse_strings(
+                _run_tool([strings_tool, str(effective_path)], STRINGS_TIMEOUT, "strings")
+            )
+        else:
+            # _py_strings returns None only for a file it could not read. Coercing
+            # that to [] is the silent empty parse H1/H4 exist to prevent: the lib
+            # would then be matched, classified and coverage-judged over an empty
+            # string corpus as if its strings had been read and found benign
+            # (_classify_obfuscated reads a zero string yield as obfuscation). Raise
+            # instead so the handler below decides honestly - a Ghidra last-resort
+            # recovery, or `unscannable`. This is also the verdict the binutils path
+            # already reaches for the same cause: with `strings` present, a failed
+            # run raises from _run_tool. One cause, one verdict, either host.
+            in_process_strings = _py_strings(effective_path)
+            if in_process_strings is None:
+                raise NativeToolError(
+                    f"could not read {effective_path.name} for strings: no `strings` "
+                    "binary on this host and the in-process reader failed"
+                )
+            embedded = in_process_strings
         # Stripped detection: pyelftools reads .symtab presence arch-agnostically
         # when available; otherwise fall back to readelf -S (G10).
         if pe_has_symtab is not None:
             stripped = not pe_has_symtab
         elif readelf is not None:
-            sections = _run_tool([readelf, "-S", str(so_path)], READELF_TIMEOUT, "readelf")
+            # effective_path, not so_path: for a UPX lib that unpacked, the section
+            # table of the PACKED original describes the compressed stub
+            # (.UPX0/.UPX1, no .symtab) and says nothing about the real code every
+            # other read in this block analysed. A stripped verdict has to come
+            # from the bytes it is a verdict about.
+            sections = _run_tool([readelf, "-S", str(effective_path)], READELF_TIMEOUT, "readelf")
             stripped = _is_stripped(exports, sections)
         else:
             # No .symtab view available at all: assume stripped (the conservative
@@ -1659,7 +1743,7 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
                 ghidra_functions=ghidra_functions, ghidra_decompiled=True,
                 ghidra_truncated=ghidra_truncated, ghidra_error=ghidra_error,
                 scan_error=(
-                    f"symbol layer failed ({exc}); recovered "
+                    f"the symbol/string read failed ({exc}); recovered "
                     f"{len(ghidra_functions)} function bodies via Ghidra last-resort"
                 ),
                 sha256=so_digest,
@@ -1731,6 +1815,7 @@ def _analyze_so_uncached(so_path: Path, security_triggers: set[str] | None = Non
         jni_onload=jni_onload,
         packed=packed,
         packer=packer,
+        unpacked=unpacked,
         ghidra_functions=ghidra_functions,
         ghidra_decompiled=ghidra_decompiled,
         ghidra_error=ghidra_error,

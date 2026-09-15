@@ -1066,12 +1066,39 @@ def find_external_native_loads(java_files: list) -> list[str]:
     return targets
 
 
+# PLATFORM-LIB1: Android platform/OS-provided libraries. The OS supplies these and
+# they are never the app's own native code, so a loadLibrary("log") resolving to
+# the platform's liblog.so is NOT an unexamined app surface. Without this the
+# unaccounted-loads hatch fired on essentially every app that touches a platform
+# library, holding the native surface at `partial` permanently - which also undid
+# the vacuous-coverage soundness argument for apps that ship no .so of their own
+# (CALIB-NATIVE-VACUOUS). Verified live: a PropertyGuru run's only unaccounted
+# entry was `log`.
+#
+# The exemption is sound in the adversarial case: a library the app SHIPS lands in
+# the APK and is analyzed, so its basename is in analyzed_names and it never
+# reaches this check - only a library absent from the APK, i.e. the platform's,
+# can be exempted. Residual: an APK shipping its own liblog.so whose analysis
+# failed would be exempted here; the set is deliberately small and OS-only
+# (libc++_shared.so is NOT here - it ships inside APKs) to keep that window narrow.
+_PLATFORM_NATIVE_LIBS = frozenset({
+    "libc.so", "libm.so", "libdl.so", "liblog.so", "libz.so", "libstdc++.so",
+    "libandroid.so", "libjnigraphics.so", "libEGL.so", "libGLESv1_CM.so",
+    "libGLESv2.so", "libGLESv3.so", "libOpenMAXAL.so", "libOpenSLES.so",
+    "libvulkan.so", "libmediandk.so", "libnativewindow.so", "libaaudio.so",
+    "libcamera2ndk.so", "libsync.so", "libnativehelper.so", "libnetd_client.so",
+})
+
+
 def unaccounted_native_loads(load_targets: list[str], analyzed_names: set[str]) -> list[str]:
     """The load targets whose library we did NOT analyze. `analyzed_names` is the
     set of analyzed .so basenames (e.g. "libfoo.so"). A loadLibrary("foo") maps
     to libfoo.so; a load path maps to its basename. Any target not covered is a
     loaded-but-unexamined native surface - the caller must degrade native
-    coverage to partial rather than certify a confident negative (ADR-0006)."""
+    coverage to partial rather than certify a confident negative (ADR-0006).
+
+    PLATFORM-LIB1: a target resolving to an OS-provided platform library is not
+    an app surface and is not reported (see _PLATFORM_NATIVE_LIBS)."""
     analyzed = set(analyzed_names)
     unaccounted: list[str] = []
     seen: set[str] = set()
@@ -1085,7 +1112,7 @@ def unaccounted_native_loads(load_targets: list[str], analyzed_names: set[str]) 
         # several call sites (e.g. loadLibrary("log") in many RN modules) is one
         # surface, not N. Dedup by exact target, first occurrence wins. Coverage
         # gates on presence, never on count, so this only de-noises the report.
-        if base not in analyzed and t not in seen:
+        if base not in analyzed and base not in _PLATFORM_NATIVE_LIBS and t not in seen:
             seen.add(t)
             unaccounted.append(t)
     return unaccounted

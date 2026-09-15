@@ -943,12 +943,16 @@ def test_unaccounted_native_loads_empty():
 
 
 def test_unaccounted_native_loads_dedups_repeated_target():
-    # The same target loaded from several call sites (e.g. loadLibrary("log") in
-    # many RN modules) is one unexamined surface, not N - the report shows it
+    # The same target loaded from several call sites (e.g. loadLibrary("hermes")
+    # in many RN modules) is one unexamined surface, not N - the report shows it
     # once. Order is preserved and the first occurrence wins.
-    assert unaccounted_native_loads(["log", "log"], set()) == ["log"]
-    assert unaccounted_native_loads(["log", "ssl", "log", "crypto"], set()) == [
-        "log",
+    #
+    # Deliberately app-owned targets: loadLibrary("log") used to be the example
+    # here, but platform libraries are exempt from this bound (PLATFORM-LIB1) so
+    # they no longer exercise the dedup path at all.
+    assert unaccounted_native_loads(["hermes", "hermes"], set()) == ["hermes"]
+    assert unaccounted_native_loads(["hermes", "ssl", "hermes", "crypto"], set()) == [
+        "hermes",
         "ssl",
         "crypto",
     ]

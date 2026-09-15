@@ -1025,6 +1025,33 @@ def _join_script(hooks: list[str], checkpoint_ids: list[str]) -> str:
     return "\n\n".join(parts)
 
 
+def _environment_normalization() -> str:
+    """Make the reference test emulator look like an ordinary retail device so an
+    app that defensively stalls (or crashes) the moment it detects an emulator /
+    tampered build actually advances past its splash and runs its real root/SSL
+    checks - the only way those checks can be empirically exercised and bypassed.
+
+    This is NOT a detected-technique bypass: it neutralises the anti-analysis
+    *environment* gate that otherwise blocks the app from ever reaching the code we
+    do bypass. It composes the same verified, conditional scrubs the targeted path
+    already uses - Build.HARDWARE/PRODUCT/... emulator markers (sdk_gphone /
+    goldfish / ranchu) rewritten to retail values, Build.TAGS/FINGERPRINT test-keys
+    -> release-keys, and the native __system_property_get ro.build.* counterpart -
+    so the Java-bridge and native property-read surfaces are both covered. Every
+    scrub is conditional and a no-op on a genuine retail device (ADR-0006): it only
+    rewrites a value that actually carries an emulator/tamper marker, so it can
+    neither fabricate a signal nor change behaviour where there was nothing to hide.
+
+    Deployed only on the universal/forced fallback path (an unknown or operator-
+    forced target, where we cannot know in advance whether the app self-stalls); a
+    fully targeted run leaves this out and stays byte-identical."""
+    return "\n\n".join((
+        ROOT_RECIPES["emulator_detection"],
+        ROOT_RECIPES["root_build_tags_test_keys"],
+        ROOT_RECIPES["native_build_props_probe"],
+    ))
+
+
 def synthesize(classification: ClassificationResult, action: Action) -> SynthesisResult:
     """Compose a deterministic bypass script from the detected techniques.
 
@@ -1106,13 +1133,33 @@ def synthesize(classification: ClassificationResult, action: Action) -> Synthesi
         ssl_hooks.append(UNIVERSAL_SSL)
         universal.append("ssl")
 
-    all_hooks = evasion_hooks + root_hooks + ssl_hooks
+    # Environment normalization (universal/forced fallback only): if any category
+    # fell back to the universal base, the target is unknown or operator-forced and
+    # we cannot assume it runs normally under instrumentation on an emulator. An
+    # anti-emulator/anti-tamper app (e.g. a React-Native target whose real root/SSL
+    # checks live in its JS bundle) defensively stalls or crashes on its splash when
+    # it sees emulator build props - so those checks never run and the bypass can
+    # observe nothing (the verified PropertyGuru splash-stall). Prepend the
+    # conditional environment scrub so the app advances to the code we actually
+    # bypass. It runs AFTER the evasion base (which must stay first so the agent is
+    # hidden before any app probe) and BEFORE the bypass hooks. Source-only: it is
+    # not a detected technique, so it never enters root/ssl hook counts,
+    # universal_categories, applied_hooks, or the strategy - a fully targeted run
+    # (universal empty) is byte-identical to before.
+    env_hooks: list[str] = [_environment_normalization()] if universal else []
+
+    all_hooks = evasion_hooks + env_hooks + root_hooks + ssl_hooks
     # Checkpoints for the technology-level "hooks engaged" signal cover BOTH the
     # dedicated recipe hooks AND the category universal base (labelled
     # universal:<cat>). Without this, a bypass that only used the universal base
     # would emit no checkpoint and the signal would silently read "none" even
     # though the bypass ran (RS_CertPinning exposed this).
     checkpoint_ids = list(applied) + [f"universal:{c}" for c in universal]
+    if env_hooks:
+        # A distinct, auditable checkpoint so the "hooks engaged" audit shows the
+        # environment scrub actually attached - kept out of universal_categories and
+        # applied_hooks so it never inflates the root/ssl bypass accounting.
+        checkpoint_ids.append("env:emulator-scrub")
     source = _join_script(all_hooks, checkpoint_ids)
     # The effect observer (pin-check + handshake behavioral evidence) is embedded
     # in UNIVERSAL_SSL, so a fully-covered targeted SSL bypass needs it appended

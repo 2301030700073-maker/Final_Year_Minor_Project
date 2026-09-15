@@ -178,6 +178,45 @@ def test_force_dynamic_neither_classification_with_both_action_yields_universal(
     assert "checkServerTrusted" in res.source     # universal ssl trust-neutralization
 
 
+def test_forced_universal_deploys_environment_normalization_scrub():
+    # The --force-dynamic universal envelope must also neutralise the anti-analysis
+    # ENVIRONMENT gate (emulator/tamper build props), not just root+SSL. An app that
+    # defensively stalls (or crashes) on its splash the moment it detects an emulator
+    # - the verified PropertyGuru splash-stall - never reaches the root/SSL checks we
+    # bypass, so the bypass can observe nothing. A forced BOTH on a NEITHER
+    # classification therefore prepends the conditional environment scrub, reusing the
+    # same verified recipes the targeted path uses across the Java-bridge AND native
+    # property-read surfaces.
+    res = synthesize(_cls(Action.NEITHER), Action.BOTH)
+    # Build-field emulator markers scrubbed to retail (Java bridge) ...
+    assert "sdk_gphone" in res.source and "ranchu" in res.source
+    assert "/sdk_gphone|goldfish|ranchu/" in res.source
+    # ... test-keys -> release-keys normalization ...
+    assert "release-keys" in res.source
+    # ... and the native ro.build.* counterpart.
+    assert "__system_property_get" in res.source
+    assert "ro.build.fingerprint" in res.source
+    # Audited as an engaged hook, distinct from the root/ssl universal bases.
+    assert 'send({hook: "env:emulator-scrub"})' in res.source
+    # But it is source-only: environment normalization is NOT a detected-technique
+    # bypass, so it never inflates the hook accounting or the strategy.
+    assert res.universal_categories == ["root", "ssl"]
+    assert res.applied_hooks == []
+    assert res.strategy == "universal"
+
+
+def test_targeted_run_omits_environment_normalization_scrub():
+    # The environment scrub is scoped to the universal/forced fallback ONLY. A fully
+    # targeted run (every wanted category mapped to a dedicated hook) stays
+    # byte-identical to before this change: no emulator scrub, no env checkpoint.
+    res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["okhttp_certificate_pinner"]), Action.SSL_ONLY)
+    assert res.strategy == "targeted"
+    assert res.universal_categories == []
+    assert "env:emulator-scrub" not in res.source
+    assert "sdk_gphone" not in res.source
+    assert "__system_property_get" not in res.source
+
+
 def test_all_recipe_hooks_are_well_formed():
     # Every hand-authored hook must be a structurally balanced snippet - a malformed
     # hook would be a silent runtime failure in the Frida session (principle 3).

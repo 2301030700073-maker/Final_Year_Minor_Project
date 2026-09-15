@@ -4,6 +4,107 @@ Automated detection and empirically-verified bypass of Android root-detection an
 
 **Status.** The deterministic core — Phases 1–4: ingest → static detection → decision engine → dynamic Frida bypass (+ optional live traffic capture) → report → calibration — is **built and validated end-to-end**, against OWASP UnCrackable Level 1–3 and a wider, independently-ground-truthed calibration corpus (`config/ground_truth.yaml`). The AI capability layer (Phases 5–7) is intentionally deferred (ADR-0003), so nothing in the steps below depends on a model being present.
 
+## Quick start — from a cold laptop boot to a finished analysis
+
+Everything runs from the **WSL2 Ubuntu** terminal (the repo, `uv`, `adb`, `frida` all live there); **Windows** is used only to boot the emulator. If this is a fresh checkout, do the one-time install in sections 1–4 first (uv, the Android toolchain, jadx/CFR/Ghidra). After that, this is the exact per-boot sequence — each command prints an expected line so you know it worked. Static-only analysis (`--skip-dynamic`, recipe A below) needs **none** of steps 1–4 here — skip straight to it.
+
+**Where the configuration lives** (`config/`): `settings.yaml` (decision thresholds `root: 0.7` / `ssl: 0.7`, output paths), `signatures/*.yaml` (119 versioned detection rules: 48 root, 51 ssl, 12 native, 8 packers), `ground_truth.yaml` (the independent calibration truth used by `calibration-report`).
+
+### 0. One-time / after every `git pull`
+```bash
+uv sync
+```
+Expected: resolves and installs the exact locked versions from `uv.lock` into `.venv/`. A "missing" locked package (e.g. `androguard`) almost always means a stale `.venv` — re-running this fixes it.
+
+### 1. (Windows) Boot the rooted emulator
+In a **Windows** PowerShell/terminal — not WSL — start a **Google APIs** (not Google Play), **userdebug**, x86_64 AVD (Frida needs root):
+```
+emulator -avd Frida_Test -no-snapshot
+```
+Wait for the home screen. (A rooted physical device over USB works too — then `adb root` must succeed.)
+
+### 2. (WSL2) Restore the emulator's internet path
+```bash
+bash scripts/emulator_up.sh
+```
+Expected when the emulator is up: `[emulator-up] OK: emulator-5554 internet is up (device proxy -> 127.0.0.1:8080; Windows-host pass-through, no MITM, pinning apps work).` If no emulator is running it prints one line and exits 0 — safe to run any time. (The WSL2-hosted emulator has no NAT; its only outbound path is an `adb reverse` to a Windows-host pass-through proxy, which a fresh boot loses.)
+
+### 3. (WSL2) Check the configuration + auto-start services
+```bash
+uv run python scripts/check_environment.py --fix
+```
+Runs six check groups — Python/WSL2, `uv sync`, the Android toolchain (jadx/apktool/frida/mitmproxy/…), adb + emulator + root + frida-server, the Frida WSL→Windows bridge, and the project components (unit suite, signature load, CLI entrypoint, report generator) — and with `--fix` auto-starts the adb server and device `frida-server`. Expected tail:
+```
+  NN/NN checks passed
+  Mode: --fix (auto-start enabled)
+```
+Drop `--fix` to check without starting anything.
+
+### 4. (WSL2) Confirm the exact Frida path the dynamic stage uses
+```bash
+PYTHONPATH=src uv run python -m cli verify-device
+```
+Expected: the device is reported online and a process count is enumerated over the *same* connection path the bypass uses; it auto-provisions a version-matched `frida-server` (16.7.19) if the on-device one is missing/mismatched. On a Windows-host emulator, do **not** substitute `frida-ps -U` — USB auto-discovery can't see the TCP-served emulator and hangs.
+
+> **One-command shortcut for the OWASP targets:** `bash run.sh --check-only` does the whole emulator/frida-server/relay setup above; `bash run.sh` (or `--target uncrackable2`/`uncrackable3`) then installs the APK, runs the pipeline end-to-end via the verification-bundle collector, and prints `Root bypassed: True` / `Correlation: True`.
+
+### 5. Run an analysis — pick a recipe below.
+
+## Command recipes — real values + expected outcome
+
+Every `run` needs `--apk` and `--justification` (audited, ADR-0005; accepted forms: `OWN_APP` | `CTF` | `AUTHORIZED_ENGAGEMENT:<id>` | `ACADEMIC_TRAINING_TARGET`). Package ids for `--target` come from `config/ground_truth.yaml` (table at the end of this section). Reports land in `outputs/reports/<apk_sha256>/<run_id>.md`; the audit log is appended to `outputs/audit_log.jsonl`.
+
+**A. Static-only — no device/root/frida needed (runs anywhere):**
+```bash
+PYTHONPATH=src uv run python -m cli run --apk APK_Test/UnCrackable-Level1.apk --target owasp.mstg.uncrackable1 --justification ACADEMIC_TRAINING_TARGET --skip-dynamic
+```
+Expected: stages through `decision_engine`, prints `Decision: ROOT_ONLY`, then stops before `dynamic` — no bypass attempted. Verdict tier: `deterministic_matched` (static match only, not dynamically confirmed).
+
+**B. Static + dynamic bypass (default full run):**
+```bash
+PYTHONPATH=src uv run python -m cli run --apk APK_Test/UnCrackable-Level1.apk --target owasp.mstg.uncrackable1 --justification ACADEMIC_TRAINING_TARGET
+```
+Expected: `Decision: ROOT_ONLY`, then `OK dynamic (…ms)`; all three UnCrackable root hooks fire → `bypassed=True`, promoting root from `deterministic_matched` to `dynamically_confirmed`. (A real transcript is in section 5 below.)
+
+**C. Static + dynamic + live traffic capture (real SSL-bypass proof):**
+```bash
+PYTHONPATH=src uv run python -m cli run --apk APK_Test/AndroGoat.apk --target owasp.sat.agoat --justification ACADEMIC_TRAINING_TARGET --capture-traffic
+```
+Expected: `Decision: BOTH` (AndroGoat has both a 14-path root check and a real `CertificatePinner`); the capture stage routes the app through `mitmdump`, decrypts, and records the flows in the report as SSL-bypass evidence. Requires `mitmdump` reachable from the adb-server host.
+
+**D. Forced bypass on a coverage-limited NEITHER (PropertyGuru root + SSL):**
+```bash
+PYTHONPATH=src uv run python -m cli run --apk APK_Test/propertyguru-2026-5-4.apk --target com.allproperty.android.consumer.my --justification ACADEMIC_TRAINING_TARGET --force-dynamic --capture-traffic
+```
+Expected: the **static half stays NEITHER / root 0.20** (PG's root checks live in the React-Native/Hermes bundle the signature engine can't attribute — a documented false negative, unchanged by this flag). `--force-dynamic` deploys the universal root+SSL bypass anyway (audited as an operator override); an environment-normalization scrub makes the emulator look like a retail device so PG advances past its anti-emulator splash and actually runs its checks. On a real root probe-hit → root `dynamically_confirmed`, correlation `COVERAGE-CONFIRMED`; SSL is confirmed once the app's own pin-check runs and a handshake completes over the capture proxy — otherwise surfaced honestly as `UNVERIFIED`, never a fake pass. `--force-dynamic` is a **no-op** unless the static verdict is NEITHER.
+
+**E. All options at once (maximal meaningful run):**
+```bash
+PYTHONPATH=src uv run python -m cli run \
+  --apk APK_Test/propertyguru-2026-5-4.apk \
+  --target com.allproperty.android.consumer.my \
+  --justification AUTHORIZED_ENGAGEMENT:pentest-2026 \
+  --device emulator-5554 \
+  --force-dynamic \
+  --capture-traffic
+```
+Expected: same behaviour as recipe D, additionally pinned to the `emulator-5554` serial with an engagement-id justification written to the audit log. Note `--skip-dynamic` is deliberately absent — it is mutually exclusive with `--force-dynamic`/`--capture-traffic` (a static-only run can neither bypass nor capture).
+
+### Targets in `APK_Test/` — package ids + documented ground truth
+
+| APK | `--target` (package id) | Ground truth (root / ssl) | Expected static decision |
+|---|---|---|---|
+| `UnCrackable-Level1.apk` | `owasp.mstg.uncrackable1` | true / false | `ROOT_ONLY` |
+| `UnCrackable-Level2.apk` | `owasp.mstg.uncrackable2` | true / false | `ROOT_ONLY` |
+| `UnCrackable-Level3.apk` | `owasp.mstg.uncrackable3` | true / false | `ROOT_ONLY` |
+| `AndroGoat.apk` | `owasp.sat.agoat` | true / true | `BOTH` |
+| `RS_CertPinning.apk` | `com.redshift.rs_certpinning_bypass` | null / true | `SSL_ONLY` |
+| `InsecureBankv2.apk` | `com.android.insecurebankv2` | true / null | `ROOT_ONLY` |
+| `RS_Vapour.apk` | `com.redshift.rs_vapourtraining` | true / false | `ROOT_ONLY` |
+| `propertyguru-2026-5-4.apk` | `com.allproperty.android.consumer.my` | true / null | `NEITHER` (root 0.20 — coverage-limited FN; use `--force-dynamic`) |
+
+Only **UnCrackable Level 1–3** are committed to the repo; the rest are supplied separately (see section 5) — drop them into `APK_Test/` to reproduce their runs. A `null` ground-truth side is a *documented lower bound* (that APK's decompile was partial), **not** a confident negative — see `config/ground_truth.yaml`. `--target` is optional (auto-derived from the APK's manifest package); pass it to pin the success-check/bypass module explicitly.
+
 ## Environment split
 
 This is developed on one machine and **executed/tested on a separate reference machine**: WSL2 Ubuntu 24.04, 4 vCPU / 11 GB RAM allocated, RTX 5070 GPU, ~930 GB free (see ADR-0007 in `docs/plans/adr/`). If you're pulling this repo to test it, the steps below assume you're on (or setting up) that reference environment. If your hardware differs, step 1 (the Python environment) works anywhere; the Android toolchain and dynamic-analysis pieces (steps 3+) assume WSL2/Linux specifically and will need adaptation otherwise — flag it back if so.
@@ -48,12 +149,12 @@ uv run pytest tests/unit
 
 This exercises the signature matcher and decision engine against fixtures only — if this passes, the deterministic core's logic is sound independent of whether the rest of this setup is done yet.
 
-Expected result on WSL2/Linux — **1642 tests collected, 1641 passed, 1 skipped** in ~34 s (on Windows, expect the handful of POSIX-only failures noted above instead of a fully clean run):
+Expected result on WSL2/Linux — **1654 tests, all 1654 passing** in ~29 s (a machine missing an optional tool may report 1 of them skipped instead) (on Windows, expect the handful of POSIX-only failures noted above instead of a fully clean run):
 
 ```
 $ uv run pytest tests/unit -q
 ........................................................................
-1641 passed, 1 skipped in 34.08s
+1654 passed in 28.70s
 ```
 
 > Pulled new commits and now this reports `ModuleNotFoundError` for a package that's in `uv.lock` (e.g. `androguard`)? Your `.venv` predates a dependency that was added to the lockfile — re-run `uv sync` to install the newly-locked packages, then re-run the suite. A stale `.venv` is the usual cause of a locked package appearing "missing," and is distinct from the platform failures noted above.
@@ -104,6 +205,7 @@ The `run` command's full option set (from `src/cli.py`):
 | `--justification` | authorization reason for this run — **required**, written to the immutable audit log (ADR-0005) |
 | `--skip-dynamic` | static-only: no device, root, or frida-server needed |
 | `--capture-traffic` | additionally capture live TLS traffic through the bypass (mitmproxy) |
+| `--force-dynamic` | operator override (ADR-0005): deploy the universal root+SSL bypass on a **NEITHER** target that would otherwise skip the dynamic stage — for coverage-limited misses (e.g. RN/Hermes root checks the signature engine can't attribute). Does **not** change the static verdict/confidence/calibration; the result stays gated on real behaviour (`dynamically_confirmed` only on a real probe-hit / pin-check+handshake, else `UNVERIFIED`). No-op with `--skip-dynamic` or when a category was already detected. |
 | `--device` | target a specific device/emulator serial |
 | `--target` | package id selecting the success-check module; auto-derived from the manifest when omitted |
 

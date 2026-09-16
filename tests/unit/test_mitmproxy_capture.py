@@ -650,11 +650,13 @@ def test_the_attribution_is_told_what_the_proxy_recorded(monkeypatch, tmp_path):
     real = pa.attribute_proxy_clients
 
     def spy(sampled, uid_packages, package, proxy_port=None, target_running=None,
-            proxy_connections_seen=None):
+            proxy_connections_seen=None, probe_uids=None):
         seen["count"] = proxy_connections_seen
+        seen["probe_uids"] = probe_uids
         return real(sampled, uid_packages, package, proxy_port,
                     target_running=target_running,
-                    proxy_connections_seen=proxy_connections_seen)
+                    proxy_connections_seen=proxy_connections_seen,
+                    probe_uids=probe_uids)
 
     monkeypatch.setattr(pa, "attribute_proxy_clients", spy)
     monkeypatch.setattr(pa, "sample_proxy_clients_during",
@@ -668,9 +670,43 @@ def test_the_attribution_is_told_what_the_proxy_recorded(monkeypatch, tmp_path):
     result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711, stdout=refusal)
 
     assert seen["count"] == 1, "what the proxy recorded must reach the verdict"
+    assert seen["probe_uids"] == {0}, (
+        "the uid this stage's own probe dialled from must reach the verdict too - "
+        "otherwise a lone probe socket reads as proof the sampling works")
     assert len(result.evidence["tls_failed_clients"]) == 1
     # Blind probe + a recorded connection: no absence is claimed.
     assert result.evidence["proxy_attribution"]["reached"] is None
+
+
+def test_an_unreadable_probe_uid_reaches_the_verdict_as_unknown(monkeypatch, tmp_path):
+    """The uid this stage's own shell runs as is what the attribution subtracts, and
+    when it cannot be read the attribution has to be TOLD that - not handed a
+    default. Either guess is a lie in a different direction: assuming 0 leaves the
+    probe's own socket counted as an observation, and assuming "none of ours" is a
+    claim the stage cannot make about a probe it just ran."""
+    from dynamic import proxy_attribution as pa
+    seen = {}
+    real = pa.attribute_proxy_clients
+
+    def spy(sampled, uid_packages, package, proxy_port=None, target_running=None,
+            proxy_connections_seen=None, probe_uids=None):
+        seen["probe_uids"] = probe_uids
+        return real(sampled, uid_packages, package, proxy_port,
+                    target_running=target_running,
+                    proxy_connections_seen=proxy_connections_seen,
+                    probe_uids=probe_uids)
+
+    monkeypatch.setattr(pa, "attribute_proxy_clients", spy)
+    monkeypatch.setattr(pa, "package_uid_map",
+                        lambda serial, adb=None: {10181: ["com.example.app"]})
+    # Set after the autouse fixture's stub, so this override is the one the stage sees.
+    monkeypatch.setattr(mitmproxy_capture, "_device_shell_uid", lambda serial: None)
+    result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711)
+
+    assert seen["probe_uids"] is None
+    # And the unknown does not wedge the stage: with a silent proxy there is still
+    # nothing that could have been missed, so the absence is a measured one.
+    assert result.evidence["proxy_attribution"]["reached"] is False
 
 
 def test_start_windows_mitmdump_builds_detached_start_process(monkeypatch):
@@ -1699,6 +1735,10 @@ def _app_running_by_default(monkeypatch):
                         {"uids": set(), "samples": 3, "samples_measured": 3,
                          "measured": True, "errors": []})
     monkeypatch.setattr(_pa, "package_uid_map", lambda serial, adb=None: {})
+    # And the uid this stage's own on-device shell runs as, which the attribution
+    # subtracts from what it credits to the app (the pre-flight probe's socket is
+    # on the same table). 0 is the measured value on the reference emulator.
+    monkeypatch.setattr(mitmproxy_capture, "_device_shell_uid", lambda serial: 0)
 
 
 def _empty_capture_run(monkeypatch, tmp_path, pid, stdout="", **kwargs):

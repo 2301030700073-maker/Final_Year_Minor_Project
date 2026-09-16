@@ -184,7 +184,8 @@ def package_uid_map(serial: str, adb: str | None = None) -> dict | None:
 def attribute_proxy_clients(sampled: dict | None, uid_packages: dict | None,
                             package: str, proxy_port: int | None = None,
                             target_running: bool | None = None,
-                            proxy_connections_seen: int | None = None) -> dict:
+                            proxy_connections_seen: int | None = None,
+                            probe_uids: set[int] | None = None) -> dict:
     """Did THIS app itself reach the capture proxy?
 
     `reached` is True (a uid carrying this package was seen with a socket to the
@@ -224,6 +225,23 @@ def attribute_proxy_clients(sampled: dict | None, uid_packages: dict | None,
     recorded nothing leaves nothing to miss, and there a False stands even with
     an empty uid set. None means the count was not measured, which cannot rule
     the miss out, so it yields None as well.
+
+    `probe_uids` names the uids THIS PIPELINE's own connections belong to, so that
+    what is credited to the probe is only ever an app's socket. Two facts, both
+    measured, make this necessary. The pre-flight reachability probe runs `nc`
+    from this stage's adb shell (`id -u` -> 0 on the reference emulator), and that
+    socket lingers in TIME_WAIT for the whole capture window - run `0821158c`
+    sampled uids {0, 10168}, 0 being that shell. So the pipeline's own connection
+    is present in every window it probed, and left in it would "demonstrate the
+    probe works" precisely where nothing else was seen, licensing the absence this
+    guard exists to refuse. A set (possibly empty) is the probe's uids, excluded
+    from the observation; `None` means a probe ran and the uid it ran as could not
+    be read, which cannot be told apart from the app's, so no uid on the table can
+    be credited to the app at all and the gate falls back to what the proxy
+    recorded. A uid on that table can be a system daemon's rather than an app's,
+    and a False may still rest on one - seeing any live socket to the proxy shows
+    the sampling reads this window correctly. What it must never rest on is the
+    probe's own socket, and subtracting that is what separates the two.
     """
     if sampled is None or not sampled.get("measured"):
         return {"reached": None, "uid": None, "shared_uid": [], "uids_seen": [],
@@ -232,22 +250,31 @@ def attribute_proxy_clients(sampled: dict | None, uid_packages: dict | None,
                            f"{package} reached the capture proxy was not measured")}
     seen = set(sampled.get("uids") or ())
     if uid_packages is None:
-        return {"reached": None, "uid": None, "shared_uid": [], "uids_seen": sorted(seen),
+        return {"reached": None, "uid": None, "shared_uid": [], "uids_seen": [],
                 "proxy_port": proxy_port,
                 "reason": (f"the device's package list could not be read, so {package}'s uid "
                            "is unknown and whether it reached the proxy was not measured")}
     target_uids = {u for u, pkgs in uid_packages.items() if package in pkgs}
     if not target_uids:
-        return {"reached": None, "uid": None, "shared_uid": [], "uids_seen": sorted(seen),
+        return {"reached": None, "uid": None, "shared_uid": [], "uids_seen": [],
                 "proxy_port": proxy_port,
                 "reason": (f"{package} has no uid in the device's package list, so whether it "
                            "reached the proxy was not measured")}
+    # What this stage itself dialled comes off the table before anything is read
+    # from what is left: a socket the pipeline opened is not an observation of the
+    # app's behaviour.
+    probe_uid_unknown = probe_uids is None
+    if not probe_uid_unknown:
+        seen -= set(probe_uids)
     hit = target_uids & seen
     uid = sorted(hit)[0] if hit else sorted(target_uids)[0]
     shared = sorted(p for p in uid_packages.get(uid, []) if p != package)
     shared_note = (f"; uid {uid} is shared with {', '.join(shared)}, so this is uid-level "
                    "evidence and not proof that this package opened it") if shared else ""
     if hit:
+        # Positive proof the process existed and dialled the proxy. Safe even when
+        # the probe's own uid is unknown: a uid that carries this package is the
+        # app's, and the shell's is not.
         return {"reached": True, "uid": uid, "shared_uid": shared, "uids_seen": sorted(seen),
                 "proxy_port": proxy_port,
                 "reason": f"uid {uid} held a socket to the capture proxy{shared_note}"}
@@ -264,9 +291,22 @@ def attribute_proxy_clients(sampled: dict | None, uid_packages: dict | None,
                 "proxy_port": proxy_port,
                 "reason": (f"{package} (uid {uid}) {why} - whether it reached the capture "
                            "proxy was therefore not measured")}
+    if probe_uid_unknown and seen:
+        # The table is not empty, and this stage's own pre-flight probe ran. Without
+        # the uid it ran as, a socket this pipeline opened cannot be told apart from
+        # one a client opened - so the table cannot demonstrate that this sampling
+        # sees OTHER people's connections, which is the whole question here.
+        return {"reached": None, "uid": uid, "shared_uid": shared, "uids_seen": others,
+                "proxy_port": proxy_port,
+                "reason": (f"the socket table showed uid(s) {', '.join(str(u) for u in others)} "
+                           f"holding a socket to the capture proxy and not uid {uid} "
+                           f"({package}), but this stage's own pre-flight probe ran and the "
+                           "uid it ran as could not be read, so a socket this pipeline opened "
+                           "cannot be told apart from one a client opened - whether the app "
+                           "reached the proxy was not measured")}
     if not seen and proxy_connections_seen != 0:
-        recorded = (
-            "the proxy's own log was not read this run, so what the probe had to catch "
+        because = (
+            "the proxy's own log was not read this run, so what this sampling had to catch "
             "is unknown"
             if proxy_connections_seen is None else
             f"the proxy's own log recorded {proxy_connections_seen} client->proxy "
@@ -276,7 +316,7 @@ def attribute_proxy_clients(sampled: dict | None, uid_packages: dict | None,
                 "proxy_port": proxy_port,
                 "reason": (f"the socket table was readable but no uid on it held a socket to "
                            f"the capture proxy in any of {sampled.get('samples_measured')} "
-                           f"sample(s), while {recorded} - a probe that saw nothing while "
+                           f"sample(s), while {because} - a probe that saw nothing while "
                            "connections happened did not observe this window, so whether the "
                            "app stayed away was not measured")}
     seen_note = (

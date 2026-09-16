@@ -267,6 +267,41 @@ class FlowSummary:
     scheme: str = ""
 
 
+def _device_shell_uid(serial: str) -> int | None:
+    """The uid this stage's own on-device commands run as (CAPUID1).
+
+    This stage connects to its own proxy. The pre-flight reachability probe is the
+    known one - it runs `nc` on the device - and `_app_client_connections` already
+    subtracts that connection from the client-connection COUNT because mitmdump
+    accepts it exactly like app traffic. The uid side needs the same subtraction:
+    `attribute_proxy_clients` decides whether a sampling "demonstrably saw the
+    window" from the uids on it, and a socket this stage opened is on the table
+    under the shell's uid, not the app's. Left in, it would demonstrate that the
+    sampling works at the precise moment nothing else was seen - licensing the
+    "the app stayed away" verdict the guard exists to refuse.
+
+    Not hypothetical: `/proc/net/tcp` keeps a finished connection's row in
+    TIME_WAIT for the whole capture window. Measured on run 0821158c, the
+    attribution sampled uids {0, 10168} - 10168 the app, 0 this shell.
+
+    Returns the uid, or None when it could not be READ. Never a guess: an unknown
+    probe uid cannot be told apart from the app's on that table, so the caller has
+    to pass the unknown on rather than assume either value."""
+    try:
+        adb = device._require_adb()
+        res = subprocess.run([adb, "-s", serial, "shell", "id", "-u"],
+                             capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError, RuntimeError):
+        # RuntimeError = _require_adb could not resolve adb.
+        return None
+    if res.returncode != 0:
+        return None
+    try:
+        return int(res.stdout.strip())
+    except ValueError:
+        return None
+
+
 def _device_reaches_proxy(serial: str, proxy_port: int) -> bool | None:
     """Pre-flight device->proxy reachability probe (CAPREACH1).
 
@@ -1325,10 +1360,16 @@ def run_capture_stage(
         # and its silence is not evidence the app stayed away (see
         # attribute_proxy_clients). Computing the verdict above - before the log was
         # read, which is where this stage used to compute it - made that unaskable.
+        # This stage's own connections must not be credited to the app either: the
+        # shell that ran the pre-flight probe owns one on the same table, under its
+        # own uid (see _device_shell_uid). Passed unconditionally - when no probe
+        # socket exists, subtracting its uid is a no-op.
+        shell_uid = _device_shell_uid(serial)
         proxy_attribution_verdict = proxy_attribution.attribute_proxy_clients(
             proxy_clients, proxy_attribution.package_uid_map(serial), package,
             proxy_port, target_running=target_running,
-            proxy_connections_seen=len(flows) + len(tls_failed))
+            proxy_connections_seen=len(flows) + len(tls_failed),
+            probe_uids={shell_uid} if shell_uid is not None else None)
         # The WSL2 addon's own liveness (None on the native placement, where no
         # addon runs and mitmdump's own flow_detail stdout is the source).
         channel_alive = _capture_channel_alive(stdout_text or "") if wsl2 else None
@@ -1524,6 +1565,10 @@ def run_capture_stage(
                     # auditable from the persisted evidence alone.
                     "client_connections_raw": client_connections_raw,
                     "preflight_probe_connections": probe_connections,
+                    # The uid that probe ran as, which the attribution excludes from
+                    # what it credits to the app (None = could not be read). Recorded
+                    # so the exclusion is auditable from the persisted evidence.
+                    "preflight_probe_uid": shell_uid,
                     # Certificate refusals this capture observed, from whichever
                     # source this placement writes (see _count_tls_failed_clients).
                     "tls_failed_clients": tls_failed,

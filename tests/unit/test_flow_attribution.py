@@ -128,7 +128,8 @@ def test_a_target_that_never_reached_the_proxy_is_a_measured_absence():
     """False is licensed only with the app's liveness as its premise - see the
     three tests below for what happens without it."""
     got = pa.attribute_proxy_clients(_sampled({999}), {10131: ["com.test.app"]},
-                                     "com.test.app", 8081, target_running=True)
+                                     "com.test.app", 8081, target_running=True,
+                                     probe_uids={0})
     assert got["reached"] is False and got["uid"] == 10131
     assert "held no socket to the capture proxy" in got["reason"]
 
@@ -173,13 +174,69 @@ def test_an_unmeasured_connection_count_cannot_rule_the_miss_out():
 def test_a_probe_that_saw_other_uids_keeps_the_absence_and_says_so():
     """The case the module was built for: the probe demonstrably can see
     connections in this window, and this app was not among them. What it did see
-    is carried so a reader can weigh the absence rather than assume it."""
+    is carried so a reader can weigh the absence rather than assume it. The
+    pipeline's own socket is named here so the uids below are only ever a
+    client's - that is what makes them evidence of what the sampling can see."""
     got = pa.attribute_proxy_clients(_sampled({999, 1000}), {10131: ["com.test.app"]},
                                      "com.test.app", 8081, target_running=True,
-                                     proxy_connections_seen=4)
+                                     proxy_connections_seen=4, probe_uids={0})
     assert got["reached"] is False
     assert got["uids_seen"] == [999, 1000]
     assert "the probe did see 2 other uid(s)" in got["reason"]
+
+
+def test_the_probes_own_socket_cannot_license_an_absence():
+    """The leak ADR-0017's own guard left open, measured on run
+    `0821158c79da4bb1a9fc35370ba65bb9`: its attribution sampled uids {0, 10168}
+    - 10168 the app, 0 the adb shell this stage ran its pre-flight probe from.
+    `/proc/net/tcp` keeps that finished connection's row in TIME_WAIT for the whole
+    window, so the probe's own socket is on every table the probe looked at.
+    Credited to the probe it would "demonstrate the sampling works" exactly where
+    nothing else was seen, licensing the absence this guard exists to refuse."""
+    got = pa.attribute_proxy_clients(_sampled({0}), {10131: ["com.test.app"]},
+                                     "com.test.app", 8081, target_running=True,
+                                     proxy_connections_seen=17, probe_uids={0})
+    assert got["reached"] is None and got["reached"] is not False
+    assert "no uid on it held a socket" in got["reason"]
+    assert "17 client->proxy connection(s)" in got["reason"]
+    assert got["uids_seen"] == []
+
+
+def test_a_lone_probe_socket_with_a_silent_proxy_is_still_a_measured_absence():
+    """The other side of that exclusion: with the probe's own socket subtracted and
+    the proxy having recorded nothing, there is nothing that could have been
+    missed, so the absence stands. The exclusion must not turn every probed window
+    into `not measured`."""
+    got = pa.attribute_proxy_clients(_sampled({0}), {10131: ["com.test.app"]},
+                                     "com.test.app", 8081, target_running=True,
+                                     proxy_connections_seen=0, probe_uids={0})
+    assert got["reached"] is False
+    assert "the proxy recorded no client->proxy connection this window" in got["reason"]
+
+
+def test_the_probes_own_socket_is_stripped_from_the_observation():
+    """The exclusion is a subtraction, not a special case for the verdict: a uid
+    the pipeline dialled from is not an observation of the app, so it is not
+    carried as one either."""
+    got = pa.attribute_proxy_clients(_sampled({0, 10131}),
+                                     {10131: ["com.test.app"], 0: ["android"]},
+                                     "com.test.app", 8081, probe_uids={0})
+    assert got["reached"] is True
+    assert got["uids_seen"] == [10131]
+
+
+def test_an_unreadable_probe_uid_cannot_demonstrate_the_probe_works():
+    """`None` is not "no probe ran" - it is "a probe ran and the uid it ran as
+    could not be read". The sockets on that table then cannot be sorted into ours
+    and a client's, so a non-empty table proves nothing about what this sampling
+    can see, and the reader is told that rather than the raw uids being offered as
+    evidence of a working probe."""
+    got = pa.attribute_proxy_clients(_sampled({999}), {10131: ["com.test.app"]},
+                                     "com.test.app", 8081, target_running=True,
+                                     proxy_connections_seen=0, probe_uids=None)
+    assert got["reached"] is None
+    assert "the uid it ran as could not be read" in got["reason"]
+    assert got["uids_seen"] == [999]
 
 
 def test_every_verdict_carries_the_observation_it_rests_on():

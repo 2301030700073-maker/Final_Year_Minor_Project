@@ -939,14 +939,34 @@ def run_capture_stage(
             # cannot support ANY of them: this rung does not compete with the
             # others, it invalidates them.
             if channel_alive is False:
+                # What a dead recorder invalidates is the facts IT produces: the
+                # flow list, the device-side connection count, the certificate-
+                # refusal list. It does NOT invalidate the pre-flight reachability
+                # probe - that is measured device-side (_device_reaches_proxy) and
+                # reads none of this log - so the probe is the one route fact that
+                # still holds here, and the message keeps it rather than disowning
+                # the route along with the recorder.
+                probe_note = (
+                    f" - it reported that the device "
+                    f"{'COULD' if reachable else 'could NOT'} reach "
+                    f"127.0.0.1:{proxy_port}"
+                    if reachable is not None else " - it was unavailable this run"
+                )
                 device_or_app_cause = (
                     "the capture proxy's log carries no addon marker at all - not "
                     "even the @@ADDON_LOADED@@ line, which is written at import "
-                    "before any traffic exists. So the recorder that produces every "
-                    "other fact about this capture never ran, and this empty result "
-                    "says NOTHING about the device route, the app's traffic, or "
-                    "certificate pinning. Check that the Windows-host mitmdump "
-                    "loaded the addon and could write its flow log"
+                    "before any traffic exists. So the recorder that produces the "
+                    "flow list, the device-side connection count and the "
+                    "certificate-refusal list never ran: those facts are ABSENT, "
+                    "not empty, and the zeros recorded beside them are artifacts "
+                    "of a dead recorder rather than observations. This result says "
+                    "nothing about the app's traffic or about certificate pinning. "
+                    "The one route fact that survives is the pre-flight "
+                    "reachability probe, which is measured device-side and reads "
+                    "none of this log"
+                    + probe_note
+                    + ". Check that the Windows-host mitmdump loaded the addon "
+                    "and could write its flow log"
                     + (f" - the proxy's own log says: {proxy_log_excerpt}"
                        if proxy_log_excerpt else
                        " - and the proxy's own log is empty too, so it likely "

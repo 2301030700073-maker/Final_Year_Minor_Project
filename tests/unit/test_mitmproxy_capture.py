@@ -590,6 +590,30 @@ def test_wsl2_dead_channel_quotes_the_proxys_own_log(monkeypatch, tmp_path):
     assert result.evidence["proxy_log_excerpt"].startswith("in script")
 
 
+def test_dead_channel_rung_keeps_the_probe_that_does_not_read_that_log(monkeypatch, tmp_path):
+    # A dead recorder invalidates the facts IT produces (the flow list, the
+    # connection count, the refusal list). The pre-flight reachability probe is
+    # measured device-side and reads none of that, so it survives a dead channel
+    # - and the message must keep it instead of disowning the route with the log.
+    _wsl2_empty_stubs(monkeypatch, log_text="", reachable=True)
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1)
+    assert result.evidence["capture_channel_alive"] is False
+    assert "never ran" in result.error
+    assert "COULD reach" in result.error
+    assert result.evidence["device_reached_proxy_preflight"] is True
+
+
+def test_dead_channel_rung_still_reports_a_down_probe_as_down(monkeypatch, tmp_path):
+    # The probe is kept, so a probe that failed must be reported as failed rather
+    # than softened into the generic "nothing is known about the route".
+    _wsl2_empty_stubs(monkeypatch, log_text="", reachable=False)
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1)
+    assert "could NOT reach" in result.error
+    assert "adb reverse" not in result.error
+
+
 def test_wsl2_dead_channel_says_so_when_the_proxy_log_is_empty_too(monkeypatch, tmp_path):
     _wsl2_empty_stubs(monkeypatch, log_text="", reachable=False)
     result = mitmproxy_capture.run_capture_stage(

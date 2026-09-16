@@ -119,6 +119,63 @@ parser that reads only the envelope finds nothing in the capture window's stream
 
 ## Verification
 
-Pending implementation. This ADR is committed before the code so the decision is
-auditable on its own; the verification section will be completed with the
-measured full-suite result and a real end-to-end run once the change lands.
+Implemented 2026-09-16.
+
+**Full suite: 1866 passed** (52s; 1861 before this change, plus the five new tests).
+The push that first carried the wiring failed CI at import collection -
+`ImportError: cannot import name 'SSL_CONFIRMATION_LINE'` - because the constants
+and the wiring test were still uncommitted in the working tree while every local run
+passed against it; `c6095391a` commits them, and `pytest --collect-only` on the
+committed tree now collects 1866 with 0 errors.
+
+**A prerequisite defect was found by the first real run, not by the suite.** That run
+failed the capture stage with `[Errno 36] File name too long:
+'/…/src/dynamic/scripts/Java.perform(function () { …'`: cli.py passed the synthesized
+bypass's *source* where `run_capture_stage(bypass_script=…)` documents a *filename*
+under `src/dynamic/scripts/`, and `frida_runner.load_script` resolves it with
+`(SCRIPT_DIR / name).read_text()`. `bypass_applied` is set after that load, so it
+stayed False - meaning the capture window had never actually run under the bypass on
+any real run, so this ADR's premise ("that window ran under the pinning-only bypass")
+was false and there was no hooked window to evaluate. `6c61497b2` adds
+`bypass_source` and dispatches on which argument was given, to the two loaders that
+already exist for the split. The ADR-0015 e2e test that was supposed to cover this
+asserted that the CLI passed *a* value, never that the loader could read it.
+
+**Real end-to-end run** (PropertyGuru, `--force-dynamic --capture-traffic`,
+`run_id 6546c2c0248947b8a67e06ce2b3ebf44`), which exercised the non-upgrade path:
+
+```
+OK  dynamic                          (30938ms)
+OK  success-check                    (0ms)
+OK  capture-traffic                  (25766ms)
+OK  success-check (capture window)   (0ms)
+```
+
+- The capture window genuinely ran hooked for the first time: `bypass_applied=true`,
+  `bypass_arm="synthesized source (8774 chars)"`,
+  `app_launch.launched_by="frida spawn"`, app still running at the end.
+- The new stage is in the report's stage table
+  (`| success-check (capture window) | success | 0 | |`) with its evidence naming the
+  window it evaluated and the reason it did not upgrade.
+- It did **not** upgrade, correctly: that window's observer recorded only its two hook
+  checkpoints - no `ssl-pin-check`, no `ssl-handshake` - and the proxy recorded 19
+  `tls_failed_client` refusals ("The client does not trust the proxy's certificate")
+  on `graph.facebook.com`, `sdk.iad-03.braze.com` and `featureassets.org`. One flow
+  was decrypted (`api.segment.io`) and the stage's own device-side attribution found
+  uid 10168 held no socket to the proxy, so it is not attributable to the app.
+- `Root bypassed: True` from the dynamic window is carried through untouched, and
+  `SSL bypassed: inconclusive` stands - an absence in one window did not retract a
+  confirmation from another, and no claim was manufactured from the pinning-only
+  bypass.
+
+**The upgrade path itself is verified against the real pipeline**, with the capture
+stage's evidence supplied as a fixture rather than by a device:
+`tests/unit/test_cli_capture_window_wiring.py` drives `cli.run` end to end and asserts
+the written report reads `- SSL bypassed: True` naming the launch that confirmed it,
+and `tests/unit/test_cli_capture_window_upgrade.py` asserts the merge takes the two
+SSL lines while keeping the dynamic window's root and liveness lines. What has **not**
+been observed on a real target is a capture window that carries both effects; that is
+the population this ADR is for (apps that stall under the dynamic spawn and run under
+the later launch), and PropertyGuru is not one of them - its TLS clients refuse the
+proxy CA on the hosts that matter, which is a coverage bound of the synthesized bypass,
+not of this decision.

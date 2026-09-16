@@ -2284,6 +2284,7 @@ def run(
         # touches a half-open device.
         serial = None
         install_ok = False
+        install_result: dict = {}
         try:
             serial = device.discover_device(device_serial)
             # FR-4.2: install_apk's check=True only confirms adb accepted the
@@ -2293,7 +2294,13 @@ def run(
             # dynamic stage where frida can't attach to a non-installed package and
             # fails confusingly downstream (NFR-1). verify_installed was dead code;
             # this is where it belongs.
-            device.install_apk(serial, apk)
+            # install_apk reports what the install had to do to succeed. It
+            # recovers from exactly one case - a differently-signed copy of the
+            # same package already on the device, which adb cannot replace and
+            # which would otherwise make every build after the first of a given
+            # target permanently unanalyzable - and it says so rather than doing
+            # it silently. Carried onto the dynamic stage's evidence below.
+            install_result = device.install_apk(serial, apk, package_name) or {}
             install_ok = device.verify_installed(serial, package_name)
         except Exception as exc:
             dynamic_stage = StageResult(
@@ -2383,6 +2390,18 @@ def run(
                 # surfaced loudly after the report is written. correlation stays None
                 # -> reported as "not attempted", never a fake pass.
                 dynamic_failed = True
+        if install_result.get("recovered_from_signature_conflict"):
+            # A device state change the operator did not ask for belongs on the
+            # record, not only in the scrollback (ADR-0005): the stale
+            # differently-signed copy of this package was removed so the install
+            # could proceed, and adb's own refusal that triggered it is kept
+            # beside it. Rides on the dynamic stage's evidence, so it round-trips
+            # in stage_results_json and reaches any later regenerated report
+            # without a schema change.
+            dynamic_stage.evidence = {
+                **(dynamic_stage.evidence or {}),
+                "install_recovery": install_result,
+            }
         if dynamic_stage.status == "success":
             try:
                 device.clear_logcat(serial)

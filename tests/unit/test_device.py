@@ -281,6 +281,134 @@ def test_install_apk_passes_test_only_flag(monkeypatch):
     assert "-t" in seen["cmd"]
 
 
+# --- install refusals: the diagnostic, and the one case that is recovered -----
+#
+# An `adb install` refusal is the first thing a real-world target hits, and the
+# reason adb gives is the only thing that makes the failure actionable. It lives
+# on CalledProcessError.stderr, which str() drops.
+
+_CONFLICT = (
+    "Performing Streamed Install\n"
+    "adb: failed to install /x/app.apk: Failure "
+    "[INSTALL_FAILED_UPDATE_INCOMPATIBLE: Package owasp.sat.agoat signatures do "
+    "not match previously installed version; ignoring!]\n"
+)
+
+
+def _install_harness(monkeypatch, refusals, uninstall_removes=True):
+    """Drive install_apk with scripted adb answers; returns the commands issued.
+
+    ``refusals`` is the stderr for each successive `adb install`; None means that
+    attempt succeeds. Any command that is neither an install nor an uninstall is
+    a test bug, so it asserts rather than silently passing."""
+    calls: list = []
+    monkeypatch.setattr(device, "_require_adb", lambda: "adb")
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if cmd[3] == "install":
+            n = sum(1 for c in calls if c[3] == "install") - 1
+            msg = refusals[min(n, len(refusals) - 1)]
+            if msg is None:
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="Success", stderr="")
+            raise subprocess.CalledProcessError(1, cmd, output="", stderr=msg)
+        if cmd[3] == "uninstall":
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0 if uninstall_removes else 1,
+                stdout="Success" if uninstall_removes else "Failure [DELETE_FAILED_INTERNAL_ERROR]",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected adb subcommand: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    return calls
+
+
+def test_a_refused_install_carries_adb_own_diagnostic(monkeypatch):
+    # The measured defect: a second AndroGoat build failed to install and the
+    # stage reported "returned non-zero exit status 1" - the line naming the
+    # conflict had been captured and thrown away. Whatever adb said must be what
+    # the operator sees.
+    _install_harness(monkeypatch, [_CONFLICT])
+    with pytest.raises(RuntimeError) as raised:
+        device.install_apk("emulator-5554", "/x/app.apk")
+    message = str(raised.value)
+    assert "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in message
+    assert "owasp.sat.agoat" in message
+
+
+def test_a_conflict_naming_another_package_is_never_uninstalled(monkeypatch):
+    # The recovery is destructive, so its target has to be the package adb named
+    # AND the package being installed. A conflict about some other package is a
+    # refusal, not a licence to remove that other package.
+    calls = _install_harness(monkeypatch, [_CONFLICT])
+    with pytest.raises(RuntimeError):
+        device.install_apk("emulator-5554", "/x/app.apk", "com.example.somethingelse")
+    assert [c[3] for c in calls] == ["install"]
+
+
+def test_a_signature_conflict_without_an_expected_package_is_not_recovered(monkeypatch):
+    # No expected package means the caller has not told us which package this
+    # APK is; without that, nothing may be removed.
+    calls = _install_harness(monkeypatch, [_CONFLICT])
+    with pytest.raises(RuntimeError):
+        device.install_apk("emulator-5554", "/x/app.apk")
+    assert [c[3] for c in calls] == ["install"]
+
+
+def test_a_non_signature_install_failure_is_never_recovered(monkeypatch):
+    # ABI, minSdk and storage refusals are real incompatibilities. Retrying them
+    # past an uninstall would destroy the installed copy and still fail.
+    calls = _install_harness(monkeypatch, ["adb: failed to install /x/app.apk: Failure "
+                                          "[INSTALL_FAILED_INSUFFICIENT_STORAGE]"])
+    with pytest.raises(RuntimeError) as raised:
+        device.install_apk("emulator-5554", "/x/app.apk", "owasp.sat.agoat")
+    assert "INSTALL_FAILED_INSUFFICIENT_STORAGE" in str(raised.value)
+    assert [c[3] for c in calls] == ["install"]
+
+
+def test_a_signature_conflict_on_the_target_package_is_recovered(monkeypatch):
+    # The case that made the second build of a target unanalyzable: adb cannot
+    # replace a package signed with a different key, so the stale copy goes and
+    # the install is retried - and the removal is reported, not silent.
+    calls = _install_harness(monkeypatch, [_CONFLICT, None])
+    result = device.install_apk("emulator-5554", "/x/app.apk", "owasp.sat.agoat")
+    assert result["recovered_from_signature_conflict"] is True
+    assert result["uninstalled_package"] == "owasp.sat.agoat"
+    assert "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in result["first_refusal"]
+    uninstalls = [c for c in calls if c[3] == "uninstall"]
+    assert len(uninstalls) == 1 and uninstalls[0][4] == "owasp.sat.agoat"
+    assert sum(1 for c in calls if c[3] == "install") == 2
+
+
+def test_a_successful_install_reports_no_recovery(monkeypatch):
+    calls = _install_harness(monkeypatch, [None])
+    assert device.install_apk("emulator-5554", "/x/app.apk", "owasp.sat.agoat") == {
+        "recovered_from_signature_conflict": False
+    }
+    assert [c[3] for c in calls] == ["install"]
+
+
+def test_recovery_that_cannot_remove_the_stale_copy_names_both_reasons(monkeypatch):
+    # A recovery that fails must not read like the original refusal: the operator
+    # needs to know the removal was attempted and why it did not work.
+    _install_harness(monkeypatch, [_CONFLICT], uninstall_removes=False)
+    with pytest.raises(RuntimeError) as raised:
+        device.install_apk("emulator-5554", "/x/app.apk", "owasp.sat.agoat")
+    message = str(raised.value)
+    assert "could not be removed" in message
+    assert "DELETE_FAILED_INTERNAL_ERROR" in message
+
+
+def test_a_recovered_install_that_still_fails_says_the_removal_already_happened(monkeypatch):
+    _install_harness(monkeypatch, [_CONFLICT, "adb: failed to install: Failure [INSTALL_FAILED_OLDER_SDK]"])
+    with pytest.raises(RuntimeError) as raised:
+        device.install_apk("emulator-5554", "/x/app.apk", "owasp.sat.agoat")
+    message = str(raised.value)
+    assert "even after removing" in message
+    assert "INSTALL_FAILED_OLDER_SDK" in message
+
+
 def test_in_wsl_detects_microsoft_kernel(monkeypatch, tmp_path):
     # _in_wsl: the reference env is WSL2; the transport decision (adb over the
     # Windows-side relay vs direct) keys off this. Reads /proc/version - must be

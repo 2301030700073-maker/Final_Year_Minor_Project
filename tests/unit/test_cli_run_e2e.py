@@ -307,7 +307,7 @@ def test_install_failure_preserves_static_report_and_exits_nonzero(run_setup, mo
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
-    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: False)
     # synthetic bypass is computed before the device gate - keep it real/simple
     monkeypatch.setattr(
@@ -413,7 +413,7 @@ def test_unexpected_dynamic_exception_preserves_static_report_and_exits_nonzero(
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
-    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(
         cli, "synthesize",
@@ -464,7 +464,7 @@ def test_logcat_capture_failure_preserves_static_report_and_exits_nonzero(run_se
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
-    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(
         cli, "synthesize",
@@ -520,7 +520,7 @@ def test_unknown_app_root_probe_confirms_in_report(run_setup, monkeypatch):
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
-    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(
         cli, "synthesize",
@@ -580,7 +580,7 @@ def test_unknown_app_confirmed_root_correlates_rather_than_being_skipped(
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
-    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(
         cli, "synthesize",
@@ -641,7 +641,7 @@ def test_unknown_app_with_no_confirmation_still_declines_to_correlate(
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
-    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(
         cli, "synthesize",
@@ -695,7 +695,7 @@ def test_capture_window_runs_under_a_pinning_only_bypass(run_setup, monkeypatch)
     from common import StageResult
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
-    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(device_mod, "clear_logcat", lambda serial: None)
     monkeypatch.setattr(device_mod, "capture_logcat", lambda serial: "")
@@ -805,7 +805,7 @@ def test_capture_failure_footer_does_not_claim_dynamic_was_not_attempted(run_set
     from common import StageResult
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
-    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(
         cli, "synthesize",
@@ -1103,7 +1103,7 @@ def test_technology_check_raise_preserves_static_report_and_exits_nonzero(run_se
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
-    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(
         cli, "synthesize",

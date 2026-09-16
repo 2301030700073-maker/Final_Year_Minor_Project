@@ -448,7 +448,83 @@ def discover_device(serial: str | None = None) -> str:
     return lines[0].split("\t")[0]
 
 
-def install_apk(serial: str, apk_path: Path) -> None:
+def _stream_diagnostic(stdout, stderr) -> str:
+    """Both captured streams of a failed adb call, labelled, or a stated absence."""
+    parts = []
+    for label, stream in (("stdout", stdout), ("stderr", stderr)):
+        text = (stream or "").strip()
+        if text:
+            parts.append(f"{label}: {text}")
+    return " | ".join(parts) or "(adb produced no diagnostic on either stream)"
+
+
+def _install_diagnostic(exc: subprocess.CalledProcessError) -> str:
+    """adb's own explanation of a refused install, off the exception it was lost on.
+
+    ``capture_output=True`` puts the reason on the exception's ``.stderr``, but
+    ``str(CalledProcessError)`` renders only the command and the exit status. A
+    stage that reported the exception therefore reported "returned non-zero exit
+    status 1" and discarded the single line that says why - measured on the
+    7 MB AndroGoat build, where adb had answered
+    ``INSTALL_FAILED_UPDATE_INCOMPATIBLE: Package owasp.sat.agoat signatures do
+    not match previously installed version`` and none of it reached the report.
+    Every real refusal - ABI, minSdk, storage, signature - is named on that
+    stream, so this is the difference between a diagnosable stage and a
+    mysterious one (principle 3: a failure that does not carry its cause is a
+    silent failure wearing loud clothes)."""
+    return _stream_diagnostic(exc.stdout, exc.stderr)
+
+
+# adb's spellings for "this package is already here under a different signing
+# key". Three phrasings because the exact code varies by Android version.
+_SIGNATURE_CONFLICT_MARKERS = (
+    "INSTALL_FAILED_UPDATE_INCOMPATIBLE",
+    "INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES",
+    "signatures do not match",
+)
+
+
+def _signature_conflict_package(diagnostic: str) -> str | None:
+    """The package adb says is already installed under another key, if any.
+
+    Only adb's OWN naming of the package is returned - never a package derived
+    from the APK under test. What is done with the answer is destructive
+    (below), so it must come from the tool that observed the conflict rather
+    than from our own expectation of it."""
+    for line in diagnostic.splitlines():
+        if not any(m in line for m in _SIGNATURE_CONFLICT_MARKERS):
+            continue
+        match = re.search(r"Package ([A-Za-z0-9_.]+) signatures do not match", line)
+        if match:
+            return match.group(1)
+    return None
+
+
+def install_apk(serial: str, apk_path: Path, package_name: str | None = None) -> dict:
+    """Install the APK under test. Returns what the install had to do to succeed.
+
+    ``package_name`` is the package the caller expects this APK to declare. It
+    is what makes the recovery below safe, and it is optional: with no expected
+    package the recovery is skipped and a conflict is reported as a failure.
+
+    Recovery, in one narrow case. ``adb install -r`` cannot replace a package
+    whose installed copy is signed with a different key. That is not a defect in
+    the APK - it is residue from an earlier run of this pipeline against a
+    different build of the same package, which is exactly what this project does
+    when it re-analyzes a target across builds (AndroGoat: 21 runs). Left
+    alone, the platform can never analyze two builds of one package in
+    sequence, because the second run's install always fails. So when adb
+    names the conflicting package AND it is the package being installed, the
+    stale copy is uninstalled and the install retried once. Three things keep
+    this from being a blunt instrument: the uninstall target is adb's own named
+    package, never the caller's expectation of it; it is only reached on an
+    explicit signature-conflict marker, so ABI/minSdk/storage refusals still
+    fail loudly instead of being retried into a confusing state; and the
+    recovery is returned to the caller so it is recorded as evidence rather
+    than performed silently.
+
+    Callers may ignore the return value; nothing is mutated but the device's
+    copy of the target package itself."""
     adb = _require_adb()
     # -t: allow installing testOnly APKs (some training/vulnerable apps are
     # marked testOnly; install without -t fails INSTALL_FAILED_TEST_ONLY).
@@ -459,10 +535,44 @@ def install_apk(serial: str, apk_path: Path) -> None:
     # contradicting the module's own never-hang-silently discipline (principle 3).
     # 5 minutes is far beyond any real install of this project's targets, so it
     # only ever trips on a hang.
-    subprocess.run(
-        [adb, "-s", serial, "install", "-r", "-t", str(apk_path)],
-        capture_output=True, text=True, check=True, timeout=300,
-    )
+    cmd = [adb, "-s", serial, "install", "-r", "-t", str(apk_path)]
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=300)
+        return {"recovered_from_signature_conflict": False}
+    except subprocess.CalledProcessError as exc:
+        diagnostic = _install_diagnostic(exc)
+        conflict = _signature_conflict_package(diagnostic)
+        if conflict is None or package_name is None or conflict != package_name:
+            raise RuntimeError(
+                f"adb refused to install {Path(apk_path).name}: {diagnostic}"
+            ) from exc
+        # The retry is attempted but never assumed: `adb uninstall` exits non-zero
+        # when nothing was removed, and a second refusal is possible, so the
+        # caller still sees a failure - now one that names the package removed
+        # and quotes the second refusal, instead of the same opaque status.
+        removed = subprocess.run(
+            [adb, "-s", serial, "uninstall", conflict],
+            capture_output=True, text=True, timeout=120,
+        )
+        if removed.returncode != 0 or "Success" not in (removed.stdout or ""):
+            raise RuntimeError(
+                f"adb refused to install {Path(apk_path).name} ({diagnostic}) and the "
+                f"stale copy of {conflict} could not be removed to make room: "
+                f"{_stream_diagnostic(removed.stdout, removed.stderr)}"
+            ) from exc
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=300)
+        except subprocess.CalledProcessError as retry_exc:
+            raise RuntimeError(
+                f"adb refused to install {Path(apk_path).name} even after removing the "
+                f"differently-signed copy of {conflict}: "
+                f"{_install_diagnostic(retry_exc)}"
+            ) from retry_exc
+        return {
+            "recovered_from_signature_conflict": True,
+            "uninstalled_package": conflict,
+            "first_refusal": diagnostic,
+        }
 
 
 def clear_logcat(serial: str) -> None:

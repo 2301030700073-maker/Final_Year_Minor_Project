@@ -252,6 +252,7 @@ class TechnologyHooksEngagedCheck:
         frida_messages: list | None,
         app_still_running: bool | None = None,
         ui_liveness: dict | None = None,
+        window: str | None = None,
     ) -> VerificationResult:
         """`app_still_running` is the post-bypass liveness of the app process,
         recorded by the dynamic stage at the settle window (True = it survived
@@ -265,16 +266,37 @@ class TechnologyHooksEngagedCheck:
         uiautomator interactive-node count) - it proves the app is not merely
         alive but its UI is live, focused, un-ANRed, and renders interactive
         nodes. Each signal is honest real device data; None means "not captured"
-        (a missing tool), never a guessed pass."""
+        (a missing tool), never a guessed pass.
+
+        `window` names the launch this stream came from, and is set when the
+        evaluation is about the capture window rather than the dynamic stage's own
+        (ADR-0016). It is a LABEL, not a mode: the predicate is evaluated on the
+        stream it was given exactly as before, and the label only makes the
+        resulting confirmation lines state which launch they are about - so a
+        confirmation can never be read as belonging to the other window, which is
+        the conflation ADR-0015 spent three commits removing. None keeps the
+        original wording byte-for-byte for the dynamic stage's own evaluation."""
         messages = frida_messages or []
         engaged: list[str] = []
         root_probe_hits: list[str] = []
         effects: list[str] = []
         not_installed: list[str] = []
         for m in messages:
-            if not isinstance(m, dict):
+            if isinstance(m, str):
+                # The capture stage stores a payload that was ITSELF a string (a
+                # script log line) as the bare string.
+                payload = m
+            elif isinstance(m, dict):
+                payload = m.get("payload")
+                if not isinstance(payload, (dict, str)):
+                    # Payload-unwrapped, the capture stage's stored shape: the
+                    # message IS the payload. Read it rather than skipping - an
+                    # extractor that can decline to look at a message turns that
+                    # message into silence, which is how this check's sibling read
+                    # the whole capture window as an observer that saw nothing.
+                    payload = m
+            else:
                 continue
-            payload = m.get("payload")
             if isinstance(payload, dict):
                 hook = payload.get("hook")
                 if hook and str(hook) not in engaged:
@@ -383,7 +405,8 @@ class TechnologyHooksEngagedCheck:
                 _native_hook_installation_line(not_installed, captured=bool(messages))
             ),
             "TLS handshakes completed post-bypass": (
-                "yes (a TLS handshake completed through the neutralized stack)"
+                "yes (a TLS handshake completed through the neutralized stack"
+                f"{', ' + window if window else ''})"
                 if "ssl-handshake" in effects
                 else (
                     TLS_HANDSHAKE_REJECTED
@@ -406,7 +429,8 @@ class TechnologyHooksEngagedCheck:
             "SSL bypass confirmation basis": (
                 "app's own pin-check ran without rejecting AND a TLS handshake "
                 "completed (pin logic accepted a connection it would otherwise "
-                "reject)" if ssl_confirmed
+                "reject)"
+                f"{'; ' + window if window else ''}" if ssl_confirmed
                 else "not confirmed (need BOTH the app's pin-check to run without "
                      "rejecting and a TLS handshake to complete)"
             ),

@@ -8,7 +8,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 52 files, **22,030 LOC**. Largest: cli (3,443), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,372), mitmproxy_capture (1,593), common (784), device (779), signatures (717), attestation (695).
+- `src/`: 52 files, **22,054 LOC**. Largest: cli (3,443), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,372), mitmproxy_capture (1,593), common (784), device (779), signatures (717), attestation (695).
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
 - `tests/`: 92 files, **30,331 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
@@ -66,7 +66,7 @@ module's line count unchanged escapes it.)
 | `storage/db.py` | 195 | 210 | +15 | 2026-09-09 |
 | `storage/results.py` | 218 | 250 | +32 | 2026-09-09 |
 | `stringrecover.py` | 315 | 374 | +59 | 2026-09-09 |
-| `success_checks/*.py` | 800 | 924 | +124 | re-read (undated) |
+| `success_checks/*.py` | 800 | 948 | +148 | re-read (undated) |
 | `synthesizer.py` | 1117 | 1,192 | +75 | 2026-09-10 |
 | `ui_liveness.py` | 308 | 553 | +245 | — |
 | `upx.py` | 128 | 128 | +0 | — |

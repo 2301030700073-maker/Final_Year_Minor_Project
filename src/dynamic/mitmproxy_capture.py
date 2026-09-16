@@ -84,6 +84,25 @@ from mitmproxy import http
 _LOG_PATH = r"@LOG_WIN@"
 
 
+def _mark_loaded():
+    # The addon's OWN liveness, written once at import - before mitmproxy calls
+    # any hook, so it depends on no traffic, no app, and no client trusting our
+    # CA. Every other marker in this file is written by a hook that fires on
+    # something happening, so if the addon never loads (a syntax or import
+    # error) or cannot write its log at all, NONE of them appear and the file
+    # comes back empty. The stage reads that emptiness as evidence, so without
+    # this line "the recorder ran and saw nothing" and "the recorder never ran"
+    # are one observation - and it resolves to the first.
+    try:
+        with open(_LOG_PATH, "a", buffering=1) as f:
+            f.write("@@ADDON_LOADED@@\\n")
+    except Exception:
+        pass
+
+
+_mark_loaded()
+
+
 def _emit(flow):
     try:
         req = flow.request
@@ -174,6 +193,13 @@ def tls_failed_client(flow):
 # skipped by _parse_flow_detail so it is never mistaken for a decrypted flow.
 _CLIENT_CONNECT_MARKER = "@@CLIENT_CONNECT@@"
 
+# The addon's own liveness marker, written at import (see the addon's
+# _mark_loaded). Its ABSENCE on the WSL2 placement is the only signal that says
+# the log is empty because nothing ever wrote to it rather than because nothing
+# happened - without it that emptiness is read as a device-routing or
+# app-silence cause, neither of which the evidence carries.
+_ADDON_LOADED_MARKER = "@@ADDON_LOADED@@"
+
 # TLS-refusal marker the addon writes when a client REJECTS our certificate (see
 # the addon's tls_failed_client hook). Distinct from _CLIENT_CONNECT_MARKER: that
 # one says the device reached the proxy, this one says the proxy's certificate was
@@ -189,6 +215,19 @@ _TLS_FAILED_CLIENT_MARKER = "@@TLS_FAILED_CLIENT@@"
 _TLS_HANDSHAKE_FAILED_PHRASE = "tls handshake failed"
 # The host inside that message ("... certificate for <host> (tlsv1 alert ...)").
 _TLS_FAILED_HOST_RE = re.compile(r"\bfor\s+([^\s(]+)")
+
+
+def _capture_channel_alive(text: str) -> bool:
+    """Whether the WSL2 addon wrote its load marker into the log we read back.
+
+    Only meaningful on the WSL2 placement: there an addon produces every fact
+    the capture reports, so an empty log has two possible meanings - nothing
+    happened, or nothing was recording - and only the marker separates them.
+    The native placement uses mitmdump's own flow_detail stdout and runs no
+    addon, so the marker can never appear there and its absence means nothing;
+    the caller passes wsl2 and this is never asked to answer for that path.
+    """
+    return _ADDON_LOADED_MARKER in (text or "")
 
 
 @dataclass
@@ -370,6 +409,9 @@ def _parse_flow_detail(text: str) -> list[FlowSummary]:
         # Skip connection lifecycle noise, including our own reachability marker
         # (@@CLIENT_CONNECT@@ is counted by _count_client_connections, never a flow).
         if line == _CLIENT_CONNECT_MARKER:
+            continue
+        if line == _ADDON_LOADED_MARKER:
+            # Addon liveness, not a flow (see _capture_channel_alive).
             continue
         if line.startswith(_TLS_FAILED_CLIENT_MARKER):
             # A certificate-refusal record, not a flow. Prefix (not equality):
@@ -819,6 +861,9 @@ def run_capture_stage(
         # and native mitmdump's own flow_detail line), so neither reports a zero
         # it could not have seen.
         tls_failed = _count_tls_failed_clients(stdout_text or "")
+        # The WSL2 addon's own liveness (None on the native placement, where no
+        # addon runs and mitmdump's own flow_detail stdout is the source).
+        channel_alive = _capture_channel_alive(stdout_text or "") if wsl2 else None
         if not flows:
             client_connections = _count_client_connections(stdout_text or "")
             # A crashed pinning-bypass script is a THIRD, concrete cause of zero
@@ -833,7 +878,21 @@ def run_capture_stage(
             # CAPREACH1: name the ACTUAL cause using the pre-flight probe, instead
             # of the old "either the device could not reach mitmdump ... or the app
             # made no network requests" hedge that left the operator to guess.
-            if tls_failed:
+            # The capture channel comes first. On WSL2 every fact below is read
+            # from a log the addon writes, so a log carrying no addon marker
+            # cannot support ANY of them: this rung does not compete with the
+            # others, it invalidates them.
+            if channel_alive is False:
+                device_or_app_cause = (
+                    "the capture proxy's log carries no addon marker at all - not "
+                    "even the @@ADDON_LOADED@@ line, which is written at import "
+                    "before any traffic exists. So the recorder that produces every "
+                    "other fact about this capture never ran, and this empty result "
+                    "says NOTHING about the device route, the app's traffic, or "
+                    "certificate pinning. Check that the Windows-host mitmdump "
+                    "loaded the addon and could write its flow log"
+                )
+            elif tls_failed:
                 # The refusal is DIRECT evidence, so it outranks the pre-flight
                 # probe and the connection count in the diagnosis: a client can
                 # only refuse our certificate after completing a TCP connection
@@ -913,6 +972,11 @@ def run_capture_stage(
                     # Certificate refusals this capture observed, from whichever
                     # source this placement writes (see _count_tls_failed_clients).
                     "tls_failed_clients": tls_failed,
+                    # Whether the WSL2 addon reported itself loaded (None on the
+                    # native placement, which runs no addon). False means this log
+                    # is empty because nothing recorded, not because nothing
+                    # happened - and the cause named in `error` says so.
+                    "capture_channel_alive": channel_alive,
                     # CAPREACH1: the PRE-FLIGHT probe verdict (True route up /
                     # False route down / None not probeable). Recorded separately
                     # from client_connections because it is measured before the

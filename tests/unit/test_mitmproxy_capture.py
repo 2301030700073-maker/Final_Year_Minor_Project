@@ -1198,3 +1198,81 @@ def test_reachability_probe_never_raises_on_timeout(monkeypatch):
     # degrades to unknown.
     import subprocess as _sp
     assert _probe(monkeypatch, raises=_sp.TimeoutExpired("nc", 30)) is None
+
+
+# --- the capture channel's own liveness -------------------------------------
+# On the WSL2 placement EVERY fact the capture reports is read from a log the
+# addon writes, so a log with no addon marker in it supports none of them. The
+# stage used to read that emptiness as a device-routing or app-silence cause -
+# naming a cause its only evidence could not carry.
+
+
+def _wsl2_empty_stubs(monkeypatch, log_text, reachable):
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: True)
+    monkeypatch.setattr(mitmproxy_capture, "_windows_mitmdump", lambda: "C:\\x\\mitmdump.exe")
+    monkeypatch.setattr(pass_through_proxy, "ensure_internet", lambda *a, **k: None)
+    monkeypatch.setattr(pass_through_proxy, "is_listening", lambda *a, **k: True)
+    monkeypatch.setattr(mitmproxy_capture, "_prepare_windows_confdir",
+                        lambda confdir, dest: "C:\\Users\\Public\\x-conf")
+    monkeypatch.setattr(mitmproxy_capture, "_write_windows_addon", lambda path, log_win: path)
+    monkeypatch.setattr(mitmproxy_capture, "_start_windows_mitmdump", lambda *a: None)
+    monkeypatch.setattr(mitmproxy_capture, "_wait_windows_listening", lambda *a: None)
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    monkeypatch.setattr(mitmproxy_capture.time, "sleep", lambda s: None)
+    monkeypatch.setattr(mitmproxy_capture.time, "time_ns", lambda: 12345)
+    monkeypatch.setattr(mitmproxy_capture, "_read_flow_detail_log", lambda path: log_text)
+    monkeypatch.setattr(device, "create_mitm_ca", lambda confdir: confdir / "c.pem")
+    monkeypatch.setattr(device, "push_system_ca",
+                        lambda serial, cert: "/system/etc/security/cacerts/x.0")
+    monkeypatch.setattr(device, "adb_reverse", lambda serial, dp, hp, add=True: None)
+    monkeypatch.setattr(device, "set_http_proxy", lambda serial, host, port: None)
+    monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+    monkeypatch.setattr(mitmproxy_capture, "_launch_app", lambda serial, package: None)
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: reachable)
+
+
+def test_addon_reports_its_own_liveness_at_import(tmp_path):
+    addon = tmp_path / "addon.py"
+    mitmproxy_capture._write_windows_addon(addon, r"C:\Users\Public\f.log")
+    rendered = addon.read_text()
+    # Written by a module-level call, never from a hook: a marker written from a
+    # hook could only appear once traffic had already proved the addon was alive,
+    # which is the very fact it exists to establish.
+    assert "@@ADDON_LOADED@@" in rendered
+    assert "\n_mark_loaded()\n" in rendered
+
+
+def test_addon_loaded_marker_is_never_read_as_traffic():
+    assert mitmproxy_capture._parse_flow_detail("@@ADDON_LOADED@@\n") == []
+    assert mitmproxy_capture._count_client_connections("@@ADDON_LOADED@@\n") == 0
+
+
+def test_capture_channel_alive_true_only_when_the_marker_is_present():
+    assert mitmproxy_capture._capture_channel_alive("@@ADDON_LOADED@@\n") is True
+    assert mitmproxy_capture._capture_channel_alive("") is False
+    assert mitmproxy_capture._capture_channel_alive(None) is False
+    # Traffic alone does not prove the addon loaded - only its own marker does.
+    assert mitmproxy_capture._capture_channel_alive("@@CLIENT_CONNECT@@\n") is False
+
+
+def test_wsl2_empty_log_without_the_addon_marker_blames_the_recorder(monkeypatch, tmp_path):
+    _wsl2_empty_stubs(monkeypatch, log_text="", reachable=False)
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1)
+    assert result.status == "failed"
+    assert result.evidence["capture_channel_alive"] is False
+    assert "@@ADDON_LOADED@@" in result.error
+    # The rung that would otherwise fire on a down pre-flight probe names the adb
+    # reverse tunnel. It must not, because nothing recorded whether the device
+    # reached the proxy at all.
+    assert "adb reverse" not in result.error
+
+
+def test_wsl2_empty_log_with_the_addon_marker_keeps_the_route_verdict(monkeypatch, tmp_path):
+    _wsl2_empty_stubs(monkeypatch, log_text="@@ADDON_LOADED@@\n", reachable=False)
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1)
+    assert result.evidence["capture_channel_alive"] is True
+    assert "adb reverse" in result.error
+    assert "@@ADDON_LOADED@@" not in result.error

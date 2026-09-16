@@ -18,9 +18,12 @@ signal that PROVES the empty capture inapplicable/expected downgrades it to
     it proves the route worked and that the app exercised its network path)
   - INTERNET + dynamic ran-success + NO in-process SSL-exercised signal (neither
     the synthesized bypass's bypassEffect nor the predefined bypass's pin-check/
-    verify firing for a concrete host) => app-silence (the in-process Frida
-    observers would have fired even through an unreachable proxy, so their silence
-    rules out a proxy-reachability failure)
+    verify firing for a concrete host) => app-silence, but ONLY where that silence
+    is informative. These observers fire INSIDE a live connection's TLS stage, so
+    they say nothing when (i) the app has a network path outside the Java stack they
+    hook (a WebView page load, a Flutter dart:io session) or (ii) the capture
+    recorded the device opening a connection. Both are guarded in Signal 2: (i) is
+    reported as uninformative, naming the layer, and (ii) falls through to Signal 3,
 
 Anything undisambiguable - INTERNET but no successful dynamic signal (dynamic
 skipped/failed/absent), or no manifest at all - stays FAILED; reclassifying it
@@ -375,3 +378,63 @@ def test_a_connection_the_capture_watched_outranks_a_down_probe():
         capture, _manifest(_INTERNET), _dynamic([], status="skipped"))
     assert out.status == "skipped"
     assert "4 client" in out.evidence["not_applicable_reason"]
+
+
+# --- Signal 2: the 0 it reads is a fact about the OBSERVERS -------------------
+
+def test_signal2_still_reads_observer_silence_as_app_silence_when_nothing_contradicts_it():
+    # The one case where the silence IS informative: a Java-stack app, a route the
+    # pre-flight probe did not find down, and no connection the capture observed.
+    out = _reclassify_empty_capture(_capture(), _manifest(_INTERNET), _dynamic([]))
+    assert out.status == "skipped"
+    assert "app did not exercise its network/SSL path" in out.evidence["not_applicable_reason"]
+    assert "non_java_tls_layers" not in out.evidence
+
+
+def test_signal2_names_the_invisible_tls_stack_instead_of_the_app():
+    # A WebView page load runs Chromium's own TLS stack and never calls
+    # CertificatePinner.check / TrustManagerImpl.verifyChain, so the observers'
+    # silence cannot establish that the app made no request.
+    out = _reclassify_empty_capture(
+        _capture(), _manifest(_INTERNET), _dynamic([]),
+        non_java_tls_layers=["WebView (Chromium's own TLS stack)"],
+    )
+    assert out.status == "skipped"
+    reason = out.evidence["not_applicable_reason"]
+    assert "WebView (Chromium's own TLS stack)" in reason
+    assert "cannot say the app did not exercise" in reason
+    # The ASSERTION form must be gone, not merely the words: the honest reason
+    # necessarily says it *cannot* make this claim, so the regression guard is the
+    # exact claiming phrase the old branch emitted.
+    assert "app did not exercise its network/SSL path (no in-process SSL signal" not in reason
+    assert out.evidence["non_java_tls_layers"] == ["WebView (Chromium's own TLS stack)"]
+
+
+def test_signal2_does_not_claim_app_silence_when_a_connection_was_observed():
+    # RS_CertPinning 2026-09-16: client_connections=1 with 0 in-process signals. A
+    # connection IS the app exercising its network path, so Signal 2 must not assert
+    # the opposite of what the proxy measured.
+    out = _reclassify_empty_capture(
+        _capture(client_connections=1), _manifest(_INTERNET), _dynamic([]),
+    )
+    assert out.status == "skipped"
+    reason = out.evidence["not_applicable_reason"]
+    assert "device reached the proxy" in reason and "1 client connection" in reason
+    assert "app did not exercise" not in reason
+
+
+def test_signal3_reason_names_the_invisible_path_when_the_app_has_one():
+    out = _reclassify_empty_capture(
+        _capture(client_connections=1), _manifest(_INTERNET), _dynamic([]),
+        non_java_tls_layers=["Dart AOT snapshot (Flutter's own BoringSSL via dart:io)"],
+    )
+    assert "Dart AOT snapshot" in out.evidence["not_applicable_reason"]
+
+
+def test_non_java_tls_layers_names_only_layers_the_scan_corpus_established():
+    from cli import _non_java_tls_layers
+    assert _non_java_tls_layers(None, None) == []
+    assert _non_java_tls_layers([], []) == []
+    assert len(_non_java_tls_layers(["Webview.java:22: myWebView.loadUrl(\"https://x\")"], [])) == 1
+    assert len(_non_java_tls_layers([], ["libapp.so"])) == 1
+    assert len(_non_java_tls_layers(["a"], ["libapp.so"])) == 2

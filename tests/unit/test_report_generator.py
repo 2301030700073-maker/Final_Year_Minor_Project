@@ -2453,3 +2453,99 @@ def test_self_termination_note_falls_back_when_reason_missing(tmp_path):
     content = report_path.read_text(encoding="utf-8")
     assert "App anti-instrumentation fired (FR-4.6)" in content
     assert "detected the instrumentation (Frida/root)" in content
+
+
+def test_capture_summary_exposes_the_non_java_layers_and_the_preflight_verdict():
+    from common import StageResult
+    from report.generator import _capture_summary
+
+    skipped = StageResult(
+        stage="capture-traffic", status="skipped",
+        evidence={"reason": "no flows captured",
+                  "not_applicable_reason": "no in-process SSL signal was observed ...",
+                  "non_java_tls_layers": ["WebView (Chromium's own TLS stack)"],
+                  "device_reached_proxy_preflight": False},
+    )
+    cs = _capture_summary([skipped])
+    assert cs["capture_non_java_tls_layers"] == ["WebView (Chromium's own TLS stack)"]
+    assert cs["capture_device_reached_preflight"] is False
+    # No capture stage at all: the template reads both keys unconditionally, so a run
+    # with none must still provide them (RPT-TMPLCOV1).
+    assert _capture_summary([])["capture_non_java_tls_layers"] is None
+    assert _capture_summary([])["capture_device_reached_preflight"] is None
+
+
+def test_generate_report_non_java_tls_app_is_not_told_it_did_not_try(tmp_path):
+    # RS_CertPinning 2026-09-16, at report level: the capture came back empty on an
+    # app whose pinned request is a WebView page load (Webview.java:22), which runs
+    # Chromium's TLS stack and never reaches the Java-stack observers. Their silence
+    # must not be rendered as the app not trying.
+    from common import StageResult
+    from static.manifest import ManifestInfo
+
+    skipped = StageResult(
+        stage="capture-traffic", status="skipped",
+        evidence={
+            "reason": "no flows captured", "proxy": "127.0.0.1:8081",
+            "client_connections": 1, "tls_failed_clients": [],
+            "capture_channel_alive": True, "device_reached_proxy_preflight": True,
+            "non_java_tls_layers": ["WebView (Chromium's own TLS stack)"],
+            "reclassified_from": "failed",
+            "not_applicable_reason": (
+                "no in-process SSL signal was observed, and this app has at least one "
+                "network path outside the Java stack those observers hook (WebView "
+                "(Chromium's own TLS stack)) - so their silence is uninformative this "
+                "run, and this run cannot say the app did not exercise its network/SSL "
+                "path"),
+            "flows_path": "/x/flows"},
+    )
+    manifest = ManifestInfo(debuggable=False, network_security_config=None,
+                            permissions=["android.permission.INTERNET"])
+    path = generate_report(
+        run_id="cap-nonjava", apk_hash="cap03", timestamp="2026-09-16T13:00:00",
+        metadata={"hashes": {"sha256": "cap03"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[skipped], output_dir=tmp_path, manifest=manifest,
+    )
+    content = path.read_text(encoding="utf-8")
+    # The unobservable layer is named and the observers are disclaimed...
+    assert "cannot speak for this app" in content
+    assert "WebView (Chromium's own TLS stack)" in content
+    assert "uninformative" in content
+    # ...and the lead-in no longer claims the empty capture was PROVEN expected.
+    assert "proved this run's empty capture was expected" not in content
+    assert "showed the empty capture is not a proxy/wiring fault" in content
+
+
+def test_generate_report_preflight_down_does_not_claim_the_app_never_executed(tmp_path):
+    # cli.py's own Signal-P comment: these observers fire INSIDE a live connection's
+    # TLS stage, so a device that cannot open the socket produces their silence
+    # whether or not the app made a request. The report must not read that 0 as proof
+    # the app's pinned request never executed.
+    from common import StageResult
+    from static.manifest import ManifestInfo
+
+    down = StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={"reason": "no flows captured", "proxy": "127.0.0.1:8081",
+                  "client_connections": 0, "tls_failed_clients": [],
+                  "capture_channel_alive": True,
+                  "device_reached_proxy_preflight": False, "flows_path": "/x/flows"},
+        error="no traffic captured through the proxy",
+    )
+    dynamic = StageResult(
+        stage="dynamic", status="success",
+        evidence={"frida_messages": [], "scripts_applied": ["synthetic_ssl_pinning_bypass"]},
+    )
+    manifest = ManifestInfo(debuggable=False, network_security_config=None,
+                            permissions=["android.permission.INTERNET"])
+    path = generate_report(
+        run_id="cap-preflight-down", apk_hash="cap04", timestamp="2026-09-16T13:05:00",
+        metadata={"hashes": {"sha256": "cap04"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[dynamic, down], output_dir=tmp_path, manifest=manifest,
+    )
+    content = path.read_text(encoding="utf-8")
+    assert "the app's own pinned request never executed" not in content
+    assert "pre-flight probe found the device could **not** reach the proxy" in content
+    assert "it leaves a device→proxy reachability failure to fix" in content

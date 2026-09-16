@@ -8,9 +8,9 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 51 files, **20,790 LOC**. Largest: cli (3,231), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,172), mitmproxy_capture (1,167), common (784), device (779), signatures (717), attestation (695).
+- `src/`: 51 files, **20,895 LOC**. Largest: cli (3,317), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,191), mitmproxy_capture (1,167), common (784), device (779), signatures (717), attestation (695).
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
-- `tests/`: 92 files, **29,824 LOC** (more test than source; informational, see §Currency).
+- `tests/`: 92 files, **29,929 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
 
 ## Currency — what each ✅ covers
@@ -38,7 +38,7 @@ module's line count unchanged escapes it.)
 | `androguard_scanner.py` | 335 | 387 | +52 | — |
 | `audit/attestation.py` | 571 | 695 | +124 | 2026-09-07 |
 | `calibration/*.py` | 510 | 571 | +61 | 2026-09-07 |
-| `cli.py` | 2530 | 3,231 | +701 | 2026-09-15 (full re-read) |
+| `cli.py` | 2530 | 3,317 | +787 | 2026-09-15, 2026-09-16 (Signal-2 observer silence is not app-silence; the 0 is a fact about the observers) |
 | `common.py` | 466 | 784 | +318 | — |
 | `correlation.py` | 82 | 140 | +58 | — |
 | `coverage.py` | 342 | 527 | +185 | 2026-09-07 |
@@ -60,7 +60,7 @@ module's line count unchanged escapes it.)
 | `packers.py` | 157 | 157 | +0 | — |
 | `pass_through_proxy.py` | 245 | 277 | +32 | — |
 | `report/attribution.py` | 220 | 220 | +0 | 2026-09-07 |
-| `report/generator.py` | 791 | 1,172 | +23 | 2026-09-08, 2026-09-15, 2026-09-16 (empty-capture ladder reads the stage record) |
+| `report/generator.py` | 791 | 1,191 | +400 | 2026-09-08, 2026-09-15, 2026-09-16 (empty-capture ladder reads the stage record; render sites stop asserting an inference their evidence cannot carry) |
 | `signatures.py` | 523 | 717 | +194 | — |
 | `storage/db.py` | 195 | 210 | +15 | 2026-09-09 |
 | `storage/results.py` | 218 | 250 | +32 | 2026-09-09 |

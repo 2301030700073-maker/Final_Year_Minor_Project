@@ -735,10 +735,37 @@ def _correlation_skip_reason_for_failed_stage(
     return None
 
 
+def _non_java_tls_layers(webview_sites, dart_aot_libs) -> list[str]:
+    """The TLS stacks this run has EVIDENCE the app uses which the dynamic stage's
+    in-process observers structurally cannot see, named for the empty-capture reason.
+
+    Both inputs come from the same scan corpus the report already prints as
+    coverage-limited, so naming them here adds no new claim: a WebView call site
+    (find_webview_js) means the app hands at least one page load to Chromium, whose
+    TLS stack is its own; a Dart AOT snapshot (find_dart_aot_libs) means a Flutter
+    app whose dart:io TLS runs its own BoringSSL. Neither routes through
+    javax.net.ssl.X509TrustManager, so neither ever reaches the dynamic stage's
+    CertificatePinner.check / TrustManagerImpl.verifyChain hooks - however many
+    requests the app makes.
+
+    Deliberately NOT listed: a native libssl.so. The synthesizer DOES hook
+    SSL_CTX_* on those when symbols survive, so treating native TLS as invisible
+    would be an overclaim in the other direction (the stripped-BoringSSL case is
+    already reported honestly on its own line, [[native-boringssl-symbol-stripping]]).
+    Absence from this list is not a claim that a layer is observable."""
+    layers: list[str] = []
+    if webview_sites:
+        layers.append("WebView (Chromium's own TLS stack)")
+    if dart_aot_libs:
+        layers.append("Dart AOT snapshot (Flutter's own BoringSSL via dart:io)")
+    return layers
+
+
 def _reclassify_empty_capture(
     capture_stage: StageResult,
     manifest_info,
     dynamic_stage: StageResult | None,
+    non_java_tls_layers: list[str] | None = None,
 ) -> StageResult:
     """An empty traffic capture is only a FAILURE when a real proxy/wiring problem
     is the plausible cause. When a proxy-INDEPENDENT signal already in hand proves
@@ -810,7 +837,17 @@ def _reclassify_empty_capture(
     (Windows mitmdump missing, no usable device) are returned untouched - only an
     empty-capture "failed" whose evidence carries a flow count of zero is a
     reclassification candidate (decider-owns-its-guard: this function alone decides,
-    so no caller can drift)."""
+    so no caller can drift).
+
+    Signal 2 carries two guards the 0 it reads does not establish, both applied
+    BEFORE it concludes app-silence (non_java_tls_layers):
+      - an app whose TLS runs outside the Java stack the observers hook (a WebView
+        page load, a Flutter dart:io TLS session) produces their silence whether or
+        not it made a request, so the 0 is uninformative in both directions and the
+        reason says that instead of naming the app for not trying;
+      - a capture that recorded the device opening a connection to the proxy has
+        direct evidence the network path WAS exercised, which the 0 cannot override
+        - that case falls through to Signal 3, which owns it."""
     if capture_stage.status != "failed":
         return capture_stage
     evidence = capture_stage.evidence or {}
@@ -927,7 +964,45 @@ def _reclassify_empty_capture(
                     or isinstance(payload.get("hostname"), str)
                     or isinstance(payload.get("host"), str)):
                 ssl_effects += 1
-        if ssl_effects == 0:
+        # The 0 below is a fact about the OBSERVERS, and two things follow from it
+        # only if the observers could have seen this app's TLS at all:
+        #
+        # (a) A network path outside the Java stack they hook. CertificatePinner.check
+        #     and TrustManagerImpl.verifyChain are Java-stack hooks: a WebView page
+        #     load runs Chromium's own TLS stack and a Flutter app's dart:io runs its
+        #     own BoringSSL, so neither reaches them however many requests the app
+        #     makes. On such an app the 0 is uninformative in BOTH directions, and
+        #     calling it app-silence would be the empty-evidence-channel-read-as-
+        #     evidence-of-absence mistake one layer up - the same class this ladder's
+        #     predecessor guards exist for.
+        # (b) A connection the capture actually recorded. A connection IS the app
+        #     exercising its network path, so concluding "did not exercise" here would
+        #     assert the opposite of what the proxy measured; the evidence belongs to
+        #     Signal 3, which is exactly where this falls through
+        #     ([[guard-order-relative-to-the-branch-it-guards]]).
+        if ssl_effects == 0 and not _observed_connection:
+            if non_java_tls_layers:
+                layers = ", ".join(non_java_tls_layers)
+                return StageResult(
+                    stage="capture-traffic", status="skipped",
+                    evidence={**evidence, "reclassified_from": "failed",
+                              "non_java_tls_layers": list(non_java_tls_layers),
+                              "not_applicable_reason": (
+                                  "no in-process SSL signal was observed, and this app "
+                                  f"has at least one network path outside the Java stack "
+                                  f"those observers hook ({layers}) - so their silence is "
+                                  "uninformative this run. A request on such a path never "
+                                  "reaches CertificatePinner.check or "
+                                  "TrustManagerImpl.verifyChain whether or not the app "
+                                  "made one, which makes the app exercising exactly that "
+                                  "path indistinguishable from the app making no request "
+                                  "at all. This run therefore cannot say the app did not "
+                                  "exercise its network/SSL path: the empty capture is "
+                                  "evidence neither way, and it is not a proxy failure "
+                                  "either. Confirming or refuting pinning on that path "
+                                  "needs a runtime that sees that TLS stack (ADR-0006)")},
+                    error=None, duration_ms=capture_stage.duration_ms,
+                )
             return StageResult(
                 stage="capture-traffic", status="skipped",
                 evidence={**evidence, "reclassified_from": "failed",
@@ -965,7 +1040,12 @@ def _reclassify_empty_capture(
                           "this run (interactive capture needed) or a request this "
                           "parser could not read (a non-standard verb is the known "
                           "residual of the _METHODS enumeration). This is NOT a "
-                          "device->proxy reachability failure")},
+                          "device->proxy reachability failure")
+                          + (f". This app also has a network path outside the Java stack "
+                             f"the in-process observers cover ({', '.join(non_java_tls_layers)}), "
+                             "so their silence does not narrow these causes: a request on "
+                             "that path is invisible to them whether or not it was made."
+                             if non_java_tls_layers else "")},
             error=None, duration_ms=capture_stage.duration_ms,
         )
 
@@ -2411,7 +2491,13 @@ def run(
         # dynamic ran with 0 in-process SSL bypassEffect) can prove the empty
         # capture was expected/inapplicable - reclassify those to "skipped" so the
         # stage line stops crying wolf while a genuine proxy failure stays loud.
-        capture_stage = _reclassify_empty_capture(capture_stage, manifest_info, dynamic_stage)
+        capture_stage = _reclassify_empty_capture(
+            capture_stage, manifest_info, dynamic_stage,
+            # The app's own out-of-Java-stack TLS layers, from the same scan corpus
+            # the report prints as coverage-limited ([[gap8-webview-js-bridge]],
+            # [[dart-aot-coverage-bound]]).
+            non_java_tls_layers=_non_java_tls_layers(webview_sites, dart_aot_libs),
+        )
         stage_results.append(capture_stage)
         _print_stage(capture_stage)
         if capture_stage.status == "failed":

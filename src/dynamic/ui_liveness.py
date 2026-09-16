@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import time
 from pathlib import Path
 
 _ANR_MARKERS = (
@@ -361,6 +362,52 @@ def tap(serial: str, x: int, y: int, adb: str | None = None) -> None:
     adb = adb or _adb_wrapper()
     subprocess.run([adb, "-s", serial, "shell", "input", "tap", str(int(x)), str(int(y))],
                    capture_output=True, text=True, check=True, timeout=20)
+
+
+def wait_for_foreground(serial: str, package: str, timeout: float = 8.0,
+                        interval: float = 0.5, adb: str | None = None) -> dict:
+    """Poll until the app's OWN activity is the resumed one - the precondition for
+    dumping a hierarchy that is the app's.
+
+    The drive used to dump immediately after `am start`. On a cold start the
+    activity has not drawn yet, so uiautomator returns the PREVIOUS screen - the
+    launcher's - and a tap resolved from those coordinates would change the
+    state of a screen the app does not own, silently and uninterpretably. The
+    wait is bounded so a launch that never comes up is a recorded refusal
+    rather than a hang.
+
+    `foreground` is True (the app owns the screen), False (it never did within
+    the bound) or None (the probe itself failed on every poll - a fact about
+    the observer, never a False, which would assert the app stayed away).
+    """
+    adb = adb or _adb_wrapper()
+    deadline = time.monotonic() + timeout
+    polls = 0
+    errors = 0
+    while True:
+        polls += 1
+        out = None
+        try:
+            out = subprocess.run(
+                [adb, "-s", serial, "shell", "dumpsys", "activity", "activities"],
+                capture_output=True, text=True, timeout=30,
+            ).stdout
+        except Exception:
+            errors += 1
+        if out is not None and _parse_activity_resumed(out, package):
+            return {"foreground": True, "polls": polls, "errors": errors,
+                    "timeout_s": timeout, "reason": None}
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(interval)
+    if errors == polls:
+        return {"foreground": None, "polls": polls, "errors": errors, "timeout_s": timeout,
+                "reason": (f"`dumpsys activity activities` failed on all {polls} poll(s) "
+                           f"over {timeout}s, so whether the app owns the foreground was "
+                           "not measured")}
+    return {"foreground": False, "polls": polls, "errors": errors, "timeout_s": timeout,
+            "reason": (f"the app's activity was still not the resumed one after {timeout}s "
+                       f"({polls} poll(s))")}
 
 
 def check_ui_liveness(serial: str, package: str, adb: str | None = None) -> dict:

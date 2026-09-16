@@ -35,6 +35,14 @@ uiautomator hierarchy**, and only when the choice is unambiguous:
   one would capture a screen nobody chose, making the run's result
   uninterpretable.
 - No dump, or no tappable widget, is likewise a recorded refusal.
+- The hierarchy is dumped only once the app's **own activity is the resumed
+  one**, waited for under a bounded timeout. A dump taken while the launch is
+  still drawing returns the PREVIOUS screen's widgets - the launcher's, on a
+  cold start - and a tap resolved from those coordinates would silently mutate
+  a screen the app does not own. A launch that never comes up, and a foreground
+  probe that could not be taken at all, are separate recorded refusals with
+  their own causes; the drive never falls back to tapping whatever happens to
+  be on screen.
 
 Every outcome - tapped, refused, unmeasurable - is recorded on the capture
 stage's evidence (label, bounds, how it was selected, outcome) and reaches the
@@ -55,6 +63,12 @@ The drive lives inside `run_capture_stage`, which is opt-in via
   before it, and the report says which it is.
 - A driven run's traffic is traffic the tool's own tap caused. That is recorded
   so the capture's provenance is never ambiguous.
+- Measured on the reference emulator (2026-09-16, RS_CertPinning): with the dump
+  taken straight after `am start`, the drive saw **25** tappable widgets and
+  refused because none named a start action - a correct refusal about the
+  launcher's hierarchy, and a wrong statement about an app whose own screen
+  carries a single clickable `START`. The wait is what makes the refusal a fact
+  about the app.
 
 ## Alternatives considered
 - **Hardcoded per-target coordinates** - rejected: reference-emulator-specific and

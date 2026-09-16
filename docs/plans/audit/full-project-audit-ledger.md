@@ -8,7 +8,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 51 files, **21,307 LOC**. Largest: cli (3,354), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,206), mitmproxy_capture (1,407), common (784), device (779), signatures (717), attestation (695).
+- `src/`: 51 files, **21,367 LOC**. Largest: cli (3,354), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,216), mitmproxy_capture (1,420), common (784), device (779), signatures (717), attestation (695).
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
 - `tests/`: 92 files, **30,331 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
@@ -54,7 +54,7 @@ module's line count unchanged escapes it.)
 | `ingest/normalize.py` | 174 | 208 | +34 | 2026-09-07 |
 | `jnibridge.py` | 175 | 202 | +27 | 2026-09-09 |
 | `manifest.py` | 457 | 544 | +87 | — |
-| `mitmproxy_capture.py` | 487 | 1,407 | +920 | 2026-09-16 (the stage's own pre-flight probe is not the app's connection) |
+| `mitmproxy_capture.py` | 487 | 1,420 | +933 | 2026-09-16 (the stage's own pre-flight probe is not the app's connection) |
 | `native.py` | 1243 | 1,879 | +636 | 2026-09-15 (full re-read) |
 | `obfuscation.py` | 261 | 282 | +21 | 2026-09-09 |
 | `packers.py` | 157 | 157 | +0 | — |
@@ -67,7 +67,7 @@ module's line count unchanged escapes it.)
 | `stringrecover.py` | 315 | 374 | +59 | 2026-09-09 |
 | `success_checks/*.py` | 800 | 924 | +124 | re-read (undated) |
 | `synthesizer.py` | 1117 | 1,192 | +75 | 2026-09-10 |
-| `ui_liveness.py` | 308 | 506 | +198 | — |
+| `ui_liveness.py` | 308 | 553 | +245 | — |
 | `upx.py` | 128 | 128 | +0 | — |
 | `webview.py` | 98 | 116 | +18 | — |
 

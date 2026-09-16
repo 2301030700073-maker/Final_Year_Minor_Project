@@ -1492,12 +1492,16 @@ def _app_running_by_default(monkeypatch):
     this with its own monkeypatch."""
     monkeypatch.setattr(mitmproxy_capture, "_app_pid", lambda serial, package: 4711)
     # Same reasoning for the ADR-0011 UI drive: it reads a real device's UI
-    # hierarchy and taps it. Its selection policy is pinned by the ui_liveness
-    # tests, and the wiring (this record reaching the evidence) has its own test.
-    monkeypatch.setattr(mitmproxy_capture, "_drive_ui",
-                        lambda serial: {"attempted": False, "tapped": False,
-                                        "target": None, "selected_by": None,
-                                        "reason": "UI drive disabled for this test"})
+    # hierarchy and taps it. Stub the DEVICE BOUNDARY rather than _drive_ui
+    # itself - with the app never measured as owning the foreground, the real
+    # _drive_ui refuses by its own rule and touches nothing, so every test here
+    # exercises the real refusal path instead of a stand-in for it.
+    from dynamic import ui_liveness as _uil
+    monkeypatch.setattr(_uil, "wait_for_foreground",
+                        lambda serial, package: {"foreground": False, "polls": 1, "errors": 0,
+                                                 "timeout_s": 8.0,
+                                                 "reason": "the app's activity was still not "
+                                                           "the resumed one after 8.0s"})
 
 
 def _empty_capture_run(monkeypatch, tmp_path, pid, **kwargs):
@@ -1567,7 +1571,7 @@ def test_run_capture_stage_records_the_ui_drive(monkeypatch, tmp_path):
     # and a recorded refusal is what explains a still-un-exercised network path.
     result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711)
     assert result.evidence["ui_drive"]["tapped"] is False
-    assert result.evidence["ui_drive"]["reason"] == "UI drive disabled for this test"
+    assert "refusing to tap a screen the app does not own" in result.evidence["ui_drive"]["reason"]
 
 
 def test_run_capture_stage_does_not_drive_when_disabled(monkeypatch, tmp_path):
@@ -1576,3 +1580,60 @@ def test_run_capture_stage_does_not_drive_when_disabled(monkeypatch, tmp_path):
     result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711, drive_ui=False)
     assert result.evidence["ui_drive"]["tapped"] is False
     assert result.evidence["ui_drive"]["reason"] == "UI drive disabled for this run"
+
+
+# --- ADR-0011: the drive will not act on a screen the app does not own ---------
+
+
+def _fg(state, reason=None):
+    return {"foreground": state, "polls": 3, "errors": 0, "timeout_s": 8.0,
+            "reason": reason or ("the app's activity was still not the resumed one "
+                                 "after 8.0s (3 poll(s))" if state is False else None)}
+
+
+def test_drive_ui_refuses_and_reads_nothing_when_the_app_lacks_the_foreground(monkeypatch):
+    """The whole point: a hierarchy dumped before the activity draws belongs to
+    the PREVIOUS screen, so the drive must not merely decline to tap it - it must
+    not resolve a target from it at all."""
+    from dynamic import ui_liveness
+    monkeypatch.setattr(ui_liveness, "wait_for_foreground", lambda s, p: _fg(False))
+    read = []
+    monkeypatch.setattr(ui_liveness, "dump_ui_targets",
+                        lambda serial: read.append(serial) or {"measured": True,
+                                                                "reason": None, "targets": []})
+    rec = mitmproxy_capture._drive_ui("emulator-5554", "com.test.app")
+    assert rec["attempted"] is False and rec["tapped"] is False
+    assert "refusing to tap a screen the app does not own" in rec["reason"]
+    assert read == []
+
+
+def test_drive_ui_refuses_when_foreground_ownership_was_not_measured(monkeypatch):
+    """A failed probe is not evidence the app stayed away - but it is also not a
+    licence to tap whatever happens to be on screen."""
+    from dynamic import ui_liveness
+    monkeypatch.setattr(ui_liveness, "wait_for_foreground",
+                        lambda s, p: _fg(None, "`dumpsys activity activities` failed on all "
+                                               "3 poll(s) over 8.0s, so whether the app owns "
+                                               "the foreground was not measured"))
+    read = []
+    monkeypatch.setattr(ui_liveness, "dump_ui_targets",
+                        lambda serial: read.append(serial) or {"measured": True,
+                                                                "reason": None, "targets": []})
+    rec = mitmproxy_capture._drive_ui("emulator-5554", "com.test.app")
+    assert rec["tapped"] is False and rec["foreground"]["foreground"] is None
+    assert "could not be measured" in rec["reason"]
+    assert read == []
+
+
+def test_drive_ui_taps_once_the_app_owns_the_screen(monkeypatch):
+    from dynamic import ui_liveness
+    monkeypatch.setattr(ui_liveness, "wait_for_foreground", lambda s, p: _fg(True))
+    monkeypatch.setattr(ui_liveness, "dump_ui_targets",
+                        lambda serial: {"measured": True, "reason": None,
+                                        "targets": [{"label": "START", "bounds": "[600,2200][840,2418]",
+                                                     "center": (720, 2309)}]})
+    taps = []
+    monkeypatch.setattr(ui_liveness, "tap", lambda serial, x, y: taps.append((x, y)))
+    rec = mitmproxy_capture._drive_ui("emulator-5554", "com.test.app")
+    assert rec["tapped"] is True and taps == [(720, 2309)]
+    assert rec["target"]["label"] == "START"

@@ -924,7 +924,7 @@ def _stop_windows_mitmdump() -> str | None:
     )
 
 
-def _drive_ui(serial: str) -> dict:
+def _drive_ui(serial: str, package: str) -> dict:
     """One deterministic tap to get the app past a control that gates its network
     path, returned as the record the stage stores under `ui_drive` (ADR-0011).
 
@@ -934,6 +934,19 @@ def _drive_ui(serial: str) -> dict:
     refusal is what lets the report say the network path stayed un-exercised
     because nothing was safe to tap, rather than leaving the reader to guess."""
     from dynamic import ui_liveness
+    # Only dump once the app owns the screen. A hierarchy read while the launch
+    # is still drawing belongs to the PREVIOUS screen, and tapping a coordinate
+    # from it would mutate a screen the app does not own - so that is a recorded
+    # refusal with its own cause, never a tap.
+    fg = ui_liveness.wait_for_foreground(serial, package)
+    if fg["foreground"] is not True:
+        return {"attempted": False, "tapped": False, "target": None,
+                "selected_by": None, "foreground": fg,
+                "reason": ("the app never became the resumed activity, so the hierarchy "
+                           "on screen is not the app's" if fg["foreground"] is False else
+                           "the app's foreground ownership could not be measured")
+                          + f" ({fg['reason']}) - refusing to tap a screen the app does "
+                            "not own"}
     dump = ui_liveness.dump_ui_targets(serial)
     if not dump["measured"]:
         return {"attempted": False, "tapped": False, "target": None,
@@ -1106,7 +1119,7 @@ def run_capture_stage(
         # spent. Deliberately after the launch pid sample (so that sample reflects
         # the launch, not the tap) and before the window sleep (so whatever the tap
         # triggers lands inside the window).
-        ui_drive = (_drive_ui(serial) if drive_ui else
+        ui_drive = (_drive_ui(serial, package) if drive_ui else
                     {"attempted": False, "tapped": False, "target": None,
                      "selected_by": None,
                      "reason": "UI drive disabled for this run"})

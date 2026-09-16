@@ -3,10 +3,16 @@
 
 Runs the capture stage on RS_CertPinning twice - once WITHOUT the bypass script
 (plain am-start cold start) and once WITH it (spawn under Frida with the
-pinning-only universal script). In each run the driver taps the app's START
-button mid-window so the WebView issues its HTTPS request while mitmdump is
-capturing. The contrast - pinned host absent/blocked without the script, present
-and decrypted with it - is the empirical proof of the bypass.
+pinning-only universal script). In each run the capture stage drives the UI with
+its own deterministic single tap (ADR-0011) so the WebView issues its HTTPS
+request while mitmdump is capturing. The contrast - pinned host absent/blocked
+without the script, present and decrypted with it - is the empirical proof of
+the bypass.
+
+The drive is NOT this script's: it is `run_capture_stage`'s own, so both arms
+tap the same control by the same rule and the proof rests on the same
+mechanism the pipeline uses. The stage's `ui_drive` record is printed per arm
+so what drove the app is read, never assumed.
 
 Reference-machine only: shells out to adb/powershell and must run on WSL2 where
 the emulator lives on the Windows host. Reports results honestly (NFR-7), never
@@ -19,8 +25,6 @@ Usage:
 from __future__ import annotations
 
 import sys
-import threading
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -33,7 +37,6 @@ PKG = "com.redshift.rs_certpinning_bypass"
 MAIN = "com.redshift.rs_certpinning_bypass/.MainActivity"
 CAPTURE_PORT = mc.DEFAULT_PROXY_PORT
 _OUT = Path("outputs/analysis/rs_certpinning")
-_START_BUTTON = (720, 2309)  # the app's START button (from uiautomator dump)
 BYPASS_SCRIPT = "ssl_pinning_bypass_universal.js"
 
 
@@ -42,40 +45,27 @@ def _adb() -> str:
     return shutil.which("adb") or "/home/ubuntu/.local/bin/adb"
 
 
-def _tap(serial: str, x: int, y: int, delay: float = 4.0) -> None:
-    """Sleep `delay` (let the capture stage cold-start the app), then tap the
-    app's START button so the WebView issues its HTTPS request inside the
-    capture window. Runs on the calling thread (the capture runs in another)."""
-    time.sleep(delay)
-    import subprocess
-    subprocess.run([_adb(), "-s", serial, "shell", "input", "tap", str(x), str(y)],
-                   capture_output=True, text=True, timeout=20)
-
-
 def _run_arm(bypass_script, window, label):
     # Bring up the internet baseline first (the capture stage restores it after).
     ptp.ensure_internet(SERIAL, ptp.INTERNET_PROXY_PORT)
     _OUT.mkdir(parents=True, exist_ok=True)
 
-    # Run the capture in a thread so the driver can tap START mid-window.
-    result_holder = {}
-
-    def _capture():
-        result_holder["r"] = mc.run_capture_stage(
-            SERIAL, PKG, _OUT, proxy_port=CAPTURE_PORT,
-            capture_window=window, bypass_script=bypass_script)
-
-    t = threading.Thread(target=_capture, daemon=True)
-    t.start()
-    _tap(SERIAL, *_START_BUTTON, delay=min(4.0, window * 0.3))
-    t.join(timeout=window + 40)
-    result = result_holder.get("r")
+    # The stage drives the UI itself (drive_ui defaults True), so nothing here
+    # taps: a second tap from this script would be an unrecorded state change
+    # and would make the arms' contrast unattributable.
+    result = mc.run_capture_stage(
+        SERIAL, PKG, _OUT, proxy_port=CAPTURE_PORT,
+        capture_window=window, bypass_script=bypass_script)
 
     print(f"\n===== ARM: {label} (bypass={bypass_script!r}) =====")
     if result is None:
         print("[!] capture did not complete")
         return None
+    drive = (result.evidence or {}).get("ui_drive") or {}
     print(f"  status: {result.status}   bypass_applied={result.evidence.get('bypass_applied')}")
+    print(f"  ui_drive: tapped={drive.get('tapped')} target="
+          f"{(drive.get('target') or {}).get('label')!r} selected_by={drive.get('selected_by')!r}"
+          f" reason={drive.get('reason')!r}")
     if result.status == "success":
         hosts = result.evidence["hosts"]
         print(f"  flows: {result.evidence['flows_count']}")

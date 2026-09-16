@@ -552,3 +552,44 @@ def test_dump_ui_targets_reports_a_failed_shell_as_not_measured(monkeypatch):
     out = ui_liveness.dump_ui_targets("emulator-5554", adb="/bin/adb")
     assert out["measured"] is False
     assert "uiautomator" in out["reason"] and out["targets"] == []
+
+
+# --- waiting for the app to own the screen before dumping its hierarchy --------
+
+_RESUMED = (
+    "  * Hist #0: ActivityRecord{... PKG}\n"
+    "      state=RESUMED token=...\n"
+    "      mResumed=true\n"
+)
+
+
+def _dumpsys(monkeypatch, out):
+    class _R:
+        stdout = out
+    monkeypatch.setattr(ui_liveness.subprocess, "run", lambda *a, **k: _R())
+
+
+def test_wait_for_foreground_returns_true_once_the_app_is_resumed(monkeypatch):
+    _dumpsys(monkeypatch, _RESUMED.replace("PKG", "com.test.app/.Main"))
+    got = ui_liveness.wait_for_foreground("s", "com.test.app", timeout=1.0, interval=0.0)
+    assert got["foreground"] is True and got["polls"] == 1
+
+
+def test_wait_for_foreground_is_false_when_another_app_holds_the_screen(monkeypatch):
+    """The launcher being resumed is exactly the cold-start case the drive must
+    not act on, and it is a measured absence - not a None."""
+    _dumpsys(monkeypatch, _RESUMED.replace("PKG", "com.android.launcher3/.Launcher"))
+    got = ui_liveness.wait_for_foreground("s", "com.test.app", timeout=0.0, interval=0.0)
+    assert got["foreground"] is False
+    assert "still not the resumed one" in got["reason"]
+
+
+def test_wait_for_foreground_is_none_when_the_probe_never_ran(monkeypatch):
+    """Every poll raising says nothing about the app; it must not be reported as
+    the app having stayed away."""
+    def _boom(*a, **k):
+        raise OSError("adb: no devices/emulators found")
+    monkeypatch.setattr(ui_liveness.subprocess, "run", _boom)
+    got = ui_liveness.wait_for_foreground("s", "com.test.app", timeout=0.0, interval=0.0)
+    assert got["foreground"] is None
+    assert "not measured" in got["reason"]

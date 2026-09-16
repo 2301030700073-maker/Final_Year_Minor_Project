@@ -552,6 +552,25 @@ def _launch_liveness_cause(pid_after_launch: int | None,
     return False, None
 
 
+def _target_running(pid_after_launch: int | None,
+                    pid_after_capture: int | None) -> bool | None:
+    """Was the target app running during the capture window?
+
+    True / False / None (not measured), following _parse_pidof's 0-vs-None
+    contract. This is the premise the capture's attribution rests on: the absence
+    of the app's uid from the device's socket table only means "this app stayed
+    away from the proxy" if the app was there to stay away. Without it, a run
+    whose launch silently started nothing is reported as the app choosing not to
+    use the proxy - a true statement about an empty set and a false one about the
+    app ([[native-absent-vacuous-coverage]], [[success-check-engine-vacuous-truth-guard]]).
+    """
+    if pid_after_launch or pid_after_capture:
+        return True
+    if pid_after_launch == 0 or pid_after_capture == 0:
+        return False
+    return None
+
+
 def _parse_flow_detail(text: str) -> list[FlowSummary]:
     """Extract {host, method, path, status} per flow from mitmdump's
     `flow_detail=2` stdout. Confirmed live format (mitmproxy 8.1.1):
@@ -658,27 +677,99 @@ def _parse_flow_detail(text: str) -> list[FlowSummary]:
     return flows
 
 
-def _launch_app(serial: str, package: str) -> None:
-    """Cold-start the package for capture.
+def _resolve_launch_component(serial: str, package: str) -> str | None:
+    """The `pkg/activity` component to launch, from the device's own resolver.
 
-    Force-stops any running instance first, then launches the main activity via
-    am start. An app that is *already* running (e.g. left open by the dynamic
-    stage) fires no new SDK/API traffic on a bare am start, which yields a
-    misleading empty capture. Force-stop guarantees a fresh cold start that makes
-    deterministic requests inside the capture window. Fails loudly on a rejected
-    adb command (NFR-7); an app that crashes on launch still returns exit 0 from
-    am start, so an empty capture is reported honestly downstream."""
+    Needed because the obvious launch form is not one this tool can trust:
+    `am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER
+    -p <pkg>` EXITS 0 while printing `Error: Activity not started, unable to
+    resolve Intent` on a device with no launcher app installed - measured on the
+    reference emulator. The exit 0 is what makes it dangerous: `check=True` does
+    not fire and the stage spends its whole capture window on an app that was
+    never started. Resolving the component first, then launching it with `-n`, is
+    the form that was measured to work on the same device.
+    """
+    adb = device._require_adb()
+    try:
+        res = subprocess.run(
+            [adb, "-s", serial, "shell", "cmd", "package", "resolve-activity",
+             "--brief", "-a", "android.intent.action.MAIN",
+             "-c", "android.intent.category.LAUNCHER", package],
+            capture_output=True, text=True, timeout=20,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if res.returncode != 0:
+        return None
+    for line in (res.stdout or "").splitlines():
+        line = line.strip()
+        # `--brief` prints a `priority=0 preferredOrder=0 ...` header first; the
+        # component is the `pkg/activity` line below it.
+        if "/" in line and not line.startswith(("priority=", "Error", "No ")):
+            return line
+    return None
+
+
+def _launch_app(serial: str, package: str) -> dict:
+    """Cold-start the package for capture, and report whether it actually ran.
+
+    Force-stops any running instance first: an app that is *already* running
+    (e.g. left open by the dynamic stage) fires no new SDK/API traffic on a bare
+    am start, which yields a misleading empty capture.
+
+    Then tries the launch forms in order and VERIFIES THE EFFECT after each,
+    because no exit status from `am start` can be trusted for this: it returns 0
+    both for a launch that worked and for `Error: Activity not started, unable to
+    resolve Intent`. A form that leaves no running process is recorded and the
+    next is tried; the first that produces a pid wins, and no further form runs -
+    launching the app a second time would not be the same capture.
+
+    Returns the record the decision was made from, so the stage records the
+    launch's real evidence instead of assuming one: `launched_by` (None when no
+    form produced a process), `pid` (>0 running, 0 measurably not running, None
+    could not be measured - the _parse_pidof contract) and `attempts`.
+    """
     adb = device._require_adb()
     subprocess.run(
         [adb, "-s", serial, "shell", "am", "force-stop", package],
         capture_output=True, text=True, check=True, timeout=20,
     )
-    subprocess.run(
-        [adb, "-s", serial, "shell", "am", "start",
-         "-a", "android.intent.action.MAIN",
+    component = _resolve_launch_component(serial, package)
+    forms: list[tuple[str, list[str]]] = []
+    if component:
+        forms.append(("resolved component", ["am", "start", "-n", component]))
+    forms.append((
+        "package MAIN/LAUNCHER intent",
+        ["am", "start", "-a", "android.intent.action.MAIN",
          "-c", "android.intent.category.LAUNCHER", "-p", package],
-        capture_output=True, text=True, check=True, timeout=20,
-    )
+    ))
+    forms.append((
+        "monkey launcher",
+        ["monkey", "-p", package, "-c", "android.intent.category.LAUNCHER", "1"],
+    ))
+    attempts: list[dict] = []
+    for how, argv in forms:
+        try:
+            res = subprocess.run(
+                [adb, "-s", serial, "shell"] + argv,
+                capture_output=True, text=True, timeout=20,
+            )
+        except (subprocess.SubprocessError, OSError) as e:
+            attempts.append({"form": how, "issued": False, "pid": None,
+                             "output": str(e)[-200:]})
+            continue
+        pid = _app_pid(serial, package)
+        # Bounded at the CAUSE end: am prints its failure on the last line, and a
+        # head-only cut would keep the "Starting: Intent" line and drop the error.
+        output = ((res.stdout or "") + (res.stderr or "")).strip()
+        attempts.append({"form": how, "issued": True, "pid": pid,
+                         "output": output[-200:]})
+        if pid:
+            return {"component": component, "launched_by": how, "pid": pid,
+                    "attempts": attempts}
+    measured = [a["pid"] for a in attempts if a["issued"] and a["pid"] is not None]
+    return {"component": component, "launched_by": None,
+            "pid": 0 if measured else None, "attempts": attempts}
 
 
 def _cleanup(serial: str, proxy_port: int, proc: subprocess.Popen | None) -> list[str]:
@@ -1103,9 +1194,11 @@ def run_capture_stage(
             device2.resume(pid)
             time.sleep(1.0)  # let the app start making requests under the hook
             bypass_applied = True
+            launch = {"component": None, "launched_by": "frida spawn", "pid": pid,
+                      "attempts": []}
         else:
             # "Without script" arm: plain cold-start, no hooks.
-            _launch_app(serial, package)
+            launch = _launch_app(serial, package)
             bypass_applied = False
         # CAPLIVE1: sample the app's OWN liveness at both ends of the window,
         # device-side. Everything else this stage records - the flow list, the
@@ -1134,9 +1227,14 @@ def run_capture_stage(
         # handshake's socket can be gone in a moment.
         proxy_clients = proxy_attribution.sample_proxy_clients_during(
             serial, proxy_port, capture_window)
-        proxy_attribution_verdict = proxy_attribution.attribute_proxy_clients(
-            proxy_clients, proxy_attribution.package_uid_map(serial), package, proxy_port)
+        # The end-of-window liveness sample is taken BEFORE the attribution is
+        # computed, because the attribution now needs it: a False ("the app did
+        # not reach the proxy") is only licensed if the app was there to reach it.
         pid_after_capture = _app_pid(serial, package)
+        target_running = _target_running(pid_after_launch, pid_after_capture)
+        proxy_attribution_verdict = proxy_attribution.attribute_proxy_clients(
+            proxy_clients, proxy_attribution.package_uid_map(serial), package,
+            proxy_port, target_running=target_running)
 
         if wsl2:
             stdout_text = _read_flow_detail_log(log_wsl)
@@ -1338,6 +1436,12 @@ def run_capture_stage(
                     "proxy_client_uids": sorted(proxy_clients["uids"]),
                     "proxy_client_samples": proxy_clients["samples"],
                     "proxy_client_samples_measured": proxy_clients["samples_measured"],
+                    # What the launch actually did (verified by its effect, not by am's
+                    # exit status - it returns 0 even when it starts nothing) and whether
+                    # the app was running during the window at all, which is the premise
+                    # the attribution above rests on.
+                    "app_launch": launch,
+                    "app_target_running": target_running,
                     # Reachability probe (device-side, proxy-independent): how many
                     # client connections reached mitmdump. >0 with 0 flows => device
                     # reached the proxy, app was silent (app-silence, not a wiring
@@ -1407,6 +1511,12 @@ def run_capture_stage(
                 "proxy_client_uids": sorted(proxy_clients["uids"]),
                 "proxy_client_samples": proxy_clients["samples"],
                 "proxy_client_samples_measured": proxy_clients["samples_measured"],
+                # What the launch actually did (verified by its effect, not by am's
+                # exit status - it returns 0 even when it starts nothing) and whether
+                # the app was running during the window at all, which is the premise
+                # the attribution above rests on.
+                "app_launch": launch,
+                "app_target_running": target_running,
                 # A crashed bypass hook can still let OTHER hooks yield flows, so a
                 # capture can SUCCEED with genuine {type:error} messages recorded.
                 # Store them (symmetric with the empty-flows branch) so the report

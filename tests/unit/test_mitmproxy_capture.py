@@ -507,23 +507,110 @@ def test_write_windows_addon_bakes_log_path(tmp_path):
     assert "def error" in text
 
 
-def test_launch_app_force_stops_then_starts(monkeypatch):
+def _launch_env(monkeypatch, calls, pids):
+    """A fake adb for the launch sequence: every command succeeds silently, and
+    `_app_pid` reports the next entry of `pids` (the last one repeating).
+
+    `_app_pid` is overridden here EXPLICITLY even though the autouse fixture
+    already stubs it: that stub always reports a running process, and varying
+    liveness per launch form is the whole subject of these tests."""
+    monkeypatch.setattr(mitmproxy_capture.device, "_require_adb", lambda: "/bin/adb")
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+    monkeypatch.setattr(mitmproxy_capture.subprocess, "run", fake_run)
+    seq = list(pids)
+    monkeypatch.setattr(mitmproxy_capture, "_app_pid",
+                        lambda serial, package: seq.pop(0) if len(seq) > 1 else seq[0])
+
+
+def test_launch_app_force_stops_first_then_verifies_each_form(monkeypatch):
     # An already-running app (e.g. left open by the dynamic stage) fires no fresh
     # SDK/API traffic on a bare am start, so the capture must cold-start it:
-    # force-stop first, then launch. Order matters.
+    # force-stop comes first, and that order matters.
+    calls = []
+    _launch_env(monkeypatch, calls, [0])
+    rec = mitmproxy_capture._launch_app("emulator-5554", "com.example.app")
+    assert "force-stop" in calls[0]
+    assert any("resolve-activity" in c for c in calls)
+    # No exit status from am start is a guard (it returns 0 while starting
+    # nothing), so the `-p` intent is not trusted alone: monkey follows it.
+    launches = [c for c in calls if "start" in c or "monkey" in c]
+    assert "-p" in launches[0] and "monkey" in launches[1]
+    # Nothing ran, and that is recorded as a measured absence, not as a launch.
+    assert rec["launched_by"] is None and rec["pid"] == 0
+    assert [a["form"] for a in rec["attempts"]] == ["package MAIN/LAUNCHER intent",
+                                                    "monkey launcher"]
+
+
+def test_launch_app_stops_at_the_first_form_that_leaves_a_process(monkeypatch):
+    """A second launch would not be the same capture, so the first form that
+    produces a pid ends the sequence."""
+    calls = []
+    _launch_env(monkeypatch, calls, [4711])
+    rec = mitmproxy_capture._launch_app("emulator-5554", "com.example.app")
+    assert rec["pid"] == 4711
+    assert rec["launched_by"] == "package MAIN/LAUNCHER intent"
+    assert len(rec["attempts"]) == 1
+    assert not any("monkey" in c for c in calls)
+
+
+def test_launch_app_moves_to_the_next_form_when_a_form_leaves_nothing(monkeypatch):
+    """The ladder: the first form leaves no process (recorded as pid 0, a measured
+    absence), the second produces one and wins. Without this, the `-p` intent -
+    the form measured to start nothing on the reference emulator - would be the
+    only thing ever tried."""
+    calls = []
+    _launch_env(monkeypatch, calls, [0, 4711])
+    rec = mitmproxy_capture._launch_app("emulator-5554", "com.example.app")
+    assert [a["form"] for a in rec["attempts"]] == ["package MAIN/LAUNCHER intent",
+                                                    "monkey launcher"]
+    assert [a["pid"] for a in rec["attempts"]] == [0, 4711]
+    assert rec["launched_by"] == "monkey launcher" and rec["pid"] == 4711
+
+
+def test_launch_app_keeps_the_am_error_when_no_form_starts_anything(monkeypatch):
+    """The measured failure mode: am prints `Error: Activity not started, unable
+    to resolve Intent` and exits 0. `check=True` cannot see it, so the failure is
+    caught by its effect and the error text is kept for the record - a launch that
+    started nothing must never be silent."""
     calls = []
 
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
-        return subprocess.CompletedProcess(cmd, 0)
-
-    monkeypatch.setattr(mitmproxy_capture.device, "_require_adb",
-                        lambda: "/bin/adb")
+        if "pidof" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="", stderr="Starting: Intent { act=MAIN }\nError: Activity "
+                                     "not started, unable to resolve Intent { pkg=x }")
+    monkeypatch.setattr(mitmproxy_capture.device, "_require_adb", lambda: "/bin/adb")
     monkeypatch.setattr(mitmproxy_capture.subprocess, "run", fake_run)
-    mitmproxy_capture._launch_app("emulator-5554", "com.example.app")
-    assert calls and "force-stop" in calls[0]
-    assert "start" in calls[1]
-    assert "am" in calls[1]
+    monkeypatch.setattr(mitmproxy_capture, "_app_pid", lambda serial, package: 0)
+    rec = mitmproxy_capture._launch_app("emulator-5554", "com.example.app")
+    assert rec["launched_by"] is None and rec["pid"] == 0
+    assert all(a["issued"] for a in rec["attempts"])
+    assert any("unable to resolve Intent" in a["output"] for a in rec["attempts"])
+
+
+def test_run_capture_stage_does_not_call_a_never_launched_app_absent(monkeypatch, tmp_path):
+    """The end-to-end defect this guard closes: a capture in which the app never
+    started was rendered as "this app did NOT reach the proxy", because the
+    absence of its uid from the socket table was read without asking whether the
+    app was there to be absent from it."""
+    from dynamic import proxy_attribution as pa
+    monkeypatch.setattr(pa, "sample_proxy_clients_during",
+                        lambda serial, proxy_port, seconds, interval=2.0, adb=None:
+                        {"uids": {999}, "samples": 4, "samples_measured": 4,
+                         "measured": True, "errors": []})
+    monkeypatch.setattr(pa, "package_uid_map",
+                        lambda serial, adb=None: {10181: ["com.example.app"]})
+    result, _ = _empty_capture_run(monkeypatch, tmp_path, 0, capture_window=1.0)
+    ev = result.evidence
+    assert ev["app_target_running"] is False
+    assert "app_launch" in ev
+    assert ev["proxy_attribution"]["reached"] is None
+    assert "was not running during the capture window" in ev["proxy_attribution"]["reason"]
 
 
 def test_start_windows_mitmdump_builds_detached_start_process(monkeypatch):

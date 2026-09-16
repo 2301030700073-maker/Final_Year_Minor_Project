@@ -182,7 +182,8 @@ def package_uid_map(serial: str, adb: str | None = None) -> dict | None:
 
 
 def attribute_proxy_clients(sampled: dict | None, uid_packages: dict | None,
-                            package: str, proxy_port: int | None = None) -> dict:
+                            package: str, proxy_port: int | None = None,
+                            target_running: bool | None = None) -> dict:
     """Did THIS app itself reach the capture proxy?
 
     `reached` is True (a uid carrying this package was seen with a socket to the
@@ -195,6 +196,16 @@ def attribute_proxy_clients(sampled: dict | None, uid_packages: dict | None,
     uid-level and not package-level: a socket from a shared uid is not proof that
     THIS package opened it, and a caller that hid that would be upgrading
     uid-level evidence to a package-level claim.
+
+    `target_running` is the premise a False rests on: was the app running during
+    the window at all? A False says "this app stayed away from the proxy", and an
+    app that was never started cannot stay away from anything - it makes no
+    requests for a reason that has nothing to do with the proxy. Measured on the
+    reference emulator: a launch form that started nothing still exited 0, and
+    the resulting capture was reported as the app choosing not to use the proxy.
+    So a False requires `target_running is True`; False and unmeasured liveness
+    both yield None (not measured). A True needs no such premise - a socket from
+    the target's uid is positive proof the process existed.
     """
     if sampled is None or not sampled.get("measured"):
         return {"reached": None, "uid": None, "shared_uid": [], "proxy_port": proxy_port,
@@ -217,6 +228,17 @@ def attribute_proxy_clients(sampled: dict | None, uid_packages: dict | None,
     if hit:
         return {"reached": True, "uid": uid, "shared_uid": shared, "proxy_port": proxy_port,
                 "reason": f"uid {uid} held a socket to the capture proxy{shared_note}"}
+    if target_running is not True:
+        why = (
+            "was not running during the capture window, so it made no requests for a "
+            "reason that has nothing to do with the proxy"
+            if target_running is False else
+            "could not be measured as running during the capture window, so its absence "
+            "from the socket table is not evidence that it stayed away"
+        )
+        return {"reached": None, "uid": uid, "shared_uid": shared, "proxy_port": proxy_port,
+                "reason": (f"{package} (uid {uid}) {why} - whether it reached the capture "
+                           "proxy was therefore not measured")}
     return {"reached": False, "uid": uid, "shared_uid": shared, "proxy_port": proxy_port,
             "reason": (f"uid {uid} ({package}) held no socket to the capture proxy in any of "
                        f"{sampled.get('samples_measured')} readable sample(s) of the window"

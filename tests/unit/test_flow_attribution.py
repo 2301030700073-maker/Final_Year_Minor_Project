@@ -125,10 +125,40 @@ def test_a_shared_uid_is_reported_as_uid_level_not_package_level():
 
 
 def test_a_target_that_never_reached_the_proxy_is_a_measured_absence():
+    """False is licensed only with the app's liveness as its premise - see the
+    three tests below for what happens without it."""
     got = pa.attribute_proxy_clients(_sampled({999}), {10131: ["com.test.app"]},
-                                     "com.test.app", 8081)
+                                     "com.test.app", 8081, target_running=True)
     assert got["reached"] is False and got["uid"] == 10131
     assert "held no socket to the capture proxy" in got["reason"]
+
+
+def test_a_target_that_was_not_running_is_never_a_measured_absence():
+    """Measured on the reference emulator: `am start -a MAIN -c LAUNCHER -p <pkg>`
+    starts nothing on a device with no launcher app AND EXITS 0, so the stage's
+    launch silently did nothing and the capture was reported as "this app did NOT
+    reach the proxy" - for an app that was never running. An app that does not
+    exist cannot stay away from anything: it makes no requests for a reason that
+    has nothing to do with the proxy."""
+    got = pa.attribute_proxy_clients(_sampled({999}), {10131: ["com.test.app"]},
+                                     "com.test.app", 8081, target_running=False)
+    assert got["reached"] is None and got["reached"] is not False
+    assert "was not running during the capture window" in got["reason"]
+
+
+def test_unmeasured_liveness_does_not_license_an_absence_either():
+    got = pa.attribute_proxy_clients(_sampled({999}), {10131: ["com.test.app"]},
+                                     "com.test.app", 8081, target_running=None)
+    assert got["reached"] is None
+    assert "not evidence that it stayed away" in got["reason"]
+
+
+def test_a_uid_that_reached_the_proxy_needs_no_liveness_premise():
+    """Proof positive: the socket IS the app having existed. Gating this on
+    liveness would throw away the strongest evidence the module has."""
+    got = pa.attribute_proxy_clients(_sampled({10131}), {10131: ["com.test.app"]},
+                                     "com.test.app", 8081, target_running=False)
+    assert got["reached"] is True
 
 
 def test_an_unreadable_socket_table_is_not_measured_and_never_false():

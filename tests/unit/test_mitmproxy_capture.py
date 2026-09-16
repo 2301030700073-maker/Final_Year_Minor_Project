@@ -1491,9 +1491,16 @@ def _app_running_by_default(monkeypatch):
     and _launch_liveness_cause tests; a test that wants the crash path overrides
     this with its own monkeypatch."""
     monkeypatch.setattr(mitmproxy_capture, "_app_pid", lambda serial, package: 4711)
+    # Same reasoning for the ADR-0011 UI drive: it reads a real device's UI
+    # hierarchy and taps it. Its selection policy is pinned by the ui_liveness
+    # tests, and the wiring (this record reaching the evidence) has its own test.
+    monkeypatch.setattr(mitmproxy_capture, "_drive_ui",
+                        lambda serial: {"attempted": False, "tapped": False,
+                                        "target": None, "selected_by": None,
+                                        "reason": "UI drive disabled for this test"})
 
 
-def _empty_capture_run(monkeypatch, tmp_path, pid):
+def _empty_capture_run(monkeypatch, tmp_path, pid, **kwargs):
     """Drive run_capture_stage down the real empty-capture path with a device that
     is routed and reachable, so the only thing under test is what the stage makes
     of the app's own liveness."""
@@ -1525,7 +1532,7 @@ def _empty_capture_run(monkeypatch, tmp_path, pid):
     monkeypatch.setattr(mitmproxy_capture, "_app_pid",
                         lambda serial, package: samples.append(package) or pid)
     result = mitmproxy_capture.run_capture_stage(
-        "emulator-5554", "com.example.app", str(tmp_path / "out"))
+        "emulator-5554", "com.example.app", str(tmp_path / "out"), **kwargs)
     return result, samples
 
 
@@ -1552,3 +1559,20 @@ def test_run_capture_stage_names_a_crash_instead_of_app_silence(monkeypatch, tmp
     assert "was NOT running" in result.error
     assert "never came up or died on start" in result.error
     assert "the app made no network requests during the capture window" not in result.error
+
+
+def test_run_capture_stage_records_the_ui_drive(monkeypatch, tmp_path):
+    # The drive record must reach the evidence: a tapped:True there is what tells the
+    # reader that part of this capture's traffic is traffic the tool's own tap caused,
+    # and a recorded refusal is what explains a still-un-exercised network path.
+    result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711)
+    assert result.evidence["ui_drive"]["tapped"] is False
+    assert result.evidence["ui_drive"]["reason"] == "UI drive disabled for this test"
+
+
+def test_run_capture_stage_does_not_drive_when_disabled(monkeypatch, tmp_path):
+    # The gate itself: with the drive off, the stubbed _drive_ui must not be reached
+    # at all, so the recorded reason is the stage's own.
+    result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711, drive_ui=False)
+    assert result.evidence["ui_drive"]["tapped"] is False
+    assert result.evidence["ui_drive"]["reason"] == "UI drive disabled for this run"

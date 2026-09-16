@@ -8,6 +8,7 @@ from dynamic.ui_liveness import (
     _parse_rendered_content, _parse_text_nodes, _classify_screen,
     _parse_tls_block, _matches_target,
 )
+from dynamic import ui_liveness
 
 
 def test_activity_resumed_when_package_foreground():
@@ -437,3 +438,117 @@ def test_pidof_failure_is_recorded_not_silent(monkeypatch):
     # the scan still completed with package-only attribution - no signal lost
     assert r["clickable_nodes"] == 1
     assert r["anr_detected"] is False
+
+
+
+def test_parse_tap_targets_reads_the_devices_own_bounds():
+    # The coordinate comes from the dump, which is what makes one policy work across
+    # devices and DPIs instead of a stored constant (project-limitations D2).
+    xml = ('<hierarchy>'
+           '<node class="android.widget.Button" text="START" clickable="true" '
+           'bounds="[600,2200][840,2418]"/>'
+           '<node class="android.widget.TextView" text="hello" clickable="false" '
+           'bounds="[0,0][100,50]"/>'
+           '</hierarchy>')
+    targets = ui_liveness._parse_tap_targets(xml)
+    assert len(targets) == 1
+    assert targets[0]["label"] == "START"
+    assert targets[0]["bounds"] == [600, 2200, 840, 2418]
+    assert targets[0]["center"] == [720, 2309]
+
+
+def test_parse_tap_targets_never_treats_long_clickable_as_tappable():
+    # Same guard as _parse_clickable_nodes: `long-clickable="true"` must not make a
+    # long-press-only control ("uninstall", "clear data") a tap target.
+    xml = '<node class="android.widget.FrameLayout" long-clickable="true" bounds="[0,0][100,100]"/>'
+    assert ui_liveness._parse_tap_targets(xml) == []
+
+
+def test_parse_tap_targets_skips_degenerate_bounds():
+    xml = '<node text="X" clickable="true" bounds="[10,10][10,10]"/>'
+    assert ui_liveness._parse_tap_targets(xml) == []
+
+
+def test_parse_tap_targets_falls_back_to_content_desc():
+    xml = '<node content-desc="Play" clickable="true" bounds="[0,0][10,10]"/>'
+    assert ui_liveness._parse_tap_targets(xml)[0]["label"] == "Play"
+
+
+def test_choose_tap_target_prefers_a_label_that_names_the_action():
+    targets = [{"label": "Settings", "center": [1, 2]},
+               {"label": "START", "center": [3, 4]}]
+    target, how = ui_liveness._choose_tap_target(targets)
+    assert how == "label-match"
+    assert target["center"] == [3, 4]
+
+
+def test_choose_tap_target_taps_a_lone_target_without_a_known_label():
+    # A sole widget is unambiguous even when its label is not in the vocabulary -
+    # and how it was chosen is recorded, because it is the weaker justification.
+    target, how = ui_liveness._choose_tap_target([{"label": "Begin demo", "center": [7, 8]}])
+    assert how == "sole-target" and target["center"] == [7, 8]
+
+
+def test_choose_tap_target_refuses_to_guess_between_widgets():
+    # Several targets, none named by the vocabulary: tapping one could navigate,
+    # open settings or destroy state, and the capture would be of a screen nobody
+    # chose. Refusing is the honest outcome, not an error.
+    targets = [{"label": f"item {i}", "center": [i, i]} for i in range(4)]
+    target, why = ui_liveness._choose_tap_target(targets)
+    assert target is None
+    assert "refusing to guess" in why and "4 tappable widgets" in why
+
+
+def test_choose_tap_target_refuses_on_an_empty_hierarchy():
+    target, why = ui_liveness._choose_tap_target([])
+    assert target is None and "no tappable widget" in why
+
+
+def test_dump_ui_targets_never_trusts_a_stale_dump(monkeypatch):
+    # A failed dump leaves the PREVIOUS screen's /sdcard/ui_dump.xml in place.
+    # Tapping a coordinate read from it would press wherever an earlier screen had a
+    # button, which is worse than not tapping at all - so the success marker is the
+    # only thing standing between the two, and the cat must not even be attempted.
+    import subprocess
+
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="ERROR: could not get idle state\n", stderr="")
+
+    monkeypatch.setattr(ui_liveness.subprocess, "run", fake_run)
+    out = ui_liveness.dump_ui_targets("emulator-5554", adb="/bin/adb")
+    assert out["measured"] is False
+    assert "stale file not trusted" in out["reason"]
+    assert out["targets"] == []
+    assert not any("cat" in c for c in calls)
+
+
+def test_dump_ui_targets_parses_a_fresh_dump(monkeypatch):
+    import subprocess
+
+    def fake_run(cmd, **kw):
+        if "uiautomator" in cmd:
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="UI hierchary dumped to: /sdcard/ui_dump.xml", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout='<node text="START" clickable="true" bounds="[600,2200][840,2418]"/>',
+            stderr="")
+
+    monkeypatch.setattr(ui_liveness.subprocess, "run", fake_run)
+    out = ui_liveness.dump_ui_targets("emulator-5554", adb="/bin/adb")
+    assert out["measured"] is True and out["reason"] is None
+    assert out["targets"][0]["center"] == [720, 2309]
+
+
+def test_dump_ui_targets_reports_a_failed_shell_as_not_measured(monkeypatch):
+    def boom(*a, **k):
+        raise OSError("adb gone")
+
+    monkeypatch.setattr(ui_liveness.subprocess, "run", boom)
+    out = ui_liveness.dump_ui_targets("emulator-5554", adb="/bin/adb")
+    assert out["measured"] is False
+    assert "uiautomator" in out["reason"] and out["targets"] == []

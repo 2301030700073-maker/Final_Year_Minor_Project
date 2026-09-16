@@ -1185,6 +1185,18 @@ def run(
             "normal runs never touch the device's proxy settings."
         ),
     ),
+    drive_ui: bool = typer.Option(
+        True, "--drive-ui/--no-drive-ui",
+        help=(
+            "With --capture-traffic (and only then), make at most ONE "
+            "deterministic tap to get the app past a control that gates its "
+            "network path, so a button-triggered pinned request can be exercised "
+            "inside the capture window (ADR-0011). The target is read from the "
+            "device's own live UI hierarchy, never a stored coordinate, and the "
+            "drive REFUSES to tap when the choice is ambiguous. Every outcome is "
+            "recorded on the capture stage and reaches the report."
+        ),
+    ),
     force_dynamic: bool = typer.Option(
         False, "--force-dynamic",
         help=(
@@ -2497,6 +2509,7 @@ def run(
                 )
             capture_stage = mitmproxy_capture.run_capture_stage(
                 capture_serial, package_name, ANALYSIS_ROOT / "captures",
+                drive_ui=drive_ui,
             )
         except Exception as exc:
             capture_stage = StageResult(

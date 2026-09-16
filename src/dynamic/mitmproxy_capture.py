@@ -924,6 +924,34 @@ def _stop_windows_mitmdump() -> str | None:
     )
 
 
+def _drive_ui(serial: str) -> dict:
+    """One deterministic tap to get the app past a control that gates its network
+    path, returned as the record the stage stores under `ui_drive` (ADR-0011).
+
+    Never guesses - ui_liveness._choose_tap_target owns that policy. Every outcome
+    is returned, refusals included, because a tap changes app state: an
+    unrecorded one would leave this capture's provenance ambiguous, and a recorded
+    refusal is what lets the report say the network path stayed un-exercised
+    because nothing was safe to tap, rather than leaving the reader to guess."""
+    from dynamic import ui_liveness
+    dump = ui_liveness.dump_ui_targets(serial)
+    if not dump["measured"]:
+        return {"attempted": False, "tapped": False, "target": None,
+                "selected_by": None, "reason": dump["reason"]}
+    target, how = ui_liveness._choose_tap_target(dump["targets"])
+    if target is None:
+        return {"attempted": False, "tapped": False, "target": None,
+                "selected_by": None, "targets_seen": len(dump["targets"]),
+                "reason": how}
+    try:
+        ui_liveness.tap(serial, target["center"][0], target["center"][1])
+    except Exception as e:
+        return {"attempted": True, "tapped": False, "target": target,
+                "selected_by": how, "reason": f"input tap failed: {e}"}
+    return {"attempted": True, "tapped": True, "target": target,
+            "selected_by": how, "reason": None}
+
+
 def run_capture_stage(
     serial: str,
     package: str,
@@ -932,6 +960,7 @@ def run_capture_stage(
     capture_window: float = CAPTURE_WINDOW_SECONDS,
     mitmdump_path: str | None = None,
     bypass_script: str | None = None,
+    drive_ui: bool = True,
 ) -> StageResult:
     """Run a mitmproxy capture of `package`'s traffic and return a StageResult.
 
@@ -1073,6 +1102,14 @@ def run_capture_stage(
         # before the window so it speaks to the launch, and again after it so a
         # mid-window death is visible too.
         pid_after_launch = _app_pid(serial, package)
+        # ADR-0011: give a button-gated network path its chance before the window is
+        # spent. Deliberately after the launch pid sample (so that sample reflects
+        # the launch, not the tap) and before the window sleep (so whatever the tap
+        # triggers lands inside the window).
+        ui_drive = (_drive_ui(serial) if drive_ui else
+                    {"attempted": False, "tapped": False, "target": None,
+                     "selected_by": None,
+                     "reason": "UI drive disabled for this run"})
         time.sleep(capture_window)
         pid_after_capture = _app_pid(serial, package)
 
@@ -1262,6 +1299,13 @@ def run_capture_stage(
                     # rendered as the app choosing not to use the network.
                     "app_pid_after_launch": pid_after_launch,
                     "app_pid_after_capture": pid_after_capture,
+                    # ADR-0011: the single deterministic tap this run made (or the
+                    # reason it made none). Recorded unconditionally because a
+                    # `tapped: True` here means part of this capture's traffic is
+                    # traffic the tool itself caused - the reader must be able to
+                    # tell a driven capture from an undriven one, and a refusal
+                    # must be visible as the reason the path stayed un-exercised.
+                    "ui_drive": ui_drive,
                     # Reachability probe (device-side, proxy-independent): how many
                     # client connections reached mitmdump. >0 with 0 flows => device
                     # reached the proxy, app was silent (app-silence, not a wiring
@@ -1320,6 +1364,10 @@ def run_capture_stage(
                 "proxy": f"127.0.0.1:{proxy_port}",
                 "bypass_script": bypass_script,
                 "bypass_applied": bypass_applied,
+                # Same record on the flow-carrying path: a driven capture's traffic
+                # is partly traffic the tool's own tap caused, and the report has to
+                # be able to say so whichever way the capture turned out.
+                "ui_drive": ui_drive,
                 # A crashed bypass hook can still let OTHER hooks yield flows, so a
                 # capture can SUCCEED with genuine {type:error} messages recorded.
                 # Store them (symmetric with the empty-flows branch) so the report

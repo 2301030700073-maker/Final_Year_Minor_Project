@@ -253,6 +253,116 @@ def _parse_rendered_content(uiautomator_xml: str) -> bool:
     return False
 
 
+# The verbs a first-party "go to the network" control uses. Deliberately small and
+# explicit rather than a broad word list: on an arbitrary app's home screen a loose
+# match would pick navigation or a settings entry, and this module's job is to tap
+# only what it can justify (ADR-0011). Matched against the WHOLE label, lowercased.
+_INTENT_LABELS = ("start", "begin", "load", "continue", "retry", "submit", "go",
+                  "open", "fetch", "login", "sign in")
+
+
+def _node_label(node: str) -> str:
+    """A node's human label: its text, else its content-desc.
+
+    Both are what a person reads on the control, and an icon-only button carries
+    only the desc. The `(?<![\\w-])` guard is the same one _parse_clickable_nodes
+    documents - without it `text` matches inside a longer attribute name and the
+    label comes from the wrong place."""
+    for attr in ("text", "content-desc"):
+        m = re.search(r'(?<![\w-])' + attr + r'="([^"]+)"', node)
+        if m and m.group(1).strip():
+            return m.group(1).strip()
+    return ""
+
+
+def _parse_tap_targets(uiautomator_xml: str) -> list[dict]:
+    """Tappable widgets in a uiautomator dump, each with the centre of its own
+    bounds. Pure over the XML, so the selection policy below is fixture-testable
+    with no device attached.
+
+    `bounds="[x1,y1][x2,y2]"` is the DEVICE's own geometry, and that is the whole
+    point of this function: it is where a tap coordinate comes from INSTEAD of a
+    stored constant, which is what makes one policy hold across devices and DPIs
+    (project-limitations D2). Nodes with missing or degenerate bounds are skipped
+    rather than tapped at (0,0)."""
+    targets: list[dict] = []
+    for m in re.finditer(r'<node[^>]*(?<![\w-])(?:clickable|focusable)="true"[^>]*>',
+                         uiautomator_xml):
+        node = m.group(0)
+        b = re.search(r'bounds="\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]"', node)
+        if not b:
+            continue
+        x1, y1, x2, y2 = (int(v) for v in b.groups())
+        if x2 <= x1 or y2 <= y1:
+            continue
+        targets.append({
+            "label": _node_label(node),
+            "bounds": [x1, y1, x2, y2],
+            "center": [(x1 + x2) // 2, (y1 + y2) // 2],
+        })
+    return targets
+
+
+def _choose_tap_target(targets: list[dict]) -> tuple[dict | None, str]:
+    """The single target to tap, or None with the reason it refused. Pure policy.
+
+    Deterministic, and refuses rather than guesses: a tap changes app state, so an
+    arbitrary one would capture a screen nobody chose and leave the run's result
+    uninterpretable. The second return value is how it was decided, and is
+    recorded verbatim - a `sole-target` tap is a weaker justification than a
+    `label-match` and the evidence says which one happened."""
+    if not targets:
+        return None, "no tappable widget in the hierarchy"
+    for t in targets:
+        if t["label"].strip().lower() in _INTENT_LABELS:
+            return t, "label-match"
+    if len(targets) == 1:
+        return targets[0], "sole-target"
+    return None, (
+        f"{len(targets)} tappable widgets and not one whose label names a "
+        "start/continue action - refusing to guess which of them exercises the "
+        "network path")
+
+
+def dump_ui_targets(serial: str, adb: str | None = None) -> dict:
+    """A FRESH uiautomator dump's tap targets: {"targets", "measured", "reason"}.
+
+    Carries the same stale-file guard check_ui_liveness uses, and for a sharper
+    reason here. On failure `uiautomator dump` prints "ERROR: could not get idle
+    state" and a STALE /sdcard/ui_dump.xml from a previous screen remains; tapping
+    a coordinate read from it would press wherever an earlier screen had a button.
+    A stale coordinate is worse than no coordinate, so a dump without its own
+    success marker degrades to a recorded not-measured, never to a tap."""
+    adb = adb or _adb_wrapper()
+    try:
+        out = subprocess.run(
+            [adb, "-s", serial, "shell", "uiautomator", "dump", "/sdcard/ui_dump.xml"],
+            capture_output=True, text=True, timeout=30,
+        )
+        stdout = out.stdout or ""
+        if "dumped to" not in stdout:
+            return {"targets": [], "measured": False,
+                    "reason": "uiautomator dump failed (stale file not trusted): "
+                              + (stdout.strip()[:80] or "no output")}
+        xml_out = subprocess.run(
+            [adb, "-s", serial, "shell", "cat", "/sdcard/ui_dump.xml"],
+            capture_output=True, text=True, timeout=30,
+        ).stdout or ""
+        return {"targets": _parse_tap_targets(xml_out), "measured": True, "reason": None}
+    except Exception as e:
+        return {"targets": [], "measured": False, "reason": f"uiautomator: {e}"}
+
+
+def tap(serial: str, x: int, y: int, adb: str | None = None) -> None:
+    """Send one tap at a coordinate that came from the device's own dump.
+
+    check=True: a drive that did not happen must not be recorded as one, and the
+    caller records the failure as the drive's outcome (principle 3)."""
+    adb = adb or _adb_wrapper()
+    subprocess.run([adb, "-s", serial, "shell", "input", "tap", str(int(x)), str(int(y))],
+                   capture_output=True, text=True, check=True, timeout=20)
+
+
 def check_ui_liveness(serial: str, package: str, adb: str | None = None) -> dict:
     """Gather real-time UI-responsiveness evidence for the running app.
 

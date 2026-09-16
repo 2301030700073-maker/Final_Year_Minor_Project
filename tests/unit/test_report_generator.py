@@ -1282,6 +1282,66 @@ def test_generate_report_explains_environment_normalization_scrub(tmp_path):
     assert "Environment normalization deployed" not in report_path2.read_text(encoding="utf-8")
 
 
+def test_capture_summary_exposes_the_recorders_liveness_and_its_recorded_cause():
+    from common import StageResult
+    from report.generator import _capture_summary
+
+    dead = StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={"reason": "no flows captured", "proxy": "127.0.0.1:8081",
+                  "client_connections": 0, "tls_failed_clients": [],
+                  "capture_channel_alive": False,
+                  "device_reached_proxy_preflight": True},
+        error="the capture proxy's log carries no addon marker at all - never ran",
+    )
+    cs = _capture_summary([dead])
+    assert cs["capture_channel_alive"] is False
+    assert cs["capture_diagnosis"] == dead.error
+    # A crashed stage keeps its own path: its cause is rendered by capture_error
+    # (the capture_errored branch), so it must not also be relabelled as the
+    # empty-capture diagnosis.
+    crashed = StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={"reason": "capture exception"}, error="capture stage raised: X")
+    assert _capture_summary([crashed])["capture_diagnosis"] is None
+    # No stage at all, and a run whose recorder never reported: both must expose
+    # the keys rather than crash the template (RPT-TMPLCOV1).
+    assert _capture_summary([])["capture_channel_alive"] is None
+    assert _capture_summary([])["capture_diagnosis"] is None
+
+
+def test_generate_report_dead_recorder_is_named_and_its_zeros_are_not_evidence(tmp_path):
+    from common import StageResult
+    from static.manifest import ManifestInfo
+
+    dead = StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={"reason": "no flows captured", "proxy": "127.0.0.1:8081",
+                  "client_connections": 0, "tls_failed_clients": [],
+                  "capture_channel_alive": False,
+                  "device_reached_proxy_preflight": True,
+                  "flows_path": "/x/flows"},
+        error=("the capture proxy's log carries no addon marker at all - "
+               "the recorder never ran: those facts are ABSENT, not empty"),
+    )
+    manifest = ManifestInfo(debuggable=False, network_security_config=None,
+                            permissions=["android.permission.INTERNET"])
+    report_path = generate_report(
+        run_id="cap-dead-recorder", apk_hash="cap02", timestamp="2026-09-16T12:00:00",
+        metadata={"hashes": {"sha256": "cap02"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[dead], output_dir=tmp_path, manifest=manifest,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    # The stage's own recorded cause reaches the reader...
+    assert "capture recorder itself never ran" in content
+    assert "the recorder never ran" in content
+    # ...and the zero the dead recorder produced is NOT reused as an observation
+    # about the device: the reachability-probe prose would read that 0 as proof.
+    assert "Device-side reachability probe" not in content
+    assert "corroborates" not in content
+
+
 def test_generate_report_states_no_internet_as_capture_failure_cause(tmp_path):
     # Report-completeness gap: a failed capture is only ever explained by the
     # generic dual hypothesis, even when the cause is provable from the app's

@@ -8,7 +8,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 51 files, **20,720 LOC**. Largest: cli (3,231), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,143), mitmproxy_capture (978), common (784), device (779), signatures (717), attestation (695).
+- `src/`: 51 files, **20,749 LOC**. Largest: cli (3,231), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,172), mitmproxy_capture (1,126), common (784), device (779), signatures (717), attestation (695).
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
 - `tests/`: 92 files, **29,824 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
@@ -60,7 +60,7 @@ module's line count unchanged escapes it.)
 | `packers.py` | 157 | 157 | +0 | — |
 | `pass_through_proxy.py` | 245 | 277 | +32 | — |
 | `report/attribution.py` | 220 | 220 | +0 | 2026-09-07 |
-| `report/generator.py` | 791 | 1,143 | +352 | 2026-09-08, 2026-09-15 |
+| `report/generator.py` | 791 | 1,172 | +23 | 2026-09-08, 2026-09-15, 2026-09-16 (empty-capture ladder reads the stage record) |
 | `signatures.py` | 523 | 717 | +194 | — |
 | `storage/db.py` | 195 | 210 | +15 | 2026-09-09 |
 | `storage/results.py` | 218 | 250 | +32 | 2026-09-09 |

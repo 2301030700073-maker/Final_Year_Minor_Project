@@ -40,7 +40,7 @@ from audit.attestation import (
 from calibration.ground_truth import DEFAULT_PATH as DEFAULT_GROUND_TRUTH_PATH
 from calibration.ground_truth import load_ground_truth
 from calibration.report import compute_calibration_report
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from common import (
     elapsed_ms,
@@ -64,6 +64,8 @@ from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
 from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
 from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
 from dynamic.success_checks.technology import (
+    SSL_CONFIRMATION_LINE,
+    SSL_HANDSHAKE_LINE,
     TechnologyHooksEngagedCheck,
     liveness_evidence_lines,
 )
@@ -784,6 +786,43 @@ def _ssl_path_exercised(messages) -> int:
                 or isinstance(payload.get("host"), str)):
             count += 1
     return count
+
+
+def _upgrade_verification_from_capture_window(
+    capture_verification: VerificationResult,
+    verification: VerificationResult | None,
+) -> VerificationResult:
+    """Fold a confirming capture-window evaluation into the run's verification
+    (ADR-0016). Called only when that window's own observer carried BOTH the app's
+    pin-check and a completed handshake AND the run had not already confirmed, so
+    this function performs the merge without deciding to: the upgrade-only property
+    stays visible at the call site rather than buried in here.
+
+    With an existing verification, ONLY the two SSL lines move. The capture window
+    cannot speak to root - its bypass is pinning-only by construction (ADR-0015), so
+    it carries no root recipe and observed no root probe - and its post-bypass
+    liveness belongs to a different launch than the one the run's lines were measured
+    in. Both stay exactly as the dynamic window measured them. The two keys are the
+    check's own constants rather than literals here: a rename in one file that
+    silently stopped merging them would leave a report whose SSL verdict and SSL
+    evidence line contradict each other, with nothing raising.
+
+    With no existing verification (the dynamic stage produced none), the capture
+    window's own evaluation becomes the run's. Its root lines say no root-artifact
+    probe was observed during the run, which is what this window measured, and
+    `root_bypassed` stays unpromoted rather than being manufactured out of a
+    pinning-only bypass."""
+    if verification is None:
+        return capture_verification
+    return replace(
+        verification,
+        ssl_bypassed=True,
+        evidence_lines={
+            **verification.evidence_lines,
+            SSL_HANDSHAKE_LINE: capture_verification.evidence_lines[SSL_HANDSHAKE_LINE],
+            SSL_CONFIRMATION_LINE: capture_verification.evidence_lines[SSL_CONFIRMATION_LINE],
+        },
+    )
 
 
 def _reclassify_empty_capture(
@@ -2628,6 +2667,117 @@ def run(
         _print_stage(capture_stage)
         if capture_stage.status == "failed":
             capture_failed = True
+
+        # --- ADR-0016: evaluate the capture window's own observer ---
+        #
+        # The success-check stage above ran BEFORE this window existed, so the only
+        # stream it could ever see was the dynamic stage's launch - and that launch is
+        # the one that stalls on its splash, which is the entire reason this capture
+        # stage exists. Since ADR-0015 this window runs under the same pinning-only
+        # bypass and the same observer script, so its stream is a second, complete
+        # evaluation of the identical predicate: the app's own pin-check ran without
+        # rejecting AND a handshake then completed. A run could therefore hold both
+        # effects - in this stage's own evidence - and still report SSL inconclusive,
+        # because the check that set `verification` never saw them.
+        #
+        # A second evaluation, not a union of the two streams: the predicate is one
+        # connection's story (the pin logic accepting a connection it would otherwise
+        # reject), and a pin-check from one launch plus a handshake from another is a
+        # connection neither launch observed (ADR-0016).
+        #
+        # Upgrade-only, and gated on `bypass_applied` - an un-hooked window has no
+        # observer in it, so its empty stream is a fact about the window rather than
+        # about the app ([[observer-silence-is-a-fact-about-observers]]), exactly as a
+        # hooked window that legitimately stayed silent is. Neither may retract a
+        # confirmation from the dynamic window, so that arm is not evaluated at all
+        # rather than evaluated and then ignored.
+        capture_evidence = capture_stage.evidence or {}
+        if capture_evidence.get("bypass_applied") and capture_evidence.get("frida_messages"):
+            # Name the launch, not just the stage: the confirmation lines this
+            # evaluation produces say which window they are about, so a confirmation
+            # can never be read as belonging to the other one.
+            capture_window = "in this run's capture window"
+            capture_launched_by = (capture_evidence.get("app_launch") or {}).get("launched_by")
+            if capture_launched_by:
+                capture_window += f", launched by {capture_launched_by}"
+            # A run the dynamic window already confirmed has nothing to upgrade. The
+            # capture window is still evaluated - part 3 of the ADR keeps both named
+            # evaluations of both named launches in the record - but its verdict cannot
+            # change the run's, and correlation is only re-run when the object it reads
+            # actually changed.
+            already_confirmed = verification is not None and verification.ssl_bypassed is True
+            try:
+                capture_verification = TechnologyHooksEngagedCheck().check(
+                    capture_evidence.get("frida_messages") or [],
+                    app_still_running=capture_evidence.get("app_target_running"),
+                    ui_liveness=capture_evidence.get("ui_liveness"),
+                    window=capture_window,
+                )
+                upgraded = capture_verification.ssl_bypassed is True and not already_confirmed
+                if upgraded:
+                    verification = _upgrade_verification_from_capture_window(
+                        capture_verification, verification
+                    )
+                    # correlate() is a pure function of (classification, verification) and
+                    # reads ssl_bypassed in five places, so a verdict upgraded after the
+                    # first correlation ran would otherwise sit beside a correlation
+                    # computed from the pre-upgrade object. Re-running it is the whole
+                    # fix; nothing from the earlier result is carried over.
+                    correlation_result = correlation_module.correlate(classification, verification)
+                    # Correlation now HAS a verification to compare against, so the
+                    # "no verification to correlate" reason no longer applies. The
+                    # failed-stage helper further down preserves an existing reason but
+                    # the report renders the correlation branch ahead of the skip
+                    # reason, so a stale one could never contradict a real result.
+                    correlation_skip_reason = None
+                if upgraded:
+                    capture_note = (
+                        "the capture window's own observer carried BOTH the app's "
+                        "pin-check and a completed handshake; the run's verification was "
+                        "upgraded and correlation re-run against it"
+                    )
+                elif already_confirmed:
+                    capture_note = (
+                        "the dynamic window had already confirmed the SSL bypass, so this "
+                        "window's evaluation could not upgrade anything; recorded so both "
+                        "launches' evaluations are in the audit trail"
+                    )
+                else:
+                    capture_note = (
+                        "the capture window's own observer did not carry BOTH the app's "
+                        "pin-check and a completed handshake, so the run's verification "
+                        "stands as the dynamic window measured it - an absence in this "
+                        "window never retracts a confirmation from another"
+                    )
+                capture_check_stage = StageResult(
+                    stage="success-check (capture window)",
+                    status="success",
+                    evidence={
+                        "window": capture_window,
+                        "bypass_applied": True,
+                        "ssl_bypassed": capture_verification.ssl_bypassed,
+                        "upgraded_ssl_verification": upgraded,
+                        "bypass_hooks_engaged": capture_verification.evidence_lines.get(
+                            "bypass hooks engaged", "none"
+                        ),
+                        "note": capture_note,
+                    },
+                )
+            except Exception as exc:
+                # Same treatment as the dynamic-side arms: an unexpected raise out of a
+                # success check must not discard the static analysis or the capture
+                # evidence already gathered, and must never be silent.
+                dynamic_failed = True
+                capture_check_stage = StageResult(
+                    stage="success-check (capture window)", status="failed",
+                    evidence={"reason": "unexpected capture-window check exception"},
+                    error=(
+                        "capture-window hooks-engaged check raised unexpectedly: "
+                        f"{exc}"
+                    ),
+                )
+            stage_results.append(capture_check_stage)
+            _print_stage(capture_check_stage)
 
     # dynamic_stage.evidence["reason"] already distinguishes "operator passed
     # --skip-dynamic" from "NEITHER classification - no bypass technique to

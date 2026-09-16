@@ -637,6 +637,42 @@ def test_run_capture_stage_does_not_call_a_never_launched_app_absent(monkeypatch
     assert "was not running during the capture window" in ev["proxy_attribution"]["reason"]
 
 
+def test_the_attribution_is_told_what_the_proxy_recorded(monkeypatch, tmp_path):
+    """The verdict may refuse an absence only when the probe could see the window,
+    and what the proxy recorded is how that is known - so the count has to reach
+    the call, derived from the same text the flow and refusal readings come from.
+    This stage used to compute the verdict BEFORE reading the log, which made the
+    question unaskable however the verdict itself was written. The shape below is
+    the PropertyGuru run's: a probe that saw no uid at all, in a window whose proxy
+    refused a client's certificate."""
+    from dynamic import proxy_attribution as pa
+    seen = {}
+    real = pa.attribute_proxy_clients
+
+    def spy(sampled, uid_packages, package, proxy_port=None, target_running=None,
+            proxy_connections_seen=None):
+        seen["count"] = proxy_connections_seen
+        return real(sampled, uid_packages, package, proxy_port,
+                    target_running=target_running,
+                    proxy_connections_seen=proxy_connections_seen)
+
+    monkeypatch.setattr(pa, "attribute_proxy_clients", spy)
+    monkeypatch.setattr(pa, "sample_proxy_clients_during",
+                        lambda serial, proxy_port, seconds, interval=2.0, adb=None:
+                        {"uids": set(), "samples": 3, "samples_measured": 3,
+                         "measured": True, "errors": []})
+    monkeypatch.setattr(pa, "package_uid_map",
+                        lambda serial, adb=None: {10181: ["com.example.app"]})
+    refusal = (f"{mitmproxy_capture._TLS_FAILED_CLIENT_MARKER}"
+               "graph.facebook.com|bad certificate\n")
+    result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711, stdout=refusal)
+
+    assert seen["count"] == 1, "what the proxy recorded must reach the verdict"
+    assert len(result.evidence["tls_failed_clients"]) == 1
+    # Blind probe + a recorded connection: no absence is claimed.
+    assert result.evidence["proxy_attribution"]["reached"] is None
+
+
 def test_start_windows_mitmdump_builds_detached_start_process(monkeypatch):
     # Start-Process must take NO redirect of its own: measured on the reference
     # host, -RedirectStandardOutput makes it block for the child's whole lifetime
@@ -1665,10 +1701,15 @@ def _app_running_by_default(monkeypatch):
     monkeypatch.setattr(_pa, "package_uid_map", lambda serial, adb=None: {})
 
 
-def _empty_capture_run(monkeypatch, tmp_path, pid, **kwargs):
+def _empty_capture_run(monkeypatch, tmp_path, pid, stdout="", **kwargs):
     """Drive run_capture_stage down the real empty-capture path with a device that
     is routed and reachable, so the only thing under test is what the stage makes
-    of the app's own liveness."""
+    of the app's own liveness.
+
+    `stdout` is the proxy's own output as the stage reads it back. Empty is the
+    empty capture; a marker line is how a test puts a read-back fact - a flow or a
+    refused certificate - in the window without a proxy.
+    """
     monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: False)
     monkeypatch.setattr(mitmproxy_capture.shutil, "which", lambda name: "/usr/bin/mitmdump")
     monkeypatch.setattr(mitmproxy_capture.time, "sleep", lambda s: None)
@@ -1677,7 +1718,7 @@ def _empty_capture_run(monkeypatch, tmp_path, pid, **kwargs):
         def __init__(self, *a, **k):
             pass
         def communicate(self, timeout=None):
-            return "", ""
+            return stdout, ""
         def terminate(self):
             pass
         def kill(self):

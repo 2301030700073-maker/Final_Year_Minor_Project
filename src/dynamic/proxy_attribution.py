@@ -183,7 +183,8 @@ def package_uid_map(serial: str, adb: str | None = None) -> dict | None:
 
 def attribute_proxy_clients(sampled: dict | None, uid_packages: dict | None,
                             package: str, proxy_port: int | None = None,
-                            target_running: bool | None = None) -> dict:
+                            target_running: bool | None = None,
+                            proxy_connections_seen: int | None = None) -> dict:
     """Did THIS app itself reach the capture proxy?
 
     `reached` is True (a uid carrying this package was seen with a socket to the
@@ -197,6 +198,12 @@ def attribute_proxy_clients(sampled: dict | None, uid_packages: dict | None,
     THIS package opened it, and a caller that hid that would be upgrading
     uid-level evidence to a package-level claim.
 
+    `uids_seen` is the observation the verdict rests on: the uids the sampling
+    actually saw holding a socket to the proxy, the target's excluded. It is on
+    every return because without it a reader cannot tell a probe that worked (it
+    saw other uids and not this app's) from one that saw nothing at all - two
+    measurements that otherwise render identically.
+
     `target_running` is the premise a False rests on: was the app running during
     the window at all? A False says "this app stayed away from the proxy", and an
     app that was never started cannot stay away from anything - it makes no
@@ -206,28 +213,45 @@ def attribute_proxy_clients(sampled: dict | None, uid_packages: dict | None,
     So a False requires `target_running is True`; False and unmeasured liveness
     both yield None (not measured). A True needs no such premise - a socket from
     the target's uid is positive proof the process existed.
+
+    `proxy_connections_seen` is the other half of that premise: how many
+    client->proxy connections the proxy's OWN log recorded in this same window
+    (decrypted flows + refused handshakes). A False also asserts the probe could
+    have seen the app, and a probe that observed no uid at all while the proxy
+    recorded connections demonstrably could not - it missed every connection that
+    happened, so the target's absence from its samples is a fact about the probe,
+    not about the app. That case yields None. A window in which the proxy
+    recorded nothing leaves nothing to miss, and there a False stands even with
+    an empty uid set. None means the count was not measured, which cannot rule
+    the miss out, so it yields None as well.
     """
     if sampled is None or not sampled.get("measured"):
-        return {"reached": None, "uid": None, "shared_uid": [], "proxy_port": proxy_port,
+        return {"reached": None, "uid": None, "shared_uid": [], "uids_seen": [],
+                "proxy_port": proxy_port,
                 "reason": ("the device's socket table could not be read, so whether "
                            f"{package} reached the capture proxy was not measured")}
+    seen = set(sampled.get("uids") or ())
     if uid_packages is None:
-        return {"reached": None, "uid": None, "shared_uid": [], "proxy_port": proxy_port,
+        return {"reached": None, "uid": None, "shared_uid": [], "uids_seen": sorted(seen),
+                "proxy_port": proxy_port,
                 "reason": (f"the device's package list could not be read, so {package}'s uid "
                            "is unknown and whether it reached the proxy was not measured")}
     target_uids = {u for u, pkgs in uid_packages.items() if package in pkgs}
     if not target_uids:
-        return {"reached": None, "uid": None, "shared_uid": [], "proxy_port": proxy_port,
+        return {"reached": None, "uid": None, "shared_uid": [], "uids_seen": sorted(seen),
+                "proxy_port": proxy_port,
                 "reason": (f"{package} has no uid in the device's package list, so whether it "
                            "reached the proxy was not measured")}
-    hit = target_uids & set(sampled.get("uids") or ())
+    hit = target_uids & seen
     uid = sorted(hit)[0] if hit else sorted(target_uids)[0]
     shared = sorted(p for p in uid_packages.get(uid, []) if p != package)
     shared_note = (f"; uid {uid} is shared with {', '.join(shared)}, so this is uid-level "
                    "evidence and not proof that this package opened it") if shared else ""
     if hit:
-        return {"reached": True, "uid": uid, "shared_uid": shared, "proxy_port": proxy_port,
+        return {"reached": True, "uid": uid, "shared_uid": shared, "uids_seen": sorted(seen),
+                "proxy_port": proxy_port,
                 "reason": f"uid {uid} held a socket to the capture proxy{shared_note}"}
+    others = sorted(seen - target_uids)
     if target_running is not True:
         why = (
             "was not running during the capture window, so it made no requests for a "
@@ -236,10 +260,33 @@ def attribute_proxy_clients(sampled: dict | None, uid_packages: dict | None,
             "could not be measured as running during the capture window, so its absence "
             "from the socket table is not evidence that it stayed away"
         )
-        return {"reached": None, "uid": uid, "shared_uid": shared, "proxy_port": proxy_port,
+        return {"reached": None, "uid": uid, "shared_uid": shared, "uids_seen": others,
+                "proxy_port": proxy_port,
                 "reason": (f"{package} (uid {uid}) {why} - whether it reached the capture "
                            "proxy was therefore not measured")}
-    return {"reached": False, "uid": uid, "shared_uid": shared, "proxy_port": proxy_port,
+    if not seen and proxy_connections_seen != 0:
+        recorded = (
+            "the proxy's own log was not read this run, so what the probe had to catch "
+            "is unknown"
+            if proxy_connections_seen is None else
+            f"the proxy's own log recorded {proxy_connections_seen} client->proxy "
+            "connection(s) in this same window"
+        )
+        return {"reached": None, "uid": uid, "shared_uid": shared, "uids_seen": [],
+                "proxy_port": proxy_port,
+                "reason": (f"the socket table was readable but no uid on it held a socket to "
+                           f"the capture proxy in any of {sampled.get('samples_measured')} "
+                           f"sample(s), while {recorded} - a probe that saw nothing while "
+                           "connections happened did not observe this window, so whether the "
+                           "app stayed away was not measured")}
+    seen_note = (
+        f"; the probe did see {len(others)} other uid(s) with a socket to the proxy, so it "
+        "could see connections in this window"
+        if others else "; the proxy recorded no client->proxy connection this window"
+    )
+    return {"reached": False, "uid": uid, "shared_uid": shared, "uids_seen": others,
+            "proxy_port": proxy_port,
             "reason": (f"uid {uid} ({package}) held no socket to the capture proxy in any of "
                        f"{sampled.get('samples_measured')} readable sample(s) of the window"
-                       + (f"; uid {uid} is shared with {', '.join(shared)}" if shared else ""))}
+                       + (f"; uid {uid} is shared with {', '.join(shared)}" if shared else "")
+                       + seen_note)}

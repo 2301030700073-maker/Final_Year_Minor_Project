@@ -133,6 +133,71 @@ def test_a_target_that_never_reached_the_proxy_is_a_measured_absence():
     assert "held no socket to the capture proxy" in got["reason"]
 
 
+def test_a_probe_that_saw_no_uid_at_all_cannot_assert_an_absence():
+    """The hole this guard closes, measured on the PropertyGuru run
+    `6546c2c0248947b8a67e06ce2b3ebf44`: its verdict was `reached: False` from a
+    socket table that showed no uid at all, while the same window's proxy log
+    recorded 19 refused client handshakes and 1 decrypted flow. A refusal is
+    unreachable without a TCP connection to the proxy, so 20 connections happened
+    and the probe caught none of them - its silence is a fact about the probe, not
+    about the app. Before this guard the two measurements were indistinguishable
+    in the record, and the blind one licensed an absence."""
+    got = pa.attribute_proxy_clients(_sampled(set()), {10131: ["com.test.app"]},
+                                     "com.test.app", 8081, target_running=True,
+                                     proxy_connections_seen=20)
+    assert got["reached"] is None and got["reached"] is not False
+    assert "no uid on it held a socket" in got["reason"]
+    assert "20 client->proxy connection(s)" in got["reason"]
+    assert got["uids_seen"] == []
+
+
+def test_an_empty_uid_set_with_a_silent_proxy_is_still_a_measured_absence():
+    """The other side of the same guard: a window in which the proxy recorded
+    nothing leaves nothing for the probe to have missed, so False stands."""
+    got = pa.attribute_proxy_clients(_sampled(set()), {10131: ["com.test.app"]},
+                                     "com.test.app", 8081, target_running=True,
+                                     proxy_connections_seen=0)
+    assert got["reached"] is False
+    assert "the proxy recorded no client->proxy connection this window" in got["reason"]
+
+
+def test_an_unmeasured_connection_count_cannot_rule_the_miss_out():
+    """A caller that does not say what the proxy recorded cannot obtain an
+    absence by omission - the count is available at the one real call site."""
+    got = pa.attribute_proxy_clients(_sampled(set()), {10131: ["com.test.app"]},
+                                     "com.test.app", 8081, target_running=True)
+    assert got["reached"] is None
+    assert "was not read this run" in got["reason"]
+
+
+def test_a_probe_that_saw_other_uids_keeps_the_absence_and_says_so():
+    """The case the module was built for: the probe demonstrably can see
+    connections in this window, and this app was not among them. What it did see
+    is carried so a reader can weigh the absence rather than assume it."""
+    got = pa.attribute_proxy_clients(_sampled({999, 1000}), {10131: ["com.test.app"]},
+                                     "com.test.app", 8081, target_running=True,
+                                     proxy_connections_seen=4)
+    assert got["reached"] is False
+    assert got["uids_seen"] == [999, 1000]
+    assert "the probe did see 2 other uid(s)" in got["reason"]
+
+
+def test_every_verdict_carries_the_observation_it_rests_on():
+    """`uids_seen` is what separates a probe that worked from one that saw
+    nothing; without it those two render identically."""
+    cases = [
+        (pa.attribute_proxy_clients(_sampled({10131}), {10131: ["com.test.app"]},
+                                    "com.test.app", 8081), [10131]),
+        (pa.attribute_proxy_clients(_sampled(set(), measured=False),
+                                    {10131: ["com.test.app"]},
+                                    "com.test.app", 8081), []),
+        (pa.attribute_proxy_clients(_sampled({999}), {10131: ["com.test.app"]},
+                                    "com.test.app", 8081, target_running=None), [999]),
+    ]
+    for got, expected in cases:
+        assert got["uids_seen"] == expected
+
+
 def test_a_target_that_was_not_running_is_never_a_measured_absence():
     """Measured on the reference emulator: `am start -a MAIN -c LAUNCHER -p <pkg>`
     starts nothing on a device with no launcher app AND EXITS 0, so the stage's

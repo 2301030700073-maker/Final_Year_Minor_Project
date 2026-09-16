@@ -1290,14 +1290,11 @@ def run_capture_stage(
         # handshake's socket can be gone in a moment.
         proxy_clients = proxy_attribution.sample_proxy_clients_during(
             serial, proxy_port, capture_window)
-        # The end-of-window liveness sample is taken BEFORE the attribution is
-        # computed, because the attribution now needs it: a False ("the app did
-        # not reach the proxy") is only licensed if the app was there to reach it.
+        # The end-of-window liveness sample is taken while the window is still open.
+        # The attribution below needs it: a False ("the app did not reach the proxy")
+        # is only licensed if the app was there to reach it.
         pid_after_capture = _app_pid(serial, package)
         target_running = _target_running(pid_after_launch, pid_after_capture)
-        proxy_attribution_verdict = proxy_attribution.attribute_proxy_clients(
-            proxy_clients, proxy_attribution.package_uid_map(serial), package,
-            proxy_port, target_running=target_running)
 
         if wsl2:
             stdout_text = _read_flow_detail_log(log_wsl)
@@ -1320,6 +1317,18 @@ def run_capture_stage(
         # and native mitmdump's own flow_detail line), so neither reports a zero
         # it could not have seen.
         tls_failed = _count_tls_failed_clients(stdout_text or "")
+        # The attribution is computed HERE, after the proxy's own log has been read,
+        # because it needs what that log recorded: `tls_failed` counts client
+        # handshakes the proxy refused, and every one of them is a client->proxy
+        # connection that HAPPENED. A device-side sampling that saw no uid at all
+        # while the proxy recorded those connections did not observe this window,
+        # and its silence is not evidence the app stayed away (see
+        # attribute_proxy_clients). Computing the verdict above - before the log was
+        # read, which is where this stage used to compute it - made that unaskable.
+        proxy_attribution_verdict = proxy_attribution.attribute_proxy_clients(
+            proxy_clients, proxy_attribution.package_uid_map(serial), package,
+            proxy_port, target_running=target_running,
+            proxy_connections_seen=len(flows) + len(tls_failed))
         # The WSL2 addon's own liveness (None on the native placement, where no
         # addon runs and mitmdump's own flow_detail stdout is the source).
         channel_alive = _capture_channel_alive(stdout_text or "") if wsl2 else None

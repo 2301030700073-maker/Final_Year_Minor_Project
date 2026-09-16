@@ -1425,3 +1425,16 @@ def test_wsl2_empty_log_with_the_addon_marker_keeps_the_route_verdict(monkeypatc
     assert result.evidence["capture_channel_alive"] is True
     assert "adb reverse" in result.error
     assert "@@ADDON_LOADED@@" not in result.error
+
+
+def test_app_client_connections_excludes_the_stages_own_probe():
+    # A successful pre-flight probe makes exactly ONE connection that the pipeline
+    # itself opened, and both counter sources see it (the addon's client_connected
+    # on WSL2, mitmdump's own lifecycle line natively). The count every consumer
+    # reads is about the APP, so it must not include the pipeline.
+    assert mitmproxy_capture._app_client_connections(1, True) == 0
+    assert mitmproxy_capture._app_client_connections(2, True) == 1
+    # A probe that could not run, or ran and failed, opened nothing to subtract.
+    assert mitmproxy_capture._app_client_connections(1, None) == 1
+    assert mitmproxy_capture._app_client_connections(1, False) == 1
+    assert mitmproxy_capture._app_client_connections(0, True) == 0  # floor, never negative

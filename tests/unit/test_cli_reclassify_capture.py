@@ -202,8 +202,9 @@ def test_no_manifest_stays_failed():
 # --- Signal 3: device-side reachability probe (client connection count) --------
 
 def test_internet_client_connected_but_no_flow_is_skipped():
-    # The mitmproxy addon counted client connections: the device DID reach the
-    # proxy but no request decrypted -> app-silence / post-connect CA refusal,
+    # The mitmproxy addon counted client connections FROM THE APP (the stage's own
+    # pre-flight probe is corrected out before this count is read): the app opened
+    # connections but no request decrypted -> app-silence / post-connect CA refusal,
     # NOT a device->proxy reachability failure. Proxy-independent in the OTHER
     # direction from the bypassEffect signal, so it disambiguates even with no
     # usable dynamic stage.
@@ -211,7 +212,7 @@ def test_internet_client_connected_but_no_flow_is_skipped():
         _capture(client_connections=2), _manifest(_INTERNET), None)
     assert out.status == "skipped"
     assert out.evidence["reclassified_from"] == "failed"
-    assert "reached the proxy" in out.evidence["not_applicable_reason"]
+    assert "client connection(s) to the proxy" in out.evidence["not_applicable_reason"]
     assert "2 client" in out.evidence["not_applicable_reason"]
 
 
@@ -419,7 +420,7 @@ def test_signal2_does_not_claim_app_silence_when_a_connection_was_observed():
     )
     assert out.status == "skipped"
     reason = out.evidence["not_applicable_reason"]
-    assert "device reached the proxy" in reason and "1 client connection" in reason
+    assert "the app opened" in reason and "1 client connection" in reason
     assert "app did not exercise" not in reason
 
 

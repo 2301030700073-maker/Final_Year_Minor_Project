@@ -350,7 +350,12 @@ def _count_client_connections(text: str) -> int:
     disconnect is never miscounted. The native match is gated on the line being
     un-indented (column 0, as real flow_detail emits it) - same discipline the
     request-line parser uses - so an indented header value that merely contains
-    the substring can never inflate the count."""
+    the substring can never inflate the count.
+
+    NOTE: this is the RAW count from the log - it includes the connection this
+    stage's own pre-flight reachability probe makes (both sources see it). Callers
+    reporting or reasoning about the APP must pass it through
+    `_app_client_connections` first."""
     count = 0
     for raw in text.splitlines():
         line = raw.strip()
@@ -359,6 +364,29 @@ def _count_client_connections(text: str) -> int:
         elif "client connect" in line and not raw[0].isspace():
             count += 1
     return count
+
+
+def _app_client_connections(raw_count: int, reachable: bool | None) -> int:
+    """The client connections attributable to the APP, not to this stage's own
+    pre-flight reachability probe.
+
+    `_device_reaches_proxy` runs `nc` on the device against the proxy port before
+    the capture window, and that connect is accepted by mitmdump and counted by
+    `_count_client_connections` exactly like app traffic (measured on RS_CertPinning
+    2026-09-16: one counted connection, 2 ms, zero bytes, no SNI, arriving in the gap
+    between mitmdump listening and the app launch). Consumers read that count as
+    evidence about the device and the app, so leaving the pipeline's own connection
+    in it makes them reason about a request the pipeline made
+    ([[multi-cause-counter-label-fidelity]]).
+
+    A successful probe (reachable is True) is definitive proof of exactly one such
+    connection, so the subtraction is a correction rather than an estimate; the
+    `max(0, ...)` floor only guards the contradictory input (a probe that returned
+    True while the recorder saw nothing - a dead recorder, which its own liveness
+    rung reports) from producing a negative connection count."""
+    if reachable is True:
+        return max(0, raw_count - 1)
+    return raw_count
 
 
 def _count_tls_failed_clients(text: str) -> list[dict[str, str]]:
@@ -951,7 +979,13 @@ def run_capture_stage(
         channel_alive = _capture_channel_alive(stdout_text or "") if wsl2 else None
         proxy_log_excerpt = _proxy_log_excerpt(proxy_log)
         if not flows:
-            client_connections = _count_client_connections(stdout_text or "")
+            client_connections_raw = _count_client_connections(stdout_text or "")
+            # `reachable` is the pre-flight probe's verdict: True means this stage
+            # itself opened one counted connection to the proxy (see
+            # _app_client_connections). Removed here rather than at each consumer, so
+            # no reader below can accidentally reason about the pipeline's own connect.
+            probe_connections = 1 if reachable is True else 0
+            client_connections = _app_client_connections(client_connections_raw, reachable)
             # A crashed pinning-bypass script is a THIRD, concrete cause of zero
             # flows, distinct from device-unreachable and app-silent - and on a
             # pinned target the most likely one (the bypass never took, so TLS
@@ -1079,6 +1113,10 @@ def run_capture_stage(
                     # reached the proxy, app was silent (app-silence, not a wiring
                     # failure); 0 => device never reached the proxy (real failure).
                     "client_connections": client_connections,
+                    # The raw count and what was removed, so the arithmetic above is
+                    # auditable from the persisted evidence alone.
+                    "client_connections_raw": client_connections_raw,
+                    "preflight_probe_connections": probe_connections,
                     # Certificate refusals this capture observed, from whichever
                     # source this placement writes (see _count_tls_failed_clients).
                     "tls_failed_clients": tls_failed,

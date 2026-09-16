@@ -927,7 +927,9 @@ def _reclassify_empty_capture(
     # BEFORE the capture window (mitmdump may not have been listening yet), so it
     # may not override a connection the capture actually observed:
     # client_connections counts the connections the proxy really accepted during
-    # the window, and >0 is proof the route was usable. A down verdict the
+    # the window APART FROM this stage's own pre-flight probe (the pipeline's own
+    # `nc` connect is corrected out by _app_client_connections), and >0 is proof
+    # the route carried app traffic. A down verdict the
     # capture's own log contradicts therefore falls through to Signal 3 rather
     # than asserting a wiring break that log disproves. 0 (or absent) leaves it
     # uncontradicted and the stage loud; None is unknown and never asserts either
@@ -1032,8 +1034,9 @@ def _reclassify_empty_capture(
             stage="capture-traffic", status="skipped",
             evidence={**evidence, "reclassified_from": "failed",
                       "not_applicable_reason": (
-                          f"device reached the proxy ({client_connections} client "
-                          "connection(s)) but no request produced a decrypted flow, and "
+                          f"the app opened {client_connections} client "
+                          "connection(s) to the proxy (this stage's own pre-flight "
+                          "probe is excluded) but no request produced a decrypted flow, and "
                           "the proxy recorded no certificate refusal on either source - "
                           "nothing this capture saw says a client rejected our CA, so "
                           "what is left is the app staying silent on the network path "

@@ -2549,3 +2549,36 @@ def test_generate_report_preflight_down_does_not_claim_the_app_never_executed(tm
     assert "the app's own pinned request never executed" not in content
     assert "pre-flight probe found the device could **not** reach the proxy" in content
     assert "it leaves a device→proxy reachability failure to fix" in content
+
+
+def test_generate_report_zero_app_connections_on_a_proven_up_route_is_not_a_wiring_failure(tmp_path):
+    # The corrected count is app-attributable, so 0 no longer means "the device never
+    # reached the proxy" when the pre-flight probe proved the route UP. Reading the
+    # corrected 0 through the old prose would assert a wiring failure the probe
+    # disproves.
+    from common import StageResult
+    from static.manifest import ManifestInfo
+
+    quiet = StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={"reason": "no flows captured", "proxy": "127.0.0.1:8081",
+                  "client_connections": 0, "client_connections_raw": 1,
+                  "preflight_probe_connections": 1,
+                  "tls_failed_clients": [], "capture_channel_alive": True,
+                  "device_reached_proxy_preflight": True, "flows_path": "/x/flows"},
+        error="no traffic captured through the proxy",
+    )
+    # No dynamic stage: with one, the observer-corroborates arm of the same ladder
+    # legitimately wins (its audit IS present). This is the --skip-dynamic capture.
+    manifest = ManifestInfo(debuggable=False, network_security_config=None,
+                            permissions=["android.permission.INTERNET"])
+    path = generate_report(
+        run_id="cap-up-but-quiet", apk_hash="cap05", timestamp="2026-09-16T13:10:00",
+        metadata={"hashes": {"sha256": "cap05"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[quiet], output_dir=tmp_path, manifest=manifest,
+    )
+    content = path.read_text(encoding="utf-8")
+    assert "its own pre-flight probe excluded" in content
+    assert "the pre-flight probe found the route **UP** and no other connection arrived" in content
+    assert "real device→proxy reachability failure" not in content

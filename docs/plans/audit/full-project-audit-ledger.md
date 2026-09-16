@@ -8,9 +8,9 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 51 files, **20,895 LOC**. Largest: cli (3,317), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,191), mitmproxy_capture (1,167), common (784), device (779), signatures (717), attestation (695).
+- `src/`: 51 files, **20,936 LOC**. Largest: cli (3,320), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,191), mitmproxy_capture (1,205), common (784), device (779), signatures (717), attestation (695).
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
-- `tests/`: 92 files, **29,929 LOC** (more test than source; informational, see §Currency).
+- `tests/`: 92 files, **29,970 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
 
 ## Currency — what each ✅ covers
@@ -38,7 +38,7 @@ module's line count unchanged escapes it.)
 | `androguard_scanner.py` | 335 | 387 | +52 | — |
 | `audit/attestation.py` | 571 | 695 | +124 | 2026-09-07 |
 | `calibration/*.py` | 510 | 571 | +61 | 2026-09-07 |
-| `cli.py` | 2530 | 3,317 | +787 | 2026-09-15, 2026-09-16 (Signal-2 observer silence is not app-silence; the 0 is a fact about the observers) |
+| `cli.py` | 2530 | 3,320 | +790 | 2026-09-15, 2026-09-16 (Signal-2 observer silence is not app-silence; the 0 is a fact about the observers; the probe is not the app's connection) |
 | `common.py` | 466 | 784 | +318 | — |
 | `correlation.py` | 82 | 140 | +58 | — |
 | `coverage.py` | 342 | 527 | +185 | 2026-09-07 |
@@ -54,7 +54,7 @@ module's line count unchanged escapes it.)
 | `ingest/normalize.py` | 174 | 208 | +34 | 2026-09-07 |
 | `jnibridge.py` | 175 | 202 | +27 | 2026-09-09 |
 | `manifest.py` | 457 | 544 | +87 | — |
-| `mitmproxy_capture.py` | 487 | 1,167 | +27 | 2026-09-16 (proxy log: both ends, and its path) |
+| `mitmproxy_capture.py` | 487 | 1,205 | +718 | 2026-09-16 (the stage's own pre-flight probe is not the app's connection) |
 | `native.py` | 1243 | 1,879 | +636 | 2026-09-15 (full re-read) |
 | `obfuscation.py` | 261 | 282 | +21 | 2026-09-09 |
 | `packers.py` | 157 | 157 | +0 | — |

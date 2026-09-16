@@ -724,12 +724,26 @@ def _start_windows_mitmdump(mitmdump_win: str, confdir_win: str, addon_win: str,
                    capture_output=True, text=True, check=True, timeout=30)
 
 
-def _wait_windows_listening(port: int, timeout: float = _WSL_LISTEN_TIMEOUT) -> None:
+def _wait_windows_listening(port: int, timeout: float = _WSL_LISTEN_TIMEOUT,
+                            log_path=None) -> None:
     """Poll until a Windows-host process listens on `port`. If the just-launched
     Windows mitmdump never binds, raise loudly - the WSL2 path must not silently
-    route the device to nothing."""
+    route the device to nothing.
+
+    The mitmdump's own output is read back and quoted on failure. Measured on the
+    real host: a mitmproxy script that will not load is FATAL - mitmdump logs
+    "HTTP(S) proxy listening at *:8081." and then "Error logged during startup,
+    exiting...", so it binds the port and is gone again before this probe runs.
+    Raising on the probe alone therefore reports the SYMPTOM ("did not start
+    listening") while mitmproxy's traceback - which names the exact file and line
+    - was written to a log nobody read ([[unit-tested-parser-neq-consumed-signal]])."""
     if not pass_through_proxy._probe_windows_listening(port, timeout):
-        raise RuntimeError(f"Windows-host mitmdump did not start listening on port {port}")
+        excerpt = _proxy_log_excerpt(_read_windows_text(log_path)) if log_path else ""
+        raise RuntimeError(
+            f"Windows-host mitmdump did not start listening on port {port}"
+            + (f" - its own output says: {excerpt}" if excerpt else
+               " - and it produced no output at all, so it likely never launched")
+        )
 
 
 def _read_windows_text(path: Path) -> str:
@@ -850,7 +864,7 @@ def run_capture_stage(
             _write_windows_addon(addon_path, log_win)
             _start_windows_mitmdump(win_mitmdump, confdir_win, addon_win,
                                     flows_win, proxy_port, proxy_log_win)
-            _wait_windows_listening(proxy_port)
+            _wait_windows_listening(proxy_port, log_path=proxy_log_wsl)
         else:
             flows_path = out_dir / f"{time.time_ns()}.mitm"
             proc = subprocess.Popen(

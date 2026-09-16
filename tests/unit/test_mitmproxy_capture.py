@@ -614,6 +614,52 @@ def test_dead_channel_rung_still_reports_a_down_probe_as_down(monkeypatch, tmp_p
     assert "adb reverse" not in result.error
 
 
+def test_windows_listen_failure_quotes_the_proxys_own_output(monkeypatch):
+    # A mitmproxy script that will not load is FATAL: measured on the real host it
+    # binds the port, logs "Error logged during startup, exiting..." and is gone
+    # before the probe runs. The operator must get mitmproxy's own traceback, not
+    # only the symptom the probe can see.
+    monkeypatch.setattr(pass_through_proxy, "_probe_windows_listening",
+                        lambda port, timeout: False)
+    monkeypatch.setattr(
+        mitmproxy_capture, "_read_windows_text",
+        lambda path: "Loading script X\n error in script X\n SyntaxError: invalid syntax")
+    with pytest.raises(RuntimeError) as exc:
+        mitmproxy_capture._wait_windows_listening(8081, log_path="/mnt/c/x.log")
+    assert "did not start listening on port 8081" in str(exc.value)
+    assert "SyntaxError" in str(exc.value)
+
+
+def test_windows_listen_failure_says_so_when_the_proxy_log_is_empty(monkeypatch):
+    monkeypatch.setattr(pass_through_proxy, "_probe_windows_listening",
+                        lambda port, timeout: False)
+    monkeypatch.setattr(mitmproxy_capture, "_read_windows_text", lambda path: "")
+    with pytest.raises(RuntimeError) as exc:
+        mitmproxy_capture._wait_windows_listening(8081, log_path="/mnt/c/x.log")
+    assert "never launched" in str(exc.value)
+
+
+def test_startup_failure_cause_reaches_the_branch_that_renders_it(monkeypatch, tmp_path):
+    # End of the chain: this path's reason is "capture exception", which IS the
+    # branch that renders capture_error - so mitmproxy's own words reach a human
+    # instead of stopping at the StageResult. (The template's rendering of
+    # capture_error in that branch is pinned by the crashed-capture report test.)
+    from report.generator import _capture_summary
+
+    def boom(port, timeout=0, log_path=None):
+        raise RuntimeError("Windows-host mitmdump did not start listening on port 8081"
+                           " - its own output says: error in script X | SyntaxError")
+    _wsl2_empty_stubs(monkeypatch, log_text="", reachable=None)
+    monkeypatch.setattr(mitmproxy_capture, "_wait_windows_listening", boom)
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1)
+    assert result.status == "failed"
+    assert result.evidence["reason"] == "capture exception"
+    cs = _capture_summary([result])
+    assert cs["capture_errored"] is True
+    assert "SyntaxError" in cs["capture_error"]
+
+
 def test_wsl2_dead_channel_says_so_when_the_proxy_log_is_empty_too(monkeypatch, tmp_path):
     _wsl2_empty_stubs(monkeypatch, log_text="", reachable=False)
     result = mitmproxy_capture.run_capture_stage(
@@ -635,7 +681,7 @@ def test_run_capture_stage_wsl2_records_real_flows(monkeypatch, tmp_path):
     monkeypatch.setattr(mitmproxy_capture, "_write_windows_addon",
                         lambda path, log_win: path)
     monkeypatch.setattr(mitmproxy_capture, "_start_windows_mitmdump", lambda *a: None)
-    monkeypatch.setattr(mitmproxy_capture, "_wait_windows_listening", lambda *a: None)
+    monkeypatch.setattr(mitmproxy_capture, "_wait_windows_listening", lambda *a, **k: None)
     monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
     monkeypatch.setattr(mitmproxy_capture.time, "sleep", lambda s: None)
     monkeypatch.setattr(mitmproxy_capture.time, "time_ns", lambda: 12345)
@@ -1289,7 +1335,7 @@ def _wsl2_empty_stubs(monkeypatch, log_text, reachable):
                         lambda confdir, dest: "C:\\Users\\Public\\x-conf")
     monkeypatch.setattr(mitmproxy_capture, "_write_windows_addon", lambda path, log_win: path)
     monkeypatch.setattr(mitmproxy_capture, "_start_windows_mitmdump", lambda *a: None)
-    monkeypatch.setattr(mitmproxy_capture, "_wait_windows_listening", lambda *a: None)
+    monkeypatch.setattr(mitmproxy_capture, "_wait_windows_listening", lambda *a, **k: None)
     monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
     monkeypatch.setattr(mitmproxy_capture.time, "sleep", lambda s: None)
     monkeypatch.setattr(mitmproxy_capture.time, "time_ns", lambda: 12345)

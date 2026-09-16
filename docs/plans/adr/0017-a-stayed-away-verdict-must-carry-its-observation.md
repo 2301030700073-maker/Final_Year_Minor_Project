@@ -128,4 +128,85 @@ refusal list existed.
 
 ## Verification
 
-Pending implementation.
+Implemented on 2026-09-16 (`776d16403`, `c0302f28a`, `52a3c99f1`). Full suite:
+**1877 passed**, from 1866 before the change - 11 new tests across the two modules.
+
+The three parts are each pinned by a test that fails without them:
+
+- Part 1 - `test_every_verdict_carries_the_observation_it_rests_on` walks three
+  returns (a hit, an unreadable table, a liveness-unknown miss) and asserts the
+  `uids_seen` on each. Without it a working probe and a blind one still render
+  identically.
+- Part 2 - `test_a_probe_that_saw_no_uid_at_all_cannot_assert_an_absence` uses the
+  motivating run's own numbers (an empty table with 20 recorded client->proxy
+  connections) and asserts `reached is None`, with both numbers in the reason.
+  `test_an_empty_uid_set_with_a_silent_proxy_is_still_a_measured_absence` pins the
+  other side: `proxy_connections_seen=0` leaves nothing to miss, so `False` stands.
+- Part 3 - `test_an_unmeasured_connection_count_cannot_rule_the_miss_out` asserts
+  that a caller which does not say what the proxy recorded gets `None`, and the
+  real call site is pinned separately by
+  `test_the_attribution_is_told_what_the_proxy_recorded`, which spies on
+  `attribute_proxy_clients` and asserts the count it receives is the refused
+  handshakes actually read back from the proxy's log.
+
+The move of the call after the log read is what the second of those tests depends
+on: the count only exists once `_count_tls_failed_clients` has run.
+
+### The first real run found a hole in part 2
+
+Run `0821158c79da4bb1a9fc35370ba65bb9` (PropertyGuru, `--force-dynamic
+--capture-traffic`, exit 0) exercised the new code end to end: `OK dynamic
+(30478ms)` / `OK success-check (0ms)` / `SKIPPED capture-traffic (24297ms)` - the
+capture was reclassified because it decrypted zero flows while recording 17
+refused client handshakes - / `OK success-check (capture window) (0ms)`. Its
+attribution returned `reached: True`, `uid 10168 held a socket to the capture
+proxy`, `app_target_running: True`, and `uids_seen: [0, 10168]`.
+
+**That last field is the hole.** uid 10168 is the app. uid 0 is the adb shell this
+stage runs its own pre-flight reachability probe from - `adb shell id -u` is 0 on
+the reference emulator - and `/proc/net/tcp` keeps that finished connection's row
+in `TIME_WAIT` for the whole capture window. So the pipeline's own socket is on
+every table the probe looked at, and part 2 as written would have read a lone uid 0
+as "the probe demonstrably saw this window" - licensing precisely the absence it
+was written to refuse. `_app_client_connections` had already subtracted the same
+connection from the client-connection *count*; the uid side had never been done.
+
+Part 2 is therefore refined to say what it always meant: a `False` requires the
+sampling to have observed at least one uid that is **not this pipeline's own**.
+`attribute_proxy_clients` takes `probe_uids` and subtracts it before anything is
+read from what is left. A set is the probe's uids; `None` means a probe ran and
+the uid it ran as could not be read, which cannot be told apart from an app's - so
+a non-empty table then proves nothing about what this sampling can see and yields
+`None`. Four tests pin it:
+
+- `test_the_probes_own_socket_cannot_license_an_absence` - the measured shape, a
+  lone uid 0 with 17 recorded connections, must be `not measured`.
+- `test_a_lone_probe_socket_with_a_silent_proxy_is_still_a_measured_absence` -
+  the exclusion must not swallow the useful true negative.
+- `test_the_probes_own_socket_is_stripped_from_the_observation` - the subtraction
+  is a subtraction, not a verdict special case: a hit on the target's uid still
+  returns `True` with the probe's uid absent from `uids_seen`.
+- `test_an_unreadable_probe_uid_cannot_demonstrate_the_probe_works` - `None` is
+  not "no probe ran", and a stage that cannot read its own shell uid has to pass
+  the unknown on rather than guess either value. The stage side is pinned by
+  `test_an_unreadable_probe_uid_reaches_the_verdict_as_unknown`.
+
+### What is and is not established
+
+Established: the blind-probe condition is refused in the units, at the call site,
+and (as `reached: True` with a non-empty `uids_seen`) the positive arm runs
+against a real device and a real proxy. The motivating run's `False` is confirmed
+to have been licensed by a table with no uid on it while the window carried 20
+connections - the defect was real, not hypothetical.
+
+Not established: a real capture window in which the target genuinely stayed away
+from the proxy **and** the probe demonstrably saw the window has not been observed.
+The `False` arm is verified against fixtures, not against a device. Recording that
+here rather than implying the negative path is field-proven: it is the arm the
+report's "the flows below are not this app's traffic" sentence rests on, and it
+still rests on unit evidence alone.
+
+One consequence worth naming: on this emulator the probe's uid is always on the
+table, so `uids_seen` will generally include a uid the app does not own unless
+`_device_shell_uid` reads it - which is the argument for it being read rather than
+assumed, and for the unknown case yielding `None`.

@@ -217,6 +217,17 @@ _TLS_HANDSHAKE_FAILED_PHRASE = "tls handshake failed"
 _TLS_FAILED_HOST_RE = re.compile(r"\bfor\s+([^\s(]+)")
 
 
+def _proxy_log_excerpt(text: str, limit: int = 400) -> str:
+    """The Windows mitmdump's own first lines, for an operator diagnosing a
+    capture that recorded nothing - typically mitmproxy's own complaint about a
+    script it could not load, which it prints before it loads any addon. Bounded:
+    this lands in an operator-facing report, so it is a diagnostic head, not a
+    transcript."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    joined = " | ".join(lines)
+    return joined if len(joined) <= limit else joined[:limit] + "\u2026"
+
+
 def _capture_channel_alive(text: str) -> bool:
     """Whether the WSL2 addon wrote its load marker into the log we read back.
 
@@ -663,21 +674,52 @@ def _write_windows_addon(addon_path: Path, log_win: str) -> Path:
     return addon_path
 
 
+def _cmd_quote(value: str) -> str:
+    """Quote a value for the cmd.exe command line, but only where it needs it.
+    These paths are normally space-free, and quoting unconditionally would
+    change the shape of a command that is otherwise plain - cmd.exe splits a
+    bare command line on spaces where Start-Process -ArgumentList did not."""
+    return f'"{value}"' if " " in value else value
+
+
 def _start_windows_mitmdump(mitmdump_win: str, confdir_win: str, addon_win: str,
-                            flows_win: str, port: int) -> None:
+                            flows_win: str, port: int, log_win: str) -> None:
     """Launch mitmdump.exe on the Windows host, detached, writing raw flows to
-    flows_win and each flow to the addon's own log. PowerShell Start-Process
-    without a redirect returns at once (a redirect makes PowerShell block on the
-    long-running child); the addon is the flow source, so no stdout redirect is
-    needed and the terminal logger's TTY-gating is irrelevant. Inline
-    -ArgumentList (not an array variable) is used. Every value is a plain C:\\
-    path with no spaces, so single-quoting is enough."""
-    args = (
-        "'--set','confdir=" + confdir_win + "','--set','flow_detail=2',"
-        "'-s','" + addon_win + "','-w','" + flows_win + "','-p','" + str(port) + "'"
-    )
-    ps = ("Start-Process -FilePath '" + mitmdump_win + "' -ArgumentList "
-          + args + " -WindowStyle Hidden")
+    flows_win, each flow to the addon's own log, and the proxy's OWN output to
+    log_win.
+
+    Start-Process is given no redirect of its own. Measured on the reference
+    host: -RedirectStandardOutput makes it block for the child's entire
+    lifetime (14.9 s for a 15 s child, against 320 ms without), and mitmdump
+    runs for the whole capture window - so that would hang the stage. cmd.exe
+    performs the redirection inside the child instead: 279 ms, the same as no
+    redirect at all, and mitmdump stays findable by name for
+    _stop_windows_mitmdump (it becomes cmd.exe's child, not a stranger).
+
+    That log is the only place the proxy's own diagnostics exist. An addon
+    cannot tap them: mitmproxy writes through its own handle (measured - a
+    sys.stdout/sys.stderr tee in the addon captured none of it), and a script's
+    compile error is reported before any addon loads, so a broken addon can
+    never report itself.
+
+    Values are normally space-free C:\\ paths, so single-quoting the inner
+    command is enough; _cmd_quote covers the case where one is not."""
+    inner = " ".join([
+        # Unbuffered, or the log stays empty for the entire capture. Measured:
+        # with the plain redirect the file was 0 bytes while mitmdump ran and
+        # after the stop, because Python block-buffers stdout when it is not a
+        # TTY and _stop_windows_mitmdump is a force-kill that never flushes;
+        # with this prefix the same run produced 369 bytes live - mitmproxy's
+        # own error text. A redirect that captures nothing would have looked
+        # exactly like a working one.
+        'set "PYTHONUNBUFFERED=1" &&',
+        _cmd_quote(mitmdump_win), "--set", "confdir=" + _cmd_quote(confdir_win),
+        "--set", "flow_detail=2", "-s", _cmd_quote(addon_win),
+        "-w", _cmd_quote(flows_win), "-p", str(port),
+        ">", _cmd_quote(log_win), "2>&1",
+    ])
+    ps = ("Start-Process -FilePath 'C:\\Windows\\System32\\cmd.exe' -ArgumentList "
+          "'/c','" + inner + "' -WindowStyle Hidden")
     subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps],
                    capture_output=True, text=True, check=True, timeout=30)
 
@@ -690,12 +732,19 @@ def _wait_windows_listening(port: int, timeout: float = _WSL_LISTEN_TIMEOUT) -> 
         raise RuntimeError(f"Windows-host mitmdump did not start listening on port {port}")
 
 
-def _read_flow_detail_log(path: Path) -> str:
-    """Read a Windows mitmdump's redirected flow_detail log (best-effort)."""
+def _read_windows_text(path: Path) -> str:
+    """Read a text file the Windows-host mitmdump wrote (best-effort). Returns ""
+    when it is absent or unreadable, which callers report as not-captured rather
+    than as an empty log - the two are different facts."""
     try:
         return path.read_text(errors="ignore") if path.exists() else ""
     except OSError:
         return ""
+
+
+def _read_flow_detail_log(path: Path) -> str:
+    """Read a Windows mitmdump's redirected flow_detail log (best-effort)."""
+    return _read_windows_text(path)
 
 
 def _stop_windows_mitmdump() -> str | None:
@@ -782,6 +831,9 @@ def run_capture_stage(
     try:
         cert = device.create_mitm_ca(confdir)
         system_ca = device.push_system_ca(serial, cert)
+        # The Windows mitmdump's own output. WSL2 only: the native placement
+        # keeps mitmdump's stdout in-process instead (see the Popen below).
+        proxy_log = ""
 
         if wsl2:
             stamp = time.time_ns()
@@ -793,9 +845,11 @@ def run_capture_stage(
             flows_path = Path("/mnt/c/Users/Public") / f"{stamp}.mitm"
             addon_path = Path("/mnt/c/Users/Public") / f"{stamp}-addon.py"
             log_wsl = Path("/mnt/c/Users/Public") / f"{stamp}-flows.log"
+            proxy_log_win = f"C:\\Users\\Public\\{stamp}-mitmdump.log"
+            proxy_log_wsl = Path("/mnt/c/Users/Public") / f"{stamp}-mitmdump.log"
             _write_windows_addon(addon_path, log_win)
             _start_windows_mitmdump(win_mitmdump, confdir_win, addon_win,
-                                    flows_win, proxy_port)
+                                    flows_win, proxy_port, proxy_log_win)
             _wait_windows_listening(proxy_port)
         else:
             flows_path = out_dir / f"{time.time_ns()}.mitm"
@@ -843,6 +897,7 @@ def run_capture_stage(
 
         if wsl2:
             stdout_text = _read_flow_detail_log(log_wsl)
+            proxy_log = _read_windows_text(proxy_log_wsl)
             _stop_windows_mitmdump()
         else:
             proc.terminate()
@@ -864,6 +919,7 @@ def run_capture_stage(
         # The WSL2 addon's own liveness (None on the native placement, where no
         # addon runs and mitmdump's own flow_detail stdout is the source).
         channel_alive = _capture_channel_alive(stdout_text or "") if wsl2 else None
+        proxy_log_excerpt = _proxy_log_excerpt(proxy_log)
         if not flows:
             client_connections = _count_client_connections(stdout_text or "")
             # A crashed pinning-bypass script is a THIRD, concrete cause of zero
@@ -891,6 +947,10 @@ def run_capture_stage(
                     "says NOTHING about the device route, the app's traffic, or "
                     "certificate pinning. Check that the Windows-host mitmdump "
                     "loaded the addon and could write its flow log"
+                    + (f" - the proxy's own log says: {proxy_log_excerpt}"
+                       if proxy_log_excerpt else
+                       " - and the proxy's own log is empty too, so it likely "
+                       "never started")
                 )
             elif tls_failed:
                 # The refusal is DIRECT evidence, so it outranks the pre-flight
@@ -977,6 +1037,10 @@ def run_capture_stage(
                     # is empty because nothing recorded, not because nothing
                     # happened - and the cause named in `error` says so.
                     "capture_channel_alive": channel_alive,
+                    # The Windows mitmdump's own output, bounded. Load-bearing
+                    # exactly when the channel above is dead: this is where
+                    # mitmproxy says why it recorded nothing.
+                    "proxy_log_excerpt": proxy_log_excerpt,
                     # CAPREACH1: the PRE-FLIGHT probe verdict (True route up /
                     # False route down / None not probeable). Recorded separately
                     # from client_connections because it is measured before the

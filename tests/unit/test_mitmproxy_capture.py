@@ -527,9 +527,12 @@ def test_launch_app_force_stops_then_starts(monkeypatch):
 
 
 def test_start_windows_mitmdump_builds_detached_start_process(monkeypatch):
-    # The Windows mitmdump launch must use Start-Process without a redirect (a
-    # redirect makes PowerShell block on the long-running child) and pass the
-    # addon (-s) as the flow source, using inline -ArgumentList elements.
+    # Start-Process must take NO redirect of its own: measured on the reference
+    # host, -RedirectStandardOutput makes it block for the child's whole lifetime
+    # (14.9 s for a 15 s child, against 320 ms without) and mitmdump runs for the
+    # entire capture window, so the stage would hang. The proxy's own output is
+    # still needed, so cmd.exe does the redirecting inside the child - measured
+    # at 279 ms, and mitmdump stays findable by name for _stop_windows_mitmdump.
     captured = {}
 
     def fake_run(cmd, **kwargs):
@@ -539,14 +542,60 @@ def test_start_windows_mitmdump_builds_detached_start_process(monkeypatch):
     monkeypatch.setattr(mitmproxy_capture.subprocess, "run", fake_run)
     mitmproxy_capture._start_windows_mitmdump(
         "C:\\x\\mitmdump.exe", "C:\\Users\\Public\\1-conf",
-        "C:\\Users\\Public\\1-addon.py", "C:\\Users\\Public\\1.mitm", 8080)
+        "C:\\Users\\Public\\1-addon.py", "C:\\Users\\Public\\1.mitm", 8080,
+        "C:\\Users\\Public\\1-mitmdump.log")
     ps = captured["cmd"][-1]
     assert "Start-Process" in ps
     assert "-ArgumentList" in ps
-    assert "'confdir=C:\\Users\\Public\\1-conf'" in ps
-    assert "'-s','C:\\Users\\Public\\1-addon.py'" in ps
-    assert "'-p','8080'" in ps
-    assert "-RedirectStandardOutput" not in ps  # the addon is the source
+    assert "cmd.exe" in ps
+    assert "confdir=C:\\Users\\Public\\1-conf" in ps
+    assert "-s C:\\Users\\Public\\1-addon.py" in ps
+    assert "-p 8080" in ps
+    assert "-RedirectStandardOutput" not in ps
+    assert "-RedirectStandardError" not in ps
+    assert "> C:\\Users\\Public\\1-mitmdump.log 2>&1" in ps
+    # Without the unbuffered prefix this file stays 0 bytes for the whole capture
+    # (measured), which is indistinguishable from a working redirect.
+    assert 'set "PYTHONUNBUFFERED=1" &&' in ps
+
+
+def test_cmd_quote_only_quotes_where_it_is_needed():
+    # cmd.exe splits a bare command line on spaces where Start-Process
+    # -ArgumentList did not, so a path with a space has to be quoted - and one
+    # without must stay unquoted, or the launch shape changes for every run.
+    assert mitmproxy_capture._cmd_quote(r"C:\Users\Public\x.py") == r"C:\Users\Public\x.py"
+    assert mitmproxy_capture._cmd_quote(r"C:\Program Files\x.py") == r'"C:\Program Files\x.py"'
+
+
+def test_proxy_log_excerpt_is_bounded_and_keeps_the_head():
+    # mitmproxy reports a script it cannot load BEFORE it loads any addon, so the
+    # head of its output carries the reason; a tail would be startup noise.
+    assert mitmproxy_capture._proxy_log_excerpt("") == ""
+    assert mitmproxy_capture._proxy_log_excerpt("a\n\n  b  \n") == "a | b"
+    long = mitmproxy_capture._proxy_log_excerpt("x" * 900)
+    assert len(long) == 401 and long.endswith("\u2026")
+
+
+def test_wsl2_dead_channel_quotes_the_proxys_own_log(monkeypatch, tmp_path):
+    # Capturing the proxy's output is only worth it if its words reach the
+    # operator: they are where mitmproxy says WHY nothing was recorded.
+    _wsl2_empty_stubs(monkeypatch, log_text="", reachable=False)
+    monkeypatch.setattr(
+        mitmproxy_capture, "_read_windows_text",
+        lambda path: "in script C:\\Users\\Public\\1-addon.py:1 '(' was never closed")
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1)
+    assert result.evidence["capture_channel_alive"] is False
+    assert "was never closed" in result.error
+    assert result.evidence["proxy_log_excerpt"].startswith("in script")
+
+
+def test_wsl2_dead_channel_says_so_when_the_proxy_log_is_empty_too(monkeypatch, tmp_path):
+    _wsl2_empty_stubs(monkeypatch, log_text="", reachable=False)
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1)
+    assert result.evidence["proxy_log_excerpt"] == ""
+    assert "never started" in result.error
 
 
 def test_run_capture_stage_wsl2_records_real_flows(monkeypatch, tmp_path):

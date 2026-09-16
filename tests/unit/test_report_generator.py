@@ -2738,3 +2738,13 @@ def test_a_tap_that_did_not_land_is_not_reported_as_a_drive(tmp_path):
     body = _render_liveness(tmp_path, stage, "noland")
     assert "did **not** land" in body
     assert "after** the gated screen was reached" not in body
+
+
+def test_a_captured_flow_is_not_claimed_as_the_app_s_own(tmp_path):
+    """The capture proxy is device-wide and no per-flow attribution to the target
+    exists, so a decrypted flow must not be presented as proof the app produced
+    it - the pinning reading is scoped to the hosts observed."""
+    body = _render_liveness(tmp_path, _flows_stage(_drive_record(True)), "scope")
+    assert "decrypted the HTTPS flows below" in body
+    assert "**not by itself proof that this app produced it**" in body
+    assert "The app accepted proxy-decrypted HTTPS flows" not in body

@@ -79,3 +79,33 @@ def test_note_fires_on_the_third_state_too():
     from common import TLS_HANDSHAKE_OBSERVER_NONE_TLS_FAILED
     assert "api.propertyguru.com" in _handshake_capture_note(
         _verification(TLS_HANDSHAKE_OBSERVER_NONE_TLS_FAILED), FLOWS)
+
+
+def _bypass_summary(reached="unrecorded"):
+    """A capture summary the note reads: the window ran under the injected bypass,
+    and the stage's device-side attribution says whose flows these are."""
+    s = dict(FLOWS)
+    s["capture_bypass_applied"] = True
+    s["capture_app_launch"] = {"launched_by": "frida spawn"}
+    if reached != "unrecorded":
+        s["capture_proxy_attribution"] = {"reached": reached, "reason": "uid 10168 ..."}
+    return s
+
+
+def test_the_console_note_does_not_claim_a_bypass_effect_over_another_apps_flows():
+    # ADR-0018 on the console surface. The clause is derived from the same two
+    # facts as the report's, so the two surfaces cannot drift into disagreeing
+    # about whose flows the window decrypted.
+    absent = _handshake_capture_note(_verification(TLS_HANDSHAKE_NONE_OBSERVED),
+                                     _bypass_summary(reached=False))
+    assert "took effect on those hosts" not in absent
+    assert "not this app's" in absent
+
+    confirmed = _handshake_capture_note(_verification(TLS_HANDSHAKE_NONE_OBSERVED),
+                                        _bypass_summary(reached=True))
+    assert "took effect on those hosts" in confirmed
+
+    unknown = _handshake_capture_note(_verification(TLS_HANDSHAKE_NONE_OBSERVED),
+                                      _bypass_summary(reached=None))
+    assert "took effect on those hosts" not in unknown
+    assert "applied" in unknown

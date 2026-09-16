@@ -8,7 +8,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 52 files, **22,390 LOC**
+- `src/`: 52 files, **22,410 LOC**
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
 - `tests/`: 92 files, **30,331 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
@@ -61,7 +61,7 @@ module's line count unchanged escapes it.)
 | `packers.py` | 157 | 157 | +0 | — |
 | `pass_through_proxy.py` | 245 | 277 | +32 | — |
 | `report/attribution.py` | 220 | 220 | +0 | 2026-09-07 |
-| `report/generator.py` | 791 | 1,372 | +581 | 2026-09-08, 2026-09-15, 2026-09-16 (empty-capture ladder reads the stage record; render sites stop asserting an inference their evidence cannot carry; the two windows a report juxtaposes are named as two launches, and the capture window's own bypass state decides whether its decrypted flows are evidence of a bypass taking effect or only of pinning not being enforced in that window; the capture window's own observer record is counted by the same single extractor as the dynamic window's and rendered beside the flows it belongs to, instead of being read only as a silence in the other window's line) Signal-shape fix 2026-09-16: `_observer_signal` now reads the capture stage's stored payload-unwrapped messages as well as the dynamic stage's raw envelopes - reading only the envelope scored a capture window's own record as total silence, so its effects/probeHits rendered as "recorded no SSL effect" whatever it said |
+| `report/generator.py` | 791 | 1,392 | +601 | 2026-09-08, 2026-09-15, 2026-09-16 (empty-capture ladder reads the stage record; render sites stop asserting an inference their evidence cannot carry; the two windows a report juxtaposes are named as two launches, and the capture window's own bypass state decides whether its decrypted flows are evidence of a bypass taking effect or only of pinning not being enforced in that window; the capture window's own observer record is counted by the same single extractor as the dynamic window's and rendered beside the flows it belongs to, instead of being read only as a silence in the other window's line) Signal-shape fix 2026-09-16: `_observer_signal` now reads the capture stage's stored payload-unwrapped messages as well as the dynamic stage's raw envelopes - reading only the envelope scored a capture window's own record as total silence, so its effects/probeHits rendered as "recorded no SSL effect" whatever it said ; ADR-0018: the two capture arms and the console clause now read the device-side attribution before claiming the decrypted flows are this app's - the effect claim needs the window fact AND whose flows they are |
 | `signatures.py` | 523 | 717 | +194 | — |
 | `storage/db.py` | 195 | 210 | +15 | 2026-09-09 |
 | `storage/results.py` | 218 | 250 | +32 | 2026-09-09 |

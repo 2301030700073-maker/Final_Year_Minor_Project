@@ -1813,7 +1813,18 @@ def test_generate_report_renders_permissions_none_when_empty(tmp_path):
     assert "**Permissions (0):**" not in content
 
 
-def _capture_stage(flows, bypass_applied=False, launch=None, frida_messages=None):
+_ATTRIBUTION_REASON = {
+    True: "uid 10168 held a socket to the capture proxy",
+    False: ("uid 10168 (com.app) held no socket to the capture proxy in any of 3 "
+            "readable sample(s) of the window; the proxy recorded no client->proxy "
+            "connection this window"),
+    None: ("the device's socket table could not be read, so whether the app reached "
+           "the capture proxy was not measured"),
+}
+
+
+def _capture_stage(flows, bypass_applied=False, launch=None, frida_messages=None,
+                   reached="unrecorded"):
     """A capture-traffic stage carrying real flow_summary evidence, so the
     Captured Traffic section is exercised rather than skipped. `bypass_applied`
     is the capture stage's own record of whether THAT window's launch ran under
@@ -1824,13 +1835,23 @@ def _capture_stage(flows, bypass_applied=False, launch=None, frida_messages=None
     stage uses), passed here as Frida envelopes and STORED the way the capture
     producer stores them - `m.get("payload", m)`, payload-unwrapped. A fixture that
     kept the envelopes gave the report a shape no capture run ever produces, which
-    is how a capture window's record came to read as silence."""
+    is how a capture window's record came to read as silence.
+
+    `reached` is the stage's device-side attribution (ADR-0012/0017/0018): whose
+    flows these are. It defaults to `"unrecorded"` - no attribution key at all -
+    because that is a real state (a run from before the attribution existed, or one
+    where it did not run) and a fixture should have to SAY that the app was on the
+    proxy before the report may claim its flows are the bypass working."""
     evidence = {
         "flow_summary": flows,
         "system_ca": "/system/etc/security/cacerts/062b6baf.0",
         "proxy": "127.0.0.1:8081",
         "bypass_applied": bypass_applied,
     }
+    if reached != "unrecorded":
+        evidence["proxy_attribution"] = {
+            "reached": reached, "reason": _ATTRIBUTION_REASON[reached],
+        }
     if launch is not None:
         evidence["app_launch"] = launch
     if frida_messages is not None:
@@ -1902,7 +1923,7 @@ def test_captured_traffic_strong_claim_only_when_ssl_confirmed(tmp_path):
         classification=_classification(),
         verification=VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={}),
         correlation=None,
-        stage_results=[_capture_stage(flows, bypass_applied=True)], output_dir=tmp_path,
+        stage_results=[_capture_stage(flows, bypass_applied=True, reached=True)], output_dir=tmp_path,
     )
     confirmed_text = confirmed.read_text(encoding="utf-8")
     assert "live proof that SSL-pinning was actually defeated" in confirmed_text
@@ -1964,7 +1985,7 @@ def test_capture_window_with_bypass_keeps_the_defeat_claim(tmp_path):
         verification=VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={}),
         correlation=None,
         stage_results=[_capture_stage(
-            flows, bypass_applied=True,
+            flows, bypass_applied=True, reached=True,
             launch={"component": None, "launched_by": "frida spawn", "pid": 4321,
                     "attempts": []},
         )],
@@ -1974,6 +1995,72 @@ def test_capture_window_with_bypass_keeps_the_defeat_claim(tmp_path):
     assert "live proof that SSL-pinning was actually defeated" in text
     assert "under the injected pinning-bypass script" in text
     assert "separate, later launch" not in text
+
+
+def test_the_capture_defeat_claim_requires_the_attribution_to_put_the_app_on_the_proxy(tmp_path):
+    # ADR-0018: ADR-0015 corrected WHICH WINDOW the flows came from; this is WHOSE
+    # they are. A device-wide proxy decrypted these, and the stage's own uid reading
+    # says the app is not among its clients - so the paragraph may not call them
+    # "the live proof that SSL-pinning was actually defeated", however true the
+    # window fact is. Both sentences used to sit in the same paragraph.
+    flows = [_Flow("api.example.com", "GET", "/v1/data", 200)]
+    out = generate_report(
+        run_id="cap-attr-false", apk_hash="capattrf", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "capattrf"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(root_bypassed=True, ssl_bypassed=True,
+                                        evidence_lines={}),
+        correlation=None,
+        stage_results=[_capture_stage(flows, bypass_applied=True, reached=False)],
+        output_dir=tmp_path,
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "live proof that SSL-pinning was actually defeated" not in text
+    assert "not this app's" in text
+    # The window fact survives; what is dropped is the attribution claim.
+    assert "under the injected pinning-bypass script" in text
+    assert _ATTRIBUTION_REASON[False] in text
+
+
+def test_capture_flows_of_unestablished_origin_are_not_credited_to_the_app(tmp_path):
+    # The other half of the same rule: reached is None - not measured - and that
+    # cannot license the claim either. Treating not-measured as licence is the error
+    # ADR-0017 stopped one layer down.
+    flows = [_Flow("api.example.com", "GET", "/v1/data", 200)]
+    out = generate_report(
+        run_id="cap-attr-none", apk_hash="capattrn", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "capattrn"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(root_bypassed=True, ssl_bypassed=True,
+                                        evidence_lines={}),
+        correlation=None,
+        stage_results=[_capture_stage(flows, bypass_applied=True, reached=None)],
+        output_dir=tmp_path,
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "live proof that SSL-pinning was actually defeated" not in text
+    assert "show the bypass was **applied** to the app" in text
+    assert _ATTRIBUTION_REASON[None] in text
+
+
+def test_the_partial_evidence_arm_does_not_claim_a_bypass_effect_on_an_absent_app(tmp_path):
+    # The same over-claim in the arm that runs when SSL was NOT dynamically
+    # confirmed: its "which window this is" note called the flows evidence the
+    # bypass took effect, over flows this app did not send.
+    flows = [_Flow("api.example.com", "GET", "/v1/data", 200)]
+    out = generate_report(
+        run_id="cap-partial-false", apk_hash="cappartf", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "cappartf"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(root_bypassed=True, ssl_bypassed=None,
+                                        evidence_lines={}),
+        correlation=None,
+        stage_results=[_capture_stage(flows, bypass_applied=True, reached=False)],
+        output_dir=tmp_path,
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "evidence the bypass took effect on those hosts" not in text
+    assert "not** evidence the bypass took effect on anything this app reached" in text
 
 
 def test_capture_window_reports_its_own_observer_effects(tmp_path):
@@ -2114,7 +2201,7 @@ def test_capture_all_https_flows_render_decrypted_transport_no_cleartext_callout
         classification=_classification(),
         verification=VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={}),
         correlation=None,
-        stage_results=[_capture_stage(flows, bypass_applied=True)], output_dir=tmp_path,
+        stage_results=[_capture_stage(flows, bypass_applied=True, reached=True)], output_dir=tmp_path,
     )
     text = out.read_text(encoding="utf-8")
     assert "live proof that SSL-pinning was actually defeated" in text
@@ -2140,7 +2227,7 @@ def test_capture_mixed_http_https_distinguishes_transport_and_flags_cleartext(tm
         classification=_classification(),
         verification=VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={}),
         correlation=None,
-        stage_results=[_capture_stage(flows, bypass_applied=True)], output_dir=tmp_path,
+        stage_results=[_capture_stage(flows, bypass_applied=True, reached=True)], output_dir=tmp_path,
     )
     text = out.read_text(encoding="utf-8")
     # Both transports are rendered distinctly in the table.

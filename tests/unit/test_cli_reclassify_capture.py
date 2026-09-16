@@ -498,3 +498,65 @@ def test_unmeasured_liveness_leaves_reclassification_exactly_as_it_was():
     # produced rather than the dicts: what matters is that the guard did not fire.
     assert (unmeasured.evidence.get("not_applicable_reason")
             == without_key.evidence.get("not_applicable_reason"))
+
+
+def test_signal2_reads_the_capture_windows_own_observer_too():
+    # The capture window is launched under the same pinning-only bypass, so it runs the
+    # same observer script and records its OWN stream - direct evidence about the very
+    # window this function is judging. Reading only the dynamic stage's stream let a run
+    # whose capture window watched the app's pin-check fire for a real host, with 0
+    # flows reaching the proxy, be downgraded to "app-silence, not applicable": the one
+    # signal that proves a real capture-path failure, relaxed.
+    cap = _capture(frida_messages=[
+        {"type": "send", "payload": {"hook": "ssl_pin_check",
+                                     "hostname": "api.example.com"}},
+    ])
+    out = _reclassify_empty_capture(cap, _manifest(_INTERNET), _dynamic([]))
+    assert out.status == "failed"
+    assert "reclassified_from" not in out.evidence
+
+
+def test_signal2_app_silence_names_every_window_it_consulted():
+    # "The app did not exercise its SSL path" is a claim about the APP, so the silence
+    # it rests on has to hold in every window that could have seen it - and the reason
+    # must not imply more windows were consulted than actually were. This message is the
+    # install-time shape (no host): it proves the hook was placed, not that a request
+    # was made, so the count stays 0 and the downgrade is the correct one.
+    cap = _capture(frida_messages=[
+        {"type": "send", "payload": {"hook": "ssl_pin_check", "present": False}},
+    ])
+    out = _reclassify_empty_capture(cap, _manifest(_INTERNET), _dynamic([]))
+    assert out.status == "skipped"
+    reason = out.evidence["not_applicable_reason"]
+    assert "the dynamic stage's observer" in reason
+    assert "this capture window's own observer" in reason
+
+
+def test_signal2_names_only_the_dynamic_window_when_the_capture_ran_unhooked():
+    # A --skip-dynamic run (or a NEITHER/ROOT_ONLY action) injects no script, so the
+    # capture window records no messages at all: the dynamic stage's stream decides
+    # alone, exactly as before the second window existed, and the reason must not name
+    # an observer that never ran.
+    out = _reclassify_empty_capture(_capture(), _manifest(_INTERNET), _dynamic([]))
+    assert out.status == "skipped"
+    reason = out.evidence["not_applicable_reason"]
+    assert "the dynamic stage's observer" in reason
+    assert "capture window" not in reason
+
+
+def test_ssl_path_exercised_keys_on_an_effect_or_a_host_never_on_bypassed():
+    from cli import _ssl_path_exercised
+    assert _ssl_path_exercised(None) == 0
+    assert _ssl_path_exercised([]) == 0
+    # INSTALL-time shapes: the hook being placed is not a request being made.
+    assert _ssl_path_exercised([{"payload": {"bypassed": True}}]) == 0
+    assert _ssl_path_exercised([{"payload": {"hook": "universal-ssl-pinning"}}]) == 0
+    assert _ssl_path_exercised([{"payload": {"bypassEffect": "ssl-pin-check"}}]) == 1
+    assert _ssl_path_exercised([{"payload": {"hostname": "a.example.com"}}]) == 1
+    assert _ssl_path_exercised([{"payload": {"host": "a.example.com"}}]) == 1
+    # A real Frida error payload carries description/stack/fileName, not these keys,
+    # and a non-dict message carries nothing readable. The predicate is deliberately
+    # the same one this ladder used before the second window existed: narrowing it
+    # could only LOWER the count, and a lower count relaxes the failure verdict.
+    assert _ssl_path_exercised([{"payload": {"description": "boom"}}]) == 0
+    assert _ssl_path_exercised(["not-a-dict"]) == 0

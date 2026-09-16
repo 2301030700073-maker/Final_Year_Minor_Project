@@ -761,6 +761,31 @@ def _non_java_tls_layers(webview_sites, dart_aot_libs) -> list[str]:
     return layers
 
 
+def _ssl_path_exercised(messages) -> int:
+    """How many messages in ONE observer's stream say the app opened a pinned
+    connection: the synthesized bypass's own `bypassEffect`, or a predefined
+    pin-check/cert-verify hook firing for a concrete host (`hostname`/`host`).
+
+    Both are emitted INSIDE a live connection's TLS stage, so neither can appear
+    unless the app actually made the request. An INSTALL-time message
+    (`universal-ssl-pinning bypassed:true` with no host, or `CertificatePinner
+    present:false`) carries no host and is deliberately not counted: it proves the
+    hook was PLACED, not that a request was made - so the discriminator keys on a
+    concrete host or an effect, never on `bypassed:true` alone. Shared by every
+    window's stream that Signal 2 reads, so the windows cannot drift to different
+    predicates ([[observer-silence-is-a-fact-about-observers]])."""
+    count = 0
+    for m in messages or []:
+        payload = m.get("payload") if isinstance(m, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        if (isinstance(payload.get("bypassEffect"), str)
+                or isinstance(payload.get("hostname"), str)
+                or isinstance(payload.get("host"), str)):
+            count += 1
+    return count
+
+
 def _reclassify_empty_capture(
     capture_stage: StageResult,
     manifest_info,
@@ -975,18 +1000,35 @@ def _reclassify_empty_capture(
     # host, or CertificatePinner present:false) carries no host and correctly does
     # NOT count: it proves the hook was placed, not that a request was made - so the
     # discriminator keys on a concrete host, never on bypassed:true alone.
+    # Signal 2's verdict is about THIS capture window ("the app simply did not
+    # exercise its network path in a non-interactive window"), but its evidence was
+    # the DYNAMIC stage's observer - a different launch of the app. That was the only
+    # stream in existence when this ladder was written. The capture window is now
+    # launched under the same pinning-only bypass, so it runs the same observer
+    # script and records its OWN stream: direct evidence about the window being
+    # judged rather than a proxy for it. Both are read, and an effect in EITHER
+    # refutes app-silence - "the app did not exercise its SSL path" is a claim about
+    # the APP, so the silence it rests on has to hold in every window that could have
+    # seen it. Reading only the dynamic stage's stream let a run whose capture window
+    # watched the app's own pin-check fire for a host, with 0 flows reaching the
+    # proxy, be downgraded to "app-silence, not applicable" - relaxing the one signal
+    # that proves a real capture-path failure. An un-hooked capture window (a
+    # --skip-dynamic run, or a NEITHER/ROOT_ONLY action) records no messages at all,
+    # so the dynamic stage's stream decides alone exactly as before.
     if has_internet and dynamic_stage is not None and dynamic_stage.status == "success":
         dyn_ev = dynamic_stage.evidence or {}
-        frida_messages = dyn_ev.get("frida_messages") or []
-        ssl_effects = 0
-        for m in frida_messages:
-            payload = m.get("payload") if isinstance(m, dict) else None
-            if not isinstance(payload, dict):
-                continue
-            if (isinstance(payload.get("bypassEffect"), str)
-                    or isinstance(payload.get("hostname"), str)
-                    or isinstance(payload.get("host"), str)):
-                ssl_effects += 1
+        window_messages = [
+            ("the dynamic stage's observer", dyn_ev.get("frida_messages") or []),
+        ]
+        capture_messages = evidence.get("frida_messages") or []
+        if capture_messages:
+            window_messages.append(
+                ("this capture window's own observer", capture_messages),
+            )
+        ssl_effects = sum(_ssl_path_exercised(msgs) for _, msgs in window_messages)
+        # Named so that a reason concluding app-silence cannot read as though more
+        # windows were consulted than actually were.
+        windows = " and ".join(name for name, _ in window_messages)
         # The 0 below is a fact about the OBSERVERS, and two things follow from it
         # only if the observers could have seen this app's TLS at all:
         #
@@ -1011,9 +1053,9 @@ def _reclassify_empty_capture(
                     evidence={**evidence, "reclassified_from": "failed",
                               "non_java_tls_layers": list(non_java_tls_layers),
                               "not_applicable_reason": (
-                                  "no in-process SSL signal was observed, and this app "
-                                  f"has at least one network path outside the Java stack "
-                                  f"those observers hook ({layers}) - so their silence is "
+                                  f"no in-process SSL signal was recorded by {windows}, "
+                                  f"and this app has at least one network path outside the "
+                                  f"Java stack those observers hook ({layers}) - so that silence is "
                                   "uninformative this run. A request on such a path never "
                                   "reaches CertificatePinner.check or "
                                   "TrustManagerImpl.verifyChain whether or not the app "
@@ -1030,9 +1072,9 @@ def _reclassify_empty_capture(
                 stage="capture-traffic", status="skipped",
                 evidence={**evidence, "reclassified_from": "failed",
                           "not_applicable_reason": "app did not exercise its "
-                          "network/SSL path (no in-process SSL signal - 0 bypassEffect "
-                          "and no pinned-connection hook fired for a host; interactive "
-                          "capture needed) - not a proxy failure"},
+                          f"network/SSL path (no in-process SSL signal from {windows} - "
+                          "0 bypassEffect and no pinned-connection hook fired for a "
+                          "host; interactive capture needed) - not a proxy failure"},
                 error=None, duration_ms=capture_stage.duration_ms,
             )
 

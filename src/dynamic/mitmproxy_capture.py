@@ -218,14 +218,26 @@ _TLS_FAILED_HOST_RE = re.compile(r"\bfor\s+([^\s(]+)")
 
 
 def _proxy_log_excerpt(text: str, limit: int = 400) -> str:
-    """The Windows mitmdump's own first lines, for an operator diagnosing a
-    capture that recorded nothing - typically mitmproxy's own complaint about a
-    script it could not load, which it prints before it loads any addon. Bounded:
-    this lands in an operator-facing report, so it is a diagnostic head, not a
-    transcript."""
+    """The Windows mitmdump's own output, for an operator diagnosing a capture
+    that recorded nothing - typically mitmproxy's complaint about a script it
+    could not load. Bounded: this lands in an operator-facing report, so it is a
+    diagnostic, not a transcript.
+
+    Bounded at BOTH ends, because the two halves of the answer sit at opposite
+    ends of mitmproxy's output. Measured on the real host, a failed addon load
+    produced: head = "Loading script <path> | error in script <path> | Traceback
+    (most recent call last): | ...frames...", tail = "... SyntaxError: invalid
+    syntax | HTTP(S) proxy listening at *:8081. | Error logged during startup,
+    exiting...". A head-only cut kept the frames and dropped both the exception
+    that explains them and the line saying the process then exited - an excerpt
+    naming a failure it could not explain."""
     lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
     joined = " | ".join(lines)
-    return joined if len(joined) <= limit else joined[:limit] + "\u2026"
+    if len(joined) <= limit:
+        return joined
+    head = (limit * 2) // 3
+    tail = limit - head
+    return f"{joined[:head]}\u2026{joined[-tail:]}"
 
 
 def _capture_channel_alive(text: str) -> bool:
@@ -848,6 +860,10 @@ def run_capture_stage(
         # The Windows mitmdump's own output. WSL2 only: the native placement
         # keeps mitmdump's stdout in-process instead (see the Popen below).
         proxy_log = ""
+        # The Windows mitmdump's log path, set only on the WSL2 placement and kept
+        # in the enclosing scope so the EXCEPTION path can read the log too - a
+        # mitmdump that will not come up is exactly when its output is needed.
+        proxy_log_wsl = None
 
         if wsl2:
             stamp = time.time_ns()
@@ -1075,6 +1091,9 @@ def run_capture_stage(
                     # exactly when the channel above is dead: this is where
                     # mitmproxy says why it recorded nothing.
                     "proxy_log_excerpt": proxy_log_excerpt,
+                    # Where the full log lives, so the bounded excerpt above is a pointer
+                    # into a file the operator can actually open.
+                    "proxy_log_path": str(proxy_log_wsl) if proxy_log_wsl else None,
                     # CAPREACH1: the PRE-FLIGHT probe verdict (True route up /
                     # False route down / None not probeable). Recorded separately
                     # from client_connections because it is measured before the
@@ -1123,9 +1142,17 @@ def run_capture_stage(
         )
         return result
     except Exception as exc:
+        # Read the proxy's own log on this path too. It is the path a mitmdump
+        # that never came up lands on, so this is where its words matter most -
+        # and a programmatic consumer should not have to parse prose out of
+        # `error` to get them.
+        startup_log = (_proxy_log_excerpt(_read_windows_text(proxy_log_wsl))
+                       if proxy_log_wsl else "")
         result = StageResult(
             stage="capture-traffic", status="failed",
-            evidence={"reason": "capture exception", "flows_path": str(flows_path)},
+            evidence={"reason": "capture exception", "flows_path": str(flows_path),
+                      "proxy_log_excerpt": startup_log,
+                      "proxy_log_path": str(proxy_log_wsl) if proxy_log_wsl else None},
             error=f"capture stage raised: {exc}",
         )
         return result

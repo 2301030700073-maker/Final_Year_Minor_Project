@@ -567,13 +567,43 @@ def test_cmd_quote_only_quotes_where_it_is_needed():
     assert mitmproxy_capture._cmd_quote(r"C:\Program Files\x.py") == r'"C:\Program Files\x.py"'
 
 
-def test_proxy_log_excerpt_is_bounded_and_keeps_the_head():
-    # mitmproxy reports a script it cannot load BEFORE it loads any addon, so the
-    # head of its output carries the reason; a tail would be startup noise.
+def test_proxy_log_excerpt_keeps_both_ends_of_a_traceback():
+    # Measured on the real host: mitmproxy's head names the script it failed to
+    # load, its tail carries the exception line that explains the failure and the
+    # line saying the process exited. A head-only cut dropped exactly the half an
+    # operator needs, so both ends are kept.
     assert mitmproxy_capture._proxy_log_excerpt("") == ""
     assert mitmproxy_capture._proxy_log_excerpt("a\n\n  b  \n") == "a | b"
     long = mitmproxy_capture._proxy_log_excerpt("x" * 900)
-    assert len(long) == 401 and long.endswith("\u2026")
+    assert len(long) == 401 and "\u2026" in long
+
+    real = ("[16:34:55.931] Loading script C:\\Users\\Public\\1-addon.py\n"
+            "[16:34:55.932] error in script C:\\Users\\Public\\1-addon.py\n"
+            "Traceback (most recent call last):\n" + "  frame line\n" * 40 +
+            "SyntaxError: invalid syntax\n"
+            "[16:34:55.934] HTTP(S) proxy listening at *:8081.\n"
+            "Error logged during startup, exiting...")
+    ex = mitmproxy_capture._proxy_log_excerpt(real)
+    assert len(ex) <= 401
+    assert "error in script" in ex          # head: WHICH script failed
+    assert "SyntaxError" in ex              # tail: WHY it failed
+    assert "exiting" in ex                  # tail: that the process then exited
+
+
+def test_exception_path_evidence_carries_the_proxy_log(monkeypatch, tmp_path):
+    # The startup-failure path is where the proxy log matters most, so it is
+    # recorded on evidence too - not only quoted inside the prose of `error`.
+    def boom(port, timeout=0, log_path=None):
+        raise RuntimeError("Windows-host mitmdump did not start listening on port 8081")
+    _wsl2_empty_stubs(monkeypatch, log_text="", reachable=None)
+    monkeypatch.setattr(mitmproxy_capture, "_wait_windows_listening", boom)
+    monkeypatch.setattr(mitmproxy_capture, "_read_windows_text",
+                        lambda path: "error in script X\nSyntaxError: invalid syntax")
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1)
+    assert result.evidence["reason"] == "capture exception"
+    assert "SyntaxError" in result.evidence["proxy_log_excerpt"]
+    assert result.evidence["proxy_log_path"].endswith("-mitmdump.log")
 
 
 def test_wsl2_dead_channel_quotes_the_proxys_own_log(monkeypatch, tmp_path):

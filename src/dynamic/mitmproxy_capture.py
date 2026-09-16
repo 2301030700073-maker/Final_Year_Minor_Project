@@ -438,6 +438,119 @@ def _count_tls_failed_clients(text: str) -> list[dict[str, str]]:
 _describe_script_errors = describe_frida_script_errors
 
 
+def _parse_pidof(stdout: str, stderr: str, returncode: int) -> int | None:
+    """The app process's pid from a `pidof <package>` run.
+
+    Three outcomes, deliberately not two:
+
+      >0    the process exists, and this is its pid
+      0     `pidof` RAN and matched nothing: the app is measurably NOT running
+      None  the probe could not be taken (an adb-level failure, or `pidof` is not
+            a command on this device's shell, which reports 127) - NOT MEASURED,
+            and never to be read as "the app was not running"
+
+    The 0/None split is the whole point. A launch failure is a real, actionable
+    cause, and only a measured absence licenses naming it; an adb hiccup must not
+    be allowed to invent a crash. adb reports its own transport errors ("device
+    offline", "closed") on stderr with a non-zero code, which would otherwise be
+    indistinguishable from `pidof`'s no-match exit status - hence stderr is
+    inspected before the return code is interpreted.
+    """
+    if returncode == 127:
+        return None
+    pids = [int(tok) for tok in (stdout or "").split() if tok.isdigit()]
+    if pids:
+        return pids[0]
+    # A measured absence needs positive evidence the SHELL ran, not just a non-zero
+    # status: `pidof`'s no-match exits 1 silently, while adb reports its own
+    # transport failures on stderr with that same status ("adb: no devices/emulators
+    # found", "adb: device offline", "error: closed"). Matching on keywords alone is
+    # not enough - the message text is adb's to change - so the rule is the empty
+    # stderr, which a silent no-match from a working shell is the only thing that
+    # produces.
+    if returncode in (0, 1) and not (stderr or "").strip():
+        return 0
+    return None
+
+
+def _app_pid(serial: str, package: str) -> int | None:
+    """Sample the app process's liveness once, device-side. See _parse_pidof for
+    the 0-vs-None contract.
+
+    Bounded, because a hung adb would otherwise stall the very capture window this
+    exists to interpret (same reasoning as the timeouts on device.py's adb calls).
+    """
+    adb = device._require_adb()
+    try:
+        res = subprocess.run(
+            [adb, "-s", serial, "shell", "pidof", package],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    return _parse_pidof(res.stdout, res.stderr, res.returncode)
+
+
+def _launch_liveness_cause(pid_after_launch: int | None,
+                           pid_after_capture: int | None,
+                           app_seen_running: bool = False) -> tuple[bool, str | None]:
+    """What the two liveness samples say about the app itself, as
+    (never_ran, note).
+
+    `never_ran` is True only when the app is MEASURABLY absent right after the
+    launch was issued. That is the one case which invalidates every app-silence
+    reading: an app that is not running makes no requests, for a reason that has
+    nothing to do with the network, so the empty capture says nothing about its
+    pinning or its traffic either way.
+
+    `app_seen_running` is the caller's direct evidence that the process DID start
+    during the window - a client certificate refusal the proxy recorded, or an
+    accepted device-side connection (the stage's own pre-flight probe excluded).
+    Either can only happen after the app started, so it outranks a single early
+    sample: without this guard a slow start whose `pidof` lands at t+0 would be
+    reported as a crash the proxy watched the app survive. The early sample is
+    just early. This guard belongs here, in the function that decides, rather than
+    at the call site - every future caller needs it and none can be trusted to
+    remember it ([[confident-negative-decider-owns-guard]]).
+
+    `note` separately carries a mid-window death, which does not invalidate the
+    launch but does stop "the app made no requests during the window" from being
+    read as a choice the app made across the whole window. Both samples must be
+    measured before a death is claimed - an unmeasured sample is never evidence.
+    """
+    if pid_after_launch == 0 and not app_seen_running:
+        # The second sample separates a launch that never happened from a launch
+        # that was merely late, because the two are different faults with the same
+        # empty capture. `pid_after_capture` truthy means the app WAS up by the end
+        # of the window, so "never came up" would be false.
+        late = (
+            f" It had started by the end of the capture window (pid "
+            f"{pid_after_capture}), so the launch was merely late and most of the "
+            "window elapsed before the app was up"
+            if pid_after_capture else
+            " It was still not running at the end of the window either, so it "
+            "never came up or died on start"
+            if pid_after_capture == 0 else ""
+        )
+        return True, (
+            "the app's process was NOT running: `pidof` matched nothing "
+            "immediately after the launch was issued." + late +
+            ". The empty capture is therefore an app-liveness failure, not "
+            "app-silence, and none of the readings below apply to it - an app that "
+            "is not running makes no requests for a reason that has nothing to do "
+            "with the network. Check logcat for the launch crash"
+        )
+    if pid_after_launch and pid_after_capture == 0:
+        return False, (
+            f"the app's process (pid {pid_after_launch}) was running when it was "
+            "launched but had EXITED by the end of the capture window - it died "
+            "mid-window, so a request it would have made after that point never "
+            "happened, and this window's silence covers only the part of it the "
+            "app was alive for"
+        )
+    return False, None
+
+
 def _parse_flow_detail(text: str) -> list[FlowSummary]:
     """Extract {host, method, path, status} per flow from mitmdump's
     `flow_detail=2` stdout. Confirmed live format (mitmproxy 8.1.1):
@@ -951,7 +1064,17 @@ def run_capture_stage(
             # "Without script" arm: plain cold-start, no hooks.
             _launch_app(serial, package)
             bypass_applied = False
+        # CAPLIVE1: sample the app's OWN liveness at both ends of the window,
+        # device-side. Everything else this stage records - the flow list, the
+        # connection count, the certificate refusals - is a fact about an OBSERVER.
+        # Without this, an app that crashed on start is indistinguishable from an
+        # app that ran and stayed off the network, and _launch_app documents that a
+        # crash on launch still returns exit 0 from am start. The sample is taken
+        # before the window so it speaks to the launch, and again after it so a
+        # mid-window death is visible too.
+        pid_after_launch = _app_pid(serial, package)
         time.sleep(capture_window)
+        pid_after_capture = _app_pid(serial, package)
 
         if wsl2:
             stdout_text = _read_flow_detail_log(log_wsl)
@@ -1088,6 +1211,27 @@ def run_capture_stage(
                     "the capture window (pre-flight reachability probe was "
                     "unavailable, so this could not be narrowed further)"
                 )
+            # CAPLIVE1: the app's own liveness outranks every reading above it.
+            # Each branch above attributes the empty capture to the app's network
+            # BEHAVIOUR (it made no request / it stayed off the wire), and not one
+            # of those readings is available for a process that was never alive.
+            # Applied here rather than as a new branch of that chain so it composes
+            # with all of them - including the dead-recorder case, whose facts are
+            # about the observer and are likewise silent on the app.
+            never_ran, liveness_note = _launch_liveness_cause(
+                pid_after_launch, pid_after_capture,
+                app_seen_running=bool(tls_failed) or client_connections > 0)
+            if never_ran:
+                device_or_app_cause = (
+                    f"{liveness_note}. Read that FIRST: the readings above are "
+                    "about the app's network behaviour, and none of them is "
+                    "available for a process that was never alive"
+                    + (". The pre-flight probe's routing failure is a separate, "
+                       "real fault and still needs fixing on its own"
+                       if reachable is False else "")
+                )
+            elif liveness_note:
+                device_or_app_cause = f"{device_or_app_cause} - but {liveness_note}"
             if bypass_applied and script_errors:
                 error = (
                     "the pinning-bypass script raised "
@@ -1108,6 +1252,16 @@ def run_capture_stage(
                     "flows_path": str(flows_path),
                     "bypass_script": bypass_script,
                     "bypass_applied": bypass_applied,
+                    # CAPLIVE1: the app's own process liveness, sampled device-side
+                    # with `pidof` immediately after the launch and again at the end
+                    # of the capture window. >0 is the pid; 0 means the probe RAN and
+                    # the app was measurably not running; None means the probe could
+                    # not be taken (never "not running" - see _parse_pidof). These
+                    # are the only facts here about the APP rather than about an
+                    # observer, and they are what keeps a crash-on-launch from being
+                    # rendered as the app choosing not to use the network.
+                    "app_pid_after_launch": pid_after_launch,
+                    "app_pid_after_capture": pid_after_capture,
                     # Reachability probe (device-side, proxy-independent): how many
                     # client connections reached mitmdump. >0 with 0 flows => device
                     # reached the proxy, app was silent (app-silence, not a wiring

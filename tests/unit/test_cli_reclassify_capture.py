@@ -439,3 +439,62 @@ def test_non_java_tls_layers_names_only_layers_the_scan_corpus_established():
     assert len(_non_java_tls_layers(["Webview.java:22: myWebView.loadUrl(\"https://x\")"], [])) == 1
     assert len(_non_java_tls_layers([], ["libapp.so"])) == 1
     assert len(_non_java_tls_layers(["a"], ["libapp.so"])) == 2
+
+
+def _liveness_capture(extra):
+    ev = {"reason": "no flows captured", "proxy": "127.0.0.1:8081",
+          "flows_path": "/x/flows", "client_connections": 0,
+          "tls_failed_clients": [], "capture_channel_alive": True}
+    ev.update(extra)
+    return StageResult(stage="capture-traffic", status="failed", evidence=ev,
+                       error="no traffic captured through the proxy")
+
+
+def _liveness_manifest():
+    return ManifestInfo(debuggable=False, network_security_config=None,
+                        permissions=["android.permission.INTERNET"])
+
+
+def test_app_that_never_ran_is_not_reclassified_as_not_applicable():
+    # Signals 1/2/3 all reason about the app's network BEHAVIOUR, and not one of them
+    # is available for a process that was measurably not running: such an app makes no
+    # requests for a reason unrelated to the network, so the emptiness is a real
+    # failure the operator has to fix - and "skipped" would hide a run whose target
+    # never started.
+    out = _reclassify_empty_capture(
+        _liveness_capture({"app_pid_after_launch": 0, "app_pid_after_capture": 0}),
+        _liveness_manifest(), None)
+    assert out.status == "failed"
+    assert "reclassified_from" not in out.evidence
+
+
+def test_never_ran_yields_to_a_recorded_certificate_refusal():
+    # A refusal requires the client to have opened the connection and started a
+    # handshake, so the process started - the early empty sample was simply early,
+    # and the refusal is direct evidence that must keep its say.
+    refused = [{"host": "api.example.com", "error": "tlsv1 alert unknown ca"}]
+    out = _reclassify_empty_capture(
+        _liveness_capture({"app_pid_after_launch": 0, "tls_failed_clients": refused}),
+        _liveness_manifest(), None)
+    assert out.status == "skipped"
+    assert out.evidence["reclassified_from"] == "failed"
+
+
+def test_never_ran_yields_to_a_connection_the_capture_counted():
+    out = _reclassify_empty_capture(
+        _liveness_capture({"app_pid_after_launch": 0, "client_connections": 1}),
+        _liveness_manifest(), None)
+    assert out.status == "skipped"
+
+
+def test_unmeasured_liveness_leaves_reclassification_exactly_as_it_was():
+    # None is not-measured and must never be read as "not running": a run whose probe
+    # failed keeps every signal it had before this guard existed.
+    without_key = _reclassify_empty_capture(_liveness_capture({}), _liveness_manifest(), None)
+    unmeasured = _reclassify_empty_capture(
+        _liveness_capture({"app_pid_after_launch": None}), _liveness_manifest(), None)
+    assert unmeasured.status == without_key.status
+    # Evidence dicts differ by the key's mere presence, so compare the verdict each
+    # produced rather than the dicts: what matters is that the guard did not fire.
+    assert (unmeasured.evidence.get("not_applicable_reason")
+            == without_key.evidence.get("not_applicable_reason"))

@@ -870,6 +870,27 @@ def _reclassify_empty_capture(
             error=None, duration_ms=capture_stage.duration_ms,
         )
 
+    # The app's OWN liveness is direct device-side evidence about the app, and it is
+    # the one fact none of the signals below can substitute for. An app that was
+    # measurably not running when the launch was issued makes no requests for a
+    # reason that has nothing to do with the network, so signals 0/P/2/3 all become
+    # unevaluable and the capture's emptiness is fully explained - by a real fault
+    # the operator has to fix. It therefore stays `failed`, never `skipped`: a
+    # "not applicable" line would hide a run whose target never started, which is
+    # the opposite of what the operator needs to see ([[not-attempted-neq-skipped]],
+    # [[observer-silence-is-a-fact-about-observers]]). The stage's own recorded cause
+    # is already the launch failure, so returning it untouched IS the corrected
+    # verdict, not a failure to reclassify.
+    #
+    # Guarded exactly as run_capture_stage guards its own version: a proxy-recorded
+    # certificate refusal, or a device connection the capture counted, can only
+    # happen after the process started - so on such a run an early empty sample is a
+    # slow start, not a crash, and the signals below keep their say.
+    if evidence.get("app_pid_after_launch") == 0 and not (
+            evidence.get("tls_failed_clients")
+            or (evidence.get("client_connections") or 0) > 0):
+        return capture_stage
+
     # Signal 0 (checked before every inference below, because it is not one): the
     # capture proxy RECORDED a client refusing its certificate this run - direct
     # evidence, from whichever source this placement writes, of why the capture is

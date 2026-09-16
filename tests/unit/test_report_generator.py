@@ -2582,3 +2582,73 @@ def test_generate_report_zero_app_connections_on_a_proven_up_route_is_not_a_wiri
     assert "its own pre-flight probe excluded" in content
     assert "the pre-flight probe found the route **UP** and no other connection arrived" in content
     assert "real device→proxy reachability failure" not in content
+
+
+def _liveness_stage(pid_launch, pid_capture):
+    from common import StageResult
+    return StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={"reason": "no flows captured", "proxy": "127.0.0.1:8081",
+                  "client_connections": 0, "tls_failed_clients": [],
+                  "capture_channel_alive": True,
+                  "device_reached_proxy_preflight": True, "flows_path": "/x/flows",
+                  "app_pid_after_launch": pid_launch,
+                  "app_pid_after_capture": pid_capture},
+        error="no traffic captured through the proxy",
+    )
+
+
+def _render_liveness(tmp_path, stage, tag):
+    from static.manifest import ManifestInfo
+    manifest = ManifestInfo(debuggable=False, network_security_config=None,
+                            permissions=["android.permission.INTERNET"])
+    return generate_report(
+        run_id=f"cap-liveness-{tag}", apk_hash=f"caplive{tag}",
+        timestamp="2026-09-16T14:00:00",
+        metadata={"hashes": {"sha256": f"caplive{tag}"},
+                  "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[stage], output_dir=tmp_path, manifest=manifest,
+    ).read_text(encoding="utf-8")
+
+
+def test_capture_summary_exposes_the_app_liveness_samples():
+    from report.generator import _capture_summary
+    summary = _capture_summary([_liveness_stage(4711, 0)])
+    assert summary["capture_app_pid_after_launch"] == 4711
+    assert summary["capture_app_pid_after_capture"] == 0
+    # No capture stage ran -> None, never 0, which would assert a verdict we did not
+    # measure (uniform key set: RPT-TMPLCOV1).
+    assert _capture_summary([])["capture_app_pid_after_launch"] is None
+
+
+def test_generate_report_app_that_never_ran_is_not_told_it_stayed_off_the_network(tmp_path):
+    # Every other arm of the empty-capture ladder attributes the empty capture to the
+    # app's network behaviour. A pidof of 0 immediately after the launch says the app
+    # was not alive to have any - and am start returns 0 for a crash, so nothing else
+    # in the capture distinguishes it.
+    content = _render_liveness(tmp_path, _liveness_stage(0, 0), "never")
+    assert "found the app was NOT running" in content
+    assert "the app staying off the network path this run" not in content
+    assert "consequence of the launch failure" in content
+
+
+def test_generate_report_app_that_died_mid_window_qualifies_its_silence(tmp_path):
+    content = _render_liveness(tmp_path, _liveness_stage(4711, 0), "died")
+    assert "died mid-window" in content
+    assert "found the app was NOT running" not in content
+    # The launch itself was sound, so the app-silence reading stands - qualified.
+    assert "the app staying off the network path this run" in content
+
+
+def test_generate_report_app_alive_throughout_keeps_the_app_silence_reading(tmp_path):
+    content = _render_liveness(tmp_path, _liveness_stage(4711, 4712), "alive")
+    assert "the app staying off the network path this run" in content
+    assert "found the app was NOT running" not in content
+    assert "died mid-window" not in content
+
+
+def test_generate_report_unmeasured_liveness_claims_nothing_about_the_app(tmp_path):
+    content = _render_liveness(tmp_path, _liveness_stage(None, None), "unmeasured")
+    assert "found the app was NOT running" not in content
+    assert "died mid-window" not in content

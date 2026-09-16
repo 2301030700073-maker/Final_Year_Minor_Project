@@ -1438,3 +1438,117 @@ def test_app_client_connections_excludes_the_stages_own_probe():
     assert mitmproxy_capture._app_client_connections(1, None) == 1
     assert mitmproxy_capture._app_client_connections(1, False) == 1
     assert mitmproxy_capture._app_client_connections(0, True) == 0  # floor, never negative
+
+
+def test_parse_pidof_distinguishes_not_running_from_not_measured():
+    # 0 means the probe RAN and matched nothing; None means it could not be taken.
+    # Collapsing the two would let an adb hiccup invent a launch crash - the same
+    # sin the liveness sample exists to prevent, one level down.
+    assert mitmproxy_capture._parse_pidof("4711\n", "", 0) == 4711
+    assert mitmproxy_capture._parse_pidof("4711 4712\n", "", 0) == 4711
+    assert mitmproxy_capture._parse_pidof("", "", 0) == 0
+    assert mitmproxy_capture._parse_pidof("", "", 1) == 0
+    assert mitmproxy_capture._parse_pidof("", "", 127) is None
+    assert mitmproxy_capture._parse_pidof("", "", 2) is None
+    # adb reports its own transport errors on stderr with a non-zero code, which
+    # would otherwise be indistinguishable from pidof's no-match exit status.
+    assert mitmproxy_capture._parse_pidof("", "adb: device offline\n", 1) is None
+    assert mitmproxy_capture._parse_pidof("", "error: closed\n", 1) is None
+
+
+def test_launch_liveness_cause_separates_never_ran_from_died_mid_window():
+    never, note = mitmproxy_capture._launch_liveness_cause(0, 0)
+    assert never is True and "never came up or died on start" in note
+    # A late start is a different fault with the same empty capture, and the second
+    # sample is what tells them apart.
+    late, late_note = mitmproxy_capture._launch_liveness_cause(0, 4711)
+    assert late is True and "merely late" in late_note
+    died, died_note = mitmproxy_capture._launch_liveness_cause(4711, 0)
+    assert died is False and "EXITED by the end" in died_note
+    # An unmeasured sample is never evidence of absence, at either end.
+    assert mitmproxy_capture._launch_liveness_cause(None, 0) == (False, None)
+    assert mitmproxy_capture._launch_liveness_cause(4711, None) == (False, None)
+
+
+def test_launch_liveness_cause_yields_to_direct_evidence_the_app_ran():
+    # A slow start whose first pidof lands at t+0: the proxy watched a client refuse
+    # its certificate, or counted the device's connection, so the process DID start.
+    # Reading that one early sample as a crash would contradict the capture's own
+    # evidence, so the guard lives in the decider rather than at each call site.
+    assert mitmproxy_capture._launch_liveness_cause(
+        0, 0, app_seen_running=True) == (False, None)
+
+
+@pytest.fixture(autouse=True)
+def _app_running_by_default(monkeypatch):
+    """The stage-level tests model a device where the app DOES come up: they stub
+    _launch_app to a no-op, so without this the real device-side liveness probe has
+    no device to ask and every one of them would read as a crash on launch.
+
+    This is the same shape as the _device_reaches_proxy stub above it, and for the
+    same reason - the probe runs real adb. Its own contract, including the
+    not-running and not-measured outcomes, is pinned directly by the _parse_pidof
+    and _launch_liveness_cause tests; a test that wants the crash path overrides
+    this with its own monkeypatch."""
+    monkeypatch.setattr(mitmproxy_capture, "_app_pid", lambda serial, package: 4711)
+
+
+def _empty_capture_run(monkeypatch, tmp_path, pid):
+    """Drive run_capture_stage down the real empty-capture path with a device that
+    is routed and reachable, so the only thing under test is what the stage makes
+    of the app's own liveness."""
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: False)
+    monkeypatch.setattr(mitmproxy_capture.shutil, "which", lambda name: "/usr/bin/mitmdump")
+    monkeypatch.setattr(mitmproxy_capture.time, "sleep", lambda s: None)
+
+    class FakeProc:
+        def __init__(self, *a, **k):
+            pass
+        def communicate(self, timeout=None):
+            return "", ""
+        def terminate(self):
+            pass
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(mitmproxy_capture.subprocess, "Popen", FakeProc)
+    monkeypatch.setattr(device, "create_mitm_ca", lambda confdir: confdir / "c.pem")
+    monkeypatch.setattr(device, "push_system_ca",
+                        lambda serial, cert: "/system/etc/security/cacerts/x.0")
+    monkeypatch.setattr(device, "adb_reverse", lambda serial, dp, hp, add=True: None)
+    monkeypatch.setattr(device, "set_http_proxy", lambda serial, host, port: None)
+    monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+    monkeypatch.setattr(mitmproxy_capture, "_launch_app", lambda serial, package: None)
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
+    samples = []
+    monkeypatch.setattr(mitmproxy_capture, "_app_pid",
+                        lambda serial, package: samples.append(package) or pid)
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", str(tmp_path / "out"))
+    return result, samples
+
+
+def test_run_capture_stage_records_the_apps_own_liveness(monkeypatch, tmp_path):
+    # Wiring: the two device-side samples must reach the evidence, because the report
+    # body and the CLI reclassifier both read them to decide whether the empty
+    # capture may be attributed to the app's network behaviour at all. A parser test
+    # passing proves nothing about whether its output is consumed.
+    result, samples = _empty_capture_run(monkeypatch, tmp_path, 4711)
+    assert result.status == "failed"
+    assert result.evidence["app_pid_after_launch"] == 4711
+    assert result.evidence["app_pid_after_capture"] == 4711
+    # Once right after the launch, once at the end of the capture window.
+    assert len(samples) == 2
+
+
+def test_run_capture_stage_names_a_crash_instead_of_app_silence(monkeypatch, tmp_path):
+    # The app is measurably not running and the route is provably up: the device
+    # reached the proxy, so every other reading available here would blame the app's
+    # network behaviour for an app that was never alive to have any.
+    result, _ = _empty_capture_run(monkeypatch, tmp_path, 0)
+    assert result.status == "failed"
+    assert result.evidence["app_pid_after_launch"] == 0
+    assert "was NOT running" in result.error
+    assert "never came up or died on start" in result.error
+    assert "the app made no network requests during the capture window" not in result.error

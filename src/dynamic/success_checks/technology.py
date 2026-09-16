@@ -214,6 +214,15 @@ _SYNTH_LOG_MARKER = "[synth] "
 _VENDOR_ROOT_MARKER = "[OK] [ROOT]"
 _VENDOR_SSL_MARKER = "[OK] [SSL]"
 
+# The two SSL-derived evidence lines, named once. ADR-0016's post-capture
+# evaluation takes exactly these two from the capture window's evaluation and keeps
+# everything else (the root lines and the liveness lines) from the dynamic window's -
+# the capture window's bypass is pinning-only, so it carries no root evidence to
+# offer. That makes this pair a contract between the check and cli.py, not two
+# literals in two files that can silently drift apart and merge the wrong lines.
+SSL_HANDSHAKE_LINE = "TLS handshakes completed post-bypass"
+SSL_CONFIRMATION_LINE = "SSL bypass confirmation basis"
+
 
 def _native_hook_installation_line(uninstalled: list[str], captured: bool) -> str:
     """Tri-state on purpose: "the script reported no failure" and "the script's
@@ -404,7 +413,7 @@ class TechnologyHooksEngagedCheck:
             "Native hook installation (script's own report)": (
                 _native_hook_installation_line(not_installed, captured=bool(messages))
             ),
-            "TLS handshakes completed post-bypass": (
+            SSL_HANDSHAKE_LINE: (
                 "yes (a TLS handshake completed through the neutralized stack"
                 f"{', ' + window if window else ''})"
                 if "ssl-handshake" in effects
@@ -426,7 +435,7 @@ class TechnologyHooksEngagedCheck:
             # Confirmed SSL bypass, on the app's own observable behavior: its pin-
             # check ran without rejecting and a handshake completed. Never a
             # fabricated pass.
-            "SSL bypass confirmation basis": (
+            SSL_CONFIRMATION_LINE: (
                 "app's own pin-check ran without rejecting AND a TLS handshake "
                 "completed (pin logic accepted a connection it would otherwise "
                 "reject)"

@@ -8,7 +8,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 52 files, **22,539 LOC**
+- `src/`: 52 files, **22,552 LOC**
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
 - `tests/`: 92 files, **30,331 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
@@ -38,7 +38,7 @@ module's line count unchanged escapes it.)
 | `androguard_scanner.py` | 335 | 387 | +52 | — |
 | `audit/attestation.py` | 571 | 695 | +124 | 2026-09-07 |
 | `calibration/*.py` | 510 | 571 | +61 | 2026-09-07 |
-| `cli.py` | 2,530 | 3,620 | +1,090 | 2026-09-15, 2026-09-16 (Signal-2 observer silence is not app-silence; the 0 is a fact about the observers; the probe is not the app's connection; a technology-level confirmation IS a target-specific verification, so it now reaches correlation; the capture window now runs under a pinning-only synthesize(cls, SSL_ONLY) — gated on the effective action, so a NEITHER/ROOT_ONLY run or --skip-dynamic keeps the un-hooked cold start — because a window that completes handshakes while measuring an un-hooked launch cannot speak to the bypass; Signal-2's app-silence verdict now reads the capture window's own observer stream as well as the dynamic stage's — that window runs the same observer script, and reading only the dynamic stage's let a capture-path failure (pin-check fired for a host, 0 flows) be downgraded to "not applicable"; 2026-09-16: an install that had to remove a differently-signed copy of the same package records the recovery on the dynamic stage's evidence) |
+| `cli.py` | 2,530 | 3,633 | +1,103 | 2026-09-15, 2026-09-16 (Signal-2 observer silence is not app-silence; the 0 is a fact about the observers; the probe is not the app's connection; a technology-level confirmation IS a target-specific verification, so it now reaches correlation; the capture window now runs under a pinning-only synthesize(cls, SSL_ONLY) — gated on the effective action, so a NEITHER/ROOT_ONLY run or --skip-dynamic keeps the un-hooked cold start — because a window that completes handshakes while measuring an un-hooked launch cannot speak to the bypass; Signal-2's app-silence verdict now reads the capture window's own observer stream as well as the dynamic stage's — that window runs the same observer script, and reading only the dynamic stage's let a capture-path failure (pin-check fired for a host, 0 flows) be downgraded to "not applicable"; 2026-09-16: an install that had to remove a differently-signed copy of the same package records the recovery on the dynamic stage's evidence; and the capture stage now carries the setup failure's own reason, because `serial is None` is reached by a refused install as well as a missing device and the hardcoded 'failed to find a connected device' was false whenever the device was found) |
 | `common.py` | 466 | 784 | +318 | — |
 | `correlation.py` | 82 | 140 | +58 | — |
 | `coverage.py` | 342 | 527 | +185 | 2026-09-07 |

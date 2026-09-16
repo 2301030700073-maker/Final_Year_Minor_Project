@@ -2637,7 +2637,15 @@ def run(
             capture_stage = mitmproxy_capture.run_capture_stage(
                 capture_serial, package_name, ANALYSIS_ROOT / "captures",
                 drive_ui=drive_ui,
-                bypass_script=capture_bypass or None,
+                # by SOURCE, not by filename: the synthesized bypass is generated in
+                # memory and never exists under src/dynamic/scripts/. Passing it to
+                # `bypass_script` (a filename under that directory) made the stage
+                # build a path out of the whole script and die with `[Errno 36] File
+                # name too long` before the bypass was loaded - so this window ran
+                # un-hooked on every real run while its own comment claimed the
+                # opposite. The two parameters reach two different loaders; there is
+                # no inference about which was meant.
+                bypass_source=capture_bypass or None,
             )
         except Exception as exc:
             capture_stage = StageResult(

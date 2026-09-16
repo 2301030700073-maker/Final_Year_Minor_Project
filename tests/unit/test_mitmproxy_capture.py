@@ -894,7 +894,8 @@ def _mock_native_run(monkeypatch, tmp_path, frida_mocks=None):
     monkeypatch.setattr(mitmproxy_capture.subprocess, "Popen",
                         lambda *a, **k: FakeProc())
 
-    hooks = {"launch_app": 0, "attach": 0, "load_script": 0, "resume": 0}
+    hooks = {"launch_app": 0, "attach": 0, "load_script": 0, "load_script_source": 0,
+             "resume": 0}
     monkeypatch.setattr(mitmproxy_capture, "_launch_app",
                         lambda s, p: hooks.__setitem__("launch_app", hooks["launch_app"] + 1))
     if frida_mocks:
@@ -913,6 +914,12 @@ def _mock_native_run(monkeypatch, tmp_path, frida_mocks=None):
         monkeypatch.setattr(
             mitmproxy_capture.frida_runner, "load_script",
             lambda session, name, on_message=None: hooks.__setitem__("load_script", hooks["load_script"] + 1))
+        # Counted separately from load_script: which loader a bypass reaches is the
+        # whole question (a filename is resolved under SCRIPT_DIR, source is not).
+        monkeypatch.setattr(
+            mitmproxy_capture.frida_runner, "load_script_source",
+            lambda session, source, on_message=None: hooks.__setitem__(
+                "load_script_source", hooks["load_script_source"] + 1))
     return hooks
 
 
@@ -942,8 +949,40 @@ def test_run_capture_stage_with_bypass_spawns_under_frida(monkeypatch, tmp_path)
     assert result.status == "success"
     assert hooks["launch_app"] == 0
     assert hooks["attach"] == 1 and hooks["load_script"] == 1 and hooks["resume"] == 1
+    assert hooks["load_script_source"] == 0
     assert result.evidence["bypass_script"] == "ssl_pinning_bypass_universal.js"
+    assert result.evidence["bypass_arm"] == "script file: ssl_pinning_bypass_universal.js"
     assert result.evidence["bypass_applied"] is True
+
+
+def test_run_capture_stage_with_synthesized_source_never_builds_a_path(monkeypatch, tmp_path):
+    # The synthesized bypass reaches the stage as SOURCE (cli.py passes
+    # synthesize(...).source), and it has no file under src/dynamic/scripts/ to be
+    # named by. Passing it where a filename belonged made load_script do
+    # `(SCRIPT_DIR / <the whole script>).read_text()`, which raised
+    # `[Errno 36] File name too long` BEFORE the bypass was loaded: the capture
+    # window then ran un-hooked on every real run while the stage's own comment
+    # said it ran under the bypass. So the loader that ran is the assertion that
+    # matters - load_script (the path-only loader) must never be reached.
+    hooks = _mock_native_run(monkeypatch, tmp_path, frida_mocks=True)
+    source = ("Java.perform(function () {\n"
+              "  send({bypassEffect: 'ssl-pin-check'});\n"
+              "});\n") * 40
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path,
+        mitmdump_path="mitmdump", capture_window=0.1,
+        bypass_source=source)
+    assert result.status == "success"
+    assert hooks["attach"] == 1 and hooks["resume"] == 1
+    assert hooks["load_script_source"] == 1
+    assert hooks["load_script"] == 0
+    assert hooks["launch_app"] == 0
+    assert result.evidence["bypass_applied"] is True
+    # The evidence names WHICH bypass was injected without embedding ~2 KB of
+    # generated JavaScript in the record it exists to explain.
+    assert result.evidence["bypass_arm"] == f"synthesized source ({len(source)} chars)"
+    assert result.evidence["bypass_script"] is None
+    assert source not in str(result.evidence)
 
 
 def test_cleanup_restores_pass_through_internet_on_wsl2(monkeypatch):

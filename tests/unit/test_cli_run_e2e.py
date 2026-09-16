@@ -722,7 +722,7 @@ def test_capture_window_runs_under_a_pinning_only_bypass(run_setup, monkeypatch)
                                   "path": "/x", "status": 200, "scheme": "https"}],
                 "proxy": "127.0.0.1:8081",
                 "system_ca": "/system/etc/security/cacerts/062b6baf.0",
-                "bypass_applied": bool(kw.get("bypass_script")),
+                "bypass_applied": bool(kw.get("bypass_source")),
             },
         )
 
@@ -737,7 +737,15 @@ def test_capture_window_runs_under_a_pinning_only_bypass(run_setup, monkeypatch)
         target="propertyguru",   # NEITHER -> forced to BOTH by --force-dynamic
         force_dynamic=True,
     )
-    assert seen.get("bypass_script") == "/*SSL_ONLY*/"
+    # The composition the capture path asked for, AND the parameter it used to ask
+    # for it: the synthesized bypass is source text with no file behind it, so it
+    # must reach the stage as `bypass_source`. Passing it as `bypass_script` (a
+    # filename under src/dynamic/scripts/) made the loader build a path out of the
+    # entire script and raise `[Errno 36] File name too long` - the capture window
+    # then ran un-hooked on every real run while this test, asserting only that a
+    # value had been passed, stayed green.
+    assert seen.get("bypass_source") == "/*SSL_ONLY*/"
+    assert seen.get("bypass_script") is None
 
 
 def test_capture_window_stays_unhooked_when_no_ssl_bypass_was_attempted(run_setup, monkeypatch):
@@ -767,7 +775,7 @@ def test_capture_window_stays_unhooked_when_no_ssl_bypass_was_attempted(run_setu
                                   "path": "/x", "status": 200, "scheme": "https"}],
                 "proxy": "127.0.0.1:8081",
                 "system_ca": "/system/etc/security/cacerts/062b6baf.0",
-                "bypass_applied": bool(kw.get("bypass_script")),
+                "bypass_applied": bool(kw.get("bypass_source")),
             },
         )
 
@@ -781,6 +789,7 @@ def test_capture_window_stays_unhooked_when_no_ssl_bypass_was_attempted(run_setu
         device_serial=None,
         target="propertyguru",
     )
+    assert seen.get("bypass_source") is None
     assert seen.get("bypass_script") is None
     text = sorted((run_setup / "reports").rglob("*.md"))[0].read_text(encoding="utf-8")
     # The window's own state is still stated, so the weaker reading is what renders.

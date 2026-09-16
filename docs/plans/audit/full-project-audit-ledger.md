@@ -8,7 +8,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 52 files, **22,213 LOC**. Largest: cli (3,593), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,372), mitmproxy_capture (1,593), common (784), device (779), signatures (717), attestation (695).
+- `src/`: 52 files, **22,249 LOC**. Largest: cli (3,601), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,372), mitmproxy_capture (1,621), common (784), device (779), signatures (717), attestation (695).
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
 - `tests/`: 92 files, **30,331 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
@@ -38,7 +38,7 @@ module's line count unchanged escapes it.)
 | `androguard_scanner.py` | 335 | 387 | +52 | — |
 | `audit/attestation.py` | 571 | 695 | +124 | 2026-09-07 |
 | `calibration/*.py` | 510 | 571 | +61 | 2026-09-07 |
-| `cli.py` | 2,530 | 3,593 | +1,063 | 2026-09-15, 2026-09-16 (Signal-2 observer silence is not app-silence; the 0 is a fact about the observers; the probe is not the app's connection; a technology-level confirmation IS a target-specific verification, so it now reaches correlation; the capture window now runs under a pinning-only synthesize(cls, SSL_ONLY) — gated on the effective action, so a NEITHER/ROOT_ONLY run or --skip-dynamic keeps the un-hooked cold start — because a window that completes handshakes while measuring an un-hooked launch cannot speak to the bypass; Signal-2's app-silence verdict now reads the capture window's own observer stream as well as the dynamic stage's — that window runs the same observer script, and reading only the dynamic stage's let a capture-path failure (pin-check fired for a host, 0 flows) be downgraded to "not applicable") |
+| `cli.py` | 2,530 | 3,601 | +1,071 | 2026-09-15, 2026-09-16 (Signal-2 observer silence is not app-silence; the 0 is a fact about the observers; the probe is not the app's connection; a technology-level confirmation IS a target-specific verification, so it now reaches correlation; the capture window now runs under a pinning-only synthesize(cls, SSL_ONLY) — gated on the effective action, so a NEITHER/ROOT_ONLY run or --skip-dynamic keeps the un-hooked cold start — because a window that completes handshakes while measuring an un-hooked launch cannot speak to the bypass; Signal-2's app-silence verdict now reads the capture window's own observer stream as well as the dynamic stage's — that window runs the same observer script, and reading only the dynamic stage's let a capture-path failure (pin-check fired for a host, 0 flows) be downgraded to "not applicable") |
 | `common.py` | 466 | 784 | +318 | — |
 | `correlation.py` | 82 | 140 | +58 | — |
 | `coverage.py` | 342 | 527 | +185 | 2026-09-07 |
@@ -54,7 +54,7 @@ module's line count unchanged escapes it.)
 | `ingest/normalize.py` | 174 | 208 | +34 | 2026-09-07 |
 | `jnibridge.py` | 175 | 202 | +27 | 2026-09-09 |
 | `manifest.py` | 457 | 544 | +87 | — |
-| `mitmproxy_capture.py` | 487 | 1,593 | +1106 | 2026-09-16 (the stage's own pre-flight probe is not the app's connection) ; ADR-0013 adds the liveness premise the attribution needs: the launch is verified by its effect (a pid) because `am start -a MAIN -c LAUNCHER -p <pkg>` starts NOTHING on a device with no launcher app and still exits 0, so a capture in which the app never ran was reported as the app not reaching the proxy ; the pid that decides which form won is polled to a bound, because one sample taken in the same breath as `am start` was measured losing the race against process creation and mis-credited the launch to the form whose output said it failed |
+| `mitmproxy_capture.py` | 487 | 1,621 | +1,134 | 2026-09-16 (the stage's own pre-flight probe is not the app's connection) ; ADR-0013 adds the liveness premise the attribution needs: the launch is verified by its effect (a pid) because `am start -a MAIN -c LAUNCHER -p <pkg>` starts NOTHING on a device with no launcher app and still exits 0, so a capture in which the app never ran was reported as the app not reaching the proxy ; the pid that decides which form won is polled to a bound, because one sample taken in the same breath as `am start` was measured losing the race against process creation and mis-credited the launch to the form whose output said it failed |
 | `dynamic/proxy_attribution.py` | 223 | 245 | +22 | 2026-09-16, new (ADR-0012): device-side uid attribution for captured traffic from /proc/net/tcp ; ADR-0013: a `reached: false` now additionally requires the app to have been measured running - an app that was never started cannot have stayed away from the proxy |
 | `native.py` | 1243 | 1,879 | +636 | 2026-09-15 (full re-read) |
 | `obfuscation.py` | 261 | 282 | +21 | 2026-09-09 |

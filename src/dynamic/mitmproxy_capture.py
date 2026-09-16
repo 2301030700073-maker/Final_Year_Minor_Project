@@ -1102,18 +1102,31 @@ def run_capture_stage(
     capture_window: float = CAPTURE_WINDOW_SECONDS,
     mitmdump_path: str | None = None,
     bypass_script: str | None = None,
+    bypass_source: str | None = None,
     drive_ui: bool = True,
 ) -> StageResult:
     """Run a mitmproxy capture of `package`'s traffic and return a StageResult.
 
-    When `bypass_script` is given (a filename under src/dynamic/scripts/), the
-    app is cold-started *under Frida* with that script loaded before resume, so
-    its traffic decrypts through the proxy. This is the "with script" side of an
-    A/B: the same run with `bypass_script=None` cold-starts via plain `am start`
-    (no hooks), so a genuinely-pinned app rejects the capture CA and its pinned
-    host shows no decrypted flow - the two runs together prove the bypass. Use a
-    pinning-only script here (never a root-detection one) so the app does not
-    self-terminate during the capture window.
+    When `bypass_script` (a filename under src/dynamic/scripts/) or
+    `bypass_source` (a script's source text, for the synthesized bypass the
+    deterministic synthesizer generates in memory and never writes to a file) is
+    given, the app is cold-started *under Frida* with that script loaded before
+    resume, so its traffic decrypts through the proxy. This is the "with script"
+    side of an A/B: the same run with neither given cold-starts via plain
+    `am start` (no hooks), so a genuinely-pinned app rejects the capture CA and
+    its pinned host shows no decrypted flow - the two runs together prove the
+    bypass. Use a pinning-only script here (never a root-detection one) so the
+    app does not self-terminate during the capture window.
+
+    The two are separate parameters rather than one polymorphic one because they
+    are different things that reach different loaders: `load_script` resolves a
+    NAME under SCRIPT_DIR and reads it, `load_script_source` takes the text. One
+    parameter that accepted either would have to guess which it was given, and
+    the guess that got this wrong once - a synthesized source passed where a
+    filename belonged - built a path out of the entire script and failed with
+    `[Errno 36] File name too long` before the bypass was ever loaded, so the
+    capture window ran un-hooked while the report said the bypass had been
+    injected. Two names, no inference.
 
     Honest contract: a `success` result means real flows were captured and
     parsed (flows_count > 0) - the decrypted-traffic proof. A capture that
@@ -1131,6 +1144,11 @@ def run_capture_stage(
     out_dir.mkdir(parents=True, exist_ok=True)
     confdir = out_dir / "mitm-conf"
     bypass_applied = False  # set True only when the Frida bypass-spawn arm runs
+    # Which bypass the spawn arm loaded, as a compact descriptor for the evidence
+    # (None on the plain-launch arm). A synthesized bypass is ~10 KB of generated
+    # JavaScript; embedding it here would bury the very record it explains, and the
+    # dynamic stage already stores the full source it deployed.
+    bypass_arm: str | None = None
 
     wsl2 = _on_wsl2()
     if wsl2:
@@ -1216,7 +1234,7 @@ def run_capture_stage(
         reachable = _device_reaches_proxy(serial, proxy_port)
 
         frida_messages: list = []
-        if bypass_script:
+        if bypass_script or bypass_source:
             # "With script" arm: spawn the app under Frida (paused), load the
             # pinning bypass, then resume - same spawn-inject-resume pattern as
             # frida_runner._run_frida. Routing/CA/mitmdump are already live
@@ -1227,7 +1245,15 @@ def run_capture_stage(
             def on_message(message, data):
                 frida_messages.append(message)
 
-            frida_runner.load_script(session, bypass_script, on_message)
+            # Which loader runs is decided by which argument was given, never by
+            # inspecting the value: a filename is a name to resolve under
+            # SCRIPT_DIR, a source string is text to load. See the docstring.
+            if bypass_source:
+                frida_runner.load_script_source(session, bypass_source, on_message)
+                bypass_arm = f"synthesized source ({len(bypass_source)} chars)"
+            else:
+                frida_runner.load_script(session, bypass_script, on_message)
+                bypass_arm = f"script file: {bypass_script}"
             device2.resume(pid)
             time.sleep(1.0)  # let the app start making requests under the hook
             bypass_applied = True
@@ -1448,6 +1474,7 @@ def run_capture_stage(
                     "system_ca": system_ca,
                     "flows_path": str(flows_path),
                     "bypass_script": bypass_script,
+                    "bypass_arm": bypass_arm,
                     "bypass_applied": bypass_applied,
                     # CAPLIVE1: the app's own process liveness, sampled device-side
                     # with `pidof` immediately after the launch and again at the end
@@ -1536,6 +1563,7 @@ def run_capture_stage(
                 "system_ca": system_ca,
                 "proxy": f"127.0.0.1:{proxy_port}",
                 "bypass_script": bypass_script,
+                "bypass_arm": bypass_arm,
                 "bypass_applied": bypass_applied,
                 # Same record on the flow-carrying path: a driven capture's traffic
                 # is partly traffic the tool's own tap caused, and the report has to

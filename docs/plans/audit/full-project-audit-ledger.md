@@ -8,7 +8,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 52 files, **21,791 LOC**. Largest: cli (3,354), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,216), mitmproxy_capture (1,593), common (784), device (779), signatures (717), attestation (695).
+- `src/`: 52 files, **21,807 LOC**. Largest: cli (3,370), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,216), mitmproxy_capture (1,593), common (784), device (779), signatures (717), attestation (695).
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
 - `tests/`: 92 files, **30,331 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
@@ -38,7 +38,7 @@ module's line count unchanged escapes it.)
 | `androguard_scanner.py` | 335 | 387 | +52 | — |
 | `audit/attestation.py` | 571 | 695 | +124 | 2026-09-07 |
 | `calibration/*.py` | 510 | 571 | +61 | 2026-09-07 |
-| `cli.py` | 2,530 | 3,354 | +824 | 2026-09-15, 2026-09-16 (Signal-2 observer silence is not app-silence; the 0 is a fact about the observers; the probe is not the app's connection) |
+| `cli.py` | 2,530 | 3,370 | +840 | 2026-09-15, 2026-09-16 (Signal-2 observer silence is not app-silence; the 0 is a fact about the observers; the probe is not the app's connection; a technology-level confirmation IS a target-specific verification, so it now reaches correlation) |
 | `common.py` | 466 | 784 | +318 | — |
 | `correlation.py` | 82 | 140 | +58 | — |
 | `coverage.py` | 342 | 527 | +185 | 2026-09-07 |

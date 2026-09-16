@@ -565,6 +565,125 @@ def test_unknown_app_root_probe_confirms_in_report(run_setup, monkeypatch):
     assert "Root-detection" in text
 
 
+def test_unknown_app_confirmed_root_correlates_rather_than_being_skipped(
+    run_setup, monkeypatch
+):
+    # The technology-level check promotes root from the app's OWN observable
+    # behaviour (a probeHit is the app's root-check being answered-false), so a
+    # confirmation here IS a target-specific verification and correlation must run
+    # against it. It used to be skipped on the strength of a note written when this
+    # check only reported hooks-engaged, which left correlate()'s coverage-limited
+    # branch unreachable for every app without a hand-authored script - i.e. every
+    # real-world app. Live symptom (propertyguru, --force-dynamic): "Root bypassed:
+    # True" printed under Dynamic Verification while the correlation ADR-0006
+    # designates for exactly that relationship read "Not evaluated".
+    from dynamic import device as device_mod
+
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
+    monkeypatch.setattr(
+        cli, "synthesize",
+        lambda classification, action: SimpleNamespace(source="root", applied_hooks=[]),
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner.run_dynamic_stage",
+        lambda *a, **kw: _ok(
+            "dynamic",
+            frida_messages=[
+                {"type": "send", "payload": {"probeHit": "root", "path": "/system/bin/su"}},
+            ],
+        ),
+    )
+    monkeypatch.setattr(device_mod, "clear_logcat", lambda serial: None)
+    monkeypatch.setattr(device_mod, "capture_logcat", lambda serial: "")
+
+    correlated = []
+    real_correlate = cli.correlation_module.correlate
+
+    def _spy(classification, verification):
+        correlated.append(verification)
+        return real_correlate(classification, verification)
+
+    monkeypatch.setattr(cli.correlation_module, "correlate", _spy)
+
+    captured = []
+    original_print = cli.console.print
+    cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
+    try:
+        cli.run(
+            apk=run_setup / "fixture.apk",
+            justification="ACADEMIC_TRAINING_TARGET",
+            skip_dynamic=False,
+            capture_traffic=False,
+            device_serial=None,
+            target="propertyguru",
+        )
+    finally:
+        cli.console.print = original_print
+
+    # correlation ran, and it ran against the verification carrying the app's own
+    # root confirmation - not against a hooks-engaged placeholder
+    assert correlated and correlated[0].root_bypassed is True
+    text = sorted((run_setup / "reports").rglob("*.md"))[0].read_text(encoding="utf-8")
+    # the defect's fingerprint: the tier declaring itself not evaluated
+    assert "technology-level hooks-engaged check (no target-specific" not in text
+
+
+def test_unknown_app_with_no_confirmation_still_declines_to_correlate(
+    run_setup, monkeypatch
+):
+    # The other half of the gate: hooks ENGAGED is not a confirmation. With no
+    # probeHit there is no target-specific verification to correlate against, so
+    # correlation stays un-attempted rather than falling through to correlate()'s
+    # "agreement by non-claim" - which would report a confident static negative as
+    # agreeing with a dynamic run that measured nothing.
+    from dynamic import device as device_mod
+
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
+    monkeypatch.setattr(
+        cli, "synthesize",
+        lambda classification, action: SimpleNamespace(source="root", applied_hooks=[]),
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner.run_dynamic_stage",
+        lambda *a, **kw: _ok(
+            "dynamic",
+            frida_messages=[{"type": "send", "payload": {"hook": "root_su_binary_paths"}}],
+        ),
+    )
+    monkeypatch.setattr(device_mod, "clear_logcat", lambda serial: None)
+    monkeypatch.setattr(device_mod, "capture_logcat", lambda serial: "")
+
+    correlated = []
+    real_correlate = cli.correlation_module.correlate
+    monkeypatch.setattr(
+        cli.correlation_module, "correlate",
+        lambda c, v: (correlated.append(v), real_correlate(c, v))[1],
+    )
+
+    captured = []
+    original_print = cli.console.print
+    cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
+    try:
+        cli.run(
+            apk=run_setup / "fixture.apk",
+            justification="ACADEMIC_TRAINING_TARGET",
+            skip_dynamic=False,
+            capture_traffic=False,
+            device_serial=None,
+            target="propertyguru",
+        )
+    finally:
+        cli.console.print = original_print
+
+    assert correlated == []
+    text = sorted((run_setup / "reports").rglob("*.md"))[0].read_text(encoding="utf-8")
+    assert "Not evaluated (dynamic used the technology-level hooks-engaged check" in text
+
+
 def test_capture_failure_footer_does_not_claim_dynamic_was_not_attempted(run_setup, monkeypatch):
     # The ROOT_ONLY case runs dynamic (machinery ran, bypass not confirmed) but
     # the capture fails. The footer must NOT claim "dynamic verification is NOT

@@ -2414,24 +2414,40 @@ def run(
                             "target": target,
                             "bypass_hooks_engaged": engaged,
                             "note": (
-                                "no target-specific success check; this stage reports "
-                                "technology-level hooks-engaged. The technology check "
-                                "also computes the root/ssl verification, reported "
-                                "separately in Dynamic Verification; correlation is "
-                                "not attempted"
+                                "no target-specific success-check script for this app; "
+                                "this stage reports technology-level hooks-engaged. The "
+                                "same check also promotes root/ssl from the app's own "
+                                "observable behaviour, reported under Dynamic Verification"
                             ),
                         },
                     )
                     # Dynamic RAN here (technology hooks-engaged tier, real root/ssl
                     # evidence surfaced under Dynamic Verification) - it was not
-                    # skipped. Correlation needs a target-specific verification to
-                    # compare static findings against, so state that reason honestly
-                    # instead of the report defaulting to "dynamic stage skipped".
-                    correlation_skip_reason = (
-                        "dynamic used the technology-level hooks-engaged check (no "
-                        "target-specific success check for this app); correlation "
-                        "requires a target-specific verification"
-                    )
+                    # skipped. Correlation needs a TARGET-SPECIFIC verification to
+                    # compare static findings against, and this check produces one:
+                    # it promotes root/ssl from the app's OWN observable behaviour (a
+                    # `probeHit` IS the app's root-check being answered-false), not
+                    # merely from our hooks attaching to the process.
+                    #
+                    # So when it confirmed a category there IS dynamic evidence to
+                    # correlate against, and correlation runs; when it confirmed
+                    # nothing there is none, and the honest reason stands instead.
+                    # Calling correlate() unconditionally would be worse than the
+                    # skip: with nothing confirmed, its documented fall-through is
+                    # "agreement by non-claim", which would report a confident static
+                    # negative as AGREEING with a dynamic run that measured nothing.
+                    # A confirmed category always populates a correlation list, so
+                    # matches can never be fabricated on this path.
+                    if verification.root_bypassed or verification.ssl_bypassed:
+                        correlation_result = correlation_module.correlate(
+                            classification, verification
+                        )
+                    else:
+                        correlation_skip_reason = (
+                            "dynamic used the technology-level hooks-engaged check (no "
+                            "target-specific success check for this app); correlation "
+                            "requires a target-specific verification"
+                        )
                 stage_results.append(check_stage)
                 _print_stage(check_stage)
             else:

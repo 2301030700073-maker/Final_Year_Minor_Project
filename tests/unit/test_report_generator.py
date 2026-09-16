@@ -2652,3 +2652,89 @@ def test_generate_report_unmeasured_liveness_claims_nothing_about_the_app(tmp_pa
     content = _render_liveness(tmp_path, _liveness_stage(None, None), "unmeasured")
     assert "found the app was NOT running" not in content
     assert "died mid-window" not in content
+
+
+# --- ADR-0011: the deterministic UI drive's record reaches the report ---------
+
+
+def _drive_record(tapped, reason=None, label="START", attempted=None):
+    """Mirrors the three records _drive_ui actually returns: a landed tap, a tap
+    that was issued and failed, and a refusal that was never issued at all."""
+    if attempted is None:
+        attempted = tapped
+    if tapped:
+        return {"attempted": True, "tapped": True, "selected_by": "intent label `start`",
+                "target": {"label": label, "bounds": "[600,2200][840,2418]",
+                           "center": (720, 2309)}, "reason": None}
+    if attempted:
+        return {"attempted": True, "tapped": False, "selected_by": "intent label `start`",
+                "target": {"label": label, "bounds": "[600,2200][840,2418]",
+                           "center": (720, 2309)}, "reason": reason}
+    return {"attempted": False, "tapped": False, "target": None, "selected_by": None,
+            "targets_seen": 3, "reason": reason}
+
+
+def _flows_stage(ui_drive):
+    from common import StageResult
+    return StageResult(
+        stage="capture-traffic", status="success",
+        evidence={"reason": None, "proxy": "127.0.0.1:8081",
+                  "system_ca": "/system/etc/security/cacerts/x.0",
+                  "flow_summary": [{"host": "api.test.app", "scheme": "https",
+                                    "method": "GET", "path": "/v1/x", "status": 200}],
+                  "client_connections": 1, "tls_failed_clients": [],
+                  "ui_drive": ui_drive},
+        error=None,
+    )
+
+
+def test_capture_summary_exposes_the_ui_drive_record():
+    """The drive is recorded on the stage; a consumer must be able to read it, or
+    the record is a fact nothing acts on."""
+    from report.generator import _capture_summary
+    stage = _flows_stage(_drive_record(True))
+    assert _capture_summary([stage])["capture_ui_drive"]["tapped"] is True
+    # No capture stage ran, so no drive happened: None, never a tapped record.
+    assert _capture_summary([])["capture_ui_drive"] is None
+
+
+def test_a_tap_is_named_as_the_cause_of_part_of_the_captured_traffic(tmp_path):
+    """A driven run's flows are partly flows the tool itself caused. The report
+    says so rather than implying the app produced them all on its own."""
+    body = _render_liveness(tmp_path, _flows_stage(_drive_record(True)), "tapped")
+    assert "drove the app with **one tap**" in body
+    assert "**the tool's own tap caused**" in body
+    assert "`START`" in body
+
+
+def test_an_empty_capture_after_a_tap_says_the_gated_screen_was_reached(tmp_path):
+    """The same empty list means something stronger once the control gating the
+    path has actually been tapped."""
+    stage = _liveness_stage(4711, 4711)
+    stage.evidence["ui_drive"] = _drive_record(True)
+    body = _render_liveness(tmp_path, stage, "emptytap")
+    assert "after** the gated screen was reached" in body
+    assert "did **not** drive the UI" not in body
+
+
+def test_a_refused_drive_names_why_the_path_stayed_unexercised(tmp_path):
+    """A refusal is an outcome, not an absence: the report must not let an empty
+    capture read as though the app had been driven to the gated path."""
+    stage = _liveness_stage(4711, 4711)
+    stage.evidence["ui_drive"] = _drive_record(
+        False, "3 tappable widgets and none named by the intent vocabulary - refusing to guess")
+    body = _render_liveness(tmp_path, stage, "refused")
+    assert "did **not** drive the UI" in body
+    assert "refusing to guess" in body
+    assert "stays un-exercised this run" in body
+
+
+def test_a_tap_that_did_not_land_is_not_reported_as_a_drive(tmp_path):
+    """`attempted` without `tapped` is a failed tap: it must not be narrated as
+    having reached the screen."""
+    stage = _liveness_stage(4711, 4711)
+    stage.evidence["ui_drive"] = _drive_record(False, "input tap failed: device offline",
+                                                attempted=True)
+    body = _render_liveness(tmp_path, stage, "noland")
+    assert "did **not** land" in body
+    assert "after** the gated screen was reached" not in body

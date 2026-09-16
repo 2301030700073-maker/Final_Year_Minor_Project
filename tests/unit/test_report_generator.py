@@ -1813,16 +1813,24 @@ def test_generate_report_renders_permissions_none_when_empty(tmp_path):
     assert "**Permissions (0):**" not in content
 
 
-def _capture_stage(flows):
+def _capture_stage(flows, bypass_applied=False, launch=None):
     """A capture-traffic stage carrying real flow_summary evidence, so the
-    Captured Traffic section is exercised rather than skipped."""
+    Captured Traffic section is exercised rather than skipped. `bypass_applied`
+    is the capture stage's own record of whether THAT window's launch ran under
+    an injected pinning-bypass script; the report reads it to decide whether a
+    decrypted flow list is evidence of a bypass taking effect or only of pinning
+    not being enforced in that window."""
+    evidence = {
+        "flow_summary": flows,
+        "system_ca": "/system/etc/security/cacerts/062b6baf.0",
+        "proxy": "127.0.0.1:8081",
+        "bypass_applied": bypass_applied,
+    }
+    if launch is not None:
+        evidence["app_launch"] = launch
     return StageResult(
         stage="capture-traffic", status="success", duration_ms=0,
-        evidence={
-            "flow_summary": flows,
-            "system_ca": "/system/etc/security/cacerts/062b6baf.0",
-            "proxy": "127.0.0.1:8081",
-        },
+        evidence=evidence,
     )
 
 
@@ -1838,10 +1846,12 @@ def test_captured_traffic_strong_claim_only_when_ssl_confirmed(tmp_path):
     # Report-correctness: the Captured Traffic section must not claim "live proof
     # that SSL-pinning was actually defeated" whenever flows exist. A captured
     # flow list is only full confirmation when the run actually confirmed the
-    # app's pin-check (ssl_bypassed is True). When the run is inconclusive (no
-    # TLS handshake / app never reached the pinned call), the section must say so
-    # plainly as partial evidence - otherwise the report contradicts its own
-    # "SSL bypassed: inconclusive" line.
+    # app's pin-check (ssl_bypassed is True) AND the capture window's own launch
+    # ran under the bypass - the flows come from that launch, not from the
+    # dynamic stage's. When the run is inconclusive (no TLS handshake / app never
+    # reached the pinned call), the section must say so plainly as partial
+    # evidence - otherwise the report contradicts its own "SSL bypassed:
+    # inconclusive" line.
     flows = [_Flow("api.example.com", "GET", "/v1/data", 200)]
 
     # Confirmed SSL -> strong claim is correct.
@@ -1851,7 +1861,7 @@ def test_captured_traffic_strong_claim_only_when_ssl_confirmed(tmp_path):
         classification=_classification(),
         verification=VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={}),
         correlation=None,
-        stage_results=[_capture_stage(flows)], output_dir=tmp_path,
+        stage_results=[_capture_stage(flows, bypass_applied=True)], output_dir=tmp_path,
     )
     confirmed_text = confirmed.read_text(encoding="utf-8")
     assert "live proof that SSL-pinning was actually defeated" in confirmed_text
@@ -1869,6 +1879,60 @@ def test_captured_traffic_strong_claim_only_when_ssl_confirmed(tmp_path):
     assert "live proof that SSL-pinning was actually defeated" not in inconclusive_text
     assert "This is partial evidence, not full confirmation" in inconclusive_text
     assert "inconclusive" in inconclusive_text
+
+
+def test_capture_window_without_bypass_never_claims_the_defeat(tmp_path):
+    # SSL can be confirmed bypassed in the DYNAMIC stage's window while the
+    # CAPTURE stage runs its own, separate launch with no bypass injected (the
+    # CLI passes no capture bypass script, so this is the normal shape today).
+    # A decrypted flow from that window proves pinning was not enforced on the
+    # host in THAT window; it does not prove the bypass defeated anything. The
+    # report must not present it as "the live proof that SSL-pinning was actually
+    # defeated" - that attributes one window's confirmation to another window's
+    # traffic, which is the reading that misled a real investigation.
+    flows = [_Flow("api.example.com", "GET", "/v1/data", 200)]
+    out = generate_report(
+        run_id="cap-nowindow", apk_hash="capnowin", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "capnowin"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={}),
+        correlation=None,
+        stage_results=[_capture_stage(
+            flows, bypass_applied=False,
+            launch={"component": "app/.Main", "launched_by": "resolved component",
+                    "pid": 17829, "attempts": []},
+        )],
+        output_dir=tmp_path,
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "live proof that SSL-pinning was actually defeated" not in text
+    assert "separate, later launch" in text
+    assert "no pinning-bypass script injected" in text
+    assert "launched by resolved component, pid 17829" in text
+    assert "not **enforced**" in text
+
+
+def test_capture_window_with_bypass_keeps_the_defeat_claim(tmp_path):
+    # The mirror: when the capture window DID run under the injected bypass, its
+    # decrypted flows are the defeat in action and the strong claim is correct.
+    flows = [_Flow("api.example.com", "GET", "/v1/data", 200)]
+    out = generate_report(
+        run_id="cap-window-bypass", apk_hash="capwinbp", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "capwinbp"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={}),
+        correlation=None,
+        stage_results=[_capture_stage(
+            flows, bypass_applied=True,
+            launch={"component": None, "launched_by": "frida spawn", "pid": 4321,
+                    "attempts": []},
+        )],
+        output_dir=tmp_path,
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "live proof that SSL-pinning was actually defeated" in text
+    assert "under the injected pinning-bypass script" in text
+    assert "separate, later launch" not in text
 
 
 def test_handshake_line_reconciles_captured_flows(tmp_path):
@@ -1936,7 +2000,7 @@ def test_capture_all_https_flows_render_decrypted_transport_no_cleartext_callout
         classification=_classification(),
         verification=VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={}),
         correlation=None,
-        stage_results=[_capture_stage(flows)], output_dir=tmp_path,
+        stage_results=[_capture_stage(flows, bypass_applied=True)], output_dir=tmp_path,
     )
     text = out.read_text(encoding="utf-8")
     assert "live proof that SSL-pinning was actually defeated" in text
@@ -1962,7 +2026,7 @@ def test_capture_mixed_http_https_distinguishes_transport_and_flags_cleartext(tm
         classification=_classification(),
         verification=VerificationResult(root_bypassed=True, ssl_bypassed=True, evidence_lines={}),
         correlation=None,
-        stage_results=[_capture_stage(flows)], output_dir=tmp_path,
+        stage_results=[_capture_stage(flows, bypass_applied=True)], output_dir=tmp_path,
     )
     text = out.read_text(encoding="utf-8")
     # Both transports are rendered distinctly in the table.

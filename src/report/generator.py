@@ -389,9 +389,9 @@ string in this APK; only its *ownership* is unverified.
 {% if capture_flows -%}
 {% if capture_decrypted_flows -%}
 {% if verification and verification.ssl_bypassed is true -%}
-Real decrypted HTTPS flows observed while the app ran through the mitmproxy capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`). This is the live proof that SSL-pinning was actually defeated - the app sent HTTPS requests the proxy decrypted (Transport = HTTPS below) and the device accepted:
+Real decrypted HTTPS flows observed while the app ran through the mitmproxy capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`). {% if capture_bypass_applied %}This capture window ran under the injected pinning-bypass script, so these flows are the live proof that SSL-pinning was actually defeated - the app sent HTTPS requests the proxy decrypted (Transport = HTTPS below) and the device accepted:{% else %}SSL-pinning was confirmed **bypassed** in the dynamic stage's own window, where the app's pin-check was exercised and neutralised. This capture window is a **separate, later launch**{% if capture_app_launch and capture_app_launch.launched_by %} (launched by {{ capture_app_launch.launched_by }}{% if capture_app_launch.pid %}, pid {{ capture_app_launch.pid }}{% endif %}){% endif %} and ran with **no pinning-bypass script injected**, so its decrypted flows show pinning was not **enforced** on those hosts in *this* window - consistent with the confirmed bypass, but not themselves the act of defeating it:{% endif %}
 {% else -%}
-The capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`) decrypted the HTTPS flows below (Transport = HTTPS), so pinning was not enforced **on those hosts**. {% if capture_proxy_attribution and capture_proxy_attribution.reached is false %}The proxy is installed device-wide (as the device's HTTP proxy), so a captured flow is not by itself this app's - **and the stage's own device-side attribution found this app did NOT reach the proxy**: {{ capture_proxy_attribution.reason }}. The flows below are therefore not this app's traffic, and the pinning reading above says nothing about this app.{% elif capture_proxy_attribution and capture_proxy_attribution.reached is true %}The proxy is installed device-wide (as the device's HTTP proxy), but the stage's device-side attribution puts this app on it: {{ capture_proxy_attribution.reason }}. The pinning reading above therefore does bear on this app - **at uid granularity**, so it is not per-flow proof of which request was whose.{% else %}The proxy is installed device-wide (as the device's HTTP proxy), and no per-flow attribution to this app exists, so a captured flow is **not by itself proof that this app produced it** - the pinning statement is scoped to the hosts actually observed, not to the app's own pinned endpoints.{% endif %} This is partial evidence, not full confirmation: the app's own pin-check was not confirmed in this run ({{ 'inconclusive' if verification and verification.ssl_bypassed is none else 'not verified' }}), so a pinned endpoint that never spoke during the run is not ruled out.
+The capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`) decrypted the HTTPS flows below (Transport = HTTPS), so pinning was not enforced **on those hosts**. {% if capture_proxy_attribution and capture_proxy_attribution.reached is false %}The proxy is installed device-wide (as the device's HTTP proxy), so a captured flow is not by itself this app's - **and the stage's own device-side attribution found this app did NOT reach the proxy**: {{ capture_proxy_attribution.reason }}. The flows below are therefore not this app's traffic, and the pinning reading above says nothing about this app.{% elif capture_proxy_attribution and capture_proxy_attribution.reached is true %}The proxy is installed device-wide (as the device's HTTP proxy), but the stage's device-side attribution puts this app on it: {{ capture_proxy_attribution.reason }}. The pinning reading above therefore does bear on this app - **at uid granularity**, so it is not per-flow proof of which request was whose.{% else %}The proxy is installed device-wide (as the device's HTTP proxy), and no per-flow attribution to this app exists, so a captured flow is **not by itself proof that this app produced it** - the pinning statement is scoped to the hosts actually observed, not to the app's own pinned endpoints.{% endif %} This is partial evidence, not full confirmation: the app's own pin-check was not confirmed in this run ({{ 'inconclusive' if verification and verification.ssl_bypassed is none else 'not verified' }}), so a pinned endpoint that never spoke during the run is not ruled out. {% if capture_bypass_applied %}**Which window this is:** the capture stage launched the app itself{% if capture_app_launch and capture_app_launch.launched_by %} (launched by {{ capture_app_launch.launched_by }}{% if capture_app_launch.pid %}, pid {{ capture_app_launch.pid }}{% endif %}){% endif %}, **under the injected pinning-bypass script** — so these decrypted flows are evidence the bypass took effect on those hosts, not merely that pinning was absent there.{% else %}**Which window this is:** the capture stage launched the app itself{% if capture_app_launch and capture_app_launch.launched_by %} (launched by {{ capture_app_launch.launched_by }}{% if capture_app_launch.pid %}, pid {{ capture_app_launch.pid }}{% endif %}){% endif %} with **no pinning-bypass script injected** — so these decrypted flows are evidence pinning was not **enforced** on those hosts, and are **not** evidence that a bypass defeated it.{% endif %} That launch is a **separate, later launch** than the dynamic stage's: the Frida SSL observer reported under Dynamic Verification was live in the dynamic stage's own window, so its reading and this flow list answer two different questions and neither is about the other's window.
 {% endif -%}
 {% else -%}
 No HTTPS flow was decrypted this run - every captured flow below was sent over cleartext HTTP (or a non-HTTPS transport). **This is not proof of SSL-pinning defeat**: there was no TLS handshake to pin or bypass. The cleartext transmission is itself a finding (see below).
@@ -952,6 +952,12 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
             # empty list (same list type as the present path - uniform key set so
             # the template never references an undefined var, RPT-TMPLCOV1).
             "capture_bypass_script_errors": [],
+            # No capture stage ran, so no window was opened with a bypass applied
+            # and no launch was recorded for one: False (not None - a bypass was
+            # definitionally not applied by a stage that did not run) and None for
+            # the launch record, which asserts nothing about a launch we did not do.
+            "capture_bypass_applied": False,
+            "capture_app_launch": None,
         }
     evidence = capture_stage.evidence or {}
     flows = evidence.get("flow_summary") or []
@@ -1087,6 +1093,22 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
         # (no such key) and clean runs an empty list, never None, so the template's
         # truthiness test and join stay crash-free (RPT-TMPLCOV1).
         "capture_cleanup_warnings": evidence.get("cleanup_warnings") or [],
+        # Whether THIS window's launch ran under an injected pinning-bypass script
+        # (run_capture_stage sets it True only on the Frida-spawn arm, i.e. exactly
+        # when a bypass_script was supplied). It is the difference between two very
+        # different readings of the same decrypted flow list - "pinning was not
+        # enforced on these hosts" versus "the injected bypass took effect on them"
+        # - so the report states it rather than letting a reader assume the
+        # stronger one. `or False` keeps OLD cached runs (no such key) on the
+        # weaker, always-true reading.
+        "capture_bypass_applied": bool(evidence.get("bypass_applied")),
+        # The capture window's OWN launch record (component / launched_by / pid /
+        # attempts). The report needs it to name which launch a decrypted flow came
+        # from: the dynamic stage launched the app separately and earlier, and its
+        # Frida SSL observer's silence is a fact about THAT window only
+        # ([[observer-silence-is-a-fact-about-observers]]). None when an old cached
+        # run recorded no launch.
+        "capture_app_launch": evidence.get("app_launch"),
     }
 
 
@@ -1097,7 +1119,19 @@ def _handshake_capture_note(verification, capture_summary: dict) -> str | None:
     not wrap reads "no TLS handshake reached during the run" - which flatly
     contradicts the Captured Traffic section, because every decrypted flow
     REQUIRED a completed TLS handshake through the CA. Credit the proxy evidence
-    without promoting SSL (a handshake alone is not a pin-check, ADR-0006)."""
+    without promoting SSL (a handshake alone is not a pin-check, ADR-0006).
+
+    The two readings are also about two DIFFERENT launches of the app, and the
+    note now says so. The observer is live in the dynamic stage's Frida launch;
+    the capture stage force-stops the app and launches it again for its own
+    window (the dynamic stage runs before capture in the pipeline). Without that
+    statement the note reads as one measurement contradicting itself, rather than
+    two windows answering two different questions - which is how it was misread
+    on a real run whose observer legitimately saw nothing while the capture
+    decrypted 32 flows. The capture window's own bypass state is named for the
+    same reason: it decides what those flows are evidence OF - pinning not
+    enforced (no bypass script in that window) versus the injected bypass taking
+    effect (a bypass script in that window)."""
     if verification is None:
         return None
     hs = verification.evidence_lines.get("TLS handshakes completed post-bypass", "")
@@ -1120,10 +1154,33 @@ def _handshake_capture_note(verification, capture_summary: dict) -> str | None:
     if not hosts:
         hosts = capture_summary.get("capture_hosts") or []
     preview = ", ".join(hosts[:5]) + ("..." if len(hosts) > 5 else "")
+    launched_by = (capture_summary.get("capture_app_launch") or {}).get("launched_by")
+    window = (
+        f"the capture stage's own window (launched by {launched_by})"
+        if launched_by
+        else "the capture stage's own window"
+    )
+    if capture_summary.get("capture_bypass_applied"):
+        bypass_clause = (
+            "That window ran under the injected pinning-bypass script, so these "
+            "flows are evidence the bypass took effect on those hosts - still not "
+            "the app's own pin-check"
+        )
+    else:
+        bypass_clause = (
+            "That window ran with no pinning-bypass script injected, so these "
+            "flows are evidence pinning was not ENFORCED on those hosts - not "
+            "that a bypass defeated it"
+        )
     return (
         f"{len(flows)} flow(s) decrypted by the capture proxy, which requires "
-        f"completed TLS handshakes through the CA (hosts: {preview}) - the Frida "
-        f"SSL observer recorded none, so SSL is not promoted on this basis alone"
+        f"completed TLS handshakes through the CA (hosts: {preview}). These are "
+        f"two different launches of the app, not one measurement: the flows come "
+        f"from {window}, while the Frida SSL observer reported above was live in "
+        f"the dynamic stage's separate, earlier launch. The observer's zero does "
+        f"not contradict the proxy's {len(flows)} - it is a fact about the window "
+        f"the observer was live for. {bypass_clause}. SSL is not promoted on "
+        f"this basis alone"
     )
 
 

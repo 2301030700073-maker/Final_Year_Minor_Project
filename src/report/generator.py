@@ -720,6 +720,16 @@ def _observer_signal(messages) -> dict:
     probe_hits_any == root_probe_hits and this changes no current output - it closes
     the latent label gap in the safe (EXTEND) direction, reversing nothing.
 
+    TWO stored shapes reach this extractor, and both are real. frida_runner stores
+    Frida's raw `{type, payload}` envelope for the dynamic stage; mitmproxy_capture
+    stores the payload ALONE (`m.get("payload", m)`) for the capture stage. Reading
+    only the envelope made every capture-window message invisible: the identical
+    messages that yield checkpoints and effects from the dynamic stage scored
+    all-zero from the capture stage, so this window's own record rendered as
+    "recorded no SSL effect" whatever it actually said - in the report line and in
+    the handshake note built on it. `type` sits on the message in both shapes, which
+    is why the crash check below can be shape-independent.
+
     `{type:error}` messages carry no payload and are skipped: a crashed hook is
     described by the shared script-error helper, never counted as an effect."""
     checkpoints: set[str] = set()
@@ -727,11 +737,22 @@ def _observer_signal(messages) -> dict:
     probe_hits_any = 0
     ssl_effects: dict[str, int] = {}
     for m in messages or []:
-        if isinstance(m, dict) and m.get("type") == "error":
+        if not isinstance(m, dict):
             continue
-        payload = m.get("payload") if isinstance(m, dict) else None
+        if m.get("type") == "error":
+            continue
+        # An envelope (Frida's raw shape, what the dynamic stage stores) carries a
+        # dict `payload`; a payload-unwrapped message (what the capture stage stores)
+        # IS the payload. Prefer the nested dict when there is one, else read the
+        # message. Deliberately tolerant rather than keyed on `type`: a rule that can
+        # DECLINE to look at a message turns that message into silence, which is the
+        # failure this extractor just had, so an unrecognised shape must never read as
+        # "this window recorded nothing". The accepted cost is reading a nested
+        # "payload" dict one level down even when it is script data - a spurious effect
+        # keeps a loud signal loud, where a dropped one invents a silence.
+        payload = m.get("payload")
         if not isinstance(payload, dict):
-            continue
+            payload = m
         if isinstance(payload.get("hook"), str):
             checkpoints.add(payload["hook"])
         if "probeHit" in payload:

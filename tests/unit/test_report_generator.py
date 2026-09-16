@@ -1821,7 +1821,10 @@ def _capture_stage(flows, bypass_applied=False, launch=None, frida_messages=None
     decrypted flow list is evidence of a bypass taking effect or only of pinning
     not being enforced in that window. `frida_messages` is that window's own
     observer stream (the capture stage records it under the same key the dynamic
-    stage uses)."""
+    stage uses), passed here as Frida envelopes and STORED the way the capture
+    producer stores them - `m.get("payload", m)`, payload-unwrapped. A fixture that
+    kept the envelopes gave the report a shape no capture run ever produces, which
+    is how a capture window's record came to read as silence."""
     evidence = {
         "flow_summary": flows,
         "system_ca": "/system/etc/security/cacerts/062b6baf.0",
@@ -1831,11 +1834,45 @@ def _capture_stage(flows, bypass_applied=False, launch=None, frida_messages=None
     if launch is not None:
         evidence["app_launch"] = launch
     if frida_messages is not None:
-        evidence["frida_messages"] = frida_messages
+        # The capture producer's own transformation (mitmproxy_capture): the stored
+        # list is the payload alone, so the fixture is built by the same rule rather
+        # than hand-written in the dynamic stage's envelope shape.
+        evidence["frida_messages"] = [m.get("payload", m) for m in frida_messages]
     return StageResult(
         stage="capture-traffic", status="success", duration_ms=0,
         evidence=evidence,
     )
+
+
+def test_observer_signal_reads_both_stored_shapes_identically():
+    # The two windows store the SAME observer script's messages in different shapes:
+    # frida_runner keeps Frida's raw {type, payload} envelope, mitmproxy_capture stores
+    # the payload alone (`m.get("payload", m)`). The extractor is documented as one set
+    # of rules for both windows, so one shape must not read as silence - and it did,
+    # which made a capture window's own record render as "recorded no SSL effect"
+    # whatever it actually said. The fixture is built BY the producer's rule rather
+    # than hand-written in the other stage's shape.
+    from report.generator import _observer_signal
+    envelopes = [
+        {"type": "send", "payload": {"hook": "ssl_pin_check"}},
+        {"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}},
+        {"type": "send", "payload": {"probeHit": "root"}},
+        {"type": "send", "payload": {"probeHit": "emulator"}},
+        {"type": "error", "description": "boom", "lineNumber": 3},
+    ]
+    stored = [m.get("payload", m) for m in envelopes]      # the capture stage's shape
+    assert _observer_signal(stored) == _observer_signal(envelopes)
+    assert _observer_signal(stored)["ssl_effects"] == {"ssl-pin-check": 1}
+    assert _observer_signal(stored)["root_probe_hits"] == 1  # only the value "root"
+    assert _observer_signal(stored)["probe_hits_any"] == 2   # but any value engages
+    assert _observer_signal(stored)["checkpoints"] == {"ssl_pin_check"}
+    # Tolerance is deliberate and one-directional: a message carrying a dict
+    # `payload` is read one level down even without Frida's `type` marker (the
+    # half-envelope the reachability fixtures use), because a rule that can DECLINE to
+    # look at a message turns it into silence - the failure this extractor just had. A
+    # spurious effect keeps a loud signal loud; a dropped one invents a silence.
+    half = [{"payload": {"bypassEffect": "ssl-pin-check"}}]
+    assert _observer_signal(half)["ssl_effects"] == {"ssl-pin-check": 1}
 
 
 class _Flow:

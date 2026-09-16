@@ -8,7 +8,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 52 files, **21,895 LOC**. Largest: cli (3,401), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,279), mitmproxy_capture (1,593), common (784), device (779), signatures (717), attestation (695).
+- `src/`: 52 files, **21,967 LOC**. Largest: cli (3,401), native (1,879), decompile (1,408), synthesizer (1,192), generator (1,351), mitmproxy_capture (1,593), common (784), device (779), signatures (717), attestation (695).
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
 - `tests/`: 92 files, **30,331 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
@@ -61,7 +61,7 @@ module's line count unchanged escapes it.)
 | `packers.py` | 157 | 157 | +0 | — |
 | `pass_through_proxy.py` | 245 | 277 | +32 | — |
 | `report/attribution.py` | 220 | 220 | +0 | 2026-09-07 |
-| `report/generator.py` | 791 | 1,279 | +488 | 2026-09-08, 2026-09-15, 2026-09-16 (empty-capture ladder reads the stage record; render sites stop asserting an inference their evidence cannot carry; the two windows a report juxtaposes are named as two launches, and the capture window's own bypass state decides whether its decrypted flows are evidence of a bypass taking effect or only of pinning not being enforced in that window) |
+| `report/generator.py` | 791 | 1,351 | +560 | 2026-09-08, 2026-09-15, 2026-09-16 (empty-capture ladder reads the stage record; render sites stop asserting an inference their evidence cannot carry; the two windows a report juxtaposes are named as two launches, and the capture window's own bypass state decides whether its decrypted flows are evidence of a bypass taking effect or only of pinning not being enforced in that window; the capture window's own observer record is counted by the same single extractor as the dynamic window's and rendered beside the flows it belongs to, instead of being read only as a silence in the other window's line) |
 | `signatures.py` | 523 | 717 | +194 | — |
 | `storage/db.py` | 195 | 210 | +15 | 2026-09-09 |
 | `storage/results.py` | 218 | 250 | +32 | 2026-09-09 |

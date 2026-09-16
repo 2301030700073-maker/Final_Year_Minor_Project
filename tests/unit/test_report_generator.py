@@ -1813,13 +1813,15 @@ def test_generate_report_renders_permissions_none_when_empty(tmp_path):
     assert "**Permissions (0):**" not in content
 
 
-def _capture_stage(flows, bypass_applied=False, launch=None):
+def _capture_stage(flows, bypass_applied=False, launch=None, frida_messages=None):
     """A capture-traffic stage carrying real flow_summary evidence, so the
     Captured Traffic section is exercised rather than skipped. `bypass_applied`
     is the capture stage's own record of whether THAT window's launch ran under
     an injected pinning-bypass script; the report reads it to decide whether a
     decrypted flow list is evidence of a bypass taking effect or only of pinning
-    not being enforced in that window."""
+    not being enforced in that window. `frida_messages` is that window's own
+    observer stream (the capture stage records it under the same key the dynamic
+    stage uses)."""
     evidence = {
         "flow_summary": flows,
         "system_ca": "/system/etc/security/cacerts/062b6baf.0",
@@ -1828,6 +1830,8 @@ def _capture_stage(flows, bypass_applied=False, launch=None):
     }
     if launch is not None:
         evidence["app_launch"] = launch
+    if frida_messages is not None:
+        evidence["frida_messages"] = frida_messages
     return StageResult(
         stage="capture-traffic", status="success", duration_ms=0,
         evidence=evidence,
@@ -1933,6 +1937,79 @@ def test_capture_window_with_bypass_keeps_the_defeat_claim(tmp_path):
     assert "live proof that SSL-pinning was actually defeated" in text
     assert "under the injected pinning-bypass script" in text
     assert "separate, later launch" not in text
+
+
+def test_capture_window_reports_its_own_observer_effects(tmp_path):
+    # The capture window runs the same observer script as the dynamic stage, in its
+    # own launch. When its effects are recorded, the report must surface them as
+    # belonging to the window the flow list came from - otherwise the only SSL
+    # statement in the report is the OTHER window's silence, which is a fact about a
+    # different launch.
+    flows = [_Flow("api.example.com", "GET", "/v1/data", 200)]
+    out = generate_report(
+        run_id="cap-obs", apk_hash="capobs", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "capobs"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(root_bypassed=True, ssl_bypassed=None, evidence_lines={}),
+        correlation=None,
+        stage_results=[_capture_stage(
+            flows,
+            bypass_applied=True,
+            frida_messages=[
+                {"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}},
+                {"type": "send", "payload": {"bypassEffect": "ssl-handshake"}},
+                {"type": "send", "payload": {"probeHit": "root"}},
+            ],
+        )],
+        output_dir=tmp_path,
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "This window's own in-process observer" in text
+    assert "`ssl-pin-check`=1" in text and "`ssl-handshake`=1" in text
+    assert "1 root `probeHit`(s)" in text
+    assert "during the window whose flows are listed above" in text
+
+
+def test_capture_window_omits_the_observer_line_when_it_recorded_nothing(tmp_path):
+    # An un-hooked capture window records no observer messages. The line must then be
+    # absent rather than rendered with zeroes, which would read as "this window's
+    # observer ran and saw nothing" - a statement about an observer that never ran.
+    flows = [_Flow("api.example.com", "GET", "/v1/data", 200)]
+    out = generate_report(
+        run_id="cap-obsnone", apk_hash="capobsno", timestamp="2026-08-21T12:00:00",
+        metadata={"hashes": {"sha256": "capobsno"}, "package": {"package_name": "app"}},
+        classification=_classification(),
+        verification=VerificationResult(root_bypassed=True, ssl_bypassed=None, evidence_lines={}),
+        correlation=None,
+        stage_results=[_capture_stage(flows)],
+        output_dir=tmp_path,
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "This window's own in-process observer" not in text
+
+
+def test_observer_signal_counts_effects_by_the_shared_rules():
+    # One extractor serves both windows. Lock the three distinctions it makes, since
+    # a second copy of this logic in the capture path is exactly the drift this
+    # shares away: a {type:error} message is a crashed hook (described elsewhere) and
+    # never an effect; a probeHit of a value other than "root" counts toward
+    # engagement but never toward the "root probeHit(s)" line; checkpoints are the
+    # hook readiness markers, not effects.
+    from report.generator import _observer_signal
+
+    signal = _observer_signal([
+        {"type": "error", "description": "boom"},
+        {"type": "send", "payload": {"hook": "root_su_binary_paths"}},
+        {"type": "send", "payload": {"probeHit": "root"}},
+        {"type": "send", "payload": {"probeHit": "emulator"}},
+        {"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}},
+        {"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}},
+        "not-a-dict",
+    ])
+    assert signal["ssl_effects"] == {"ssl-pin-check": 2}
+    assert signal["root_probe_hits"] == 1
+    assert signal["probe_hits_any"] == 2
+    assert signal["checkpoints"] == {"root_su_binary_paths"}
 
 
 def test_handshake_line_reconciles_captured_flows(tmp_path):

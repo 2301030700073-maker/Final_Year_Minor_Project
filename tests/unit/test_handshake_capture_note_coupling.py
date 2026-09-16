@@ -103,3 +103,39 @@ def test_note_host_preview_caps_at_five_with_ellipsis():
     note = _handshake_capture_note(ver, {"capture_flows": flows})
     assert "..." in note
     assert "7 flow(s) decrypted" in note
+
+
+def test_note_names_the_capture_windows_own_observer_record():
+    # The capture window runs the same observer script as the dynamic stage, in its
+    # own launch - so it can be the window where the pin-check/handshake actually
+    # fired. Reading its effects only as a silence in the OTHER window's line is how
+    # a run that decrypted real flows came to be reported as "the observer recorded
+    # none". The note must report what this window's observer saw, not only that the
+    # other window's saw nothing.
+    ver = _ver(TLS_HANDSHAKE_NONE_OBSERVED)
+    cap = {
+        "capture_flows": [{"host": "api.example.com"}],
+        "capture_observer_ssl_effects": {"ssl-pin-check": 2, "ssl-handshake": 1},
+    }
+    note = _handshake_capture_note(ver, cap)
+    assert "`ssl-pin-check`=2" in note
+    assert "`ssl-handshake`=1" in note
+    assert "the window the flows above came from" in note
+    # Still not a promotion: the tier is the success-check stage's decision, and it
+    # ran against the dynamic window before this one opened (ADR-0006).
+    assert "not promoted" in note
+
+
+def test_note_says_so_when_the_capture_windows_observer_was_silent_too():
+    # The mirror: this window's observer recorded nothing either, which means the
+    # handshakes behind the flows took a path its hooks do not see. That is a
+    # different, weaker statement than "the observer recorded effects here", and the
+    # note must not let the two read alike.
+    ver = _ver(TLS_HANDSHAKE_NONE_OBSERVED)
+    cap = {
+        "capture_flows": [{"host": "api.example.com"}],
+        "capture_observer_ssl_effects": {},
+    }
+    note = _handshake_capture_note(ver, cap)
+    assert "also recorded no SSL effect" in note
+    assert "the app's own pin-check ran" not in note

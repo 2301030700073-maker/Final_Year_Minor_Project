@@ -410,6 +410,9 @@ Raw flow file: `{{ capture_flows_path }}`
 {% if capture_cleartext_flows -%}
 > **Cleartext HTTP observed ({{ capture_cleartext_flows | length }} flow(s)):** the `HTTP (cleartext)` rows above were sent WITHOUT TLS. They are **not** evidence of SSL-pinning defeat (there was no TLS handshake to pin or bypass), but cleartext transmission is itself a finding: any credential, token, session id, or PII in those requests — **including URL query parameters** — was exposed in plaintext on the wire to any on-path observer.
 {% endif -%}
+{% if capture_observer_ssl_effects or capture_observer_probe_hits %}
+**This window's own in-process observer**{% if capture_app_launch and capture_app_launch.launched_by %} (the same observer script as the dynamic stage's, in the launch by {{ capture_app_launch.launched_by }}){% endif %} recorded{% if capture_observer_probe_hits %} {{ capture_observer_probe_hits }} root `probeHit`(s){% endif %}{% if capture_observer_ssl_effects %}{% if capture_observer_probe_hits %} and{% endif %} SSL bypass-effect message(s) {% for k, v in capture_observer_ssl_effects.items() %}`{{ k }}`={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}. That is the app's own code hitting an injected hook **during the window whose flows are listed above** - the window that actually completed handshakes, so these readings belong to the traffic below and not to the dynamic stage's separate launch.
+{% endif %}
 {% if capture_bypass_script_errors %}
 > **Partial capture:** the injected pinning-bypass script raised {{ capture_bypass_script_errors | length }} uncaught error(s) during this otherwise-successful capture ({{ capture_bypass_script_errors | join("; ") }}). Flows were still decrypted, but a crashed hook can leave some pinned endpoints unbypassed and therefore uncaptured — **treat the flow list above as a lower bound, not a complete inventory of the app's traffic.**
 {% endif -%}
@@ -694,6 +697,58 @@ def _decompile_summary(stage_results: list[StageResult]) -> dict:
     }
 
 
+def _observer_signal(messages) -> dict:
+    """Count what a Frida message stream says the app's OWN code did: the readiness
+    checkpoints our hooks delivered, `probeHit`s (root) and `bypassEffect`s (SSL).
+
+    ONE extractor for every window that runs this observer script - the dynamic
+    stage's launch and the capture stage's separate launch - so a capture window's
+    effects are counted by exactly the rules the dynamic window's are. Two windows
+    of one script counted differently is how the same evidence ends up meaning two
+    things in one report.
+
+    ENGAGE-PROBE-ROOT1 (decider-owns-its-guard + AG-SC1): root_probe_hits counts
+    ONLY probeHits whose VALUE is "root", so the report's "N root probeHit(s)" line
+    is accurate to its label no matter what the emitter sends. The success-check
+    layer already matches the probeHit value precisely (androgoat.py:_ROOT_PROBE_RE)
+    exactly because "a probeHit of some OTHER type" must not read as root; this layer
+    was the one place that still counted any probeHit as root and relied on the
+    emitter only ever sending `root`. probe_hits_any counts a behavioral probeHit of
+    ANY value so `engaged_any` still reflects its exact claim ("a behavioral signal
+    came back") rather than dropping a non-root hit into "no engagement at all".
+    Today every synthesized probeHit is `root` (synthesizer.py), so on every real run
+    probe_hits_any == root_probe_hits and this changes no current output - it closes
+    the latent label gap in the safe (EXTEND) direction, reversing nothing.
+
+    `{type:error}` messages carry no payload and are skipped: a crashed hook is
+    described by the shared script-error helper, never counted as an effect."""
+    checkpoints: set[str] = set()
+    root_probe_hits = 0
+    probe_hits_any = 0
+    ssl_effects: dict[str, int] = {}
+    for m in messages or []:
+        if isinstance(m, dict) and m.get("type") == "error":
+            continue
+        payload = m.get("payload") if isinstance(m, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        if isinstance(payload.get("hook"), str):
+            checkpoints.add(payload["hook"])
+        if "probeHit" in payload:
+            probe_hits_any += 1
+            if payload.get("probeHit") == "root":
+                root_probe_hits += 1
+        effect = payload.get("bypassEffect")
+        if isinstance(effect, str):
+            ssl_effects[effect] = ssl_effects.get(effect, 0) + 1
+    return {
+        "checkpoints": checkpoints,
+        "root_probe_hits": root_probe_hits,
+        "probe_hits_any": probe_hits_any,
+        "ssl_effects": ssl_effects,
+    }
+
+
 def _hooks_engaged(stage_results: list[StageResult]) -> dict:
     """Auditable "bypass hooks engaged" summary derived from the dynamic stage's
     OWN Frida message stream, so engagement is attributable to the signatures
@@ -727,22 +782,6 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
         # rather than an empty one that would read as "ran, engaged nothing".
         return absent
 
-    checkpoints: set[str] = set()
-    # ENGAGE-PROBE-ROOT1 (decider-owns-its-guard + AG-SC1): root_probe_hits counts
-    # ONLY probeHits whose VALUE is "root", so the report's "N root probeHit(s)" line
-    # is accurate to its label no matter what the emitter sends. The success-check
-    # layer already matches the probeHit value precisely (androgoat.py:_ROOT_PROBE_RE)
-    # exactly because "a probeHit of some OTHER type" must not read as root; this layer
-    # is the one place that still counted any probeHit as root and relied on the
-    # emitter only ever sending `root`. probe_hits_any counts a behavioral probeHit of
-    # ANY value so `engaged_any` still reflects its exact claim ("a behavioral signal
-    # came back") rather than dropping a non-root hit into "no engagement at all".
-    # Today every synthesized probeHit is `root` (synthesizer.py), so on every real run
-    # probe_hits_any == root_probe_hits and this changes no current output - it closes
-    # the latent label gap in the safe (EXTEND) direction, reversing nothing.
-    root_probe_hits = 0
-    probe_hits_any = 0
-    ssl_effects: dict[str, int] = {}
     # Principle 3 / ADR-0006: uncaught Frida {type:error} messages mean an injected
     # hook crashed at runtime (the instrumentation did NOT run cleanly). They carry
     # no payload, so every payload consumer below skips them and a crashed run would
@@ -751,21 +790,11 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
     # so this audit and the capture stage never drift on the wording, then skipped
     # in the payload loop.
     script_errors = describe_frida_script_errors(evidence.get("frida_messages") or [])
-    for m in evidence.get("frida_messages") or []:
-        if isinstance(m, dict) and m.get("type") == "error":
-            continue  # crash described above; carries no payload
-        payload = m.get("payload") if isinstance(m, dict) else None
-        if not isinstance(payload, dict):
-            continue
-        if isinstance(payload.get("hook"), str):
-            checkpoints.add(payload["hook"])
-        if "probeHit" in payload:
-            probe_hits_any += 1
-            if payload.get("probeHit") == "root":
-                root_probe_hits += 1
-        effect = payload.get("bypassEffect")
-        if isinstance(effect, str):
-            ssl_effects[effect] = ssl_effects.get(effect, 0) + 1
+    signal = _observer_signal(evidence.get("frida_messages"))
+    checkpoints = signal["checkpoints"]
+    root_probe_hits = signal["root_probe_hits"]
+    probe_hits_any = signal["probe_hits_any"]
+    ssl_effects = signal["ssl_effects"]
 
     # scripts_applied mixes the scaffolding label ("synthesized"), per-lib native
     # envelope labels ("synthesized:<lib>"), hand-authored .js filenames, and the
@@ -958,9 +987,17 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
             # the launch record, which asserts nothing about a launch we did not do.
             "capture_bypass_applied": False,
             "capture_app_launch": None,
+            # No capture stage ran, so no window opened an observer record: empty
+            # dict / 0 (same types as the present path - uniform key set, RPT-TMPLCOV1,
+            # so the template's new line cannot reference an undefined name).
+            "capture_observer_ssl_effects": {},
+            "capture_observer_probe_hits": 0,
         }
     evidence = capture_stage.evidence or {}
     flows = evidence.get("flow_summary") or []
+    # Computed once for the keys below: the capture window's own observer record,
+    # counted by the shared extractor the dynamic window's hooks audit uses.
+    _capture_signal = _observer_signal(evidence.get("frida_messages"))
     # Split captured flows by transport so the report can scope its pinning-defeat
     # claim to the flows that were ACTUALLY decrypted (https) and surface cleartext
     # http as a distinct finding that is NOT pinning-defeat proof (no TLS handshake
@@ -1108,7 +1145,23 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
         # Frida SSL observer's silence is a fact about THAT window only
         # ([[observer-silence-is-a-fact-about-observers]]). None when an old cached
         # run recorded no launch.
+        # The capture window's own launch record (component / launched_by / pid /
+        # attempts). The report needs it to name which launch a decrypted flow came
+        # from: the dynamic stage launched the app separately and earlier, and its
+        # Frida SSL observer's silence is a fact about THAT window only
+        # ([[observer-silence-is-a-fact-about-observers]]). None when an old cached
+        # run recorded no launch.
         "capture_app_launch": evidence.get("app_launch"),
+        # The capture window's OWN Frida observer record. This window now runs under
+        # the same pinning-only bypass the dynamic stage was directed to attempt, so
+        # it is the window that actually completes handshakes - and reading its
+        # effects only as a silence in the OTHER window's line is how a run that
+        # decrypted 32 flows came to be reported as "the Frida SSL observer recorded
+        # none". Counted by the same extractor as the dynamic window's, because it is
+        # the same observer script in a different launch. Empty dict / 0 for an
+        # un-hooked window and for old cached runs, both of which recorded nothing.
+        "capture_observer_ssl_effects": _capture_signal["ssl_effects"],
+        "capture_observer_probe_hits": _capture_signal["root_probe_hits"],
     }
 
 
@@ -1172,6 +1225,25 @@ def _handshake_capture_note(verification, capture_summary: dict) -> str | None:
             "flows are evidence pinning was not ENFORCED on those hosts - not "
             "that a bypass defeated it"
         )
+    # The capture window's own observer record. Without it this note could only say
+    # the observer was silent, which is true of the dynamic window and says nothing
+    # about the window the flows came from. Naming both is what makes the two
+    # readings legible; neither promotes SSL (the tier is the success-check stage's
+    # call, and it ran against the dynamic window before this one opened).
+    effects = capture_summary.get("capture_observer_ssl_effects") or {}
+    if effects:
+        observer_clause = (
+            "In this window the same observer script recorded "
+            + ", ".join(f"`{k}`={v}" for k, v in sorted(effects.items()))
+            + " - the app's own pin-check ran and a handshake completed through the "
+            "hooked stack HERE, which is the window the flows above came from"
+        )
+    else:
+        observer_clause = (
+            "In this window the same observer script also recorded no SSL effect, "
+            "so the handshakes behind these flows took a path its hooks do not "
+            "observe"
+        )
     return (
         f"{len(flows)} flow(s) decrypted by the capture proxy, which requires "
         f"completed TLS handshakes through the CA (hosts: {preview}). These are "
@@ -1179,8 +1251,8 @@ def _handshake_capture_note(verification, capture_summary: dict) -> str | None:
         f"from {window}, while the Frida SSL observer reported above was live in "
         f"the dynamic stage's separate, earlier launch. The observer's zero does "
         f"not contradict the proxy's {len(flows)} - it is a fact about the window "
-        f"the observer was live for. {bypass_clause}. SSL is not promoted on "
-        f"this basis alone"
+        f"the observer was live for. {observer_clause}. {bypass_clause}. SSL is not "
+        f"promoted on this basis alone"
     )
 
 

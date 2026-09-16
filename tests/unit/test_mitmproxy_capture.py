@@ -520,6 +520,9 @@ def _launch_env(monkeypatch, calls, pids):
         calls.append(list(cmd))
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
     monkeypatch.setattr(mitmproxy_capture.subprocess, "run", fake_run)
+    # One sample per form: these tests are about which FORM is chosen, and the
+    # poll that removes the launch race is exercised on its own below.
+    monkeypatch.setattr(mitmproxy_capture, "_LAUNCH_PID_TIMEOUT", 0.0)
     seq = list(pids)
     monkeypatch.setattr(mitmproxy_capture, "_app_pid",
                         lambda serial, package: seq.pop(0) if len(seq) > 1 else seq[0])
@@ -570,6 +573,26 @@ def test_launch_app_moves_to_the_next_form_when_a_form_leaves_nothing(monkeypatc
     assert rec["launched_by"] == "monkey launcher" and rec["pid"] == 4711
 
 
+def test_launch_app_credits_the_form_that_actually_started_the_app(monkeypatch):
+    """Measured on the reference emulator: the resolved-component form started the
+    app - its own output shows `Starting: Intent { cmp=.../.MainActivity }` and no
+    error - while the pid sample taken in the same breath read 0. The ladder
+    concluded that form had failed, tried another, and credited the launch to the
+    form whose output carried `Error: Activity not started, unable to resolve
+    Intent`. Polling to a bound is what makes the record match what happened, and
+    it is also what stops a needless second launch of an app already running."""
+    calls = []
+    _launch_env(monkeypatch, calls, [0, 14037])  # the race: 0 now, alive a moment later
+    monkeypatch.setattr(mitmproxy_capture, "_LAUNCH_PID_TIMEOUT", 0.05)
+    monkeypatch.setattr(mitmproxy_capture.time, "sleep", lambda s: None)
+    monkeypatch.setattr(mitmproxy_capture, "_resolve_launch_component",
+                        lambda serial, package: "com.example.app/.MainActivity")
+    rec = mitmproxy_capture._launch_app("emulator-5554", "com.example.app")
+    assert rec["launched_by"] == "resolved component" and rec["pid"] == 14037
+    assert [a["form"] for a in rec["attempts"]] == ["resolved component"]
+    assert not any("monkey" in c for c in calls)
+
+
 def test_launch_app_keeps_the_am_error_when_no_form_starts_anything(monkeypatch):
     """The measured failure mode: am prints `Error: Activity not started, unable
     to resolve Intent` and exits 0. `check=True` cannot see it, so the failure is
@@ -587,6 +610,7 @@ def test_launch_app_keeps_the_am_error_when_no_form_starts_anything(monkeypatch)
     monkeypatch.setattr(mitmproxy_capture.device, "_require_adb", lambda: "/bin/adb")
     monkeypatch.setattr(mitmproxy_capture.subprocess, "run", fake_run)
     monkeypatch.setattr(mitmproxy_capture, "_app_pid", lambda serial, package: 0)
+    monkeypatch.setattr(mitmproxy_capture, "_LAUNCH_PID_TIMEOUT", 0.0)
     rec = mitmproxy_capture._launch_app("emulator-5554", "com.example.app")
     assert rec["launched_by"] is None and rec["pid"] == 0
     assert all(a["issued"] for a in rec["attempts"])

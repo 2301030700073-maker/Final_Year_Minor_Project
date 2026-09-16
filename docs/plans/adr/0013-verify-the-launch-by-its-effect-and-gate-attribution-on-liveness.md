@@ -126,3 +126,30 @@ succeeded and whether the app was up.
 - **Making the attribution uid-level premise into "the app was seen in the
   capture log"**, which the capture log cannot support at all — it carries no
   client identity (ADR-0012).
+
+## Measured follow-on: the pid sample was itself a race
+
+The first live run after this decision recorded its own contradiction, inside the
+`app_launch` evidence it had just produced:
+
+    attempts[0] "resolved component"           pid 0      output: Starting: Intent { cmp=.../.MainActivity }
+    attempts[1] "package MAIN/LAUNCHER intent" pid 14037  output: Error: Activity not started, unable to resolve Intent
+
+The resolved-component form is what started the app - its output shows the intent
+accepted, with no error - while the pid sample taken in the same breath read 0.
+`am start` does not wait for the process it starts, so the ladder concluded that
+form had failed, tried a second one, and credited `launched_by` to the form whose
+own recorded output says it started nothing. Had the next rung been a form
+capable of starting an app, this would have relaunched the target mid-capture.
+
+`_wait_for_app_pid` now polls `pidof` to a bound (6s, 0.5s interval) after each
+form, so a form is credited only once the process it started is observed.
+Re-measured on the same device and target:
+
+    {"launched_by": "resolved component", "pid": 14771,
+     "attempts": [{"form": "resolved component", "issued": true, "pid": 14771,
+                   "output": "Starting: Intent { cmp=.../.MainActivity }"}]}
+
+One attempt, the form that worked, and the pid agreeing with the text beside it.
+The bound is deliberate: a form that starts nothing costs at most the bound, and
+three forms of that is ~18s against a capture window that is itself 12s.

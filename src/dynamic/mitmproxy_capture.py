@@ -710,6 +710,40 @@ def _resolve_launch_component(serial: str, package: str) -> str | None:
     return None
 
 
+# Bounded so a form that starts nothing cannot stall the capture for long: three
+# forms at the worst case is ~18s against a capture window that is itself 12s.
+_LAUNCH_PID_TIMEOUT = 6.0
+_LAUNCH_PID_INTERVAL = 0.5
+
+
+def _wait_for_app_pid(serial: str, package: str, timeout: float = _LAUNCH_PID_TIMEOUT,
+                      interval: float = _LAUNCH_PID_INTERVAL) -> int | None:
+    """Poll `pidof` for the app's process after a launch was issued.
+
+    A single sample immediately after `am start` is a race, and the reference
+    emulator was measured losing it: the resolved-component form started the app
+    (its own output shows `Starting: Intent { cmp=.../.MainActivity }` and no
+    error) while the pid sample taken in the same breath read 0. The ladder then
+    concluded that form had failed, tried another, and credited the launch to the
+    form whose output actually carried `Error: Activity not started, unable to
+    resolve Intent` - a record contradicting itself. `am start` does not wait for
+    the process, so the poll is what makes the record match what happened.
+
+    Returns the first pid seen; 0 when the probe ran for the whole bound and the
+    app was measurably not running; None when no sample could be taken (the
+    _parse_pidof contract). The timeout and interval are read from module
+    constants at call time so a caller - or a test - can shorten the bound.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        pid = _app_pid(serial, package)
+        if pid:
+            return pid
+        if time.monotonic() >= deadline:
+            return pid
+        time.sleep(interval)
+
+
 def _launch_app(serial: str, package: str) -> dict:
     """Cold-start the package for capture, and report whether it actually ran.
 
@@ -720,7 +754,9 @@ def _launch_app(serial: str, package: str) -> dict:
     Then tries the launch forms in order and VERIFIES THE EFFECT after each,
     because no exit status from `am start` can be trusted for this: it returns 0
     both for a launch that worked and for `Error: Activity not started, unable to
-    resolve Intent`. A form that leaves no running process is recorded and the
+    resolve Intent`. The effect is a pid, polled briefly rather than sampled once,
+    because `am start` does not wait for the process and one sample was measured
+    losing that race. A form that leaves no running process is recorded and the
     next is tried; the first that produces a pid wins, and no further form runs -
     launching the app a second time would not be the same capture.
 
@@ -758,7 +794,8 @@ def _launch_app(serial: str, package: str) -> dict:
             attempts.append({"form": how, "issued": False, "pid": None,
                              "output": str(e)[-200:]})
             continue
-        pid = _app_pid(serial, package)
+        pid = _wait_for_app_pid(serial, package, _LAUNCH_PID_TIMEOUT,
+                                _LAUNCH_PID_INTERVAL)
         # Bounded at the CAUSE end: am prints its failure on the last line, and a
         # head-only cut would keep the "Starting: Intent" line and drop the error.
         output = ((res.stdout or "") + (res.stderr or "")).strip()

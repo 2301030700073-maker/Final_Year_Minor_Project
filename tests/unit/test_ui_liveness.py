@@ -564,6 +564,13 @@ _RESUMED = (
 
 
 def _dumpsys(monkeypatch, out):
+    """Stub `dumpsys activity activities` for the drive's screen-ownership probe.
+
+    Callers must still pass `adb=` explicitly: `wait_for_foreground` and `tap`
+    resolve the REAL adb wrapper when it is omitted (`device._require_adb`), which
+    raises on any machine without the Android platform-tools - so omitting it makes
+    a test pass only where adb happens to be installed, and fail in CI. Every other
+    call in this file passes it; these are no different."""
     class _R:
         stdout = out
     monkeypatch.setattr(ui_liveness.subprocess, "run", lambda *a, **k: _R())
@@ -571,7 +578,8 @@ def _dumpsys(monkeypatch, out):
 
 def test_wait_for_foreground_returns_true_once_the_app_is_resumed(monkeypatch):
     _dumpsys(monkeypatch, _RESUMED.replace("PKG", "com.test.app/.Main"))
-    got = ui_liveness.wait_for_foreground("s", "com.test.app", timeout=1.0, interval=0.0)
+    got = ui_liveness.wait_for_foreground("s", "com.test.app", timeout=1.0, interval=0.0,
+                                         adb="adb")
     assert got["foreground"] is True and got["polls"] == 1
 
 
@@ -579,7 +587,8 @@ def test_wait_for_foreground_is_false_when_another_app_holds_the_screen(monkeypa
     """The launcher being resumed is exactly the cold-start case the drive must
     not act on, and it is a measured absence - not a None."""
     _dumpsys(monkeypatch, _RESUMED.replace("PKG", "com.android.launcher3/.Launcher"))
-    got = ui_liveness.wait_for_foreground("s", "com.test.app", timeout=0.0, interval=0.0)
+    got = ui_liveness.wait_for_foreground("s", "com.test.app", timeout=0.0, interval=0.0,
+                                         adb="adb")
     assert got["foreground"] is False
     assert "still not the resumed one" in got["reason"]
 
@@ -590,6 +599,7 @@ def test_wait_for_foreground_is_none_when_the_probe_never_ran(monkeypatch):
     def _boom(*a, **k):
         raise OSError("adb: no devices/emulators found")
     monkeypatch.setattr(ui_liveness.subprocess, "run", _boom)
-    got = ui_liveness.wait_for_foreground("s", "com.test.app", timeout=0.0, interval=0.0)
+    got = ui_liveness.wait_for_foreground("s", "com.test.app", timeout=0.0, interval=0.0,
+                                         adb="adb")
     assert got["foreground"] is None
     assert "not measured" in got["reason"]

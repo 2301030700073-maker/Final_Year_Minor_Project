@@ -345,6 +345,50 @@ def test_install_failure_preserves_static_report_and_exits_nonzero(run_setup, mo
     assert any("Dynamic stage FAILED" in c for c in captured)
 
 
+def test_capture_names_the_real_setup_failure_instead_of_a_missing_device(run_setup, monkeypatch):
+    # `serial is None` is reached by EVERY dynamic setup failure, but the capture
+    # stage hardcoded one of them - "failed to find a connected device/emulator" -
+    # so a refused install was reported as an absent emulator. Measured on the
+    # 7 MB AndroGoat build, where the device was found and the APK was rejected
+    # for a signature conflict, and the report blamed the emulator. The capture
+    # stage must carry the setup failure's own words, and must not assert a cause
+    # it did not observe.
+    from dynamic import device as device_mod
+
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+
+    def _refused(serial, apk, package_name=None):
+        raise RuntimeError(
+            "adb refused to install app.apk: stderr: adb: failed to install: Failure "
+            "[INSTALL_FAILED_UPDATE_INCOMPATIBLE: Package owasp.sat.agoat signatures "
+            "do not match previously installed version; ignoring!]"
+        )
+
+    monkeypatch.setattr(device_mod, "install_apk", _refused)
+    monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: False)
+    monkeypatch.setattr(
+        cli, "synthesize",
+        lambda classification, action: SimpleNamespace(source="root", applied_hooks=[]),
+    )
+
+    with pytest.raises(typer.Exit) as ei:
+        cli.run(
+            apk=run_setup / "fixture.apk",
+            justification="ACADEMIC_TRAINING_TARGET",
+            skip_dynamic=False,
+            capture_traffic=True,
+            device_serial=None,
+            target="uncrackable1",
+        )
+    assert ei.value.exit_code == 1
+
+    text = sorted((run_setup / "reports").rglob("*.md"))[0].read_text(encoding="utf-8")
+    # the capture row carries the install refusal that actually happened
+    assert "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in text
+    # and does not blame a device that was found
+    assert "failed to find a connected device" not in text
+
+
 def test_no_device_setup_failure_preserves_static_report_and_exits_nonzero(run_setup, monkeypatch):
     # GAP-2 on the EARLIEST dynamic steps (the exact crash this guards): discover_
     # device and install_apk run BEFORE the already-guarded install-verify / run_

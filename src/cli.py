@@ -2285,6 +2285,7 @@ def run(
         serial = None
         install_ok = False
         install_result: dict = {}
+        dynamic_setup_error = ""
         try:
             serial = device.discover_device(device_serial)
             # FR-4.2: install_apk's check=True only confirms adb accepted the
@@ -2319,6 +2320,12 @@ def run(
             _print_stage(dynamic_stage)
             dynamic_failed = True
             serial = None
+            # Kept so the capture stage below can say WHY there is no device to
+            # capture on. `serial is None` is reached by every setup failure -
+            # no device/emulator, an install adb refused, an install that did not
+            # register - and the capture stage used to name only the first of
+            # them, so a refused install was reported as a missing emulator.
+            dynamic_setup_error = str(exc)
         if serial is not None and not install_ok:
             # FR-4.2 / GAP-2: an arbitrary real-world app that fails to install
             # (ABI mismatch, signature, minSdk, storage) must NOT _halt and
@@ -2613,20 +2620,26 @@ def run(
     if capture_traffic:
         capture_start = time.monotonic()
         try:
-            # serial is None here only if dynamic setup above already failed to
-            # find a usable device; re-attempting capture on a nonexistent device
-            # would surface as a confusing "raised unexpectedly", so fail with the
-            # honest reason instead (still caught below -> failed capture stage,
-            # report preserved, non-zero exit). Under --skip-dynamic the capture
-            # stage resolves its own serial since dynamic never ran.
+            # serial is None here after ANY dynamic setup failure, not only a
+            # missing device: discover_device, install_apk and verify_installed
+            # all funnel into the same handler. So the reason carries the setup
+            # failure's own words rather than naming one of its causes - the
+            # hardcoded "failed to find a connected device/emulator" was false
+            # whenever the device was found and the APK was refused, which is
+            # what a differently-signed re-install looks like (measured on the
+            # 7 MB AndroGoat build: a signature conflict reported as an absent
+            # emulator). Still caught below -> failed capture stage, report
+            # preserved, non-zero exit. Under --skip-dynamic the capture stage
+            # resolves its own serial since dynamic never ran.
             if skip_dynamic:
                 capture_serial = device.discover_device(device_serial)
             elif serial is not None:
                 capture_serial = serial
             else:
                 raise RuntimeError(
-                    "no usable device for traffic capture - dynamic setup already "
-                    "failed to find a connected device/emulator"
+                    "no usable device for traffic capture - dynamic setup failed "
+                    "before a device was usable: "
+                    f"{dynamic_setup_error or 'no reason recorded'}"
                 )
             # The capture window runs under the SAME deterministic SSL bypass the
             # dynamic stage was directed to attempt, so its decrypted flows are

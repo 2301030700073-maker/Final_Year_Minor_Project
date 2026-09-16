@@ -1502,6 +1502,17 @@ def _app_running_by_default(monkeypatch):
                                                  "timeout_s": 8.0,
                                                  "reason": "the app's activity was still not "
                                                            "the resumed one after 8.0s"})
+    # And the ADR-0012 device-side attribution: it reads /proc/net/tcp and the
+    # package list off a real device, for the whole capture window. Neutral by
+    # default - an empty uid set with no package list resolves to a recorded
+    # NOT MEASURED, never to "the app stayed off the proxy", so a test that does
+    # not care about attribution cannot accidentally assert it either way.
+    from dynamic import proxy_attribution as _pa
+    monkeypatch.setattr(_pa, "sample_proxy_clients_during",
+                        lambda serial, proxy_port, seconds, interval=2.0, adb=None:
+                        {"uids": set(), "samples": 3, "samples_measured": 3,
+                         "measured": True, "errors": []})
+    monkeypatch.setattr(_pa, "package_uid_map", lambda serial, adb=None: {})
 
 
 def _empty_capture_run(monkeypatch, tmp_path, pid, **kwargs):
@@ -1637,3 +1648,36 @@ def test_drive_ui_taps_once_the_app_owns_the_screen(monkeypatch):
     rec = mitmproxy_capture._drive_ui("emulator-5554", "com.test.app")
     assert rec["tapped"] is True and taps == [(720, 2309)]
     assert rec["target"]["label"] == "START"
+
+
+# --- ADR-0012: who reached the capture proxy, recorded on the stage -----------
+
+
+def test_run_capture_stage_records_which_uid_reached_the_capture_proxy(monkeypatch, tmp_path):
+    """The capture log carries no client identity, so the stage's record of who
+    held a socket to the proxy is the only attribution an SSL reading can rest
+    on. It has to reach the evidence, not stop at the helper that computed it."""
+    from dynamic import proxy_attribution as pa
+    monkeypatch.setattr(pa, "sample_proxy_clients_during",
+                        lambda serial, proxy_port, seconds, interval=2.0, adb=None:
+                        {"uids": {10131}, "samples": 5, "samples_measured": 5,
+                         "measured": True, "errors": []})
+    monkeypatch.setattr(pa, "package_uid_map",
+                        lambda serial, adb=None: {10131: ["com.example.app"]})
+    result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711, capture_window=1.0)
+    ev = result.evidence
+    assert ev["proxy_attribution"]["reached"] is True
+    assert ev["proxy_attribution"]["uid"] == 10131
+    # A set would not survive the round trip to the stored JSON, and a lost uid
+    # list reads as "nobody reached the proxy".
+    assert ev["proxy_client_uids"] == [10131]
+    assert ev["proxy_client_samples"] == 5
+    import json
+    json.dumps(ev)  # the evidence must serialize: it is persisted and re-rendered
+
+
+def test_run_capture_stage_never_records_unmeasured_attribution_as_absence(monkeypatch, tmp_path):
+    """The default fixture reads no device. That is a fact about the probe, so it
+    must land as None - a False would assert the app stayed off the proxy."""
+    result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711, capture_window=1.0)
+    assert result.evidence["proxy_attribution"]["reached"] is None

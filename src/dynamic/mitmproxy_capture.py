@@ -29,6 +29,7 @@ from urllib.parse import urlsplit
 
 from common import StageResult, describe_frida_script_errors
 from dynamic import device
+from dynamic import proxy_attribution
 from dynamic import frida_runner
 from dynamic import pass_through_proxy
 
@@ -1123,7 +1124,18 @@ def run_capture_stage(
                     {"attempted": False, "tapped": False, "target": None,
                      "selected_by": None,
                      "reason": "UI drive disabled for this run"})
-        time.sleep(capture_window)
+        # Sample the device's own socket table ACROSS the window rather than
+        # sleeping through it (ADR-0012). The proxy is installed device-wide, so
+        # the capture log alone cannot say whose flows these are - but
+        # /proc/net/tcp carries a uid per socket, and the proxy is reached over
+        # `adb reverse`, so the port mitmproxy sees is adb's, not the device's.
+        # The device-side question is the answerable one: which uid held a socket
+        # aimed at the proxy's port. Sampled repeatedly because a pinned
+        # handshake's socket can be gone in a moment.
+        proxy_clients = proxy_attribution.sample_proxy_clients_during(
+            serial, proxy_port, capture_window)
+        proxy_attribution_verdict = proxy_attribution.attribute_proxy_clients(
+            proxy_clients, proxy_attribution.package_uid_map(serial), package, proxy_port)
         pid_after_capture = _app_pid(serial, package)
 
         if wsl2:
@@ -1319,6 +1331,13 @@ def run_capture_stage(
                     # tell a driven capture from an undriven one, and a refusal
                     # must be visible as the reason the path stayed un-exercised.
                     "ui_drive": ui_drive,
+                    # Device-side attribution of the captured traffic (ADR-0012):
+                    # which uid held a socket to the capture proxy, and whether the
+                    # target app was one of them. `reached` None = not measured.
+                    "proxy_attribution": proxy_attribution_verdict,
+                    "proxy_client_uids": sorted(proxy_clients["uids"]),
+                    "proxy_client_samples": proxy_clients["samples"],
+                    "proxy_client_samples_measured": proxy_clients["samples_measured"],
                     # Reachability probe (device-side, proxy-independent): how many
                     # client connections reached mitmdump. >0 with 0 flows => device
                     # reached the proxy, app was silent (app-silence, not a wiring
@@ -1381,6 +1400,13 @@ def run_capture_stage(
                 # is partly traffic the tool's own tap caused, and the report has to
                 # be able to say so whichever way the capture turned out.
                 "ui_drive": ui_drive,
+                # Device-side attribution of the captured traffic (ADR-0012):
+                # which uid held a socket to the capture proxy, and whether the
+                # target app was one of them. `reached` None = not measured.
+                "proxy_attribution": proxy_attribution_verdict,
+                "proxy_client_uids": sorted(proxy_clients["uids"]),
+                "proxy_client_samples": proxy_clients["samples"],
+                "proxy_client_samples_measured": proxy_clients["samples_measured"],
                 # A crashed bypass hook can still let OTHER hooks yield flows, so a
                 # capture can SUCCEED with genuine {type:error} messages recorded.
                 # Store them (symmetric with the empty-flows branch) so the report

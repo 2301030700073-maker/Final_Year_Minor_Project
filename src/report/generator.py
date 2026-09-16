@@ -391,7 +391,7 @@ string in this APK; only its *ownership* is unverified.
 {% if verification and verification.ssl_bypassed is true -%}
 Real decrypted HTTPS flows observed while the app ran through the mitmproxy capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`). This is the live proof that SSL-pinning was actually defeated - the app sent HTTPS requests the proxy decrypted (Transport = HTTPS below) and the device accepted:
 {% else -%}
-The capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`) decrypted the HTTPS flows below (Transport = HTTPS), so pinning was not enforced **on those hosts**. The proxy is installed device-wide (as the device's HTTP proxy), and no per-flow attribution to this app exists, so a captured flow is **not by itself proof that this app produced it** - the pinning statement is scoped to the hosts actually observed, not to the app's own pinned endpoints. This is partial evidence, not full confirmation: the app's own pin-check was not confirmed in this run ({{ 'inconclusive' if verification and verification.ssl_bypassed is none else 'not verified' }}), so a pinned endpoint that never spoke during the run is not ruled out.
+The capture proxy (`{{ capture_proxy }}`, CA installed at `{{ capture_system_ca }}`) decrypted the HTTPS flows below (Transport = HTTPS), so pinning was not enforced **on those hosts**. {% if capture_proxy_attribution and capture_proxy_attribution.reached is false %}The proxy is installed device-wide (as the device's HTTP proxy), so a captured flow is not by itself this app's - **and the stage's own device-side attribution found this app did NOT reach the proxy**: {{ capture_proxy_attribution.reason }}. The flows below are therefore not this app's traffic, and the pinning reading above says nothing about this app.{% elif capture_proxy_attribution and capture_proxy_attribution.reached is true %}The proxy is installed device-wide (as the device's HTTP proxy), but the stage's device-side attribution puts this app on it: {{ capture_proxy_attribution.reason }}. The pinning reading above therefore does bear on this app - **at uid granularity**, so it is not per-flow proof of which request was whose.{% else %}The proxy is installed device-wide (as the device's HTTP proxy), and no per-flow attribution to this app exists, so a captured flow is **not by itself proof that this app produced it** - the pinning statement is scoped to the hosts actually observed, not to the app's own pinned endpoints.{% endif %} This is partial evidence, not full confirmation: the app's own pin-check was not confirmed in this run ({{ 'inconclusive' if verification and verification.ssl_bypassed is none else 'not verified' }}), so a pinned endpoint that never spoke during the run is not ruled out.
 {% endif -%}
 {% else -%}
 No HTTPS flow was decrypted this run - every captured flow below was sent over cleartext HTTP (or a non-HTTPS transport). **This is not proof of SSL-pinning defeat**: there was no TLS handshake to pin or bypass. The cleartext transmission is itself a finding (see below).
@@ -933,6 +933,9 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
             # tapped/refused record, which would assert a drive we did not do).
             # Uniform key set (RPT-TMPLCOV1).
             "capture_ui_drive": None,
+            # No capture stage ran, so nothing sampled the device socket table:
+            # None, never a verdict asserting who reached a proxy nobody used.
+            "capture_proxy_attribution": None,
             "capture_device_reached_preflight": None,
             # No capture stage ran, so it was never reclassified to skipped/not-
             # applicable: uniform key set with the present path so the template's
@@ -1053,6 +1056,9 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
         # The drive record as the stage wrote it (ADR-0011) - including a
         # refusal, which is an outcome, not an absence.
         "capture_ui_drive": evidence.get("ui_drive"),
+        # Who held a socket to the capture proxy (ADR-0012): the only client
+        # identity any captured flow has.
+        "capture_proxy_attribution": evidence.get("proxy_attribution"),
         # The pre-flight route verdict, device-side and taken BEFORE the window: False
         # means the probe could not reach the proxy, and the in-process observers fire
         # INSIDE a live connection's TLS stage - so their 0 messages cannot be read as

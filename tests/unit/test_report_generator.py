@@ -2748,3 +2748,48 @@ def test_a_captured_flow_is_not_claimed_as_the_app_s_own(tmp_path):
     assert "decrypted the HTTPS flows below" in body
     assert "**not by itself proof that this app produced it**" in body
     assert "The app accepted proxy-decrypted HTTPS flows" not in body
+
+
+def _render_with_attribution(tmp_path, attribution, tag):
+    stage = _flows_stage(_drive_record(True))
+    stage.evidence["proxy_attribution"] = attribution
+    return _render_liveness(tmp_path, stage, tag)
+
+
+def test_a_confirmed_target_socket_says_the_pinning_reading_bears_on_the_app(tmp_path):
+    body = _render_with_attribution(
+        tmp_path, {"reached": True, "uid": 10131, "shared_uid": [],
+                   "reason": "uid 10131 held a socket to the capture proxy"}, "attr-yes")
+    assert "puts this app on it" in body
+    assert "at uid granularity" in body
+    assert "not by itself proof that this app produced it" not in body
+
+
+def test_a_measured_absence_says_the_flows_are_not_this_app_s(tmp_path):
+    """The strongest form the live run made possible: the device says the app
+    never opened a socket to the proxy, so the pinning reading cannot be about
+    it - rather than leaving the reader to infer it from a caveat."""
+    body = _render_with_attribution(
+        tmp_path, {"reached": False, "uid": 10131, "shared_uid": [],
+                   "reason": "uid 10131 (com.example.app) held no socket to the capture "
+                             "proxy in any of 7 readable sample(s) of the window"}, "attr-no")
+    assert "did NOT reach the proxy" in body
+    assert "are therefore not this app's traffic" in body
+    assert "says nothing about this app" in body
+
+
+def test_an_unmeasured_attribution_keeps_the_weaker_scoped_wording(tmp_path):
+    """None is not False: with no attribution the report may only scope the
+    claim, never assert the app stayed away."""
+    body = _render_with_attribution(tmp_path, {"reached": None, "uid": None,
+                                               "shared_uid": [], "reason": "not measured"},
+                                    "attr-none")
+    assert "not by itself proof that this app produced it" in body
+    assert "did NOT reach the proxy" not in body
+    assert "puts this app on it" not in body
+
+
+def test_a_capture_with_no_attribution_key_renders_the_weaker_wording(tmp_path):
+    body = _render_liveness(tmp_path, _flows_stage(_drive_record(True)), "attr-absent")
+    assert "not by itself proof that this app produced it" in body
+    assert "did NOT reach the proxy" not in body

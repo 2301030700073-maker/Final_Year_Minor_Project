@@ -110,4 +110,44 @@ that was not measured).
 
 ## Verification
 
-Pending implementation.
+Implemented on 2026-09-16 (`ae9ee020d`). Full suite: **1881 passed**, from 1877
+before the change.
+
+Each of the three sites is pinned by a test that fails without the fix:
+
+- `test_the_capture_defeat_claim_requires_the_attribution_to_put_the_app_on_the_proxy`
+  drives the SSL-confirmed arm with `reached: False` and asserts the "live proof"
+  sentence is absent, the flows are named as not this app's, the attribution's own
+  reason is quoted, and - the load-bearing part - that the *window* fact
+  ("under the injected pinning-bypass script") still renders. The fix scopes the
+  claim, it does not delete the section.
+- `test_capture_flows_of_unestablished_origin_are_not_credited_to_the_app` does the
+  same with `reached: None`, because not-measured cannot license the claim either.
+- `test_the_partial_evidence_arm_does_not_claim_a_bypass_effect_on_an_absent_app`
+  covers the second render site, which had the same over-claim in its "which window
+  this is" note.
+- `test_the_console_note_does_not_claim_a_bypass_effect_over_another_apps_flows`
+  covers `_handshake_capture_note`, walking all three arms, so the console and the
+  report derive the same reading from the same two facts.
+
+The change also had to make the existing fixtures honest: four tests asserted the
+strong claim from a capture stage that carried no attribution at all, which is
+exactly the licence the ADR removes. `_capture_stage` gained a `reached` parameter
+defaulting to `"unrecorded"`, so a test that wants the strong sentence now has to
+supply the evidence for it, and the four were updated to do so.
+
+**What is not established:** no real run has been observed in the state this ADR
+governs - a capture that decrypted flows with the app's uid absent from the proxy
+*and* the attribution measured. The arms are verified against fixtures. The state
+is reachable rather than theoretical: it is the ordinary case on a device-wide
+proxy, and the run that motivated ADR-0017 (`6546c2c0248947b8a67e06ce2b3ebf44`)
+differed from it only in that its attribution returned `False` from a table it had
+not demonstrated it could read. Recording this rather than implying the negative
+path has been seen in the field.
+
+**Amends ADR-0015.** Its decision table's "the flows are evidence of" column
+presumed the flows are the app's. That column now reads as conditional on the
+attribution: `bypass_applied=true` with `reached is true` gives "the injected
+bypass taking effect on those hosts"; with `reached is false` or `None` it gives
+"the bypass was applied to the app", which is a fact about the window and not
+about any host the app reached.

@@ -52,6 +52,29 @@ def _cls(action, root_ids=(), ssl_ids=()):
     )
 
 
+def test_ssl_only_composition_carries_no_root_hook_whatever_root_detected():
+    # The capture stage opens its own window under a dedicated
+    # synthesize(cls, Action.SSL_ONLY) rather than reusing the run's action, so a
+    # BOTH action cannot smuggle root recipes into a window whose purpose is
+    # measuring the SSL bypass - and so that window's injected script stays the
+    # pinning-only script run_capture_stage documents. That caller-side guarantee
+    # rests on this property, so lock it here: whatever ROOT the classification
+    # detected, an SSL_ONLY composition composes no root hook. The effect observer
+    # must ride along (a targeted SSL hook set does not embed it), because this
+    # window is expected to report its OWN pin-check/handshake effects.
+    res = synthesize(
+        _cls(Action.BOTH,
+             root_ids=["root_su_binary_paths", "native_jni_root_check"],
+             ssl_ids=["okhttp_certificate_pinner"]),
+        Action.SSL_ONLY,
+    )
+    assert res.root_hook_count == 0
+    assert "root" not in res.universal_categories
+    assert res.ssl_hook_count >= 1
+    assert "ssl-pin-check" in res.source
+    assert "ssl-handshake" in res.source
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 def test_synthesized_sources_parse_as_valid_javascript():
     # The synthesized bypasses are Frida JS strings. The other tests assert their

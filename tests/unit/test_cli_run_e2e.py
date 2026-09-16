@@ -684,6 +684,109 @@ def test_unknown_app_with_no_confirmation_still_declines_to_correlate(
     assert "Not evaluated (dynamic used the technology-level hooks-engaged check" in text
 
 
+def test_capture_window_runs_under_a_pinning_only_bypass(run_setup, monkeypatch):
+    # The capture window must measure the SAME bypass attempt the dynamic stage was
+    # directed to make. Without this it cold-starts an un-hooked app, so its
+    # decrypted flows can only show that pinning was not ENFORCED - never that the
+    # bypass defeated it - and the two windows measure different things. The CLI
+    # composes the script for that window itself, pinning-only, so a BOTH action
+    # cannot put root hooks into it.
+    from dynamic import device as device_mod
+    from common import StageResult
+
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk: None)
+    monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
+    monkeypatch.setattr(device_mod, "clear_logcat", lambda serial: None)
+    monkeypatch.setattr(device_mod, "capture_logcat", lambda serial: "")
+    # The stub echoes the ACTION it was asked for, so the assertion below proves
+    # which composition the capture path requested, not merely that it asked.
+    monkeypatch.setattr(
+        cli, "synthesize",
+        lambda classification, action: SimpleNamespace(
+            source=f"/*{action.value}*/", applied_hooks=[],
+        ),
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner.run_dynamic_stage",
+        lambda *a, **kw: _ok("dynamic", frida_messages=[]),
+    )
+    seen: dict = {}
+
+    def _capture(serial, package, out_dir, **kw):
+        seen.update(kw)
+        return StageResult(
+            stage="capture-traffic", status="success", duration_ms=0,
+            evidence={
+                "flow_summary": [{"host": "api.example.com", "method": "GET",
+                                  "path": "/x", "status": 200, "scheme": "https"}],
+                "proxy": "127.0.0.1:8081",
+                "system_ca": "/system/etc/security/cacerts/062b6baf.0",
+                "bypass_applied": bool(kw.get("bypass_script")),
+            },
+        )
+
+    monkeypatch.setattr("dynamic.mitmproxy_capture.run_capture_stage", _capture)
+
+    cli.run(
+        apk=run_setup / "fixture.apk",
+        justification="ACADEMIC_TRAINING_TARGET",
+        skip_dynamic=False,
+        capture_traffic=True,
+        device_serial=None,
+        target="propertyguru",   # NEITHER -> forced to BOTH by --force-dynamic
+        force_dynamic=True,
+    )
+    assert seen.get("bypass_script") == "/*SSL_ONLY*/"
+
+
+def test_capture_window_stays_unhooked_when_no_ssl_bypass_was_attempted(run_setup, monkeypatch):
+    # The other half of the gate: a run whose effective action never attempted an
+    # SSL bypass must not hook its capture window - that would be an unforced SSL
+    # bypass on a target we were not directed to bypass. `--skip-dynamic` means no
+    # instrumentation at all, so the capture stage keeps the plain cold start and
+    # remains the no-hooks control.
+    from dynamic import device as device_mod
+    from common import StageResult
+
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    monkeypatch.setattr(
+        cli, "synthesize",
+        lambda classification, action: SimpleNamespace(
+            source=f"/*{action.value}*/", applied_hooks=[],
+        ),
+    )
+    seen: dict = {}
+
+    def _capture(serial, package, out_dir, **kw):
+        seen.update(kw)
+        return StageResult(
+            stage="capture-traffic", status="success", duration_ms=0,
+            evidence={
+                "flow_summary": [{"host": "api.example.com", "method": "GET",
+                                  "path": "/x", "status": 200, "scheme": "https"}],
+                "proxy": "127.0.0.1:8081",
+                "system_ca": "/system/etc/security/cacerts/062b6baf.0",
+                "bypass_applied": bool(kw.get("bypass_script")),
+            },
+        )
+
+    monkeypatch.setattr("dynamic.mitmproxy_capture.run_capture_stage", _capture)
+
+    cli.run(
+        apk=run_setup / "fixture.apk",
+        justification="ACADEMIC_TRAINING_TARGET",
+        skip_dynamic=True,
+        capture_traffic=True,
+        device_serial=None,
+        target="propertyguru",
+    )
+    assert seen.get("bypass_script") is None
+    text = sorted((run_setup / "reports").rglob("*.md"))[0].read_text(encoding="utf-8")
+    # The window's own state is still stated, so the weaker reading is what renders.
+    assert "no pinning-bypass script injected" in text
+
+
 def test_capture_failure_footer_does_not_claim_dynamic_was_not_attempted(run_setup, monkeypatch):
     # The ROOT_ONLY case runs dynamic (machinery ran, bypass not confirmed) but
     # the capture fails. The footer must NOT claim "dynamic verification is NOT

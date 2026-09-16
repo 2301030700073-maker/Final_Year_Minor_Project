@@ -1182,7 +1182,12 @@ def run(
             "through mitmdump, decrypt it, and record the captured flows in the "
             "report as real SSL-bypass proof. Requires a rooted device and "
             "mitmdump reachable from the adb-server host. Off by default so "
-            "normal runs never touch the device's proxy settings."
+            "normal runs never touch the device's proxy settings. When the run's "
+            "effective action attempts an SSL bypass, this window launches the app "
+            "under that pinning-only bypass, so its decrypted flows are evidence "
+            "the bypass took effect and the window can report its own pin-check/"
+            "handshake effects; with --skip-dynamic, or an action that never "
+            "attempts an SSL bypass, it stays an un-hooked cold start instead."
         ),
     ),
     drive_ui: bool = typer.Option(
@@ -2523,9 +2528,35 @@ def run(
                     "no usable device for traffic capture - dynamic setup already "
                     "failed to find a connected device/emulator"
                 )
+            # The capture window runs under the SAME deterministic SSL bypass the
+            # dynamic stage was directed to attempt, so its decrypted flows are
+            # evidence about DEFEATING pinning rather than only about pinning being
+            # absent. Without this the window that actually completes handshakes
+            # measured a cold-started, un-hooked app (`bypass_applied=False`), so its
+            # flow list could not speak to the bypass at all - the two windows
+            # measured different things and only the report said so.
+            #
+            # Pinning-only, per run_capture_stage's own contract: Action.SSL_ONLY
+            # never composes a root recipe, and the synthesizer's universal SSL base
+            # carries the pin-check/handshake effect observer with it (synthesizer.py
+            # :1164-1170), so this window reports its own SSL observer effects instead
+            # of only being read through the dynamic window's. It is a fresh
+            # synthesize() call rather than a reuse of `synth.source` so a BOTH action
+            # cannot smuggle root hooks into the capture window.
+            #
+            # Gated on the EFFECTIVE action (post --force-dynamic): a run whose action
+            # is NEITHER -- or ROOT_ONLY -- never attempted an SSL bypass, so hooking
+            # its capture window would be an unforced SSL bypass on a target we were
+            # not directed to bypass. `--skip-dynamic` means no instrumentation at all,
+            # so that arm also keeps the plain cold start and stays the no-hooks
+            # control. Whatever the arm, the report states which window it is.
+            capture_bypass = None
+            if not skip_dynamic and dynamic_action in (Action.SSL_ONLY, Action.BOTH):
+                capture_bypass = synthesize(classification, Action.SSL_ONLY).source
             capture_stage = mitmproxy_capture.run_capture_stage(
                 capture_serial, package_name, ANALYSIS_ROOT / "captures",
                 drive_ui=drive_ui,
+                bypass_script=capture_bypass or None,
             )
         except Exception as exc:
             capture_stage = StageResult(

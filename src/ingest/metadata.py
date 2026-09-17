@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from common import StageResult, elapsed_ms, require_tool
+from ingest.signing_block import SigningBlock, read_signing_block
 
 
 class ToolError(RuntimeError):
@@ -273,6 +274,105 @@ def parse_signer_info(raw: str) -> SignerInfo:
     )
 
 
+# ADR-0019: what apksigner's verdict actually establishes. One boolean cannot
+# carry these three, and the two that matter most - a signature that failed
+# verification and a toolchain that could not read the scheme it was looking for
+# - are exactly the two a single "DOES NOT VERIFY" merges. Measured: the two
+# production APKs whose signatures are valid and whose scheme the installed
+# apksigner cannot read were reported as unverifiable, and, because ingest halted
+# on that verdict, were never analysed at all.
+SIGNER_VERIFIED = "verified"
+SIGNER_FAILED = "failed"
+SIGNER_NOT_EVALUATED = "not_evaluated"
+
+
+def classify_signer_verdict(
+    verified_schemes: list[str], block: SigningBlock, refusal: str | None
+) -> tuple[str, str]:
+    """The signer verdict and the reason for it (ADR-0019).
+
+    Three states, and the order of these tests is the whole of the rule: a scheme
+    apksigner verified settles it; failing that, a scheme the file demonstrably
+    carries means the tool did not reach a verdict on something that is there;
+    failing both, there is no scheme to have failed to read.
+
+    The middle state is deliberately the harder one to reach. It needs a measured
+    scheme in the block, not merely a refusal - a refusal alone says nothing about
+    the file, and granting the softer label on one would turn "I could not look"
+    into a claim about the APK. Where the two disagree, `failed` is the answer:
+    the risk of a wrong `not_evaluated` is a real verification failure never
+    reported as one, which is the expensive direction.
+    """
+    if verified_schemes:
+        return SIGNER_VERIFIED, f"apksigner verified {', '.join(verified_schemes)}"
+    if block.schemes:
+        return SIGNER_NOT_EVALUATED, (
+            f"apksigner verified no signature scheme, but the signing block carries "
+            f"{'/'.join(block.schemes)} - a scheme is present that the tool did not "
+            f"certify ({block.detail})" + (f": {refusal}" if refusal else "")
+        )
+    return SIGNER_FAILED, (
+        f"apksigner verified no signature scheme and the signing block carries none "
+        f"({block.detail})" + (f": {refusal}" if refusal else "")
+    )
+
+
+def verify_signature(apk_path: Path) -> dict:
+    """The signer evidence for `apk_path`: schemes verified, schemes present, verdict.
+
+    `parse_signer_info` alone cannot produce this. apksigner reports only what it
+    *verified*, so a toolchain older than the scheme inside the APK is
+    indistinguishable from an unsigned file - measured on Facebook and Netflix,
+    where the same v2 block verifies true when the same tool is asked at a lower
+    SDK level, because what changes at minSdk 28 is which scheme apksigner
+    engages, not the signature. Pairing the tool's verdict with what the file's
+    signing block actually carries is what separates "no scheme is present" from
+    "no scheme could be read".
+
+    Never raises on an apksigner refusal. That refusal is a finding - about the
+    APK when a scheme is genuinely absent or fails, about the toolchain when one
+    is present and unread - and this platform's job is to analyse the code either
+    way. Halting ingest here refused to look at two validly-signed production
+    apps over a verdict no downstream decision consumes. Aapt2 failure is
+    untouched: the package name genuinely is a gate.
+    """
+    block = read_signing_block(apk_path)
+    refusal: str | None = None
+    try:
+        raw = run_apksigner_verify(apk_path)
+    except ApksignerError as exc:
+        refusal = str(exc)
+        # Nothing was verified, so there is no scheme set and no signer identity
+        # to report. None ("scheme not reported") is the honest value, distinct
+        # from False ("reported and failed") - see Finding K.
+        info = SignerInfo(
+            v1_verified=None,
+            v2_verified=None,
+            v3_verified=None,
+            v4_verified=None,
+            certificate_dn=None,
+            certificate_sha256=None,
+            signer_count=0,
+        )
+    else:
+        info = parse_signer_info(raw)
+    verified = [label for label, ok in info.schemes.items() if ok]
+    verdict, reason = classify_signer_verdict(verified, block, refusal)
+    return {
+        **info.__dict__,
+        "verdict": verdict,
+        "verdict_reason": reason,
+        # The measurement the verdict rests on, kept beside it so a reader can
+        # check the claim rather than trust the label.
+        "apksigner_verified_schemes": verified,
+        "apksigner_refusal": refusal,
+        "signing_block_found": block.found,
+        "signing_block_schemes": block.schemes,
+        "signing_block_pairs": [f"0x{pair_id:08x}" for pair_id in block.pair_ids],
+        "signing_block_detail": block.detail,
+    }
+
+
 def ingest(
     apk_path: Path,
     reuse_metadata: dict | None = None,
@@ -349,7 +449,11 @@ def ingest(
                 error="could not extract package name from aapt2 badging",
                 duration_ms=elapsed_ms(start),
             )
-        evidence["signer"] = parse_signer_info(run_apksigner_verify(apk_path)).__dict__
+        # ADR-0019: a signature refusal is evidence, not a halt. The verdict is
+        # three-state, the reason travels with it, and the pipeline continues -
+        # the measured cost of halting here was two validly-signed production
+        # apps that were never analysed.
+        evidence["signer"] = verify_signature(apk_path)
         evidence["tool_versions"] = tool_versions()  # NEW-B: reproducibility
 
         return StageResult(

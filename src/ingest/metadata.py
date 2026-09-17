@@ -163,28 +163,81 @@ def run_apksigner_verify(apk_path: Path) -> str:
     return _run_tool("apksigner", ApksignerError, ["verify", "--verbose", "--print-certs", str(apk_path)])
 
 
+_BUILD_TOOLS_SOURCE = "source.properties"
+_PKG_REVISION_RE = re.compile(r"^\s*Pkg\.Revision\s*=\s*(\S+)\s*$", re.MULTILINE)
+
+
+def build_tools_revision(tool_path: str | Path) -> str | None:
+    """The build-tools release a tool binary belongs to, or None if the install
+    does not say. Filesystem only, no subprocess, no package manager.
+
+    Two layouts are read: an Android SDK build-tools directory ships a
+    `source.properties` carrying `Pkg.Revision` beside its binaries; a
+    distribution package names the release in the jar its launcher points at
+    instead (`/usr/bin/apksigner` resolves into a directory holding
+    `apksigner.jar -> apksigner-31.0.2.jar`). An install that says neither
+    returns None rather than a guess.
+
+    This exists because `apksigner --version` prints `0.9` on every build-tools
+    release ever shipped - it is the version of the apksigner *library*, not of
+    the toolchain - so a report that has to name the toolchain cannot take that
+    line at face value. ADR-0019 makes a v3.1 bound legible only if the reader
+    can tell which release produced the verdict, and `apksigner=0.9` answers
+    that question for no release at all.
+    """
+    resolved = Path(tool_path).resolve()
+    directory, stem = resolved.parent, resolved.stem
+    try:
+        text = (directory / _BUILD_TOOLS_SOURCE).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        pass
+    else:
+        match = _PKG_REVISION_RE.search(text)
+        if match:
+            return match.group(1)
+    for candidate in sorted(directory.glob(f"{stem}*.jar")):
+        match = re.search(rf"{re.escape(stem)}[-_]([0-9][0-9.]*[0-9])", candidate.resolve().name)
+        if match:
+            return match.group(1)
+    return None
+
+
 @functools.lru_cache(maxsize=1)
 def tool_versions() -> dict[str, str]:
     """Capture the exact toolchain that produced a run (NEW-B) - a real
     reproducibility gap for the deterministic core. Each tool is probed
     independently and degrades to "unknown" (never raises), so a missing
     optional tool cannot fail ingest. Cached (NEW-F): versions don't change
-    mid-process, so this runs once instead of spawning 4 probes per ingest."""
+    mid-process, so this runs once instead of spawning 4 probes per ingest.
+
+    Each entry is the build-tools release where the install names one, since
+    that - not the binary's self-reported line - is what identifies the
+    toolchain. Where it is not discoverable the reported line is kept, marked
+    as self-reported when it is known not to name a release."""
     versions: dict[str, str] = {}
-    for name, flag in (
+    for name, flag, reports_own_release in (
         # aapt2 takes a subcommand ("aapt2 version"), unlike the other three
         # tools which accept "--version" - a bare "--version" is an unknown
         # option for aapt2 and would record a garbage string, not the version.
-        ("aapt2", "version"),
-        ("apksigner", "--version"),
-        ("jadx", "--version"),
-        ("apktool", "--version"),
+        ("aapt2", "version", True),
+        # Not a release: every build-tools prints the apksigner library version,
+        # which has been 0.9 across releases that differ in what they can verify.
+        ("apksigner", "--version", False),
+        ("jadx", "--version", True),
+        ("apktool", "--version", True),
     ):
         try:
             tool = require_tool(name)
             result = subprocess.run([tool, flag], capture_output=True, text=True, timeout=30)
             line = (result.stdout or result.stderr).strip().splitlines()
-            versions[name] = line[0] if line else "unknown"
+            reported = line[0] if line else "unknown"
+            revision = build_tools_revision(tool)
+            if revision:
+                versions[name] = f"{revision} (build-tools)"
+            elif reports_own_release:
+                versions[name] = reported
+            else:
+                versions[name] = f"{reported} (not a build-tools release)"
         except Exception:
             versions[name] = "unknown"
     return versions

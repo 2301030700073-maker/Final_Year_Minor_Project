@@ -54,8 +54,8 @@ def test_run_tool_timeout_raises_tool_error(monkeypatch):
 
 
 def test_run_tool_called_process_error_surfaces_stderr(monkeypatch):
-    # metadata.py:132-135: a nonzero exit is wrapped, keeping the first stderr
-    # line (bounded to 200 chars) as the actionable detail.
+    # metadata.py: a nonzero exit is wrapped as the typed ToolError with the
+    # tool's own output as the actionable detail.
     monkeypatch.setattr("common.shutil.which", lambda name: "apksigner")
     def _boom(*a, **k):
         raise subprocess.CalledProcessError(1, ["apksigner"], stderr="boom")
@@ -65,6 +65,62 @@ def test_run_tool_called_process_error_surfaces_stderr(monkeypatch):
         raise AssertionError("expected ApksignerError")
     except ApksignerError as e:
         assert "boom" in str(e)
+
+
+def test_run_tool_keeps_the_line_that_explains_the_failure(monkeypatch):
+    # The measured defect: apksigner's verdict is its FIRST line and its reason
+    # is the SECOND. Keeping only line one reported "DOES NOT VERIFY" for the
+    # Facebook and Netflix APKs and discarded the text naming what actually
+    # failed, so the failure read as unexplainable.
+    monkeypatch.setattr("common.shutil.which", lambda name: "apksigner")
+    report = (
+        "DOES NOT VERIFY\n"
+        "ERROR: Target SDK version 36 requires a minimum of signature scheme v2\n"
+        "WARNING: APK Signature Scheme v3 signer #1: Unknown additional attribute\n"
+    )
+    def _boom(*a, **k):
+        raise subprocess.CalledProcessError(1, ["apksigner"], output=report, stderr="")
+    monkeypatch.setattr("ingest.metadata.subprocess.run", _boom)
+    try:
+        run_apksigner_verify(Path("x.apk"))
+        raise AssertionError("expected ApksignerError")
+    except ApksignerError as e:
+        message = str(e)
+        assert "DOES NOT VERIFY" in message
+        assert "Target SDK version 36" in message
+        assert "Unknown additional attribute" in message
+
+
+def test_run_tool_keeps_both_streams(monkeypatch):
+    # `stderr or stdout` meant a tool that wrote to both had one stream dropped
+    # entirely; which stream carries the reason is the tool's choice, not ours.
+    monkeypatch.setattr("common.shutil.which", lambda name: "apksigner")
+    def _boom(*a, **k):
+        raise subprocess.CalledProcessError(1, ["apksigner"], output="on stdout", stderr="on stderr")
+    monkeypatch.setattr("ingest.metadata.subprocess.run", _boom)
+    try:
+        run_apksigner_verify(Path("x.apk"))
+        raise AssertionError("expected ApksignerError")
+    except ApksignerError as e:
+        assert "on stdout" in str(e) and "on stderr" in str(e)
+
+
+def test_a_long_tool_report_loses_its_middle_not_its_conclusion(monkeypatch):
+    # Bounded at both ends: a head-only cut is what dropped mitmproxy's
+    # SyntaxError line once already; the tail is where tools put conclusions.
+    monkeypatch.setattr("common.shutil.which", lambda name: "apksigner")
+    long_report = "HEAD-MARKER " + ("x" * 4000) + " TAIL-MARKER"
+    def _boom(*a, **k):
+        raise subprocess.CalledProcessError(1, ["apksigner"], output=long_report, stderr="")
+    monkeypatch.setattr("ingest.metadata.subprocess.run", _boom)
+    try:
+        run_apksigner_verify(Path("x.apk"))
+        raise AssertionError("expected ApksignerError")
+    except ApksignerError as e:
+        message = str(e)
+        assert "HEAD-MARKER" in message and "TAIL-MARKER" in message
+        assert "chars elided" in message
+        assert len(message) < 2000
 
 
 def test_tool_versions_degrades_to_unknown_when_tool_missing(monkeypatch):

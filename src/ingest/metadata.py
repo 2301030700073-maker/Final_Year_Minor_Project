@@ -109,6 +109,36 @@ def _assert_zip_magic(apk_path: Path) -> None:
         )
 
 
+_DIAGNOSTIC_LIMIT = 1200
+
+
+def _tool_failure_detail(exc: subprocess.CalledProcessError) -> str:
+    """Both of a tool's output streams, whole - not the first line of one.
+
+    This kept ``stderr or stdout`` and then ``splitlines()[0]``, so a tool that
+    explained itself over several lines had all but its opening line discarded -
+    and the opening line is usually the verdict, not the reason. Measured on the
+    Facebook and Netflix APKs: the pipeline reported ``apksigner exited 1: DOES
+    NOT VERIFY`` and dropped the line immediately after it, which named the
+    check that failed, along with two warnings about signature attributes the
+    tool could not read. Diagnosing that took reading the raw tool output by
+    hand; the stage had it and threw it away. Bounded at BOTH ends rather than
+    cut at the head, so a long report loses its middle and never its conclusion.
+    """
+    parts = []
+    for label, stream in (("stdout", exc.stdout), ("stderr", exc.stderr)):
+        text = (stream or "").strip()
+        if text:
+            parts.append(f"{label}: {text}")
+    detail = " | ".join(parts) or "(no output)"
+    if len(detail) > _DIAGNOSTIC_LIMIT:
+        head = _DIAGNOSTIC_LIMIT // 2
+        tail = _DIAGNOSTIC_LIMIT - head
+        elided = len(detail) - _DIAGNOSTIC_LIMIT
+        detail = f"{detail[:head]} ... [{elided} chars elided] ... {detail[-tail:]}"
+    return detail
+
+
 def _run_tool(name: str, error_cls: type, args: list[str], timeout: int = 30) -> str:
     tool = require_tool(name)
     try:
@@ -119,9 +149,9 @@ def _run_tool(name: str, error_cls: type, args: list[str], timeout: int = 30) ->
     except subprocess.TimeoutExpired as exc:
         raise error_cls(f"{name} timed out after {timeout}s") from exc
     except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or exc.stdout or "").strip().splitlines()
-        first = detail[0] if detail else "no output"
-        raise error_cls(f"{name} exited {exc.returncode}: {first[:200]}") from exc
+        raise error_cls(
+            f"{name} exited {exc.returncode}: {_tool_failure_detail(exc)}"
+        ) from exc
 
 
 def run_aapt2_dump(apk_path: Path) -> str:

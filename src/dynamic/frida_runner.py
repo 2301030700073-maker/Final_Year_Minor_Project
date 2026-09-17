@@ -550,8 +550,37 @@ def run_dynamic_stage(
             _wait_for_checkpoint(messages, settle_seconds, require_evidence=True)
             return device, pid, instrument
 
+        def _merge_provisioning_records(first: dict, second: dict) -> dict:
+            """One record for a run that provisioned twice (ADR-0020).
+
+            Both attaches of a two-spawn run provision, and only the second
+            record survived. The first attach is the one that can find a stale
+            server - shell-run, or left mismatched by an earlier run - and replace
+            it, after which the second attach finds a matching server already
+            running. Keeping only the second record therefore rendered a run that
+            replaced the device's instrumentation exactly like one that found it
+            already correct, which is the rendering ADR-0020 exists to prevent.
+            The device state is the second record's, because that is what is
+            running now; a replacement the second did not perform is carried over
+            from the first and named as the first attach's."""
+            if not first or not second:
+                return second or first
+            merged = dict(second)
+            merged["attaches"] = 2
+            if first.get("replaced") and not second.get("replaced"):
+                merged["replaced"] = True
+                merged["replace_reason"] = (
+                    f"on this run's first attach, {first.get('replace_reason')}"
+                )
+            if first.get("server_before") is not None:
+                # What the device held before THIS run - the earliest observation,
+                # which only the first attach can have made. The second attach's is
+                # what the first attach had just left there.
+                merged["server_before"] = first["server_before"]
+            return merged
+
         # Phase A - SSL: a fresh spawn exercising the pinning check.
-        _run_one_spawn(
+        _ssl_device, _ssl_pid, ssl_instrument = _run_one_spawn(
             (SCRIPT_DIR / script_names[0]).read_text(encoding="utf-8")
             + "\n\n" + _root_envelope_src,
             Action.SSL_ONLY, messages, settle_seconds,
@@ -559,11 +588,12 @@ def run_dynamic_stage(
 
         # Phase B - root: a fresh spawn exercising the root check. Its
         # instrumentation record is the one carried into the stage evidence - it
-        # is the provisioning the root confirmation rests on, so a server
-        # replaced between the phases is visible here rather than only in Phase A.
+        # is the provisioning the root confirmation rests on - with Phase A's
+        # merged in, so a server the FIRST attach replaced stays visible.
         root_device, root_pid, instrument = _run_one_spawn(
             _root_envelope_src, Action.ROOT_ONLY, messages, settle_seconds,
         )
+        instrument = _merge_provisioning_records(ssl_instrument, instrument)
         outcome["instrument"] = instrument
 
         # FR-4.6: a spawned process gone after the settle window self-terminated.

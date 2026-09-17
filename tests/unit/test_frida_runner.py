@@ -181,6 +181,65 @@ def test_both_androgoat_runs_two_spawns_one_per_dimension(monkeypatch):
     assert "synthesized:root_runtime_exec_su" in result.evidence["scripts_applied"]
 
 
+def test_both_keeps_the_replacement_the_first_attach_performed(monkeypatch):
+    # ADR-0020: both attaches of a two-spawn run provision. The first is the one
+    # that can find a stale server - shell-run, or left mismatched by an earlier
+    # run - and replace it, after which the second finds a matching server already
+    # running. A record built from the second alone renders a run that replaced the
+    # device's instrumentation exactly like one that found it already correct.
+    class _FakeDevice:
+        def __init__(self):
+            self.pid = 1000
+
+        def spawn(self, pkg):
+            return self.pid
+
+        def resume(self, pid):
+            return None
+
+    records = [
+        {"client": "16.7", "server": "16.7", "server_before": "16.6",
+         "server_source": "pushed_from_tools", "replaced": True,
+         "replace_reason": "the running frida-server reported 16.6, the client is 16.7",
+         "unreadable": None, "handshake": "enumerate_processes returned"},
+        {"client": "16.7", "server": "16.7", "server_before": "16.7",
+         "server_source": "already_running", "replaced": False,
+         "replace_reason": None, "unreadable": None,
+         "handshake": "enumerate_processes returned"},
+    ]
+    calls = []
+
+    def fake_attach(serial, pkg):
+        calls.append(pkg)
+        dev = _FakeDevice()
+        return dev, object(), dev.pid, records[len(calls) - 1]
+
+    monkeypatch.setattr("dynamic.frida_runner.attach", fake_attach)
+    monkeypatch.setattr("dynamic.frida_runner.load_script_source",
+                        lambda session, src, on_message=None: None)
+    monkeypatch.setattr("dynamic.frida_runner._run_ui_action",
+                        lambda serial, action: None)
+    monkeypatch.setattr(
+        "dynamic.frida_runner._wait_for_checkpoint",
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
+    )
+
+    result = frida_runner.run_dynamic_stage(
+        "emulator-5554", "owasp.sat.agoat", Action.BOTH, target="AndroGoat",
+        synthesized={"source": "root", "applied_hooks": []},
+    )
+
+    assert result.status == "success"
+    assert len(calls) == 2  # both phases really did provision
+    recorded = result.evidence["instrument"]
+    assert recorded["replaced"] is True  # the first attach's replacement survives
+    assert "16.6" in recorded["replace_reason"]
+    assert "first attach" in recorded["replace_reason"]  # and says whose it was
+    assert recorded["server_source"] == "already_running"  # what is running now
+    assert recorded["server_before"] == "16.6"  # what the device held before this run
+    assert recorded["attaches"] == 2
+
+
 def _run_capture_scripts_applied(monkeypatch, action, target, synthesized):
     """Drive run_dynamic_stage through the single-spawn synthesized path and return
     the scripts_applied label list, so a test can assert the label matches what was

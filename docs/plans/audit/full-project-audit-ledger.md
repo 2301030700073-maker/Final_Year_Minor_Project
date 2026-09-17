@@ -8,9 +8,9 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 53 files, **22,786 LOC**
+- `src/`: 53 files, **22,890 LOC**
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
-- `tests/`: 97 files, **33,347 LOC** (more test than source; informational, see §Currency).
+- `tests/`: 99 files, **33,568 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
 
 ## Currency — what each ✅ covers
@@ -50,7 +50,7 @@ module's line count unchanged escapes it.)
 | `frida_runner.py` | 642 | 679 | +37 | — |
 | `hermes.py` | 198 | 235 | +37 | 2026-09-09 |
 | `indicators.py` | 192 | 267 | +75 | 2026-09-09 |
-| `ingest/metadata.py` | 324 | 373 | +49 | 2026-09-07 |
+| `ingest/metadata.py` | 324 | 477 | +153 | 2026-09-17, 2026-09-07 (ADR-0019: the signer verdict is three-state - verified / failed / not_evaluated - and the halt on it is gone, because the refusal it halted on is a finding rather than a reason to stop looking at the app; the scheme the tool could not read is now measured from the file's own signing block instead of being assumed absent, and the measurement rides beside the label. aapt2's failure still halts the stage, since the package name genuinely is required downstream) |
 | `ingest/normalize.py` | 174 | 208 | +34 | 2026-09-07 |
 | `ingest/signing_block.py` | 204 | 204 | +0 | 2026-09-17, new (ADR-0019) - the signing block is read from the file instead of inferred from apksigner's verdict; written with its tests and verified against all four sweep APKs, full Pass-2 read pending |
 | `jnibridge.py` | 175 | 202 | +27 | 2026-09-09 |

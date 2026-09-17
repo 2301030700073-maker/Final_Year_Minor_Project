@@ -8,9 +8,9 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 53 files, **22,896 LOC**
+- `src/`: 53 files, **22,949 LOC**
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
-- `tests/`: 100 files, **33,658 LOC** (more test than source; informational, see §Currency).
+- `tests/`: 101 files, **33,797 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
 
 ## Currency — what each ✅ covers
@@ -50,7 +50,7 @@ module's line count unchanged escapes it.)
 | `frida_runner.py` | 642 | 679 | +37 | — |
 | `hermes.py` | 198 | 235 | +37 | 2026-09-09 |
 | `indicators.py` | 192 | 267 | +75 | 2026-09-09 |
-| `ingest/metadata.py` | 324 | 477 | +153 | 2026-09-17, 2026-09-07 (ADR-0019: the signer verdict is three-state - verified / failed / not_evaluated - and the halt on it is gone, because the refusal it halted on is a finding rather than a reason to stop looking at the app; the scheme the tool could not read is now measured from the file's own signing block instead of being assumed absent, and the measurement rides beside the label. aapt2's failure still halts the stage, since the package name genuinely is required downstream) |
+| `ingest/metadata.py` | 324 | 530 | +206 | 2026-09-17, 2026-09-07 (ADR-0019: the signer verdict is three-state - verified / failed / not_evaluated - and the halt on it is gone, because the refusal it halted on is a finding rather than a reason to stop looking at the app; the scheme the tool could not read is now measured from the file's own signing block instead of being assumed absent, and the measurement rides beside the label. aapt2's failure still halts the stage, since the package name genuinely is required downstream. Follow-on defect found while checking the ADR's own claim that the report names the toolchain: `tool_versions` recorded `apksigner --version` verbatim, which prints `0.9` on every build-tools release ever shipped - the apksigner library version, naming no release - so the bound the NOT EVALUATED line rests on could not be read off the report. The release now comes from the install instead: `Pkg.Revision` in the `source.properties` an SDK build-tools dir ships beside its binaries, else the versioned jar a distribution package points its launcher at (`apksigner.jar -> apksigner-31.0.2.jar`). An install naming no release keeps the reported line, marked as self-reported rather than passed off as a release) |
 | `ingest/normalize.py` | 174 | 208 | +34 | 2026-09-07 |
 | `ingest/signing_block.py` | 204 | 204 | +0 | 2026-09-17, new (ADR-0019) - the signing block is read from the file instead of inferred from apksigner's verdict; written with its tests and verified against all four sweep APKs, full Pass-2 read pending |
 | `jnibridge.py` | 175 | 202 | +27 | 2026-09-09 |

@@ -1219,16 +1219,29 @@ def run_capture_stage(
     # whichever result we return (principle 3: a failed device-state cleanup is
     # recorded on the evidence, never silently dropped).
     result: StageResult | None = None
+    # ADR-0020: which Frida instruments this window, when one does, and its
+    # message stream. Both are bound before the try because the exception arm
+    # reports them, and an exception raised before the Frida arm reached its own
+    # binding would otherwise read as an unbound name inside the handler -
+    # replacing the real failure with a NameError. frida_instrument stays None on
+    # the plain cold-start arm, where no Frida was involved at all: a different
+    # statement from "a Frida ran and its record was not established", and
+    # bypass_arm/bypass_applied beside it tell the two apart, so the record is
+    # never read as an instrument that was not there.
+    frida_messages: list = []
+    frida_instrument = None
+    # The Windows mitmdump's log path, set only on the WSL2 placement and kept in
+    # the enclosing scope so the EXCEPTION path can read the log too - a mitmdump
+    # that will not come up is exactly when its output is needed. Bound before the
+    # try because the CA push above it can fail: an unbound read inside the
+    # handler would raise NameError and replace the real reason for the failure.
+    proxy_log_wsl: Path | None = None
     try:
         cert = device.create_mitm_ca(confdir)
         system_ca = device.push_system_ca(serial, cert)
         # The Windows mitmdump's own output. WSL2 only: the native placement
         # keeps mitmdump's stdout in-process instead (see the Popen below).
         proxy_log = ""
-        # The Windows mitmdump's log path, set only on the WSL2 placement and kept
-        # in the enclosing scope so the EXCEPTION path can read the log too - a
-        # mitmdump that will not come up is exactly when its output is needed.
-        proxy_log_wsl = None
 
         if wsl2:
             stamp = time.time_ns()
@@ -1268,13 +1281,6 @@ def run_capture_stage(
         # None => could not probe; unknown, and never reported as a break.
         reachable = _device_reaches_proxy(serial, proxy_port)
 
-        frida_messages: list = []
-        # ADR-0020: which Frida instruments this window, when one does. It stays
-        # None on the plain cold-start arm, where no Frida was involved at all -
-        # a different statement from "a Frida ran and its record was not
-        # established", and bypass_arm/bypass_applied beside it tell the two
-        # apart, so the record is never read as an instrument that was not there.
-        frida_instrument = None
         if bypass_script or bypass_source:
             # "With script" arm: spawn the app under Frida (paused), load the
             # pinning bypass, then resume - same spawn-inject-resume pattern as
@@ -1670,7 +1676,13 @@ def run_capture_stage(
             stage="capture-traffic", status="failed",
             evidence={"reason": "capture exception", "flows_path": str(flows_path),
                       "proxy_log_excerpt": startup_log,
-                      "proxy_log_path": str(proxy_log_wsl) if proxy_log_wsl else None},
+                      "proxy_log_path": str(proxy_log_wsl) if proxy_log_wsl else None,
+                      # ADR-0020: a capture that died is when "which Frida was
+                      # attached?" gets asked - the same reason the dynamic stage
+                      # carries its record on the failure arm. None here means the
+                      # exception landed before the Frida arm, which is a
+                      # different statement from an attach whose record was lost.
+                      "frida_instrument": frida_instrument},
             error=f"capture stage raised: {exc}",
         )
         return result

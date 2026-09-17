@@ -432,6 +432,69 @@ def test_run_capture_stage_success_records_real_flows(monkeypatch, tmp_path):
     assert [f["scheme"] for f in result.evidence["flow_summary"]] == ["https", "https"]
 
 
+def test_run_capture_stage_exception_carries_the_frida_it_was_under(monkeypatch, tmp_path):
+    # ADR-0020: a capture that dies is when "which Frida was attached?" gets
+    # asked, so the record travels on the failure arm too - the same reason the
+    # dynamic stage carries it on its own failed arm.
+    class _D:
+        def spawn(self, pkg):
+            return 1
+
+        def resume(self, pid):
+            return None
+
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: False)
+    monkeypatch.setattr(mitmproxy_capture.shutil, "which", lambda name: "/usr/bin/mitmdump")
+    monkeypatch.setattr(device, "create_mitm_ca", lambda confdir: confdir / "mitmproxy-ca-cert.pem")
+    monkeypatch.setattr(device, "push_system_ca", lambda serial, cert: "/system/etc/security/cacerts/x.0")
+    monkeypatch.setattr(device, "adb_reverse", lambda serial, dp, hp, add=True: None)
+    monkeypatch.setattr(device, "set_http_proxy", lambda serial, host, port: None)
+    monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy", lambda serial, port: True)
+    monkeypatch.setattr(mitmproxy_capture, "_launch_app", lambda serial, package: None)
+    instrument = {"client": "16.7", "server": "16.7", "server_source": "already_running"}
+    monkeypatch.setattr(mitmproxy_capture.frida_runner, "attach",
+                        lambda serial, pkg: (_D(), object(), 42, instrument))
+
+    def boom(session, name, on_message=None):
+        raise RuntimeError("script transport died")
+
+    monkeypatch.setattr(mitmproxy_capture.frida_runner, "load_script", boom)
+
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1,
+        bypass_script="ssl_pinning_bypass_universal.js",
+    )
+    assert result.status == "failed"
+    assert "script transport died" in result.error  # the real cause, not a NameError
+    assert result.evidence["frida_instrument"] is instrument
+
+
+def test_run_capture_stage_raised_before_the_frida_arm_reports_no_instrument(monkeypatch, tmp_path):
+    # ADR-0020: a failure before the Frida arm must report "no instrument", and
+    # must report its OWN reason - the names the handler reads are bound before
+    # the try, so an early failure surfaces its real cause instead of a NameError
+    # raised inside the handler.
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: False)
+    # mitmdump must be present, or the stage returns its own early failure before
+    # the CA push this test is about is ever reached.
+    monkeypatch.setattr(mitmproxy_capture.shutil, "which", lambda name: "/usr/bin/mitmdump")
+
+    def no_ca(confdir):
+        raise RuntimeError("openssl missing")
+
+    monkeypatch.setattr(device, "create_mitm_ca", no_ca)
+
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1,
+    )
+    assert result.status == "failed"
+    assert result.evidence["reason"] == "capture exception"
+    assert "openssl missing" in result.error
+    assert "NameError" not in result.error
+    assert result.evidence["frida_instrument"] is None
+
+
 def test_run_capture_stage_fails_honestly_when_no_flows(monkeypatch, tmp_path):
     # A zero-flow capture must report `failed` with the reason, never an empty
     # "success" (principle 3: no fabricated flows).

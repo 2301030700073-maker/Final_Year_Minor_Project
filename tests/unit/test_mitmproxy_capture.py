@@ -981,7 +981,7 @@ def _mock_native_run(monkeypatch, tmp_path, frida_mocks=None):
 
         def fake_attach(serial, pkg):
             hooks["attach"] += 1
-            return fake_device, fake_session, 42
+            return fake_device, fake_session, 42, {"client": "16.7", "server": "16.7"}
         monkeypatch.setattr(mitmproxy_capture.frida_runner, "attach", fake_attach)
         monkeypatch.setattr(
             mitmproxy_capture.frida_runner, "load_script",
@@ -1276,7 +1276,8 @@ def test_run_capture_stage_no_flows_names_crashed_bypass_script(monkeypatch, tmp
             pass
 
     monkeypatch.setattr(mitmproxy_capture.frida_runner, "attach",
-                        lambda serial, pkg: (FakeDevice(), object(), 42))
+                        lambda serial, pkg: (FakeDevice(), object(), 42,
+                                             {"client": "16.7", "server": "16.7"}))
 
     def fake_load_script(session, name, on_message=None):
         # frida delivers an uncaught script exception as a {type:error} envelope
@@ -1345,7 +1346,8 @@ def test_run_capture_stage_no_flows_clean_bypass_keeps_plain_reason(monkeypatch,
             pass
 
     monkeypatch.setattr(mitmproxy_capture.frida_runner, "attach",
-                        lambda serial, pkg: (FakeDevice(), object(), 42))
+                        lambda serial, pkg: (FakeDevice(), object(), 42,
+                                             {"client": "16.7", "server": "16.7"}))
     monkeypatch.setattr(mitmproxy_capture.frida_runner, "load_script",
                         lambda session, name, on_message=None: None)  # loads clean, no error
 
@@ -1405,7 +1407,8 @@ def test_run_capture_stage_success_records_bypass_script_errors(monkeypatch, tmp
             pass
 
     monkeypatch.setattr(mitmproxy_capture.frida_runner, "attach",
-                        lambda serial, pkg: (FakeDevice(), object(), 42))
+                        lambda serial, pkg: (FakeDevice(), object(), 42,
+                                             {"client": "16.7", "server": "16.7"}))
 
     def load_with_error(session, name, on_message=None):
         # a genuine uncaught hook exception, delivered as a top-level {type:error}

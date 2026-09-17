@@ -584,10 +584,11 @@ def test_ensure_frida_server_restarts_shell_run_server_as_root(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0)  # nohup start (as root)
     monkeypatch.setattr(subprocess, "run", fake_run)
     _ensure_frida_server("adb", "emulator-5554")
-    # DEV5: root + ps + pkill + ls + (wait-for-gone ps) + start. The extra ps is
-    # the bounded wait that lets the SIGTERM'd shell server exit before the root
+    # DEV5: root + ps + pkill + ls + (wait-for-gone ps) + start + the ADR-0020
+    # read-back of the version the device was left with. The wait ps is the
+    # bounded wait that lets the SIGTERM'd shell server exit before the root
     # restart, so the new server never races the old one for the frida socket.
-    assert seq["n"] == 6
+    assert seq["n"] == 7
 
 
 def test_ensure_frida_server_starts_when_present_but_not_running(monkeypatch):
@@ -607,7 +608,7 @@ def test_ensure_frida_server_starts_when_present_but_not_running(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0)  # nohup start
     monkeypatch.setattr(subprocess, "run", fake_run)
     _ensure_frida_server("adb", "emulator-5554")
-    assert seq["n"] == 4  # root + ps + ls + start all ran
+    assert seq["n"] == 5  # root + ps + ls + start + the ADR-0020 read-back
 
 
 def test_ensure_frida_server_autopushes_local_copy_when_missing(monkeypatch, tmp_path):
@@ -640,11 +641,130 @@ def test_ensure_frida_server_autopushes_local_copy_when_missing(monkeypatch, tmp
         if n == 6:  # chmod 755
             assert "chmod" in cmd
             return subprocess.CompletedProcess(cmd, 0)
-        return subprocess.CompletedProcess(cmd, 0)  # nohup start
+        return subprocess.CompletedProcess(cmd, 0)  # nohup start + ADR-0020 read-back
     monkeypatch.setattr(subprocess, "run", fake_run)
     dev._ensure_frida_server("adb", "emulator-5554")
     assert seq["pushed"] is True  # the local copy was auto-pushed
-    assert seq["n"] == 7  # root + ps + ls + rm + push + chmod + start
+    # root + ps + ls + rm + push + chmod + start + the ADR-0020 read-back
+    assert seq["n"] == 8
+
+
+def test_frida_provisioning_records_the_server_it_left_running(monkeypatch):
+    # ADR-0020: the version reads the guard already made ARE the record. A root
+    # server that already matched is called what it is - already running - and not
+    # attributed to a copy this stage pushed.
+    from dynamic.device import _ensure_frida_server
+
+    def fake_run(cmd, **kw):
+        if cmd[-1] == "root":
+            return subprocess.CompletedProcess(cmd, 0, stdout="restarting adbd as root\n", stderr="")
+        if cmd[-2:] == ["ps", "-A"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="root 1234 1 frida-server\n", stderr="")
+        if cmd[-1] == "--version":
+            return subprocess.CompletedProcess(cmd, 0, stdout="16.7.19\n", stderr="")
+        raise AssertionError(f"must not re-provision a matching root server: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("dynamic.device._frida_venv_version", lambda: "16.7")
+
+    instrument = _ensure_frida_server("adb", "emulator-5554")
+    assert instrument["client"] == "16.7"
+    assert instrument["server_source"] == "already_running"
+    assert instrument["server_before"] == "16.7" == instrument["server"]
+    assert instrument["replaced"] is False
+    assert instrument["replace_reason"] is None
+    assert instrument["unreadable"] is None  # read, and it read fine
+
+
+def test_frida_provisioning_records_a_replacement_and_its_reason(monkeypatch, tmp_path):
+    # ADR-0020: a run that silently replaced the device's instrumentation must not
+    # be indistinguishable in the record from one that did not. The reason is
+    # recorded, and so is the version the device was left with - the read-back,
+    # not the pinned copy that was pushed to it.
+    from dynamic.device import _ensure_frida_server
+
+    local = tmp_path / "frida-server-16.7.19-x86_64"
+    local.write_bytes(b"#!/bin/sh\n")
+    monkeypatch.setattr("dynamic.device._FRIDA_SERVER_LOCAL", local)
+    monkeypatch.setattr("dynamic.device._frida_venv_version", lambda: "16.7")
+    state = {"killed": False}
+
+    def fake_run(cmd, **kw):
+        if cmd[-1] == "root":
+            return subprocess.CompletedProcess(cmd, 0, stdout="restarting adbd as root\n", stderr="")
+        if cmd[-2:] == ["ps", "-A"]:
+            out = "  PID 1 init\n" if state["killed"] else "shell 1234 1 frida-server\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+        if "pkill" in cmd:
+            state["killed"] = True
+            return subprocess.CompletedProcess(cmd, 0)
+        if "ls" in cmd:  # not present on the device -> push the local copy
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="No such file")
+        if cmd[-1] == "--version":  # the read-back, after the push
+            return subprocess.CompletedProcess(cmd, 0, stdout="16.7.19\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0)  # rm / push / chmod / nohup start
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    instrument = _ensure_frida_server("adb", "emulator-5554")
+    assert instrument["replaced"] is True
+    assert "as 'shell', not root" in instrument["replace_reason"]
+    assert instrument["server_source"] == "pushed_from_tools"
+    assert instrument["server"] == "16.7"  # what the device reported afterwards
+    # A shell-run server's version was never read - the asymmetry is recorded
+    # rather than back-filled with the client's own version.
+    assert instrument["server_before"] is None
+    assert instrument["unreadable"] is None
+
+
+def test_frida_provisioning_records_an_unreadable_version_as_unreadable(monkeypatch):
+    # ADR-0020: unmeasured is recorded as unmeasured. A device server whose
+    # version cannot be read must never be rendered as the pinned version.
+    from dynamic.device import _SERVER_VERSION_UNREADABLE, _ensure_frida_server
+
+    def fake_run(cmd, **kw):
+        if cmd[-1] == "root":
+            return subprocess.CompletedProcess(cmd, 0, stdout="restarting adbd as root\n", stderr="")
+        if cmd[-2:] == ["ps", "-A"]:  # nothing running
+            return subprocess.CompletedProcess(cmd, 0, stdout="  PID 1 init\n", stderr="")
+        if "ls" in cmd:  # already on the device
+            return subprocess.CompletedProcess(cmd, 0, stdout="/data/local/tmp/frida-server\n", stderr="")
+        if cmd[-1] == "--version":  # the read-back cannot read it
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not found")
+        return subprocess.CompletedProcess(cmd, 0)  # nohup start
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("dynamic.device._frida_venv_version", lambda: "16.7")
+
+    instrument = _ensure_frida_server("adb", "emulator-5554")
+    assert instrument["server"] is None
+    assert instrument["server_source"] == "device_copy"
+    assert instrument["unreadable"] == _SERVER_VERSION_UNREADABLE
+
+
+def test_frida_provisioning_failure_carries_the_instrument(monkeypatch):
+    # ADR-0020: the run that never got as far as a server is exactly the run that
+    # has to say so, so the record rides out on the exception instead of going
+    # down with the local variable.
+    from dynamic.device import FridaProvisioningError, _ensure_frida_server
+
+    def fake_run(cmd, **kw):
+        return subprocess.CompletedProcess(
+            cmd, 1, stdout="",
+            stderr="adbd cannot run as root in production builds",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("dynamic.device._frida_venv_version", lambda: "16.7")
+
+    with pytest.raises(FridaProvisioningError) as excinfo:
+        _ensure_frida_server("adb", "emulator-5554")
+    recorded = excinfo.value.instrument  # the record survives the raise
+    assert recorded["client"] == "16.7"
+    assert recorded["server"] is None
+    assert recorded["server_source"] == "provisioning_failed"
+    # "never inspected" is not the same claim as "inspected and unreadable".
+    assert recorded["unreadable"] == "not read - adbd could not be made root"
 
 
 def test_ensure_frida_server_fails_loudly_when_local_copy_missing(monkeypatch, tmp_path):
@@ -690,15 +810,26 @@ def test_setup_frida_connection_native_path_delegates_to_get_device(monkeypatch)
     from dynamic.device import setup_frida_connection
 
     ensured = {"n": 0}
-    monkeypatch.setattr("dynamic.device._ensure_frida_server", lambda adb, serial: ensured.__setitem__("n", 1))
+    instrument = {"client": "16.7", "server": "16.7",
+                  "server_source": "already_running", "handshake": None}
+
+    def fake_ensure(adb, serial):
+        ensured["n"] = 1
+        return instrument
+
+    monkeypatch.setattr("dynamic.device._ensure_frida_server", fake_ensure)
     monkeypatch.setattr("dynamic.device._in_wsl", lambda: False)
     monkeypatch.setattr("dynamic.device._adb_wrapper_path", lambda: "adb")
     fake = object()
     monkeypatch.setattr(frida, "get_device", lambda serial, timeout=10: fake)
 
-    got = setup_frida_connection("emulator-5554")
+    got, got_instrument = setup_frida_connection("emulator-5554")
     assert got is fake
     assert ensured["n"] == 1  # the server guard ran before connecting
+    # ADR-0020: the record is the provisioning's, and this path talks to no
+    # server - so it must say no handshake happened rather than imply one did.
+    assert got_instrument is instrument
+    assert got_instrument["handshake"] is None
 
 
 def test_setup_frida_connection_wsl_path_uses_relay(monkeypatch):
@@ -712,15 +843,49 @@ def test_setup_frida_connection_wsl_path_uses_relay(monkeypatch):
     fake_mgr = type("M", (), {"add_remote_device": lambda self, addr: fake_device})()
     fake_frida = type("FF", (), {"get_device_manager": staticmethod(lambda: fake_mgr)})()
 
-    monkeypatch.setattr("dynamic.device._ensure_frida_server", lambda adb, serial: None)
+    instrument = {"client": "16.7", "server": "16.7",
+                  "server_source": "already_running", "handshake": None}
+    monkeypatch.setattr("dynamic.device._ensure_frida_server", lambda adb, serial: instrument)
     monkeypatch.setattr("dynamic.device._in_wsl", lambda: True)
     monkeypatch.setattr("dynamic.device._adb_wrapper_path", lambda: "adb")
     monkeypatch.setattr("dynamic.device._start_relay", lambda adb: "172.27.96.1")
     monkeypatch.setattr("dynamic.device.frida", fake_frida)
 
-    got = setup_frida_connection("emulator-5554")
+    got, got_instrument = setup_frida_connection("emulator-5554")
     assert got is fake_device
     assert verified["n"] == 1  # connection verified, not silently accepted
+    # ADR-0020: this is the one path that talks to the server, so the handshake
+    # effect it observed is what the record carries.
+    assert "enumerate_processes returned" in got_instrument["handshake"]
+
+
+def test_setup_frida_connection_carries_a_failed_handshake_on_the_exception(monkeypatch):
+    # ADR-0020: a run that dies at the handshake is exactly the run whose
+    # instrumentation matters most, so the record rides out on the exception
+    # instead of being lost with the local variable.
+    from dynamic.device import FridaProvisioningError, setup_frida_connection
+
+    instrument = {"client": "16.7", "server": "16.6",
+                  "server_source": "already_running", "handshake": None}
+
+    def boom(self):
+        raise RuntimeError("unable to communicate with remote frida-server")
+
+    fake_device = type("F", (), {"enumerate_processes": boom})()
+    fake_mgr = type("M", (), {"add_remote_device": lambda self, addr: fake_device})()
+    fake_frida = type("FF", (), {"get_device_manager": staticmethod(lambda: fake_mgr)})()
+    monkeypatch.setattr("dynamic.device._ensure_frida_server", lambda adb, serial: instrument)
+    monkeypatch.setattr("dynamic.device._in_wsl", lambda: True)
+    monkeypatch.setattr("dynamic.device._adb_wrapper_path", lambda: "adb")
+    monkeypatch.setattr("dynamic.device._start_relay", lambda adb: "172.27.96.1")
+    monkeypatch.setattr("dynamic.device.frida", fake_frida)
+
+    with pytest.raises(FridaProvisioningError) as excinfo:
+        setup_frida_connection("emulator-5554")
+    assert "protocol handshake failed" in str(excinfo.value)
+    recorded = excinfo.value.instrument
+    assert recorded["server"] == "16.6"  # the mismatch that explains the failure
+    assert recorded["handshake"].startswith("failed:")
 
 
 # ---------------------------------------------------------------------------

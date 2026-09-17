@@ -20,6 +20,9 @@ _RELAY_PROC: subprocess.Popen | None = None
 # device by _ensure_frida_server when the device is missing it, so the dynamic
 # stage provisions its own prerequisite instead of requiring a manual push.
 _FRIDA_SERVER_DEVICE = "/data/local/tmp/frida-server"
+# ADR-0020: one wording for "the server binary reported nothing readable", shared
+# by the pre- and post-provisioning reads so the two cannot drift apart.
+_SERVER_VERSION_UNREADABLE = "frida-server --version produced no readable version"
 _FRIDA_SERVER_LOCAL = (Path(__file__).resolve().parents[2]
                        / "tools" / "frida-server-16.7.19-x86_64")
 
@@ -214,6 +217,22 @@ def _find_windows_user(users_dir: Path = WINDOWS_USERS_DIR) -> str:
 # ---------------------------------------------------------------------------
 
 
+class FridaProvisioningError(RuntimeError):
+    """A provisioning failure that carries the instrumentation it happened to.
+
+    ADR-0020: the version of the Frida that produced (or failed to produce) a
+    dynamic verdict is part of the record, and the failure path is where it is
+    asked for most. A plain RuntimeError would leave the stage's error arm able
+    to name the cause but not the client and server it was measured against, so
+    the record is attached to the exception instead of being discarded when the
+    raise unwinds past the point that built it.
+    """
+
+    def __init__(self, message: str, instrument: dict):
+        super().__init__(message)
+        self.instrument = instrument
+
+
 def _frida_venv_version() -> str:
     """Return the venv's ``frida`` major.minor (e.g. ``"16.7"``).
 
@@ -240,7 +259,7 @@ def _device_frida_server_version(adb: str, serial: str, server_path: str) -> str
     return ".".join(parts[:2]) if len(parts) >= 2 else (version or None)
 
 
-def _ensure_frida_server(adb: str, serial: str) -> None:
+def _ensure_frida_server(adb: str, serial: str) -> dict:
     """Ensure frida-server is running AS ROOT on the device before connecting.
 
     frida-server must run as root to attach to system_server and inject into
@@ -260,8 +279,35 @@ def _ensure_frida_server(adb: str, serial: str) -> None:
     A server that is pushed but not started is the other usual cause of a
     silently-hanging dynamic stage, so it is started here if the binary is
     present, or fails loudly with the exact push/run commands if it is missing.
-    Never hang silently (principle 3)."""
+    Never hang silently (principle 3).
+
+    Returns the instrumentation record (ADR-0020): this process's Frida client
+    version, the device server binary's version before and after provisioning,
+    whether a running server was replaced and why, and where the server that is
+    now running came from. The version reads were always taken - the guard below
+    depends on one - and were previously dropped on the floor, so a run that
+    silently replaced the device's instrumentation was indistinguishable in the
+    record from one that did not."""
     server_path = _FRIDA_SERVER_DEVICE
+    client_version = _frida_venv_version()
+    instrument: dict = {
+        "client": client_version,
+        "server": None,
+        "server_before": None,
+        "server_source": None,
+        "replaced": False,
+        "replace_reason": None,
+        "unreadable": _SERVER_VERSION_UNREADABLE,
+        "handshake": None,
+    }
+
+    def _provisioning_failed(reason: str, message: str) -> FridaProvisioningError:
+        """The record as it stands when provisioning stops early: the server was
+        never inspected, which is not the same as having been read and found
+        unreadable."""
+        instrument["server_source"] = "provisioning_failed"
+        instrument["unreadable"] = f"not read - {reason}"
+        return FridaProvisioningError(message, instrument)
 
     # 1. adbd must be root for frida-server to inject across processes. adb root
     # is idempotent: it either restarts adbd as root or reports it is already
@@ -271,12 +317,13 @@ def _ensure_frida_server(adb: str, serial: str) -> None:
         capture_output=True, text=True, timeout=30,
     )
     if root.returncode != 0:
-        raise RuntimeError(
+        raise _provisioning_failed(
+            "adbd could not be made root",
             "'adb root' failed - frida-server needs a rooted adbd to attach to "
             "system_server / inject into the target app (got: "
             f"{(root.stderr or root.stdout).strip()}). Use a Google-APIs "
             "(non-Play-Store) emulator image or a rooted device, or pass "
-            "--skip-dynamic."
+            "--skip-dynamic.",
         )
 
     # 2. Any already-running frida-server must be root; a shell-run one silently
@@ -311,16 +358,31 @@ def _ensure_frida_server(adb: str, serial: str) -> None:
     #     version is wrong (or unreadable), tear it down and re-provision from
     #     the pinned tools/ copy below instead of returning optimistically.
     reprovision = False
+    if killed:
+        instrument["replaced"] = True
+        instrument["replace_reason"] = "a frida-server was running as 'shell', not root"
     if root_server_running:
-        if _device_frida_server_version(adb, serial, server_path) != _frida_venv_version():
+        instrument["server_before"] = _device_frida_server_version(adb, serial, server_path)
+        if instrument["server_before"] != client_version:
             subprocess.run(
                 [adb, "-s", serial, "shell", "pkill", "-f", "frida-server"],
                 capture_output=True, text=True, timeout=20,
             )
             root_server_running = False
             reprovision = True
+            instrument["replaced"] = True
+            instrument["replace_reason"] = (
+                "the running frida-server reported "
+                f"{instrument['server_before'] or 'no readable version'}, "
+                f"the client is {client_version}"
+            )
     if root_server_running and not reprovision:
-        return
+        instrument["server"] = instrument["server_before"]
+        instrument["server_source"] = "already_running"
+        instrument["unreadable"] = (
+            None if instrument["server"] else _SERVER_VERSION_UNREADABLE
+        )
+        return instrument
 
     # 3. Binary present? If not, auto-push it from the repo's tools/ copy - the
     #    dynamic stage provisions its own prerequisite. Fail loudly only if the
@@ -329,12 +391,14 @@ def _ensure_frida_server(adb: str, serial: str) -> None:
         [adb, "-s", serial, "shell", "ls", server_path],
         capture_output=True, text=True, timeout=20,
     )
-    if present.returncode != 0 or reprovision:
+    pushed = present.returncode != 0 or reprovision
+    if pushed:
         if not _FRIDA_SERVER_LOCAL.exists():
-            raise RuntimeError(
+            raise _provisioning_failed(
+                "the pinned tools/ copy is missing",
                 f"frida-server not on device at {server_path} and the local "
                 f"copy at {_FRIDA_SERVER_LOCAL} is missing - restore "
-                "tools/frida-server-16.7.19-x86_64 (or pass --skip-dynamic)."
+                "tools/frida-server-16.7.19-x86_64 (or pass --skip-dynamic).",
             )
         for cmd in (
             [adb, "-s", serial, "shell", "rm", "-f", server_path],
@@ -373,9 +437,25 @@ def _ensure_frida_server(adb: str, serial: str) -> None:
         capture_output=True, text=True, timeout=20,
     )
 
+    # ADR-0020: read back what the device now holds. The pinned copy is what was
+    # pushed; this is what the device reports, and the two are recorded apart so
+    # a push that did not take is visible in the record rather than assumed away.
+    instrument["server"] = _device_frida_server_version(adb, serial, server_path)
+    instrument["server_source"] = "pushed_from_tools" if pushed else "device_copy"
+    instrument["unreadable"] = (
+        None if instrument["server"] else _SERVER_VERSION_UNREADABLE
+    )
+    return instrument
 
-def setup_frida_connection(device_serial: str) -> frida.Device:
+
+def setup_frida_connection(device_serial: str) -> tuple[frida.Device, dict]:
     """Connect Frida to frida-server on the device, bridging WSL2 → Windows.
+
+    Returns the device and the instrumentation record that produced (or failed to
+    produce) the connection (ADR-0020) - see ``_ensure_frida_server``, plus the
+    protocol handshake where this path performs one. A caller that drops the
+    record leaves the run unable to say which Frida its dynamic verdict came
+    from, which is the whole point of returning it.
 
     On native Linux delegates to ``frida.get_device()``.
     On WSL2 starts an ADB forward + Windows Python relay, then connects
@@ -384,10 +464,14 @@ def setup_frida_connection(device_serial: str) -> frida.Device:
     # The most common dynamic-stage failure is a pushed-but-not-started
     # frida-server; start it (or fail loudly) before connecting so the stage
     # never hangs silently on a dead server (principle 3).
-    _ensure_frida_server(_require_adb(), device_serial)
+    instrument = _ensure_frida_server(_require_adb(), device_serial)
 
     if not _in_wsl():
-        return frida.get_device(device_serial, timeout=10)
+        # No handshake is performed on this path - get_device only enumerates
+        # attached devices; the first real talk with the server happens later at
+        # spawn. The record says nothing rather than claiming an effect that was
+        # not observed here.
+        return frida.get_device(device_serial, timeout=10), instrument
 
     adb_cmd = _adb_wrapper_path()
     win_ip = _start_relay(adb_cmd)
@@ -398,8 +482,23 @@ def setup_frida_connection(device_serial: str) -> frida.Device:
     # enumerate_processes; the _ensure_frida_server guard above is what prevents
     # the common dead-server hang, so this stays plain rather than adding fragile
     # threading to bound it.)
-    device.enumerate_processes()
-    return device
+    try:
+        device.enumerate_processes()
+    except Exception as exc:
+        # ADR-0020: the handshake is the effect that proves the *running* server
+        # matches this client's protocol version - the version reads above only
+        # describe the binary on disk. A failure here is exactly when that pair
+        # matters, so it rides out on the exception instead of being lost.
+        instrument["handshake"] = f"failed: {exc}"
+        raise FridaProvisioningError(
+            f"frida connected to the device but the protocol handshake failed: {exc}",
+            instrument,
+        ) from exc
+    instrument["handshake"] = (
+        "enumerate_processes returned - the running server answered this "
+        "client's protocol version"
+    )
+    return device, instrument
 
 
 def _require_adb() -> str:

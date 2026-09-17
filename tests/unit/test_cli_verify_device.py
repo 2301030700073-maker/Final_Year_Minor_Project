@@ -37,7 +37,7 @@ def _patch_deps(monkeypatch, *, present=True, frida_ok=True):
 
     monkeypatch.setattr(
         "cli.device.setup_frida_connection",
-        lambda serial: _FakeFridaDevice(frida_ok),
+        lambda serial: (_FakeFridaDevice(frida_ok), {"client": "16.7"}),
     )
     # The resolution guard runs between "device present" and the frida check;
     # stub it to a clean "unset" reading so the existing assertions are

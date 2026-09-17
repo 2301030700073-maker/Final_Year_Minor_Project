@@ -350,6 +350,9 @@ string in this APK; only its *ownership* is unverified.
 - TLS handshakes (capture proxy): `{{ handshake_capture_note }}`
 {% endif %}
 {% endif %}
+{% if dynamic_instrument -%}
+- Instrumentation: {{ dynamic_instrument }}
+{% endif %}
 ## Static vs. Dynamic Correlation
 
 {% if correlation -%}
@@ -776,6 +779,66 @@ def _observer_signal(messages) -> dict:
     }
 
 
+def _dynamic_instrument_sentence(stage_results: list[StageResult]) -> str | None:
+    """Which Frida produced this run's dynamic reading (ADR-0020).
+
+    The stage records the client version, the device frida-server binary's version
+    before and after provisioning, whether a running server was replaced, and the
+    protocol handshake's outcome. None of it used to be kept: the two version reads
+    existed only to decide whether to re-push the server, and were dropped at that
+    point - so a run that silently replaced the device's instrumentation rendered
+    identically to one that did not, and a `dynamically_confirmed` verdict named no
+    instrument at all while the report named six static tools.
+
+    None means no instrument exists for this run (the stage was skipped, or it
+    never reached a device); a stage that ran and failed before the device was
+    inspected says so in words rather than rendering as an absence. The two are
+    never collapsed - "no instrument" and "instrument not established" are
+    different statements, and only one of them is about the app."""
+    dynamic_stage = next((s for s in stage_results if s.stage == "dynamic"), None)
+    if dynamic_stage is None:
+        return None
+    evidence = dynamic_stage.evidence or {}
+    if "frida_messages" not in evidence and "instrument" not in evidence:
+        return None
+    instrument = evidence.get("instrument")
+    if not isinstance(instrument, dict):
+        return (
+            "not established - the dynamic stage recorded no instrumentation "
+            "detail, so the Frida behind this reading is unknown"
+        )
+
+    client = instrument.get("client") or "unreadable"
+    server = instrument.get("server")
+    source = {
+        "already_running": "already running on the device",
+        "pushed_from_tools": "pushed from the repo's pinned copy",
+        "device_copy": "the copy already on the device",
+    }.get(instrument.get("server_source") or "", "source not recorded")
+    if server:
+        device_half = f"frida-server {server} on the device ({source})"
+    else:
+        device_half = (
+            "the device's frida-server version was not read "
+            f"({instrument.get('unreadable') or 'reason not recorded'})"
+        )
+
+    parts = [f"frida {client} client", device_half]
+    if instrument.get("replaced"):
+        parts.append(
+            "a running server was replaced during this run "
+            f"({instrument.get('replace_reason') or 'reason not recorded'})"
+        )
+    handshake = instrument.get("handshake")
+    if not handshake:
+        parts.append("no protocol handshake was performed on this path")
+    elif str(handshake).startswith("failed"):
+        parts.append(f"the protocol handshake FAILED ({handshake})")
+    else:
+        parts.append("the protocol handshake succeeded")
+    return "; ".join(parts)
+
+
 def _hooks_engaged(stage_results: list[StageResult]) -> dict:
     """Auditable "bypass hooks engaged" summary derived from the dynamic stage's
     OWN Frida message stream, so engagement is attributable to the signatures
@@ -794,6 +857,7 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
     dynamic_stage = next((s for s in stage_results if s.stage == "dynamic"), None)
     absent = {
         "hooks_audit_present": False, "hooks_engaged_any": False,
+        "dynamic_instrument": None,
         "hooks_checkpoints_fired": [], "hooks_driving_signatures": [],
         "hooks_handauthored_scripts": [], "hooks_handauthored_script_paths": [],
         "hooks_loaded_not_engaged": [],
@@ -847,6 +911,8 @@ def _hooks_engaged(stage_results: list[StageResult]) -> dict:
     return {
         "hooks_audit_present": True,
         "hooks_engaged_any": engaged_any,
+        # ADR-0020: the instrument behind every reading in this audit.
+        "dynamic_instrument": _dynamic_instrument_sentence(stage_results),
         "hooks_checkpoints_fired": sorted(checkpoints),
         "hooks_driving_signatures": sorted(set(driving)),
         "hooks_handauthored_scripts": sorted(set(handauthored)),

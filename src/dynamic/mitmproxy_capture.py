@@ -1269,13 +1269,19 @@ def run_capture_stage(
         reachable = _device_reaches_proxy(serial, proxy_port)
 
         frida_messages: list = []
+        # ADR-0020: which Frida instruments this window, when one does. It stays
+        # None on the plain cold-start arm, where no Frida was involved at all -
+        # a different statement from "a Frida ran and its record was not
+        # established", and bypass_arm/bypass_applied beside it tell the two
+        # apart, so the record is never read as an instrument that was not there.
+        frida_instrument = None
         if bypass_script or bypass_source:
             # "With script" arm: spawn the app under Frida (paused), load the
             # pinning bypass, then resume - same spawn-inject-resume pattern as
             # frida_runner._run_frida. Routing/CA/mitmdump are already live
             # above, so only the launch mechanism differs from the plain
             # am-start arm. A pinning-only script is expected here.
-            device2, session, pid = frida_runner.attach(serial, package)
+            device2, session, pid, frida_instrument = frida_runner.attach(serial, package)
 
             def on_message(message, data):
                 frida_messages.append(message)
@@ -1596,6 +1602,9 @@ def run_capture_stage(
                     "frida_messages": [
                         m.get("payload", m) for m in frida_messages
                     ],
+                    # Which Frida injected the bypass this window ran under, so
+                    # the observer readings above name their instrument too.
+                    "frida_instrument": frida_instrument,
                 },
                 error=error,
             )
@@ -1646,6 +1655,7 @@ def run_capture_stage(
                 "frida_messages": [
                     m.get("payload", m) for m in frida_messages
                 ],
+                "frida_instrument": frida_instrument,
             },
         )
         return result

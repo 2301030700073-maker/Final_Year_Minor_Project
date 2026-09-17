@@ -2356,6 +2356,8 @@ def test_hooks_engaged_absent_without_dynamic_stage():
         "hooks_loaded_not_engaged": [],
         "hooks_root_probe_hits": 0, "hooks_ssl_effects": {},
         "hooks_script_errors": [], "hooks_env_normalization": False,
+        # ADR-0020: no dynamic stage ran, so there is no instrument to name.
+        "dynamic_instrument": None,
     }
 
 
@@ -2366,6 +2368,84 @@ def test_hooks_engaged_absent_when_dynamic_skipped():
     skipped = StageResult(stage="dynamic", status="skipped",
                           evidence={"reason": "no bypass script available"})
     assert _hooks_engaged([skipped])["hooks_audit_present"] is False
+
+
+def test_dynamic_instrument_sentence_names_the_frida_that_produced_the_reading():
+    # ADR-0020: a dynamically_confirmed verdict has to name the instrument it came
+    # from, the way the report already names its static tools.
+    from report.generator import _dynamic_instrument_sentence
+
+    stage = StageResult(stage="dynamic", status="success", evidence={
+        "frida_messages": [],
+        "instrument": {
+            "client": "16.7", "server": "16.7", "server_before": "16.6",
+            "server_source": "pushed_from_tools", "replaced": True,
+            "replace_reason": "the running frida-server reported 16.6, the client is 16.7",
+            "unreadable": "never used here",
+            "handshake": "enumerate_processes returned - the running server answered",
+        },
+    })
+    sentence = _dynamic_instrument_sentence([stage])
+    assert "frida 16.7 client" in sentence
+    assert "frida-server 16.7 on the device (pushed from the repo's pinned copy)" in sentence
+    assert "16.6" in sentence  # the version it replaced, not just the one it left
+    assert "was replaced during this run" in sentence
+    assert "the protocol handshake succeeded" in sentence
+
+
+def test_dynamic_instrument_sentence_reports_a_failed_handshake_but_not_as_clean():
+    # The handshake is the only effect that speaks to the *running* server; a run
+    # whose handshake failed must not read like one that never needed to make one.
+    from report.generator import _dynamic_instrument_sentence
+
+    stage = StageResult(stage="dynamic", status="failed", evidence={
+        "frida_messages": [],
+        "instrument": {"client": "16.7", "server": "16.6",
+                       "server_source": "already_running", "replaced": False,
+                       "handshake": "failed: unable to communicate with remote frida-server"},
+    })
+    sentence = _dynamic_instrument_sentence([stage])
+    assert "the protocol handshake FAILED" in sentence
+    assert "unable to communicate with remote frida-server" in sentence
+    assert "the protocol handshake succeeded" not in sentence
+
+
+def test_dynamic_instrument_sentence_never_fabricates_an_unread_version():
+    # ADR-0020: unmeasured is recorded as unmeasured. The pinned version is what
+    # the repo ships, not what the device was running, and the two are not
+    # interchangeable in a report that claims a bypass was confirmed.
+    from report.generator import _dynamic_instrument_sentence
+
+    stage = StageResult(stage="dynamic", status="success", evidence={
+        "frida_messages": [],
+        "instrument": {"client": "16.7", "server": None,
+                       "server_source": "device_copy", "replaced": False,
+                       "unreadable": "frida-server --version produced no readable version",
+                       "handshake": None},
+    })
+    sentence = _dynamic_instrument_sentence([stage])
+    assert "the device's frida-server version was not read" in sentence
+    assert "frida-server --version produced no readable version" in sentence
+    assert "frida-server 16.7" not in sentence  # the client's pin, never the device's
+    assert "no protocol handshake was performed on this path" in sentence
+
+
+def test_dynamic_instrument_sentence_keeps_no_instrument_and_not_established_apart():
+    # "There was no instrument for this run" and "this run did not establish one"
+    # are different statements about different things - only the second is about
+    # the app - so they are never collapsed into one rendering.
+    from report.generator import _dynamic_instrument_sentence
+
+    assert _dynamic_instrument_sentence([]) is None
+    skipped = StageResult(stage="dynamic", status="skipped",
+                          evidence={"reason": "no bypass script available"})
+    assert _dynamic_instrument_sentence([skipped]) is None
+    ran_without_record = StageResult(stage="dynamic", status="success",
+                                     evidence={"frida_messages": []})
+    assert "not established" in _dynamic_instrument_sentence([ran_without_record])
+    not_a_dict = StageResult(stage="dynamic", status="success",
+                             evidence={"frida_messages": [], "instrument": None})
+    assert "not established" in _dynamic_instrument_sentence([not_a_dict])
 
 
 def test_hooks_engaged_correlates_signatures_checkpoints_and_effects():

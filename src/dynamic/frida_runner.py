@@ -75,10 +75,14 @@ SCRIPTS_BY_TARGET_ACTION: dict[str, dict[Action, list[str]]] = {
 
 
 def attach(device_serial: str, package_name: str):
-    device = setup_frida_connection(device_serial)
+    """Spawn and attach to the target. Returns the device, session, pid and the
+    instrumentation record (ADR-0020) that produced them - the Frida client and
+    the device's frida-server - so the stage's own evidence can name the tool its
+    verdict rests on instead of asserting one from an unnamed instrument."""
+    device, instrument = setup_frida_connection(device_serial)
     pid = device.spawn([package_name])
     session = device.attach(pid)
-    return device, session, pid
+    return device, session, pid, instrument
 
 
 def load_script(session, script_name: str, on_message=None):
@@ -187,7 +191,8 @@ def _wait_for_checkpoint(
 
 
 def _self_terminated_result(
-    pid: int, messages: list, scripts_applied: list, target: str, start: float
+    pid: int, messages: list, scripts_applied: list, target: str, start: float,
+    *, instrument: dict | None = None,
 ) -> StageResult:
     """The FR-4.6 outcome: a spawned process that exited after the settle window
     self-terminated because it detected the instrumentation (Frida/root). Shared
@@ -205,6 +210,7 @@ def _self_terminated_result(
             ),
             "scripts_applied": scripts_applied, "pid": pid,
             "frida_messages": messages, "target": target,
+            "instrument": instrument,
         },
         error="app self-terminated due to detected instrumentation (FR-4.6)",
         duration_ms=elapsed_ms(start),
@@ -213,7 +219,7 @@ def _self_terminated_result(
 
 def _bypass_success_result(
     pid: int, messages: list, scripts_applied: list, target: str, start: float,
-    *, ui_liveness: dict | None = None,
+    *, ui_liveness: dict | None = None, instrument: dict | None = None,
 ) -> StageResult:
     """The FR-4.6 SUCCESS outcome, shared by the single- and two-spawn paths so
     the liveness contract cannot drift - the mirror of _self_terminated_result.
@@ -237,6 +243,7 @@ def _bypass_success_result(
             "frida_messages": messages, "target": target,
             "app_still_running": True,
             "ui_liveness": ui_liveness,
+            "instrument": instrument,
         },
         duration_ms=elapsed_ms(start),
     )
@@ -531,8 +538,9 @@ def run_dynamic_stage(
             combined source, resume, let the launcher draw, run the button-
             triggered UI actions for `ui_kind`, then wait for the checkpoint.
             Shared by both phases of the two-spawn flow so Phase A and Phase B
-            cannot drift. Returns (device, pid) for the caller's outcome."""
-            device, session, pid = attach(device_serial, package_name)
+            cannot drift. Returns (device, pid, instrument) for the caller's
+            outcome."""
+            device, session, pid, instrument = attach(device_serial, package_name)
             if script_src is not None:
                 load_script_source(session, script_src, on_message)
             device.resume(pid)
@@ -540,7 +548,7 @@ def run_dynamic_stage(
             for ui_action in _ui_actions_for(target, ui_kind):
                 _run_ui_action(device_serial, ui_action)
             _wait_for_checkpoint(messages, settle_seconds, require_evidence=True)
-            return device, pid
+            return device, pid, instrument
 
         # Phase A - SSL: a fresh spawn exercising the pinning check.
         _run_one_spawn(
@@ -549,14 +557,21 @@ def run_dynamic_stage(
             Action.SSL_ONLY, messages, settle_seconds,
         )
 
-        # Phase B - root: a fresh spawn exercising the root check.
-        root_device, root_pid = _run_one_spawn(
+        # Phase B - root: a fresh spawn exercising the root check. Its
+        # instrumentation record is the one carried into the stage evidence - it
+        # is the provisioning the root confirmation rests on, so a server
+        # replaced between the phases is visible here rather than only in Phase A.
+        root_device, root_pid, instrument = _run_one_spawn(
             _root_envelope_src, Action.ROOT_ONLY, messages, settle_seconds,
         )
+        outcome["instrument"] = instrument
 
         # FR-4.6: a spawned process gone after the settle window self-terminated.
         if classify_self_termination(_process_is_alive(root_device, root_pid)):
-            outcome["result"] = _self_terminated_result(root_pid, messages, scripts_applied, target, start)
+            outcome["result"] = _self_terminated_result(
+                root_pid, messages, scripts_applied, target, start,
+                instrument=instrument,
+            )
             return
 
         # FR-4.6 success via the shared builder: root_pid survived the settle
@@ -565,6 +580,7 @@ def run_dynamic_stage(
         # stays None ("not captured") - honest, not a guess.
         outcome["result"] = _bypass_success_result(
             root_pid, messages, scripts_applied, target, start,
+            instrument=instrument,
         )
 
     def _run_frida() -> None:
@@ -577,7 +593,8 @@ def run_dynamic_stage(
                 # (mutually exclusive button-triggered checks in one navigation).
                 _run_two_spawns()
                 return
-            device, session, pid = attach(device_serial, package_name)
+            device, session, pid, instrument = attach(device_serial, package_name)
+            outcome["instrument"] = instrument
 
             def on_message(message, data):
                 messages.append(message)
@@ -632,7 +649,10 @@ def run_dynamic_stage(
             # as a first-class, logged outcome with an explicit reason instead
             # of silently reporting a generic success or an unexplained crash.
             if classify_self_termination(_process_is_alive(device, pid)):
-                outcome["result"] = _self_terminated_result(pid, messages, scripts_applied, target, start)
+                outcome["result"] = _self_terminated_result(
+                    pid, messages, scripts_applied, target, start,
+                    instrument=instrument,
+                )
                 return
 
             # Real-time UI-responsiveness: the app is alive (self-termination
@@ -655,12 +675,22 @@ def run_dynamic_stage(
             # real-time UI evidence gathered just above.
             outcome["result"] = _bypass_success_result(
                 pid, messages, scripts_applied, target, start,
-                ui_liveness=ui_liveness,
+                ui_liveness=ui_liveness, instrument=instrument,
             )
         except Exception as exc:
+            # ADR-0020: a provisioning or handshake failure carries its own
+            # instrumentation record on the exception (FridaProvisioningError), so
+            # the failure path names the Frida it failed on. A failure that
+            # happened before provisioning touched the device leaves the record
+            # None - not established, which is not the same as a version.
+            outcome["instrument"] = getattr(exc, "instrument", outcome.get("instrument"))
             outcome["result"] = StageResult(
                 stage="dynamic", status="failed",
-                evidence={"frida_messages": messages}, error=str(exc),
+                evidence={
+                    "frida_messages": messages,
+                    "instrument": outcome["instrument"],
+                },
+                error=str(exc),
                 duration_ms=elapsed_ms(start),
             )
 
@@ -672,7 +702,10 @@ def run_dynamic_stage(
         # is orphaned, but the pipeline proceeds instead of hanging forever.)
         return StageResult(
             stage="dynamic", status="failed",
-            evidence={"frida_messages": messages},
+            evidence={
+                "frida_messages": messages,
+                "instrument": outcome.get("instrument"),
+            },
             error=f"frida stage exceeded {FRIDA_STAGE_TIMEOUT:.0f}s hard timeout - hung spawn/attach/load/resume",
             duration_ms=elapsed_ms(start),
         )

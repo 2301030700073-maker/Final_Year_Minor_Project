@@ -3617,7 +3617,7 @@ def verify_device_cmd(
     # 3. Root + frida-server (auto version-check/re-provision) + WSL2 relay +
     #    connect + enumerate. Any failure here surfaces the real reason.
     try:
-        frida_dev = device.setup_frida_connection(device_serial)
+        frida_dev, _instrument = device.setup_frida_connection(device_serial)
         count = len(frida_dev.enumerate_processes())
     except Exception as exc:
         console.print(f"[bold red]Frida connection failed:[/bold red] {exc}")

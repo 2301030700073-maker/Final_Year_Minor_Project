@@ -84,7 +84,8 @@ def test_ui_action_loop_runs_target_actions_in_order(monkeypatch):
 
     monkeypatch.setattr(
         "dynamic.frida_runner.attach",
-        lambda serial, pkg: (_FakeDevice(), object(), 1234),
+        lambda serial, pkg: (_FakeDevice(), object(), 1234,
+                             {"client": "16.7", "server": "16.7"}),
     )
     monkeypatch.setattr(
         "dynamic.frida_runner.load_script",
@@ -140,7 +141,7 @@ def test_both_androgoat_runs_two_spawns_one_per_dimension(monkeypatch):
     def fake_attach(serial, pkg):
         attach_calls.append(pkg)
         dev = device_a if len(attach_calls) == 1 else device_b
-        return dev, object(), dev.pid
+        return dev, object(), dev.pid, {"client": "16.7", "server": "16.7"}
 
     monkeypatch.setattr("dynamic.frida_runner.attach", fake_attach)
     monkeypatch.setattr(
@@ -194,7 +195,8 @@ def _run_capture_scripts_applied(monkeypatch, action, target, synthesized):
 
     monkeypatch.setattr(
         "dynamic.frida_runner.attach",
-        lambda serial, pkg: (_FakeDevice(), object(), 1234),
+        lambda serial, pkg: (_FakeDevice(), object(), 1234,
+                             {"client": "16.7", "server": "16.7"}),
     )
     monkeypatch.setattr(
         "dynamic.frida_runner.load_script",
@@ -264,7 +266,8 @@ def _run_with_captured_require_evidence(monkeypatch, action, target, synthesized
 
     monkeypatch.setattr(
         "dynamic.frida_runner.attach",
-        lambda serial, pkg: (_FakeDevice(), object(), 1234),
+        lambda serial, pkg: (_FakeDevice(), object(), 1234,
+                             {"client": "16.7", "server": "16.7"}),
     )
     monkeypatch.setattr(
         "dynamic.frida_runner.load_script",
@@ -304,7 +307,8 @@ def _run_with_captured_settle(monkeypatch, action, target, synthesized, settle_s
 
     monkeypatch.setattr(
         "dynamic.frida_runner.attach",
-        lambda serial, pkg: (_FakeDevice(), object(), 1234),
+        lambda serial, pkg: (_FakeDevice(), object(), 1234,
+                             {"client": "16.7", "server": "16.7"}),
     )
     monkeypatch.setattr(
         "dynamic.frida_runner.load_script",

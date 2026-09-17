@@ -52,11 +52,16 @@ def test_launcher_candidates_prefers_bat_on_windows(monkeypatch):
 
 def test_launcher_candidates_both_platforms_include_extensionless():
     """Both platform orders must include the extensionless form, so a repo that
-    vendors only one launcher style still resolves on either platform."""
-    import static.decompile as d
+    vendors only one launcher style still resolves on either platform.
+
+    Inspects the shared implementation in `common`, which is where the ordering
+    lives now: the ingest stage records the version of whatever this resolution
+    lands on, so a second copy of the order could name a build that never ran."""
     import inspect
 
-    src = inspect.getsource(d._launcher_candidates)
+    from common import launcher_candidates
+
+    src = inspect.getsource(launcher_candidates)
     # The function builds `order` from a platform branch; assert both branches
     # mention the bare stem (the extensionless launcher).
     assert 'f"{stem}.bat"' in src

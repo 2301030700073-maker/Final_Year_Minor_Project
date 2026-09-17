@@ -11,7 +11,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from common import StageResult, elapsed_ms, require_tool
+from common import StageResult, elapsed_ms, repo_root, require_tool, vendored_tool
 from ingest.signing_block import SigningBlock, read_signing_block
 
 
@@ -215,23 +215,31 @@ def tool_versions() -> dict[str, str]:
     toolchain. Where it is not discoverable the reported line is kept, marked
     as self-reported when it is known not to name a release."""
     versions: dict[str, str] = {}
-    for name, flag, reports_own_release in (
+    for name, flag, reports_own_release, from_build_tools in (
         # aapt2 takes a subcommand ("aapt2 version"), unlike the other three
         # tools which accept "--version" - a bare "--version" is an unknown
         # option for aapt2 and would record a garbage string, not the version.
-        ("aapt2", "version", True),
+        ("aapt2", "version", True, True),
         # Not a release: every build-tools prints the apksigner library version,
         # which has been 0.9 across releases that differ in what they can verify.
-        ("apksigner", "--version", False),
-        ("jadx", "--version", True),
-        ("apktool", "--version", True),
+        ("apksigner", "--version", False, True),
+        ("jadx", "--version", True, False),
+        ("apktool", "--version", True, False),
     ):
         try:
-            tool = require_tool(name)
+            # The build this run will actually invoke, not just whatever is on
+            # PATH: the static stage prefers the repo-vendored jadx, and the two
+            # differ here in a way that matters to a reader checking a coverage
+            # bound (ambient 1.5.1 vs vendored 1.5.6).
+            tool = vendored_tool(name, repo_root()) or require_tool(name)
             result = subprocess.run([tool, flag], capture_output=True, text=True, timeout=30)
             line = (result.stdout or result.stderr).strip().splitlines()
             reported = line[0] if line else "unknown"
-            revision = build_tools_revision(tool)
+            # Only a build-tools tool's release may be labelled as one. jadx is
+            # reached through a script beside its own jars, so an install that
+            # names a jar `<tool>-<ver>.jar` would otherwise have its version
+            # recorded as a build-tools release it is not.
+            revision = build_tools_revision(tool) if from_build_tools else None
             if revision:
                 versions[name] = f"{revision} (build-tools)"
             elif reports_own_release:

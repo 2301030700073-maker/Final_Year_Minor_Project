@@ -32,7 +32,14 @@ import time
 import zipfile
 from pathlib import Path
 
-from common import StageResult, sha256_bytes, elapsed_ms, require_tool
+from common import (
+    StageResult,
+    sha256_bytes,
+    elapsed_ms,
+    launcher_candidates,
+    require_tool,
+    vendored_tool,
+)
 
 # The host platform, captured ONCE at import. WINLAUNCH1 needs the launcher
 # order to differ per platform, but `_launcher_candidates` must not read
@@ -154,27 +161,15 @@ def apktool_timeout_for_size(size_bytes: int) -> int:
 
 
 def _launcher_candidates(base: Path, stem: str) -> list[Path]:
-    """Candidate launcher files for a vendored tool, platform-appropriately and
-    in preference order (WINLAUNCH1).
+    """Candidate launcher files for a vendored tool, in preference order.
 
-    The jadx/apktool distributions ship BOTH a POSIX shell launcher (`jadx`,
-    extensionless) and a Windows batch launcher (`jadx.bat`). On POSIX the
-    extensionless script is the executable; on Windows an extensionless shell
-    script is NOT executable - CreateProcess rejects it with
-    OSError [WinError 193] '%1 is not a valid Win32 application'. Preferring the
-    extensionless name unconditionally therefore silently breaks every jadx
-    invocation on Windows: the per-DEX path catches that OSError and records a
-    generic 'jadx failed', degrading the Java surface to partial (0 files) with
-    no actionable cause on the report.
-
-    Fix: order candidates by platform. On Windows try the `.bat`/`.cmd`/`.exe`
-    forms first; on POSIX try the extensionless form first. Extensionless stays
-    in both lists so a repo that vendors only one form still resolves."""
-    if IS_WINDOWS:
-        order = [f"{stem}.bat", f"{stem}.cmd", f"{stem}.exe", stem]
-    else:
-        order = [stem, f"{stem}.sh", f"{stem}.bat", f"{stem}.cmd"]
-    return [base / name for name in order]
+    The ordering itself lives in `common.launcher_candidates` (WINLAUNCH1) - the
+    ingest stage records the version of the tool that resolution lands on, so a
+    second copy here could name a different build than the one that ran. This
+    wrapper supplies the module's own platform flag, which keeps the flag
+    stubbable per-module (see IS_WINDOWS above) while the order stays in one
+    place."""
+    return launcher_candidates(base, stem, IS_WINDOWS)
 
 
 def _find_jadx() -> str:
@@ -192,10 +187,7 @@ def _find_jadx() -> str:
     `.bat` launcher is chosen over the POSIX extensionless script, which cannot
     be executed by CreateProcess."""
     root = Path(__file__).resolve().parents[2]  # <repo>/src/static -> <repo>
-    for candidate in _launcher_candidates(root / "tools" / "jadx" / "bin", "jadx"):
-        if candidate.exists():
-            return str(candidate)
-    return require_tool("jadx")
+    return vendored_tool("jadx", root, IS_WINDOWS) or require_tool("jadx")
 
 
 def _tail(text: str, max_chars: int = 4000) -> str:

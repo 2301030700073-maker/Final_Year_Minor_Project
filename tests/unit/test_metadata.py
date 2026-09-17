@@ -127,6 +127,12 @@ def test_tool_versions_degrades_to_unknown_when_tool_missing(monkeypatch):
     # metadata.py:164-169: a missing optional tool degrades to "unknown" (never
     # fails ingest), and a require_tool RuntimeError is swallowed the same way.
     monkeypatch.setattr("common.shutil.which", lambda name: None)
+    # Both halves of the resolution have to read as missing for "missing" to
+    # mean missing. The vendored tools/ tree is untracked - present on the
+    # reference box, absent on CI - so leaving this lookup live would make the
+    # test assert one thing locally and another on the runner, for a reason that
+    # has nothing to do with the code under test.
+    monkeypatch.setattr("ingest.metadata.vendored_tool", lambda name, root, is_windows=None: None)
     tool_versions.cache_clear()
     try:
         v = tool_versions()

@@ -12,6 +12,7 @@ self-reported line off as one.
 
 import subprocess
 
+from common import vendored_tool
 from ingest import metadata
 from ingest.metadata import build_tools_revision, tool_versions
 
@@ -55,8 +56,18 @@ def test_an_install_that_names_no_release_returns_none(tmp_path):
     assert build_tools_revision(_fake_tool(tmp_path)) is None
 
 
-def _probe(monkeypatch, tools: dict[str, str], reported: dict[str, str]):
+def _probe(monkeypatch, tools: dict[str, str], reported: dict[str, str], vendored=None):
+    """Run tool_versions() with both resolution halves under the test's control.
+
+    `tools`/`reported` drive the PATH half; `vendored` maps a tool name to a path
+    the repo-vendored lookup should return. Leaving it None stubs that lookup to
+    nothing, so a test meaning to exercise PATH resolution is not silently
+    answered by the real checkout's `tools/` directory."""
     monkeypatch.setattr("ingest.metadata.require_tool", lambda name: tools[name])
+    monkeypatch.setattr(
+        "ingest.metadata.vendored_tool",
+        lambda name, root, is_windows=None: (vendored or {}).get(name),
+    )
     monkeypatch.setattr("common.shutil.which", lambda name: tools.get(name))
 
     def _run(cmd, **kwargs):
@@ -115,6 +126,9 @@ def test_a_missing_tool_is_still_recorded_as_unknown(tmp_path, monkeypatch):
 
     monkeypatch.setattr("common.shutil.which", _which)
     monkeypatch.setattr("ingest.metadata.require_tool", _which)
+    # A missing tool is missing through both paths - the vendored tree is
+    # untracked, so it exists here and not on CI.
+    monkeypatch.setattr("ingest.metadata.vendored_tool", lambda name, root, is_windows=None: None)
     tool_versions.cache_clear()
     try:
         versions = metadata.tool_versions()
@@ -137,3 +151,67 @@ def test_the_probe_never_raises_on_a_failing_tool(tmp_path, monkeypatch):
     finally:
         tool_versions.cache_clear()
     assert versions["apksigner"] == "unknown"
+
+
+def test_a_tool_outside_build_tools_is_never_labelled_a_build_tools_release(tmp_path, monkeypatch):
+    """The release probe reads a versioned jar beside the binary. apktool is
+    reached through a script sitting beside its own jar, so without scoping, its
+    version would be recorded as a build-tools release it is not - a fabricated
+    toolchain claim in the one line meant to make the toolchain checkable."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    tool = bindir / "apktool"
+    tool.write_text("#!/bin/sh\n")
+    (bindir / "apktool-3.0.1.jar").write_bytes(b"")
+
+    versions = _probe(
+        monkeypatch,
+        {name: str(tool) for name in ("aapt2", "apksigner", "jadx", "apktool")},
+        {str(tool): "3.0.1"},
+    )
+    assert versions["apktool"] == "3.0.1"
+    assert "build-tools" not in versions["apktool"]
+
+
+def test_the_recorded_jadx_is_the_build_the_pipeline_runs(tmp_path, monkeypatch):
+    """decompile._find_jadx prefers the repo-pinned jadx over PATH, and the
+    Toolchain line has to name that build. The two differ here in a way that
+    matters: 1.5.1 is the ambient version the README documents as leaving some
+    real APKs' Java surface partial, and the vendored 1.5.6 is what decompiles
+    them - so naming 1.5.1 misattributes the coverage bound."""
+    bin_dir = tmp_path / "tools" / "jadx" / "bin"
+    bin_dir.mkdir(parents=True)
+    launcher = bin_dir / "jadx"
+    launcher.write_text("#!/bin/sh\n")
+
+    monkeypatch.setattr("ingest.metadata.repo_root", lambda: tmp_path)
+    monkeypatch.setattr("ingest.metadata.require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("common.shutil.which", lambda name: f"/usr/bin/{name}")
+
+    def _run(cmd, **kwargs):
+        class _Result:
+            stdout = "1.5.6" if cmd[0] == str(launcher) else "1.5.1"
+            stderr = ""
+
+        return _Result()
+
+    monkeypatch.setattr("ingest.metadata.subprocess.run", _run)
+    tool_versions.cache_clear()
+    try:
+        versions = tool_versions()
+    finally:
+        tool_versions.cache_clear()
+    assert versions["jadx"] == "1.5.6"
+
+
+def test_only_the_vendored_tools_are_preferred(tmp_path):
+    """A repo that vendors nothing resolves from PATH; the lookup returns None
+    rather than raising, so the fallback stays at the call site."""
+    (tmp_path / "tools").mkdir()
+    bin_dir = tmp_path / "tools" / "jadx" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "jadx").write_text("#!/bin/sh\n")
+
+    assert vendored_tool("jadx", tmp_path) == str(bin_dir / "jadx")
+    assert vendored_tool("apktool", tmp_path) is None
+

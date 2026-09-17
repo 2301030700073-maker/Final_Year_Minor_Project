@@ -9,6 +9,7 @@ from pathlib import Path
 
 import hashlib
 import json
+import os
 import shutil
 import time
 import yaml
@@ -69,6 +70,62 @@ def require_tool(name: str) -> str:
             "the reference WSL2 environment with the Android toolchain installed"
         )
     return path
+
+
+def repo_root() -> Path:
+    """`<repo>` - the checkout this module is running from (src/common.py -> ..)."""
+    return Path(__file__).resolve().parents[1]
+
+
+def launcher_candidates(base: Path, stem: str, is_windows: bool) -> list[Path]:
+    """Candidate launcher files for a vendored tool, platform-appropriately and
+    in preference order (WINLAUNCH1).
+
+    The jadx/apktool distributions ship BOTH a POSIX shell launcher (`jadx`,
+    extensionless) and a Windows batch launcher (`jadx.bat`). On POSIX the
+    extensionless script is the executable; on Windows an extensionless shell
+    script is NOT executable - CreateProcess rejects it with
+    OSError [WinError 193] '%1 is not a valid Win32 application'. Preferring the
+    extensionless name unconditionally therefore silently breaks every jadx
+    invocation on Windows: the per-DEX path catches that OSError and records a
+    generic 'jadx failed', degrading the Java surface to partial (0 files) with
+    no actionable cause on the report.
+
+    Fix: order candidates by platform. On Windows try the `.bat`/`.cmd`/`.exe`
+    forms first; on POSIX try the extensionless form first. Extensionless stays
+    in both lists so a repo that vendors only one form still resolves.
+
+    The platform is a PARAMETER, not a module global read here: the caller owns
+    the flag so a test can exercise the Windows branch by stubbing one module's
+    constant, without touching the process-wide `os.name` (which flips pathlib
+    into instantiating WindowsPath on a POSIX host and crashes pytest teardown).
+    One source of truth for the ordering, because the ingest stage records the
+    version of the tool this resolves and a second copy could disagree with the
+    build that actually ran."""
+    if is_windows:
+        order = [f"{stem}.bat", f"{stem}.cmd", f"{stem}.exe", stem]
+    else:
+        order = [stem, f"{stem}.sh", f"{stem}.bat", f"{stem}.cmd"]
+    return [base / name for name in order]
+
+
+def vendored_tool(name: str, root: Path, is_windows: bool | None = None) -> str | None:
+    """The repo-pinned build of `name` (`<root>/tools/<name>/bin/<name>`) or None
+    when the repo does not vendor one.
+
+    A pinned, reproducible toolchain beats an ambient system install whose
+    version can drift, and the drift is not cosmetic: the reference box's ambient
+    jadx is 1.5.1, which cannot fully decompile some real APKs, while the
+    vendored 1.5.6 can. Callers fall back to PATH with `require_tool` (loud when
+    absent); this returns None rather than raising so the choice stays visible
+    at the call site."""
+    if is_windows is None:
+        is_windows = os.name == "nt"
+    base = root / "tools" / name / "bin"
+    for candidate in launcher_candidates(base, name, is_windows):
+        if candidate.exists():
+            return str(candidate)
+    return None
 
 
 def read_text_ignore(path: Path) -> str | None:

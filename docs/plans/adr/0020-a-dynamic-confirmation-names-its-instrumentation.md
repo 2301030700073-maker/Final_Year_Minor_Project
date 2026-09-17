@@ -154,8 +154,8 @@ Implemented in `7a5d066b2`, ledger currency in `ad4fecb4e`.
   commit has, which is why those reports re-render with that sentence rather than
   claiming the absence of instrumentation. The absent-shape test now carries the
   new key so the render spread never leaves a template variable undefined.
-- **Suite: 1,942 passed** (`PYTHONPATH=src pytest tests/unit`) - ten more tests
-  than before the change, all green. `src/` is 23,318 LOC across 53 files.
+- **Suite: 1,944 passed** (`PYTHONPATH=src pytest tests/unit`) - twelve more tests
+  than before the change, all green. `src/` is 23,330 LOC across 53 files.
 - **A run that provisions twice is recorded as one run** (`8c0bc83d7`).
   `_ensure_frida_server` runs on every attach, and a two-spawn BOTH run attaches
   twice: the first attach is the one that can find a stale server and replace it,
@@ -167,6 +167,31 @@ Implemented in `7a5d066b2`, ledger currency in `ad4fecb4e`.
   earliest observation, and `attaches: 2` to mark a merged record. Pinned by
   `test_both_keeps_the_replacement_the_first_attach_performed`, which drives the
   real two-spawn path with a replacing first attach and a non-replacing second.
+
+### The end-to-end record
+
+AndroGoat, `--force-dynamic`, run `a5efd3f4` (2026-09-17T03:51:34Z) - the
+two-spawn BOTH path on the code above, which is the path a `dynamically_confirmed`
+root verdict rests on:
+
+- The stored dynamic evidence carries `{"client": "16.7", "server": "16.7",
+  "server_before": "16.7", "server_source": "already_running", "replaced": false,
+  "replace_reason": null, "unreadable": null, "handshake": "enumerate_processes
+  returned - the running server answered this client's protocol version",
+  "attaches": 2}` - so both attaches really did provision and the merge above ran
+  on real hardware, not only under a fake.
+- The rendered report line, beside `Root bypassed: True`, in
+  `outputs/reports/3e6f6b53…/a5efd3f4….md`:
+
+  `- Instrumentation: frida 16.7 client; frida-server 16.7 on the device
+  (already running on the device); the protocol handshake succeeded`
+
+  The run before this change rendered no such line at all.
+- What this run does **not** show: nothing needed replacing - the device already
+  held a matching root server - so the replacement wording is still exercised only
+  by fixture. It establishes that the record is produced, carried through
+  provisioning, stored in the stage evidence and rendered; it does not establish
+  the reprovision arm.
 
 ### What is and is not established
 

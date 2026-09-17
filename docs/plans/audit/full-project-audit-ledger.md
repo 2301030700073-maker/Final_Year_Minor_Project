@@ -8,7 +8,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 52 files, **22,552 LOC**
+- `src/`: 52 files, **22,582 LOC**
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
 - `tests/`: 92 files, **30,331 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
@@ -50,7 +50,7 @@ module's line count unchanged escapes it.)
 | `frida_runner.py` | 642 | 679 | +37 | — |
 | `hermes.py` | 198 | 235 | +37 | 2026-09-09 |
 | `indicators.py` | 192 | 267 | +75 | 2026-09-09 |
-| `ingest/metadata.py` | 324 | 343 | +19 | 2026-09-07 |
+| `ingest/metadata.py` | 324 | 373 | +49 | 2026-09-07 |
 | `ingest/normalize.py` | 174 | 208 | +34 | 2026-09-07 |
 | `jnibridge.py` | 175 | 202 | +27 | 2026-09-09 |
 | `manifest.py` | 457 | 544 | +87 | — |

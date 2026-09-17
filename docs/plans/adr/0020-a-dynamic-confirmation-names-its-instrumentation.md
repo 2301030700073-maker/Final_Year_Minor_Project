@@ -123,3 +123,50 @@ rather than degrading to silence. The ingest-time Toolchain line is deliberately
 - **Record it only on success.** A crashed or failed dynamic stage is the case
   where "which Frida was this?" gets asked, and the case where the version guard
   is most likely to have fired.
+
+## Verification
+
+Implemented in `7a5d066b2`, ledger currency in `ad4fecb4e`.
+
+- **The record's states are pinned by tests, not by the run that raised the
+  question.** Four tests in `tests/unit/test_device.py` drive
+  `_ensure_frida_server` through a matching root server already running
+  (`server_source: "already_running"`, `unreadable: null`), a shell-run server
+  replaced and re-pushed (`replaced: true` with the reason, `server_before: null`
+  because a shell server's version was never read, and `server: "16.7"` only
+  because the device reported it afterwards), a server whose version could not be
+  read (`server: null` plus the documented reason), and the failure path -
+  `FridaProvisioningError.instrument` carrying `server_source:
+  "provisioning_failed"` and `unreadable: "not read - ..."`, which is a different
+  claim from "inspected and unreadable". A fifth covers
+  `setup_frida_connection`'s handshake failure, which rides out the same way.
+- **The handshake arm is reachable on one transport path only, and says so.**
+  `frida.get_device` enumerates devices without talking to the server, so the
+  native path records no handshake, and a test pins that it records *none* rather
+  than implying one it did not perform. The success wording is reached only where
+  `enumerate_processes()` returns, and the failure wording only where it raises.
+- **The report sentence is pinned at each branch.** Four tests in
+  `tests/unit/test_report_generator.py` cover a full record, a failed handshake
+  that must not read like a clean one, an unread device version that must never
+  render as the pinned version, and the two collapse-risks kept apart: no dynamic
+  stage at all (no instrument) versus a stage that ran without a record
+  ("not established"). The second is the shape every run stored before this
+  commit has, which is why those reports re-render with that sentence rather than
+  claiming the absence of instrumentation. The absent-shape test now carries the
+  new key so the render spread never leaves a template variable undefined.
+- **Suite: 1,941 passed** (`PYTHONPATH=src pytest tests/unit`) - nine more tests
+  than before the change, all green. `src/` is 23,288 LOC across 53 files.
+
+### What is and is not established
+
+Established: the versions and the replacement are read from the device and
+recorded; an unreadable version renders as unread; failures carry the instrument;
+the renderer distinguishes "no instrument" from "not established".
+
+Not established by a captured run: the **reprovision arm** - a device actually
+carrying a mismatched frida-server - is fixture-verified only. No run in this
+repository's evidence has hit it, so its behaviour is pinned by tests rather than
+observed end-to-end, and this ADR does not claim otherwise. The capture stage's
+`frida_instrument` key is on the stage evidence but no render site reads it yet;
+the capture section shows its instrumentation through the dynamic section's
+sentence, and the ADR claims nothing more than that.

@@ -109,6 +109,12 @@ TEMPLATE = _env.from_string("""\
 {% else -%}
 **Signing:** unknown (no signing information extracted)
 {% endif %}
+{% if metadata.signer.verdict == "not_evaluated" -%}
+**Signature verification: NOT EVALUATED** - {{ metadata.signer.verdict_reason | md }}. This is a bound on the installed apksigner, which could not certify a scheme the file demonstrably carries - a statement about the toolchain, not a finding that the APK is unsigned.
+{% endif -%}
+{% if metadata.signer.verdict == "failed" -%}
+**Signature verification: FAILED** - {{ metadata.signer.verdict_reason | md }}. apksigner verified no scheme and the file's signing block carries none; treat the signature as absent or invalid.
+{% endif -%}
 {% if metadata.signer and metadata.signer.signer_count is not none and metadata.signer.signer_count > 1 -%}
 **All signers ({{ metadata.signer.signer_count }} total):**
 {% for s in metadata.signer.signers or [] -%}

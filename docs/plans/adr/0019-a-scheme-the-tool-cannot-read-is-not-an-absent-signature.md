@@ -1,6 +1,6 @@
 # 0019. A signature scheme the toolchain cannot evaluate is not a signature that is absent
 
-Status: Proposed
+Status: Accepted
 Date: 2026-09-17
 Relates to: ADR-0006 (tiers are never blended), ADR-0017 (a verdict must carry the
 observation it rests on), ADR-0005 (the audit record)
@@ -165,21 +165,50 @@ is precisely backwards for a tool whose purpose is analysing untrusted APKs.
 
 ## Verification
 
-Not yet implemented - this ADR is Proposed.
+Implemented 2026-09-17: `ef687e55a` (the parse), `329edcbb5` (the verdict and the
+removed halt), `12d363a1d` (the render), with a ledger-currency commit after each.
+Full suite **1917 passed**, from 1893 before - 24 new tests across three files.
 
-Planned, each part pinned by a test that fails without it:
+Each part is pinned by a test that fails without it:
 
-- Part 1 - a tri-state verdict whose `not_evaluated` arm is asserted distinct from
-  `failed` on the same apksigner output, so the two cannot collapse back together.
-- Part 2 - a fixture APK carrying a known set of signing-block pair IDs asserted
-  against the parser, plus the negative arm: a block carrying no pair for the
-  required scheme yields `failed`, never `not_evaluated`. The block layout is
-  position-sensitive (the Central Directory for these APKs is ~1 MB and the magic
-  is not within any fixed tail window), so the fixture must be built by the same
-  EOCD path a real APK takes rather than hand-placed.
-- Part 3 - an ingest run over an APK whose apksigner verdict is `not_evaluated`
-  reaches the static stages and produces a report; and one whose verdict is
-  `failed` also proceeds, with the finding present in the rendered output.
+- Part 1 - `tests/unit/test_signer_verdict.py` fixes the rule's three arms and, in
+  particular, the order of its tests: a scheme apksigner verified settles the
+  verdict even when a refusal was reported alongside it
+  (`test_a_verified_scheme_is_never_downgraded_by_a_refusal`), and a refusal with
+  no scheme in the block is `failed`, never the softer label
+  (`test_a_refusal_with_no_scheme_in_the_block_is_a_failure`).
+- Part 2 - `tests/unit/test_signing_block.py` builds fixtures the way a real APK
+  is laid out (the block spliced in before the Central Directory with the EOCD
+  offset corrected), and `test_the_block_is_located_from_the_eocd_not_a_tail_window`
+  asserts the magic sits more than 100 kB from the end of the file - so the
+  fixture cannot shrink into a case the tail search would also have passed. The
+  negative arm is `test_a_refusal_with_no_scheme_in_the_block_is_a_failure` and
+  `test_a_file_with_no_scheme_at_all_is_a_failure`.
+- Part 3 - `test_an_apksigner_refusal_no_longer_halts_ingest` runs the real
+  `ingest()` over an APK whose apksigner arm refuses, and requires `success` with
+  the package name extracted; `test_an_aapt2_failure_still_halts_ingest` pins the
+  gate that was deliberately left in place. `tests/unit/test_report_signer_verdict.py`
+  requires the three states to be distinguishable in the rendered text and a
+  pre-verdict record to gain no claim.
 
-Then the real check: re-run the sweep and require Facebook and Netflix to reach a
-report, with the reports naming the toolchain bound rather than an unsigned app.
+### What is and is not established
+
+Established, against the real files rather than fixtures: `read_signing_block`
+reports the pairs of all four sweep APKs, matching the hand investigation ID for
+ID (Facebook `7109871a 1b93ad61 f05368c0 6dff800d 2146444e 42726577`, Netflix
+`7109871a 1b93ad61 f05368c0 42726577`, WhatsApp `1b93ad61 7109871a 1b93ad61
+f05368c0 42726577`, AndroGoat `7109871a 42726577`); and `verify_signature`
+returns `verified` for AndroGoat and WhatsApp and `not_evaluated` for Facebook and
+Netflix, naming v2/v3.1/v3 in each reason. `whatsapp`'s duplicate v3.1 pair is
+named once, as the scheme set it is.
+
+Not established: whether the two `not_evaluated` APKs reach a completed analysis
+end to end. The re-run is in flight; this section records the outcome once it
+lands, rather than implying from the unit evidence that the pipeline now finishes.
+
+One thing this does **not** fix and never claimed to: the installed apksigner is
+still build-tools 31.0.2 and still cannot verify a v3.1 block, so on this machine
+a v3.1-signed APK's v3 status is genuinely unknown. The decision makes that
+legible - it does not make the tool newer. Installing build-tools 33+ remains
+worth doing, and `README.md` carries no version pin for `apksigner` today, which
+is how the gap stayed invisible.

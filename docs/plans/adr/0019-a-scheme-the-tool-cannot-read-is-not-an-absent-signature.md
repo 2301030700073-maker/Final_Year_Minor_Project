@@ -210,5 +210,15 @@ One thing this does **not** fix and never claimed to: the installed apksigner is
 still build-tools 31.0.2 and still cannot verify a v3.1 block, so on this machine
 a v3.1-signed APK's v3 status is genuinely unknown. The decision makes that
 legible - it does not make the tool newer. Installing build-tools 33+ remains
-worth doing, and `README.md` carries no version pin for `apksigner` today, which
-is how the gap stayed invisible.
+worth doing, and `README.md` now carries the pin (and the v3.1 consequence the
+pin exists for) that it did not carry when this gap stayed invisible.
+
+Checking the consequence above turned up the defect that made it untrue as first
+written: the report named the toolchain from `apksigner --version`, which prints
+`0.9` on every build-tools release ever shipped - the apksigner library version,
+identifying no release - so the bound a `not_evaluated` verdict rests on could
+not be read off the report at all. The release is now read from the install
+(`Pkg.Revision` in the build-tools `source.properties`, or the versioned launcher
+jar: `apksigner.jar -> apksigner-31.0.2.jar`), and an install that names no
+release keeps the reported line marked as self-reported rather than passing it
+off as one. `eba2a2a23`, `tests/unit/test_tool_versions_release.py`.

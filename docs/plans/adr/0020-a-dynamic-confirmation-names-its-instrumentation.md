@@ -154,8 +154,19 @@ Implemented in `7a5d066b2`, ledger currency in `ad4fecb4e`.
   commit has, which is why those reports re-render with that sentence rather than
   claiming the absence of instrumentation. The absent-shape test now carries the
   new key so the render spread never leaves a template variable undefined.
-- **Suite: 1,941 passed** (`PYTHONPATH=src pytest tests/unit`) - nine more tests
-  than before the change, all green. `src/` is 23,288 LOC across 53 files.
+- **Suite: 1,942 passed** (`PYTHONPATH=src pytest tests/unit`) - ten more tests
+  than before the change, all green. `src/` is 23,318 LOC across 53 files.
+- **A run that provisions twice is recorded as one run** (`8c0bc83d7`).
+  `_ensure_frida_server` runs on every attach, and a two-spawn BOTH run attaches
+  twice: the first attach is the one that can find a stale server and replace it,
+  after which the second finds a matching one already running. Keeping only the
+  second record - what the first implementation did - rendered a run that replaced
+  the device's instrumentation exactly like one that found it already correct, so
+  the two are merged: the second's device state (what is running now), the first's
+  replacement and its reason named as the first attach's, `server_before` from the
+  earliest observation, and `attaches: 2` to mark a merged record. Pinned by
+  `test_both_keeps_the_replacement_the_first_attach_performed`, which drives the
+  real two-spawn path with a replacing first attach and a non-replacing second.
 
 ### What is and is not established
 

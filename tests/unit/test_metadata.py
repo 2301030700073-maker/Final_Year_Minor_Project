@@ -133,11 +133,16 @@ def test_tool_versions_degrades_to_unknown_when_tool_missing(monkeypatch):
     # test assert one thing locally and another on the runner, for a reason that
     # has nothing to do with the code under test.
     monkeypatch.setattr("ingest.metadata.vendored_tool", lambda name, root, is_windows=None: None)
+    # Same for the two optional engines - recorded as absent here, not read from
+    # whatever this checkout has vendored.
+    monkeypatch.setattr("ingest.metadata.find_cfr_jar", lambda root: "")
+    monkeypatch.setattr("ingest.metadata.find_ghidra_headless", lambda root: None)
     tool_versions.cache_clear()
     try:
         v = tool_versions()
         assert v == {"aapt2": "unknown", "apksigner": "unknown",
-                     "jadx": "unknown", "apktool": "unknown"}
+                     "jadx": "unknown", "apktool": "unknown",
+                     "cfr": "not installed", "ghidra": "not installed"}
     finally:
         tool_versions.cache_clear()
 

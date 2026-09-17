@@ -56,18 +56,30 @@ def test_an_install_that_names_no_release_returns_none(tmp_path):
     assert build_tools_revision(_fake_tool(tmp_path)) is None
 
 
-def _probe(monkeypatch, tools: dict[str, str], reported: dict[str, str], vendored=None):
-    """Run tool_versions() with both resolution halves under the test's control.
+def _probe(
+    monkeypatch,
+    tools: dict[str, str],
+    reported: dict[str, str],
+    vendored=None,
+    cfr: str = "",
+    ghidra: str | None = None,
+):
+    """Run tool_versions() with every lookup under the test's control.
 
     `tools`/`reported` drive the PATH half; `vendored` maps a tool name to a path
     the repo-vendored lookup should return. Leaving it None stubs that lookup to
     nothing, so a test meaning to exercise PATH resolution is not silently
-    answered by the real checkout's `tools/` directory."""
+    answered by the real checkout's `tools/` directory. `cfr`/`ghidra` are the
+    same idea for the two optional engines: they default to absent, so a test
+    that is not about them is not answered by whatever this checkout happens to
+    have vendored."""
     monkeypatch.setattr("ingest.metadata.require_tool", lambda name: tools[name])
     monkeypatch.setattr(
         "ingest.metadata.vendored_tool",
         lambda name, root, is_windows=None: (vendored or {}).get(name),
     )
+    monkeypatch.setattr("ingest.metadata.find_cfr_jar", lambda root: cfr)
+    monkeypatch.setattr("ingest.metadata.find_ghidra_headless", lambda root: ghidra)
     monkeypatch.setattr("common.shutil.which", lambda name: tools.get(name))
 
     def _run(cmd, **kwargs):
@@ -129,12 +141,21 @@ def test_a_missing_tool_is_still_recorded_as_unknown(tmp_path, monkeypatch):
     # A missing tool is missing through both paths - the vendored tree is
     # untracked, so it exists here and not on CI.
     monkeypatch.setattr("ingest.metadata.vendored_tool", lambda name, root, is_windows=None: None)
+    monkeypatch.setattr("ingest.metadata.find_cfr_jar", lambda root: "")
+    monkeypatch.setattr("ingest.metadata.find_ghidra_headless", lambda root: None)
     tool_versions.cache_clear()
     try:
         versions = metadata.tool_versions()
     finally:
         tool_versions.cache_clear()
-    assert versions == {"aapt2": "unknown", "apksigner": "unknown", "jadx": "unknown", "apktool": "unknown"}
+    assert versions == {
+        "aapt2": "unknown",
+        "apksigner": "unknown",
+        "jadx": "unknown",
+        "apktool": "unknown",
+        "cfr": "not installed",
+        "ghidra": "not installed",
+    }
 
 
 def test_the_probe_never_raises_on_a_failing_tool(tmp_path, monkeypatch):
@@ -214,4 +235,49 @@ def test_only_the_vendored_tools_are_preferred(tmp_path):
 
     assert vendored_tool("jadx", tmp_path) == str(bin_dir / "jadx")
     assert vendored_tool("apktool", tmp_path) is None
+
+
+def test_the_optional_engines_are_named_so_their_absence_is_legible(tmp_path, monkeypatch):
+    """CFR and Ghidra are the two engines whose absence the report itself turns
+    into a coverage claim - no CFR is `fallback_unavailable` on the Java side, no
+    Ghidra is `partial` on the native side. Neither was recorded on the Toolchain
+    line at all, so a reader asking why either surface is not complete had
+    nothing on that line to answer with."""
+    tool = _fake_tool(tmp_path)
+    versions = _probe(
+        monkeypatch,
+        {name: str(tool) for name in ("aapt2", "apksigner", "jadx", "apktool")},
+        {str(tool): "1.0"},
+        cfr="/opt/cfr/cfr-0.152.jar",
+        ghidra="/opt/ghidra/ghidra_11.2.1_PUBLIC/support/analyzeHeadless",
+    )
+    assert versions["cfr"] == "0.152"
+    assert versions["ghidra"] == "11.2.1"
+
+
+def test_an_engine_that_is_not_installed_is_recorded_as_absent(tmp_path, monkeypatch):
+    tool = _fake_tool(tmp_path)
+    versions = _probe(
+        monkeypatch,
+        {name: str(tool) for name in ("aapt2", "apksigner", "jadx", "apktool")},
+        {str(tool): "1.0"},
+    )
+    assert versions["cfr"] == "not installed"
+    assert versions["ghidra"] == "not installed"
+
+
+def test_an_engine_found_under_a_name_carrying_no_release_is_still_present(tmp_path, monkeypatch):
+    """Found-but-unversioned and absent are different states driving different
+    report text, so they must not collapse into one another - the same rule the
+    build-tools probe follows when it refuses to guess a release."""
+    tool = _fake_tool(tmp_path)
+    versions = _probe(
+        monkeypatch,
+        {name: str(tool) for name in ("aapt2", "apksigner", "jadx", "apktool")},
+        {str(tool): "1.0"},
+        cfr="/tmp/cfr.jar",
+        ghidra="/tmp/ghidra/support/analyzeHeadless",
+    )
+    assert versions["cfr"] == "installed"
+    assert versions["ghidra"] == "installed"
 

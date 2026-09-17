@@ -11,7 +11,15 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from common import StageResult, elapsed_ms, repo_root, require_tool, vendored_tool
+from common import (
+    StageResult,
+    elapsed_ms,
+    find_cfr_jar,
+    find_ghidra_headless,
+    repo_root,
+    require_tool,
+    vendored_tool,
+)
 from ingest.signing_block import SigningBlock, read_signing_block
 
 
@@ -248,7 +256,36 @@ def tool_versions() -> dict[str, str]:
                 versions[name] = f"{reported} (not a build-tools release)"
         except Exception:
             versions[name] = "unknown"
+    # The two optional engines whose ABSENCE is itself a coverage bound: no CFR
+    # means the secondary Java recovery never ran (the stage records
+    # `fallback_unavailable`), and no Ghidra means native function bodies were
+    # only disassembled by capstone, never decompiled, so native reads `partial`.
+    # A Toolchain line that does not name them cannot explain either bound to
+    # whoever is reading the report and asking why a surface is not complete.
+    root = repo_root()
+    jar = find_cfr_jar(root)
+    headless = find_ghidra_headless(root)
+    versions["cfr"] = (_jar_release(jar) or "installed") if jar else "not installed"
+    versions["ghidra"] = (
+        (_ghidra_release(headless) or "installed") if headless else "not installed"
+    )
     return versions
+
+
+def _jar_release(jar_path: str) -> str | None:
+    """The release named by a `<name>-<version>.jar` path, or None when the name
+    carries none - an unversioned jar, or a `cfr` on PATH. None is not absence:
+    the caller distinguishes that, so a found-but-unversioned engine is recorded
+    as installed rather than as missing."""
+    match = re.search(r"-([0-9][0-9.]*[0-9])\.jar$", Path(jar_path).name)
+    return match.group(1) if match else None
+
+
+def _ghidra_release(headless_path: str) -> str | None:
+    """The release from a `.../ghidra_<version>_PUBLIC/support/analyzeHeadless`
+    path, or None when the install does not name one in the directory."""
+    match = re.search(r"ghidra_([0-9][0-9.]*[0-9])", headless_path)
+    return match.group(1) if match else None
 
 
 def parse_aapt2_output(raw: str) -> PackageMetadata:

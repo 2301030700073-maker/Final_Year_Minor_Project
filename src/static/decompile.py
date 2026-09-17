@@ -36,6 +36,7 @@ from common import (
     StageResult,
     sha256_bytes,
     elapsed_ms,
+    find_cfr_jar,
     launcher_candidates,
     require_tool,
     vendored_tool,
@@ -474,17 +475,11 @@ def _find_cfr_jar() -> str:
     `tools/cfr/` but the old loader only read `CFR_JAR`/PATH, so a default shell
     (no profile exports CFR_JAR) silently degraded the whole fallback to
     `fallback_unavailable`. Discovery is best-effort; absence still fails loudly
-    in the callers (principle 3), never silently accepted."""
-    jar = os.environ.get("CFR_JAR") or ""
-    if jar:
-        return jar
-    try:
-        root = Path(__file__).resolve().parents[2]  # <repo>/src/static -> <repo>
-        for p in sorted((root / "tools" / "cfr").glob("cfr*.jar")):
-            return str(p)
-    except OSError:
-        pass
-    return ""
+    in the callers (principle 3), never silently accepted.
+
+    The lookup itself lives in `common.find_cfr_jar` - the ingest stage records
+    which engine the run had, and that has to be the same answer this resolves."""
+    return find_cfr_jar(Path(__file__).resolve().parents[2])  # <repo>/src/static -> <repo>
 
 
 def _run_secondary_fallback(apk_path: Path, target_dir: Path, log_path: Path) -> dict:

@@ -30,7 +30,7 @@ from pathlib import Path
 
 import yaml
 
-from common import CATEGORIES, KNOWN_NATIVE_LIBS, Evidence, atomic_json_write, load_json_cache, load_yaml_entries, sha256_file, read_text_ignore
+from common import CATEGORIES, KNOWN_NATIVE_LIBS, Evidence, atomic_json_write, find_ghidra_headless, load_json_cache, load_yaml_entries, sha256_file, read_text_ignore
 from static.coverage import _min_coverage
 from static.indicators import find_native_indicator_categories
 from static.signatures import (
@@ -996,10 +996,12 @@ def _find_ghidra_headless() -> str | None:
     """Locate the Ghidra headless binary under tools/ghidra/ghidra_*/support/.
     Returns None (not raising) so a missing install degrades native coverage to
     partial instead of failing the whole scan - Ghidra is an optional deepening
-    of the symbol/string layer, not a required tool."""
-    root = Path(__file__).resolve().parents[2]
-    candidates = sorted((root / "tools" / "ghidra").glob("ghidra_*/support/analyzeHeadless"))
-    return str(candidates[-1]) if candidates else None
+    of the symbol/string layer, not a required tool.
+
+    The lookup itself lives in `common.find_ghidra_headless` - the ingest stage
+    records which engine a run had, and that has to be the same answer this
+    resolves."""
+    return find_ghidra_headless(Path(__file__).resolve().parents[2])
 
 
 def _ghidra_project_dir(out_path: Path) -> Path:

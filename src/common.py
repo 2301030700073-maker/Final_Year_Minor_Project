@@ -128,6 +128,46 @@ def vendored_tool(name: str, root: Path, is_windows: bool | None = None) -> str 
     return None
 
 
+def find_cfr_jar(root: Path) -> str:
+    """Locate a CFR jar: `CFR_JAR` env first, then `tools/cfr/cfr*.jar` under the
+    repo root (the reference-env install location), mirroring how
+    `find_ghidra_headless` discovers `tools/ghidra/`. Returns "" when none is
+    found so callers can fall back to a `cfr` binary on PATH. This is what makes
+    L-M1's secondary recovery work out-of-the-box: the jar is installed at
+    `tools/cfr/` but the old loader only read `CFR_JAR`/PATH, so a default shell
+    (no profile exports CFR_JAR) silently degraded the whole fallback to
+    `fallback_unavailable`. Discovery is best-effort; absence still fails loudly
+    in the callers (principle 3), never silently accepted.
+
+    Shared with the ingest stage, which records this engine in the run's
+    Toolchain line: whether it resolves is exactly what decides between a
+    secondary recovery and `fallback_unavailable`, so the engine named in the
+    report and the engine actually invoked have to come from one lookup."""
+    jar = os.environ.get("CFR_JAR") or ""
+    if jar:
+        return jar
+    try:
+        for candidate in sorted((root / "tools" / "cfr").glob("cfr*.jar")):
+            return str(candidate)
+    except OSError:
+        pass
+    return ""
+
+
+def find_ghidra_headless(root: Path) -> str | None:
+    """Locate the Ghidra headless binary under `tools/ghidra/ghidra_*/support/`.
+    Returns None (not raising) so a missing install degrades native coverage to
+    partial instead of failing the whole scan - Ghidra is an optional deepening
+    of the symbol/string layer, not a required tool.
+
+    Shared with the ingest stage for the same reason as `find_cfr_jar`: Ghidra's
+    presence is what decides whether a native function body was genuinely
+    decompiled or only the capstone fallback ran, and a report that bounds its
+    native coverage has to name which of the two produced it."""
+    candidates = sorted((root / "tools" / "ghidra").glob("ghidra_*/support/analyzeHeadless"))
+    return str(candidates[-1]) if candidates else None
+
+
 def read_text_ignore(path: Path) -> str | None:
     """Read a text file, returning None on OSError (unreadable/missing) instead
     of raising - the shared 'skip unreadable candidate' idiom for scanning loops

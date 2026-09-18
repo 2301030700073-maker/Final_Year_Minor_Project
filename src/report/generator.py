@@ -1351,11 +1351,23 @@ def _handshake_capture_note(verification, capture_summary: dict) -> str | None:
             + " - the app's own pin-check ran and a handshake completed through the "
             "hooked stack HERE, which is the window the flows above came from"
         )
-    else:
+    elif capture_summary.get("capture_bypass_applied"):
         observer_clause = (
-            "In this window the same observer script also recorded no SSL effect, "
-            "so the handshakes behind these flows took a path its hooks do not "
-            "observe"
+            "In this window the same observer script was loaded and recorded no SSL "
+            "effect, so the handshakes behind these flows took a path its hooks do "
+            "not observe"
+        )
+    else:
+        # No script was loaded into this window at all: the capture stage took its
+        # plain am-start arm, which force-stops the app and starts a fresh process
+        # with no Frida session, so the message stream this clause counts is empty
+        # by construction. Rendering that as "the observer recorded no SSL effect"
+        # claims a reading from an instrument that was never in the process - and
+        # then draws a conclusion from it. The flows still bound what those hosts
+        # did, which is what bypass_clause states.
+        observer_clause = (
+            "No observer script was loaded into this window, so it carries no "
+            "reading of the app's own TLS path"
         )
     return (
         f"{len(flows)} flow(s) decrypted by the capture proxy, which requires "

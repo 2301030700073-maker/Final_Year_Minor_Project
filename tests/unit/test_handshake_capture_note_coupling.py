@@ -126,16 +126,35 @@ def test_note_names_the_capture_windows_own_observer_record():
     assert "not promoted" in note
 
 
-def test_note_says_so_when_the_capture_windows_observer_was_silent_too():
-    # The mirror: this window's observer recorded nothing either, which means the
-    # handshakes behind the flows took a path its hooks do not see. That is a
-    # different, weaker statement than "the observer recorded effects here", and the
-    # note must not let the two read alike.
+def test_note_says_so_when_the_capture_windows_observer_was_loaded_and_silent():
+    # The mirror: a script WAS loaded into this window and recorded nothing, which
+    # means the handshakes behind the flows took a path its hooks do not see. That
+    # is a different, weaker statement than "the observer recorded effects here",
+    # and the note must not let the two read alike.
     ver = _ver(TLS_HANDSHAKE_NONE_OBSERVED)
     cap = {
         "capture_flows": [{"host": "api.example.com"}],
         "capture_observer_ssl_effects": {},
+        "capture_bypass_applied": True,
     }
     note = _handshake_capture_note(ver, cap)
-    assert "also recorded no SSL effect" in note
+    assert "was loaded and recorded no SSL effect" in note
     assert "the app's own pin-check ran" not in note
+
+
+def test_note_does_not_claim_a_reading_from_a_window_with_no_observer():
+    # The plain am-start arm loads nothing: the app is force-stopped and started
+    # fresh with no Frida session, so the message stream the note counts is empty by
+    # construction. Rendering that as an observer that "recorded no SSL effect"
+    # reports a reading that was never taken, and the clause built on it ("took a
+    # path its hooks do not observe") is a conclusion drawn from a probe that was
+    # not in the process.
+    ver = _ver(TLS_HANDSHAKE_NONE_OBSERVED)
+    cap = {
+        "capture_flows": [{"host": "api.example.com"}],
+        "capture_observer_ssl_effects": {},
+        "capture_bypass_applied": False,
+    }
+    note = _handshake_capture_note(ver, cap)
+    assert "No observer script was loaded into this window" in note
+    assert "recorded no SSL effect" not in note

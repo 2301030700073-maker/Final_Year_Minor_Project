@@ -241,3 +241,44 @@ class _Stage:
         self.status = status
         self.duration_ms = duration_ms
         self.error = error
+
+
+# --- a stage in flight is named, not only the last one that finished ----------
+
+
+def test_begin_marks_the_stage_in_flight(tmp_path):
+    """Completions alone name the stage BEFORE the one a run died in: the Telegram
+    run of 2026-09-18 was killed 20 minutes into `native_scan` and its sidecar read
+    `manifest_parse`. The marker is the other end of the stage, so a death inside
+    one names the stage it really was in, with the completed one kept beside it."""
+    rec = RunStatusRecorder(tmp_path, "hash1", {"run_id": "r1", "apk_hash": "hash1"})
+    rec.start()
+    rec.begin("manifest_parse")
+    rec.record({"stage": "manifest_parse", "status": "success", "duration_ms": 3})
+    rec.begin("native_scan")
+    on_disk = json.loads(rec.path.read_text(encoding="utf-8"))
+    # this is the death record: still inside native_scan, manifest_parse finished
+    assert on_disk["in_flight_stage"] == "native_scan"
+    assert on_disk["last_stage"] == "manifest_parse"
+    assert on_disk["last_stage_status"] == "success"
+
+
+def test_recording_a_stage_clears_the_in_flight_marker(tmp_path):
+    rec = RunStatusRecorder(tmp_path, "hash1", {"run_id": "r1"})
+    rec.start()
+    rec.begin("static_scan")
+    rec.record({"stage": "static_scan", "status": "success", "duration_ms": 5})
+    assert json.loads(rec.path.read_text(encoding="utf-8"))["in_flight_stage"] is None
+
+
+def test_finish_clears_the_in_flight_marker(tmp_path):
+    """A run that reached an end is not in a stage, whatever boundary it last
+    passed - a finished sidecar claiming an in-flight stage would be a false
+    interruption claim in the same direction as the one this module exists for."""
+    rec = RunStatusRecorder(tmp_path, "hash1", {"run_id": "r1"})
+    rec.start()
+    rec.begin("native_scan")
+    rec.finish(report_path=None)
+    on_disk = json.loads(rec.path.read_text(encoding="utf-8"))
+    assert on_disk["state"] == "finished"
+    assert on_disk["in_flight_stage"] is None

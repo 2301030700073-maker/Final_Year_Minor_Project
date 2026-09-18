@@ -257,6 +257,32 @@ call `_finalize_run` with a failing completion and with a failing save, assertin
 the sidecar on disk is finalized on both paths. Those last two fail against the
 pre-fix ordering by construction: the file would still read `started`.
 
+### The stage the run was inside
+
+`f81836c9c` corrected how a `started` sidecar is *read*; it did not correct what
+the sidecar says about *where* the run was. Recording only completed stages names
+the stage **before** the one a run died in, and a real death showed it: the
+Telegram run of 2026-09-18 was killed 20 minutes into `native_scan` and its
+sidecar read `last stage: manifest_parse (success)`. The record named the wrong
+stage for precisely the death it exists to record - the defect this ADR was
+written about, one stage along.
+
+The recorder now has `begin(stage)`, written before a stage's work starts and
+cleared by the next `record` or by `finish`, and the note prefers it: `was in
+'native_scan' when the record stops (last completed: manifest_parse (success))`.
+Boundaries are marked where stages begin - `_wrap_stage` covers every stage
+dispatched through it, and audit, decompile, dynamic and the capture window call
+it themselves - and a boundary that is not marked costs only precision, because
+the note falls back to the last completed stage, which is what it said before.
+
+Six tests pin it. Three on the sidecar: the marker is written, cleared by a
+completed stage, and cleared by an ending (a finished sidecar claiming to be in a
+stage would be a false interruption claim in the same direction as the one this
+module exists for). Three on the surface: the observed death is named by the
+stage it was inside, the fallback wording is unchanged for a sidecar written
+before the field existed, and a boundary that cannot write its marker prints the
+same caution `_print_stage` prints rather than raising.
+
 ### What is and is not established
 
 Established: an interrupted run is on disk with the stage it reached and did not

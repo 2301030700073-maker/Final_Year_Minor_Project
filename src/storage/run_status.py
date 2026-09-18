@@ -9,7 +9,9 @@ anywhere of how far it got or that it had stopped at all.
 
 This module records the progress as it happens, in the run's own analysis
 directory, so that a run killed by a signal that cannot be caught still leaves a
-record reading "reached native_scan and did not reach the next stage".
+record reading `was in native_scan (last completed: manifest_parse)`. Recording
+only completed stages was not enough for that: it named the stage *before* the one
+a run died in.
 
 Two deliberate boundaries:
 
@@ -105,7 +107,7 @@ def run_is_alive(status: dict[str, Any]) -> bool | None:
 class RunStatusRecorder:
     """Writes a run's progress to its analysis directory as the run proceeds.
 
-    Usage is start() -> record(stage) per completed stage -> finish(). Every
+    Usage is start() -> begin(stage) / record(stage) per stage -> finish(). Every
     method writes the whole (small) document, so the file on disk is always a
     complete JSON object rather than an append log a reader would have to
     interpret; the cost is a few hundred bytes per stage against a pipeline whose
@@ -121,6 +123,11 @@ class RunStatusRecorder:
             "stages": [],
             "last_stage": None,
             "last_stage_status": None,
+            # The stage running RIGHT NOW, cleared as soon as one is recorded.
+            # Completions alone name the wrong place: a run killed inside stage N
+            # leaves `last_stage` naming N-1, which is the stage before the one it
+            # died in.
+            "in_flight_stage": None,
         }
         # Who is running, so a reader can ask whether that run is still alive.
         # The pid alone cannot answer it - pids are recycled, and a stale pid
@@ -145,6 +152,23 @@ class RunStatusRecorder:
     def start(self) -> None:
         self._write()
 
+    def begin(self, stage_name: str) -> None:
+        """Record that a stage has STARTED.
+
+        Completions alone cannot say where a run stopped. A run killed while
+        executing stage N leaves `last_stage` naming N-1, so the record names the
+        stage before the one it died in: the Netflix run of 2026-09-17 was read as
+        `manifest_parse` while it was inside the native scan, and the Telegram run
+        of 2026-09-18 died 20 minutes into `native_scan` leaving the same
+        `manifest_parse` behind it. This is the other end of the stage, and a
+        reader holding both gets "was in '<stage>' when the record stops (last
+        completed: <stage>)".
+
+        Cleared by the next `record` or `finish`, so a finished run never claims a
+        stage in flight."""
+        self._data["in_flight_stage"] = stage_name
+        self._write()
+
     def record(self, stage: Any) -> None:
         """Record one completed stage. Accepts a StageResult or the dict it
         serializes to, because the pipeline holds the objects on the live path and
@@ -167,6 +191,10 @@ class RunStatusRecorder:
         self._data["stages"].append(entry)
         self._data["last_stage"] = name
         self._data["last_stage_status"] = status
+        # The stage that just completed is no longer in flight. Unconditional
+        # because the pipeline runs one stage at a time, so whatever was marked is
+        # what this result is the end of.
+        self._data["in_flight_stage"] = None
         self._write()
 
     def finish(
@@ -204,6 +232,9 @@ class RunStatusRecorder:
             # same reason as save_error: the state says an end-record is missing,
             # the reason says which one and why.
             self._data["audit_error"] = str(audit_error)
+        # The run reached an end, so nothing is in flight whatever the last stage
+        # boundary left behind.
+        self._data["in_flight_stage"] = None
         self._write()
 
 

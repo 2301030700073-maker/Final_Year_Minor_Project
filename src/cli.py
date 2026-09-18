@@ -676,6 +676,41 @@ def _operator_identity() -> str:
 _RUN_STATUS: RunStatusRecorder | None = None
 
 
+def _caution_sidecar(exc: Exception) -> None:
+    """One wording for the sidecar's write failure, shared by both writers below.
+
+    Never silent: an unwritable sidecar is precisely the condition that would
+    leave an interrupted run unrecorded. It does not halt a 40-minute analysis,
+    but it says so, loudly, on the spot."""
+    console.print(
+        f"[red]CAUTION: could not write the run-status sidecar ({exc}) - "
+        "an interruption from here would not record where it stopped.[/red]"
+    )
+
+
+def _begin_stage(stage_name: str) -> None:
+    """Mark a stage as STARTED in the progress sidecar (ADR-0021).
+
+    A run that dies inside a stage is recorded by its completions alone as having
+    died in the stage before it: the Telegram run of 2026-09-18 was killed 20
+    minutes into `native_scan` and its sidecar read `last stage: manifest_parse
+    (success)`, naming the stage before the one it died in. Nothing is printed
+    here - the stage's own OK/FAILED line reports the console - but a write that
+    fails gets the same caution `_print_stage` gives it.
+
+    Called from every named stage boundary: the `_wrap_stage` helper covers the
+    stages dispatched through it, and the directly-invoked stages (audit,
+    decompile, dynamic, the capture window) call it themselves. A boundary that
+    does not is not a false claim - the note falls back to the last completed
+    stage - it is only a coarser answer."""
+    if _RUN_STATUS is None:
+        return
+    try:
+        _RUN_STATUS.begin(stage_name)
+    except OSError as exc:
+        _caution_sidecar(exc)
+
+
 def _print_stage(result: StageResult) -> None:
     icon = {"success": "[green]OK[/green]", "failed": "[bold red]FAILED[/bold red]", "skipped": "[yellow]SKIPPED[/yellow]"}[result.status]
     console.print(f"{icon}  {result.stage}  ({result.duration_ms}ms)")
@@ -685,13 +720,7 @@ def _print_stage(result: StageResult) -> None:
         try:
             _RUN_STATUS.record(result)
         except OSError as exc:
-            # Never silent: an unwritable sidecar is precisely the condition that
-            # would leave an interrupted run unrecorded. It does not halt a
-            # 40-minute analysis, but it says so, loudly, on the spot.
-            console.print(
-                f"[red]CAUTION: could not write the run-status sidecar ({exc}) - "
-                "an interruption from here would not record where it stopped.[/red]"
-            )
+            _caution_sidecar(exc)
 
 
 def _completeness_console_caveat(
@@ -1181,6 +1210,9 @@ def _reclassify_empty_capture(
 def _wrap_stage(stage_name: str, fn, *args, **kwargs):
     """For pure functions that don't return a StageResult themselves - always
     produces one, so failures here are as loud as everywhere else (NFR-1)."""
+    # The stage is marked in flight before the work starts, so a run killed inside
+    # it names this stage rather than the one it finished last (ADR-0021).
+    _begin_stage(stage_name)
     start = time.monotonic()
     try:
         raw_result = fn(*args, **kwargs)
@@ -1581,6 +1613,7 @@ def run(
     _RUN_STATUS.start()
 
     # --- audit (FR-8.2/FR-3.3: before any actual analysis stage) ---
+    _begin_stage("audit")
     audit_result = record_authorization(
         audit_log_path=AUDIT_LOG_PATH,
         justification=justification,
@@ -1595,6 +1628,7 @@ def run(
         _halt(stage_results)
 
     # --- decompile ---
+    _begin_stage("decompile")
     decompile_result = decompile(apk, ANALYSIS_ROOT, apk_hash)
     stage_results.append(decompile_result)
     _print_stage(decompile_result)
@@ -2314,6 +2348,9 @@ def run(
     # classification (never "only unit-verified") and keeps the generated script
     # in the run evidence even when no device can deploy it.
     synth = synthesize(classification, dynamic_action)
+    # The dynamic stage is the longest in the pipeline (install, launch, hook, run),
+    # so a death inside it must not be recorded as the classification it followed.
+    _begin_stage("dynamic")
     if skip_dynamic:
         dynamic_stage = StageResult(
             stage="dynamic", status="skipped",
@@ -2725,6 +2762,7 @@ def run(
             capture_bypass = None
             if not skip_dynamic and dynamic_action in (Action.SSL_ONLY, Action.BOTH):
                 capture_bypass = synthesize(classification, Action.SSL_ONLY).source
+            _begin_stage("capture-traffic")
             capture_stage = mitmproxy_capture.run_capture_stage(
                 capture_serial, package_name, ANALYSIS_ROOT / "captures",
                 drive_ui=drive_ui,
@@ -3605,10 +3643,25 @@ def _print_uncompleted_runs(result: dict) -> None:
                 f"without an audit completion ({why})"
             )
         else:
-            stage = (
-                f"last stage: {status.get('last_stage') or 'none recorded'} "
-                f"({status.get('last_stage_status') or 'n/a'})"
-            )
+            # Where the run was, not only where it last succeeded. A run killed
+            # inside a stage has no completion for it, so the last completed stage
+            # is the one BEFORE the one it died in - the Telegram run of
+            # 2026-09-18 read `manifest_parse` while it was 20 minutes into the
+            # native scan. The in-flight marker names the real stage; without one
+            # (an older sidecar, or a boundary not marked) the last completed stage
+            # is all there is to say, and it is said as that.
+            last = status.get("last_stage")
+            in_flight = status.get("in_flight_stage")
+            if in_flight and in_flight != last:
+                last_note = f"last completed: {last or 'none recorded'}"
+                if last:
+                    last_note += f" ({status.get('last_stage_status') or 'n/a'})"
+                stage = f"was in '{in_flight}' when the record stops ({last_note})"
+            else:
+                stage = (
+                    f"last stage: {last or 'none recorded'} "
+                    f"({status.get('last_stage_status') or 'n/a'})"
+                )
             # `started` is not a death. A run whose process is still here is in
             # flight, and reporting it among the never-completed would assert an
             # ending that has not happened (ADR-0021, its end-to-end correction).

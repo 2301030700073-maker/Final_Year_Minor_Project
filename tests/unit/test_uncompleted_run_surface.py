@@ -342,3 +342,47 @@ class _Stage:
         self.status = status
         self.duration_ms = duration_ms
         self.error = error
+
+
+def test_the_note_names_the_stage_a_dead_run_was_inside(tmp_path, monkeypatch, capsys):
+    """The observed defect: Telegram's run of 2026-09-18 was killed 20 minutes into
+    `native_scan` while its sidecar read `last stage: manifest_parse (success)` -
+    the stage before the one it died in. The note now says where the run was, and
+    keeps the last completed stage as the floor it is."""
+    monkeypatch.setattr(cli, "ANALYSIS_ROOT", tmp_path)
+    rec = RunStatusRecorder(tmp_path, "deadbeef", {"run_id": "r-orphan", "apk_hash": "deadbeef"})
+    rec.start()
+    rec.begin("manifest_parse")
+    rec.record({"stage": "manifest_parse", "status": "success", "duration_ms": 1})
+    rec.begin("native_scan")
+    path = run_status_path(tmp_path, "deadbeef")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["pid"] = _dead_pid()  # the process that wrote this sidecar is gone
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    cli._print_uncompleted_runs({
+        "uncompleted_run_details": [
+            {"run_id": "r-orphan", "apk_hash": "deadbeef", "action": "BOTH"}
+        ],
+    })
+    flat = " ".join(capsys.readouterr().out.split())
+    assert (
+        "ended with its process gone; was in 'native_scan' when the record stops "
+        "(last completed: manifest_parse (success))"
+    ) in flat
+    assert "last stage:" not in flat
+
+
+def test_begin_stage_cautions_instead_of_raising_when_the_sidecar_cannot_be_written(
+    tmp_path, monkeypatch, capsys
+):
+    """Same rule as _print_stage's write: a stage boundary that cannot record
+    itself must not kill a 40-minute analysis, and must not be silent about it."""
+    monkeypatch.setattr(cli, "ANALYSIS_ROOT", tmp_path)
+    rec = RunStatusRecorder(tmp_path, "deadbeef", {"run_id": "r-orphan"})
+    rec.start()
+    rec.path.unlink()
+    rec.path.mkdir()  # a directory where the file goes: every write fails
+    monkeypatch.setattr(cli, "_RUN_STATUS", rec)
+    cli._begin_stage("native_scan")  # must not raise
+    assert "could not write the run-status sidecar" in " ".join(capsys.readouterr().out.split())

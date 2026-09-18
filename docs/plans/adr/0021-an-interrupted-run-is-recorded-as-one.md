@@ -182,24 +182,39 @@ The implementation is `60ead000f`; the surface tests and this record follow it.
 
 ### The end-to-end record
 
-Netflix, `--skip-dynamic`, run `86074f6762cc468bacf42ced4d5e7059`
-(2026-09-18T03:53:39Z), SIGKILLed as a **process group** 110 s in - the same
-uncatchable signal the original run died of, with no handler, `finally` or trap
-able to run:
+Netflix, run `86074f6762cc468bacf42ced4d5e7059` (2026-09-18T03:53:39Z). This run
+was meant to show the record surviving a signal nothing can catch. **It does not
+show that, and as first written this section claimed it did.** The kill never
+landed: `pid 17977` was still alive 26 minutes later, its own process group and
+session, and had recorded six stages by then - audit, decompile,
+signature_load:root, signature_load:ssl, `static_scan` (851,677 ms by itself) and
+manifest_parse - before carrying on into the native scan. The snapshot read 110 s
+in was a run mid-flight, not a death.
 
-- The console's last line was `OK signature_load:ssl`, and the sidecar on disk at
-  `outputs/analysis/b8965fec…/run_status.json` reads `state: "started"`,
-  `last_stage: "signature_load:ssl"`, `last_stage_status: "success"`, the run's
-  identity (`run_id`, `apk_hash`, `package_name: com.netflix.mediaclient`,
-  `operator`, `justification`, `git_commit`), and all four completed stages with
-  their durations - audit, decompile, signature_load:root, signature_load:ssl -
-  matching the console line for line. The original run left a log line and
-  nothing else.
-- `verify-audit-log` then reported **33** uncompleted runs (the 32 above plus
-  this one), naming `86074f67…` with its identity and last stage - on the same
-  invocation that printed `Audit log integrity FAILED` for the known line-185
-  fork. Before this change that command printed the fork and exited, and the
-  orphan list was unreachable.
+What the run does establish, and what the change exists for:
+
+- **Progress is recorded as the run proceeds**, which is the claim that survives.
+  While the process was still working, the sidecar on disk carried its identity
+  (`run_id`, `apk_hash`, `package_name`, `operator`, `justification`,
+  `git_commit`) and each completed stage with its duration - a 14-minute
+  `static_scan` is on disk as a finished stage, which no console line could name.
+  The original Netflix run left a log line and nothing else.
+- **`verify-audit-log` reached the run** as an authorization with no completion,
+  on the same invocation that printed `Audit log integrity FAILED` for the known
+  line-185 fork. That is the reachability fix, and it holds whether or not the run
+  was dead.
+
+And what the snapshot exposed, which the first version of this ADR missed:
+**`state: "started"` does not mean the run died.** A live run reads `started`
+too, and this one proved it by staying alive for half an hour under a snapshot
+that had been read as an interruption. The premise above - "a sidecar left in
+`started` is therefore the record of a run that reached a named stage and did not
+reach the next one" - is false for every run still in flight, and the surface
+built on it counts an in-flight run among those that "never completed". The
+correction this record owes is a liveness probe: the sidecar records the host and
+the process that owns it, and the note asks whether that process is still alive
+before it says a run ended. Where the host is not the one asking, the answer is
+unknown - never dead.
 
 ### The ending that exits non-zero
 

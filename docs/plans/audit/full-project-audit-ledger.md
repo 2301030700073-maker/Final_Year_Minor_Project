@@ -10,7 +10,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 - `src/`: 54 files, **23,575 LOC**
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
-- `tests/`: 102 files, **34,472 LOC** (more test than source; informational, see §Currency).
+- `tests/`: 103 files, **34,665 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
 
 ## Currency — what each ✅ covers

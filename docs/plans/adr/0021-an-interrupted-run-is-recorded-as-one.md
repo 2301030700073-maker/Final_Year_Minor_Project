@@ -145,4 +145,72 @@ WSL2 box, whose `dmesg` here carries boot messages only. Consistent is not
 established, and the fix above is correct either way, which is why it does not
 depend on the answer.
 
-The remaining sections (what the tests pin) are recorded once the code lands.
+### What the tests pin
+
+`40a4340e2` fixed the same defect class in the sweep harness that drove the
+Netflix run: it printed each target's exit status to stdout and kept nothing
+durable, so the wrapper's death took the account of the sweep with it. It now
+journals each target before it launches and names how it died (rc, signal,
+timeout, or `no_report`), which is the harness half of the same rule.
+
+The implementation is `60ead000f`; the surface tests and this record follow it.
+
+- **The record's states are pinned by tests, not by the run that raised the
+  question.** Eleven tests in `tests/unit/test_run_status.py` cover identity at
+  start, a stage appended from both producer shapes (the live path hands
+  `StageResult` objects, the regeneration path hands dicts), a failed stage
+  keeping its reason, finalization with and without a report, the write being
+  atomic and leaving no temp file, and the two collapses this module exists to
+  prevent: absent-versus-unreadable, and a corrupt sidecar reading as a run that
+  never started. A write failure must raise rather than go silent - that failure
+  is the condition that loses the trace.
+- **The surface is pinned where the defect was.** Eleven tests in
+  `tests/unit/test_uncompleted_run_surface.py` cover the pairing carrying
+  identity rather than bare ids, a completed run not being reported as an orphan,
+  both `verify_audit_log` return sites carrying the same keys, the note naming
+  the APK and last stage, `no sidecar` and `sidecar unreadable` staying distinct,
+  and `_print_stage` recording through the choke point while printing a caution
+  instead of raising when the sidecar cannot be written. The load-bearing one is
+  `test_the_command_reports_orphans_before_exiting_on_chain_errors`: it builds a
+  genuinely broken chain (a flipped `prev_hash`, the same class of break the
+  authoritative log carries at line 185) and requires the note to print *and*
+  the exit code to stay 1. That is the original defect stated as an assertion -
+  it fails against the code before this change.
+
+### The end-to-end record
+
+Netflix, `--skip-dynamic`, run `86074f6762cc468bacf42ced4d5e7059`
+(2026-09-18T03:53:39Z), SIGKILLed as a **process group** 110 s in - the same
+uncatchable signal the original run died of, with no handler, `finally` or trap
+able to run:
+
+- The console's last line was `OK signature_load:ssl`, and the sidecar on disk at
+  `outputs/analysis/b8965fec…/run_status.json` reads `state: "started"`,
+  `last_stage: "signature_load:ssl"`, `last_stage_status: "success"`, the run's
+  identity (`run_id`, `apk_hash`, `package_name: com.netflix.mediaclient`,
+  `operator`, `justification`, `git_commit`), and all four completed stages with
+  their durations - audit, decompile, signature_load:root, signature_load:ssl -
+  matching the console line for line. The original run left a log line and
+  nothing else.
+- `verify-audit-log` then reported **33** uncompleted runs (the 32 above plus
+  this one), naming `86074f67…` with its identity and last stage - on the same
+  invocation that printed `Audit log integrity FAILED` for the known line-185
+  fork. Before this change that command printed the fork and exited, and the
+  orphan list was unreachable.
+
+### What is and is not established
+
+Established: an interrupted run is on disk with the stage it reached and did not
+pass; the orphan surface prints where it can be seen, on both the valid and the
+failed path; the pairing carries the identity an auditor needs; and the DB
+deliberately holds no partial verdict row.
+
+Not established by this record: the **ingest window**. The sidecar's identity
+needs the package name ingest computes, so the recorder starts after ingest - a
+run killed during ingest still leaves only its `apks` row and its authorization,
+and this ADR does not claim otherwise. Ingest is bounded and precedes every heavy
+stage, which is why the boundary was drawn there. Also not established: the cause
+of the original Netflix death, which no record can settle after the fact - the
+demonstration run above was killed deliberately, and it establishes what an
+interrupted run now leaves, not why the first one died.
+

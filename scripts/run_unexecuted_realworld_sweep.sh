@@ -83,6 +83,17 @@ _sweep_pid_start=$(sed 's/^.*) //' "/proc/$$/stat" 2>/dev/null | awk '{print $20
 printf -- "--\tsweep_started\t%s\t%s\t%s\t0\t-\n" \
   "$_sweep_host" "$_sweep_pid" "${_sweep_pid_start:--}" >> "$JOURNAL"
 
+# The bound every elapsed column below is measured against (SWEEP-BUDGET1).
+# Every outcome row carries an elapsed_s and no row carried the budget it was
+# held to, so the number could only be read against the default in this script's
+# header - and on 2026-09-18 the sweep ran facebook under a 7,200 s bound while
+# the run it was recording legitimately needed longer than that. A reader
+# comparing 11,000 s against the documented default reads an enforced bound as a
+# breach of one, which is the opposite of what happened. Written before the
+# target list is read, so a sweep that fails on its own input still says what it
+# would have enforced.
+printf -- "--\tbudget\t%s\t-\t0\t-\t-\n" "$RUN_TIMEOUT" >> "$JOURNAL"
+
 # Targets: a file (one APK path per line) when given, else the built-in list.
 #
 # A missing or empty list is a failure of the sweep's own input, and by default it

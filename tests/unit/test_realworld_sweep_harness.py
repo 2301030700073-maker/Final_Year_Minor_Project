@@ -324,3 +324,42 @@ def test_no_frozen_row_when_the_probe_could_not_run(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert _outcomes(tmp_path)[0].split("\t")[1] == "ok"
     assert _frozen_rows(tmp_path) == []
+
+
+# --- the bound the elapsed column is measured against -------------------------
+
+
+def test_the_journal_records_the_budget_its_elapsed_column_is_measured_against(tmp_path):
+    """Every outcome row carries an elapsed_s and nothing on disk carried the
+    bound that elapsed was held to, so the only budget a reader could compare it
+    against is the default in the script's header. A sweep launched with a larger
+    SWEEP_RUN_TIMEOUT - because a target legitimately needs longer than the
+    default - then records a number that reads as a breach of a bound it was
+    never held to. The row is written before the target list is read, so a sweep
+    that fails on its own input still says what it would have enforced."""
+    runner = _fake_runner(tmp_path)
+    targets = tmp_path / "targets.txt"
+    targets.write_text(f"{REAL_APK}\n", encoding="utf-8")
+    proc = _run(tmp_path, SWEEP_TARGETS_FILE=targets, SWEEP_RUNNER=f"bash {runner}",
+                SWEEP_RUN_TIMEOUT="4321")
+    assert proc.returncode == 0, proc.stderr
+
+    rows = [r for r in _rows(tmp_path) if r.startswith("--\tbudget\t")]
+    assert len(rows) == 1, _journal(tmp_path)
+    assert rows[0].split("\t")[2] == "4321", "the budget this sweep enforced"
+
+    lines = _journal(tmp_path).splitlines()
+    first_target = min(i for i, r in enumerate(lines) if "\tstarted\t" in r)
+    assert lines.index(rows[0]) < first_target
+
+
+def test_the_budget_row_is_kept_out_of_the_outcome_readers(tmp_path):
+    """It is a `--` marker row like the rest, so a reader that counts outcomes
+    does not count it as a target that ran."""
+    runner = _fake_runner(tmp_path)
+    targets = tmp_path / "targets.txt"
+    targets.write_text(f"{REAL_APK}\n", encoding="utf-8")
+    proc = _run(tmp_path, SWEEP_TARGETS_FILE=targets, SWEEP_RUNNER=f"bash {runner}")
+    assert proc.returncode == 0, proc.stderr
+    assert len(_outcomes(tmp_path)) == 1
+    assert "1 target(s) run, 0 not ok" in proc.stdout

@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 
 import cli
 from audit.attestation import record_authorization, verify_audit_log
-from storage.run_status import RunStatusRecorder, run_status_path
+from storage.run_status import RunStatusRecorder, read_run_status, run_status_path
 
 runner = CliRunner()
 
@@ -35,6 +35,8 @@ def _sidecar(tmp_path, apk_hash, *, last_stage="native_scan", state="started"):
         rec.record({"stage": last_stage, "status": "success", "duration_ms": 7})
     if state == "finished":
         rec.finish(report_path="/out/r.md")
+    elif state == "ended_unaudited":
+        rec.finish(report_path="/out/r.md", audited=False, audit_error="audit log unwritable")
     return rec
 
 
@@ -98,6 +100,27 @@ def test_the_note_names_the_apk_and_the_last_stage(tmp_path, monkeypatch, capsys
     assert "r-orphan" in out
     assert "deadbeef" in out
     assert "last stage: native_scan" in out
+
+
+def test_an_unaudited_ending_is_not_reported_as_an_interruption(tmp_path, monkeypatch, capsys):
+    """The log's verdict makes this run an orphan - it holds no completion. The
+    sidecar knows more: the process ended on purpose and only the completion write
+    failed. Printing its last stage would read as an interruption and put the two
+    records in contradiction, so the ending is named instead."""
+    monkeypatch.setattr(cli, "ANALYSIS_ROOT", tmp_path)
+    _sidecar(tmp_path, "deadbeef", last_stage="native_scan", state="ended_unaudited")
+    cli._print_uncompleted_runs({
+        "uncompleted_run_details": [
+            {"run_id": "r-orphan", "apk_hash": "deadbeef", "action": "BOTH"}
+        ],
+    })
+    out = capsys.readouterr().out
+    # the console wraps to its width, so match against the flattened text rather
+    # than a phrase that may straddle a line break
+    flat = " ".join(out.split())
+    assert "reached 'native_scan' then ended without an audit completion" in flat
+    assert "audit log unwritable" in flat
+    assert "last stage:" not in flat
 
 
 def test_the_note_says_so_when_no_sidecar_was_ever_written(tmp_path, monkeypatch, capsys):
@@ -183,6 +206,67 @@ def test_print_stage_cautions_instead_of_raising_when_the_sidecar_cannot_be_writ
     cli._print_stage(_Stage("native_scan", "success", 42))  # must not raise
     out = capsys.readouterr().out
     assert "CAUTION" in out and "No space left on device" in out
+
+
+# --- a run that ends by exiting non-zero has still ended ----------------------
+
+
+def _started_recorder(tmp_path, apk_hash="deadbeef"):
+    rec = RunStatusRecorder(tmp_path, apk_hash, {"run_id": "r-1", "apk_hash": apk_hash})
+    rec.start()
+    rec.record({"stage": "native_scan", "status": "success", "duration_ms": 3})
+    return rec
+
+
+def test_a_failed_audit_completion_ends_the_sidecar_before_exiting(tmp_path, monkeypatch):
+    """The sidecar was finalized after the two failure branches, so a run that
+    ended with a failed completion exited non-zero leaving `started` on disk: a
+    claim that the run was interrupted, which is the opposite of what happened,
+    and one that contradicts the log - where the missing completion is precisely
+    what makes it an orphan."""
+    import typer
+
+    rec = _started_recorder(tmp_path)
+    monkeypatch.setattr(cli, "_RUN_STATUS", rec)
+    monkeypatch.setattr(cli, "generate_report", lambda **kw: tmp_path / "r.md")
+    monkeypatch.setattr(
+        cli,
+        "record_run_completion",
+        lambda **kw: _Stage("audit_completion", "failed", 1, error="audit log unwritable"),
+    )
+    monkeypatch.setattr(cli, "save_run", lambda *a, **k: None)
+
+    with pytest.raises(typer.Exit):
+        cli._finalize_run({"stage_results": []}, tmp_path, "deadbeef", "r-1", {}, {})
+
+    data = read_run_status(tmp_path, "deadbeef")
+    assert data["state"] == "ended_unaudited"
+    assert data["audit_error"] == "audit log unwritable"
+    assert data["finished_at"]
+
+
+def test_a_failed_save_ends_the_sidecar_with_its_reason(tmp_path, monkeypatch):
+    """Report written and run audited, only the DB row missing. That ending is
+    neither an interruption nor an orphan, and the sidecar says which it is."""
+    import typer
+
+    rec = _started_recorder(tmp_path)
+    monkeypatch.setattr(cli, "_RUN_STATUS", rec)
+    monkeypatch.setattr(cli, "generate_report", lambda **kw: tmp_path / "r.md")
+    monkeypatch.setattr(cli, "record_run_completion", lambda **kw: _Stage("audit_completion", "success", 1))
+
+    def boom(*a, **k):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(cli, "save_run", boom)
+
+    with pytest.raises(typer.Exit):
+        cli._finalize_run({"stage_results": []}, tmp_path, "deadbeef", "r-1", {}, {})
+
+    data = read_run_status(tmp_path, "deadbeef")
+    assert data["state"] == "finished"
+    assert data["save_error"] == "database is locked"
+    assert "audit_error" not in data
 
 
 class _Stage:

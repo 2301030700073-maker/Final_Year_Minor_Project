@@ -1234,6 +1234,24 @@ def _finalize_run(
 
     report_path = generate_report(**report_kwargs)  # regenerate with the completion stage
 
+    # ADR-0021: the run has reached an outcome by here - every branch below either
+    # returns or exits non-zero - so the sidecar is finalized BEFORE them. Doing it
+    # last, after the two failure branches, left a run that ended with a failed
+    # audit completion or a failed DB save reading `started`, which asserts an
+    # interruption that never happened. `audited` keeps those two endings apart:
+    # the first is an orphan by the audit log's own verdict, the second is a
+    # complete run that merely has no `runs` row.
+    if _RUN_STATUS is not None:
+        try:
+            _RUN_STATUS.finish(
+                report_path=report_path,
+                audited=completion_stage.status != "failed",
+                save_error=save_error,
+                audit_error=completion_stage.error if completion_stage.status == "failed" else None,
+            )
+        except OSError as exc:
+            console.print(f"[red]CAUTION: could not finalize the run-status sidecar ({exc}).[/red]")
+
     if completion_stage.status == "failed":
         console.print(f"[red]Audit completion failed: {completion_stage.error}[/red]")
         if save_error is not None:
@@ -1246,16 +1264,6 @@ def _finalize_run(
         )
         console.print(f"\n[bold green]Report: {report_path}[/bold green]")
         raise typer.Exit(code=1)
-
-    # ADR-0021: finalized last. A run that dies between save_run and here leaves
-    # a sidecar reading `started` for a run the audit log shows as completed -
-    # which is why the orphan join takes its authority from the log and uses this
-    # file only to say where a run stopped.
-    if _RUN_STATUS is not None:
-        try:
-            _RUN_STATUS.finish(report_path=report_path)
-        except OSError as exc:
-            console.print(f"[red]CAUTION: could not finalize the run-status sidecar ({exc}).[/red]")
 
     console.print(f"\n[bold green]Report: {report_path}[/bold green]")
     return report_path
@@ -3587,6 +3595,16 @@ def _print_uncompleted_runs(result: dict) -> None:
             where = "no sidecar (progress was not recorded for this run)"
         elif status.get("state") == "unreadable":
             where = f"sidecar unreadable ({status.get('error')})"
+        elif status.get("state") == "ended_unaudited":
+            # The run ended on purpose - the process exited non-zero - but its
+            # completion never reached the log, which is what leaves it an orphan
+            # here. Reporting the last stage alone would read as an interruption,
+            # which is the opposite of what happened, so the ending is named.
+            why = status.get("audit_error") or "no reason recorded"
+            where = (
+                f"reached '{status.get('last_stage') or 'none recorded'}' then ended "
+                f"without an audit completion ({why})"
+            )
         else:
             where = (
                 f"last stage: {status.get('last_stage') or 'none recorded'} "

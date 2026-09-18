@@ -131,6 +131,33 @@ def test_a_write_failure_raises_rather_than_going_silent(tmp_path, monkeypatch):
         rec.record({"stage": "ingest", "status": "success", "duration_ms": 1})
 
 
+def test_an_unaudited_ending_is_a_distinct_state_not_finished(tmp_path):
+    """A run whose audit completion failed is an orphan by the log's own verdict.
+    If the sidecar read `finished`, the orphan note - which takes its authority
+    from the log - would describe a run that reached an end as an interruption,
+    and the two records would contradict each other."""
+    rec = _recorder(tmp_path)
+    rec.start()
+    rec.finish(report_path="/out/report.md", audited=False, audit_error="audit log unwritable")
+    data = read_run_status(tmp_path, "abc")
+    assert data["state"] == "ended_unaudited"
+    assert data["audit_error"] == "audit log unwritable"
+    assert data["report_path"] == "/out/report.md"
+    assert data["finished_at"]
+
+
+def test_a_save_error_is_recorded_against_a_completed_run(tmp_path):
+    """Report written and run audited, but no DB row: a different fact from both
+    an interruption and an unaudited ending, and the sidecar can state all three."""
+    rec = _recorder(tmp_path)
+    rec.start()
+    rec.finish(report_path="/out/report.md", save_error="database is locked")
+    data = read_run_status(tmp_path, "abc")
+    assert data["state"] == "finished"
+    assert data["save_error"] == "database is locked"
+    assert "audit_error" not in data
+
+
 class _Stage:
     """Stand-in for the StageResult the live pipeline records."""
 

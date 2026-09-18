@@ -15,11 +15,12 @@ Two deliberate boundaries:
 
 - **It is not the authority on whether a run finished.** The audit log is: an
   interrupted run is an authorization with no completion (attestation's
-  `uncompleted_runs`). Finalization here happens last, so a run that dies between
-  `save_run` and its finalize leaves a sidecar reading `started` for a run the
-  audit log shows as completed. Callers take orphanhood from the log and use this
-  only to say *where* a run stopped, which keeps that window from manufacturing a
-  phantom interrupted run.
+  `uncompleted_runs`). The states here are not verdicts either. A run whose audit
+  completion failed reads `ended_unaudited` - it ended on purpose, and it is an
+  orphan by the log's own verdict - while one that completed and audited but never
+  reached the `runs` table reads `finished`. Callers take orphanhood from the log
+  and use this file only to say *where* a run stopped and *how* it ended, so
+  neither ending can be mistaken for an interruption.
 - **Write failures are raised, not swallowed.** A caller decides what a failed
   write means; this module never turns one into a silent no-op. A missing trace
   is exactly the condition this file exists to prevent.
@@ -112,10 +113,41 @@ class RunStatusRecorder:
         self._data["last_stage_status"] = status
         self._write()
 
-    def finish(self, *, report_path: str | None) -> None:
-        self._data["state"] = "finished"
+    def finish(
+        self,
+        *,
+        report_path: str | None,
+        audited: bool = True,
+        save_error: str | None = None,
+        audit_error: str | None = None,
+    ) -> None:
+        """Record the run's end. Call this on EVERY path that reaches an outcome -
+        including the ones that end in a non-zero exit - because a sidecar left in
+        `started` asserts that the run never reached an end, and a deliberate
+        failure path is not an interruption.
+
+        `audited` distinguishes the two ways a run can end, and they are not the
+        same fact: a run whose audit completion failed is an authorization with no
+        completion in the log - an orphan, by the log's own verdict - while a run
+        that completed and was audited but whose DB save failed is complete and
+        merely unrecorded in `runs`. Collapsing them into one `finished` would put
+        this file in contradiction with the log on the first case, and the log is
+        the authority on whether a run finished.
+        """
+        self._data["state"] = "finished" if audited else "ended_unaudited"
         self._data["finished_at"] = _now()
         self._data["report_path"] = str(report_path) if report_path else None
+        if save_error is not None:
+            # The report exists and the run is audited; only the DB row is missing.
+            # Recorded because "the run finished" and "the run is in the runs table"
+            # are different claims, and a reader deserves both.
+            self._data["save_error"] = str(save_error)
+        if audit_error is not None:
+            # The run ended deliberately but no completion reached the log, which
+            # is exactly what leaves it an orphan on the audit side. Kept for the
+            # same reason as save_error: the state says an end-record is missing,
+            # the reason says which one and why.
+            self._data["audit_error"] = str(audit_error)
         self._write()
 
 

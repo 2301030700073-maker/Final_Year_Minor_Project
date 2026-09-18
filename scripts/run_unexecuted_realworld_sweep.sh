@@ -44,8 +44,24 @@ LOG_DIR=${SWEEP_LOG_DIR:-run_logs/sweep-$(date -u +%Y%m%dT%H%M%SZ)}
 JOURNAL="$LOG_DIR/journal.tsv"
 mkdir -p "$LOG_DIR"
 
+# The journal is opened before the target list is read, so a sweep that fails on
+# its own input still leaves a row saying so - the same write-ahead rule the
+# per-target rows follow.
+printf "target\tstate\trc\tsignal\telapsed_s\treport\tlog\n" > "$JOURNAL"
+
 # Targets: a file (one APK path per line) when given, else the built-in list.
+#
+# A missing or empty list is a failure of the sweep's own input, and by default it
+# does NOT read as one: `mapfile < missing` prints to stderr, leaves the array
+# empty, every loop below skips it, and the verdict prints "0 target(s) not ok" -
+# a clean-looking sweep that analysed nothing. Both cases exit non-zero instead,
+# so a caller can never mistake an input failure for a clean run.
 if [ -n "${SWEEP_TARGETS_FILE:-}" ]; then
+  if [ ! -r "$SWEEP_TARGETS_FILE" ]; then
+    printf -- "--\ttargets_unreadable\t-\t-\t0\t-\t%s\n" "$SWEEP_TARGETS_FILE" >> "$JOURNAL"
+    echo "ERROR: SWEEP_TARGETS_FILE=$SWEEP_TARGETS_FILE is not readable - refusing to run a sweep that would analyse nothing" >&2
+    exit 2
+  fi
   mapfile -t TARGETS < "$SWEEP_TARGETS_FILE"
 else
   TARGETS=(
@@ -56,13 +72,25 @@ else
   )
 fi
 
+# A blank line is not a target: it would launch `run --apk ""` and journal a
+# failure that names nothing.
+_loaded=()
+for _t in ${TARGETS[@]+"${TARGETS[@]}"}; do
+  [ -n "${_t// /}" ] && _loaded+=("$_t")
+done
+TARGETS=("${_loaded[@]}")
+
+if [ "${#TARGETS[@]}" -eq 0 ]; then
+  printf -- "--\ttargets_empty\t-\t-\t0\t-\t%s\n" "${SWEEP_TARGETS_FILE:-built-in list}" >> "$JOURNAL"
+  echo "ERROR: the target list is empty - refusing to run a sweep that would analyse nothing" >&2
+  exit 2
+fi
+
 # The runner. SWEEP_RUNNER replaces the whole command (used verbatim, word-split)
 # so the journal/exit-status logic below can be exercised with a fake target
 # without an emulator or an APK.
 PY=${SWEEP_PYTHON:-.venv/bin/python3}
 ENTRY=${SWEEP_ENTRY:-src/cli.py}
-
-printf "target\tstate\trc\tsignal\telapsed_s\treport\tlog\n" > "$JOURNAL"
 
 signal_name() {
   case "$1" in
@@ -165,5 +193,5 @@ for apk in "${TARGETS[@]}"; do
   current=""
 done
 
-echo "sweep finished $(date -u +%FT%TZ): $incomplete target(s) not ok; journal $JOURNAL"
+echo "sweep finished $(date -u +%FT%TZ): ${#TARGETS[@]} target(s) run, $incomplete not ok; journal $JOURNAL"
 [ "$incomplete" -eq 0 ] || exit 1

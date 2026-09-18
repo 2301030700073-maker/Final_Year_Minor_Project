@@ -564,6 +564,7 @@ def verify_audit_log(audit_log_path: Path) -> dict:
         return {
             "valid": True, "total": 0, "chained": 0, "legacy": 0,
             "archives_checked": 0, "orphan_completions": [], "uncompleted_runs": [],
+            "uncompleted_run_details": [],
             "errors": [],
         }
     # L6: a missing current log with archives present is a truncated tail, not a
@@ -579,7 +580,10 @@ def verify_audit_log(audit_log_path: Path) -> dict:
 
     total = chained = legacy = 0
     archives_checked = 0
-    authorized_run_ids: set[str] = set()
+    # RESID-2A/ADR-0021: run_id -> the identity its authorization carried, so an
+    # uncompleted run can be reported by what it was (which APK, under which
+    # justification) and not only by a bare hex id an auditor cannot act on.
+    authorized_run_ids: dict[str, dict] = {}
     completed_run_ids: set[str] = set()
     orphan_order: list[str] = []
 
@@ -666,7 +670,13 @@ def verify_audit_log(audit_log_path: Path) -> dict:
                 event = rec.get("event")
                 run_id = rec.get("run_id")
                 if event == "run_authorized" and run_id:
-                    authorized_run_ids.add(run_id)
+                    authorized_run_ids[run_id] = {
+                        key: rec.get(key)
+                        for key in (
+                            "apk_hash", "action", "justification", "operator",
+                            "timestamp", "git_commit",
+                        )
+                    }
                 elif event in ("run_completed", "classification"):
                     # C: classification carries the run's deterministic verdict
                     # (FR-3.3) and is also a result on record - so like a
@@ -685,11 +695,14 @@ def verify_audit_log(audit_log_path: Path) -> dict:
                             )
                             orphan_order.append(run_id)
 
-    uncompleted = sorted(authorized_run_ids - completed_run_ids)
+    uncompleted = sorted(set(authorized_run_ids) - completed_run_ids)
     return {
         "valid": not errors, "total": total, "chained": chained, "legacy": legacy,
         "archives_checked": archives_checked,
         "orphan_completions": orphan_order,
         "uncompleted_runs": uncompleted,
+        "uncompleted_run_details": [
+            {**authorized_run_ids[run_id], "run_id": run_id} for run_id in uncompleted
+        ],
         "errors": errors,
     }

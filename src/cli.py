@@ -113,6 +113,7 @@ from static.packers import detect_packers, load_packer_signatures
 from static.signatures import load_signatures, scan
 from static.stringrecover import match_recovered_strings, recover_hidden_strings
 from storage.results import existing_metadata, load_runs_for_calibration, save_metadata, save_run
+from storage.run_status import RunStatusRecorder, read_run_status
 
 app = typer.Typer()
 console = Console()
@@ -667,11 +668,30 @@ def _operator_identity() -> str:
     )
 
 
+# The progress sidecar of the run in flight (ADR-0021), set by run() once the run
+# is authorized and hashed, and finalized after the run is saved. _print_stage is
+# the single choke point every stage passes through, so recording there cannot
+# miss a stage the console printed. Read (never rebound) by helpers, so no global
+# declaration is needed to consult it.
+_RUN_STATUS: RunStatusRecorder | None = None
+
+
 def _print_stage(result: StageResult) -> None:
     icon = {"success": "[green]OK[/green]", "failed": "[bold red]FAILED[/bold red]", "skipped": "[yellow]SKIPPED[/yellow]"}[result.status]
     console.print(f"{icon}  {result.stage}  ({result.duration_ms}ms)")
     if result.error:
         console.print(f"    [red]{result.error}[/red]")
+    if _RUN_STATUS is not None:
+        try:
+            _RUN_STATUS.record(result)
+        except OSError as exc:
+            # Never silent: an unwritable sidecar is precisely the condition that
+            # would leave an interrupted run unrecorded. It does not halt a
+            # 40-minute analysis, but it says so, loudly, on the spot.
+            console.print(
+                f"[red]CAUTION: could not write the run-status sidecar ({exc}) - "
+                "an interruption from here would not record where it stopped.[/red]"
+            )
 
 
 def _completeness_console_caveat(
@@ -1227,6 +1247,16 @@ def _finalize_run(
         console.print(f"\n[bold green]Report: {report_path}[/bold green]")
         raise typer.Exit(code=1)
 
+    # ADR-0021: finalized last. A run that dies between save_run and here leaves
+    # a sidecar reading `started` for a run the audit log shows as completed -
+    # which is why the orphan join takes its authority from the log and uses this
+    # file only to say where a run stopped.
+    if _RUN_STATUS is not None:
+        try:
+            _RUN_STATUS.finish(report_path=report_path)
+        except OSError as exc:
+            console.print(f"[red]CAUTION: could not finalize the run-status sidecar ({exc}).[/red]")
+
     console.print(f"\n[bold green]Report: {report_path}[/bold green]")
     return report_path
 
@@ -1311,6 +1341,7 @@ def run(
         ),
     ),
 ):
+    global _RUN_STATUS
     stage_results: list[StageResult] = []
     # Full 128-bit uuid, not a [:8] truncation: RunRecord.run_id is the PK and
     # save_run upserts via session.merge, so a 32-bit collision would silently
@@ -1520,6 +1551,26 @@ def run(
         package_for_target = ingest_result.evidence["package"]["package_name"]
         target = PACKAGE_TO_TARGET.get(package_for_target, package_for_target)
         target_canonical = _canonical_target(target)
+
+    # ADR-0021: the run is authorized, hashed and about to start its heavy
+    # stages, so from here it has an identity worth recording on disk. Written
+    # BEFORE the first of them: a run killed mid-pipeline then leaves a sidecar
+    # naming the last stage it reached, which is what the Netflix run of
+    # 2026-09-17 left nowhere but the console.
+    _RUN_STATUS = RunStatusRecorder(
+        ANALYSIS_ROOT,
+        apk_hash,
+        {
+            "run_id": run_id,
+            "apk_hash": apk_hash,
+            "package_name": (ingest_result.evidence.get("package") or {}).get("package_name"),
+            "target": target,
+            "operator": operator,
+            "justification": justification,
+            "git_commit": git_commit,
+        },
+    )
+    _RUN_STATUS.start()
 
     # --- audit (FR-8.2/FR-3.3: before any actual analysis stage) ---
     audit_result = record_authorization(
@@ -3505,6 +3556,48 @@ def _manifest_from_json(m) -> ManifestInfo | None:
     )
 
 
+def _print_uncompleted_runs(result: dict) -> None:
+    """Report authorizations whose runs never completed (ADR-0021).
+
+    Printed on BOTH the valid and the failed path. Chain integrity and
+    run-history incompleteness are independent facts about a log, and exiting on
+    a chain error before printing this is how this repository's 32 interrupted
+    runs stayed invisible from the command line: the log carries the known
+    line-185 fork, so the note below was unreachable on the authoritative log.
+
+    Each orphan is named individually, with the identity the audit log holds and
+    the last stage its sidecar recorded. A bare count is not actionable and a
+    bare run_id is not either - an auditor needs to know which APK was mid-flight
+    and how far it got."""
+    details = result.get("uncompleted_run_details")
+    if details is None:
+        # A result dict from before this field existed: fall back to the ids
+        # rather than dropping the fact on the floor.
+        details = [{"run_id": rid} for rid in (result.get("uncompleted_runs") or [])]
+    if not details:
+        return
+    console.print(
+        f"[yellow]Note: {len(details)} authorized run(s) never completed - the audit "
+        "log holds the authorization and no completion (interrupted, crashed, or "
+        "deliberately halted):[/yellow]"
+    )
+    for entry in details:
+        status = read_run_status(ANALYSIS_ROOT, entry.get("apk_hash"))
+        if status is None:
+            where = "no sidecar (progress was not recorded for this run)"
+        elif status.get("state") == "unreadable":
+            where = f"sidecar unreadable ({status.get('error')})"
+        else:
+            where = (
+                f"last stage: {status.get('last_stage') or 'none recorded'} "
+                f"({status.get('last_stage_status') or 'n/a'})"
+            )
+        console.print(
+            f"  [yellow]{entry.get('run_id')}[/yellow]  "
+            f"apk={entry.get('apk_hash')}  action={entry.get('action')}  {where}"
+        )
+
+
 @app.command("verify-audit-log")
 def verify_audit_log_cmd(
     audit_log: Path = typer.Option(
@@ -3519,19 +3612,18 @@ def verify_audit_log_cmd(
         console.print("[bold red]Audit log integrity FAILED:[/bold red]")
         for err in result["errors"]:
             console.print(f"  [red]{err}[/red]")
-        raise typer.Exit(code=1)
-    console.print(
-        f"[green]Audit log OK[/green] - {result['total']} record(s), "
-        f"{result['chained']} chained, {result['legacy']} legacy"
-    )
-    # A valid log can still contain authorizations whose runs never completed
-    # (a crashed or deliberately-halted analysis). Not a failure - but an auditor
-    # must not read a plain "OK" as "every run finished", so surface them.
-    if result.get("uncompleted_runs"):
+    else:
         console.print(
-            f"[yellow]Note: {len(result['uncompleted_runs'])} authorized run(s) "
-            f"never completed: {', '.join(result['uncompleted_runs'])}[/yellow]"
+            f"[green]Audit log OK[/green] - {result['total']} record(s), "
+            f"{result['chained']} chained, {result['legacy']} legacy"
         )
+    # A log can contain authorizations whose runs never completed (a crashed or
+    # deliberately-halted analysis). Not a failure - but an auditor must not read
+    # a plain "OK" as "every run finished", and must not lose the fact to an
+    # unrelated chain error either, so it is reported before the exit.
+    _print_uncompleted_runs(result)
+    if result["errors"]:
+        raise typer.Exit(code=1)
 
 
 @app.command("verify-device")

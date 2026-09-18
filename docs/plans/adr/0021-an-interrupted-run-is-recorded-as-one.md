@@ -216,6 +216,17 @@ the process that owns it, and the note asks whether that process is still alive
 before it says a run ended. Where the host is not the one asking, the answer is
 unknown - never dead.
 
+`f81836c9c` is that correction. The sidecar now writes `host`, `pid` and the
+kernel's start time for that pid - the start time is what keeps "alive" from
+becoming a fact about whatever process inherits the pid later - and `run_is_alive`
+answers True, False or None, where None covers a sidecar written on another host,
+one from before the field existed, and a platform exposing no `/proc`. The note
+says `IN FLIGHT` for the first, `ended with its process gone` for the second, and
+`liveness not established` for the third. Its heading no longer says these runs
+"never completed": what the log holds is that they have no completion in it, which
+is also true of a run still in flight. Five tests pin the reader's answers and
+three the note's wording.
+
 ### The ending that exits non-zero
 
 The implementation as first committed got this wrong; `6a17d9f4a` corrects it, and

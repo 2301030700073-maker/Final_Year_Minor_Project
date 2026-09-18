@@ -20,7 +20,9 @@ Two deliberate boundaries:
   orphan by the log's own verdict - while one that completed and audited but never
   reached the `runs` table reads `finished`. Callers take orphanhood from the log
   and use this file only to say *where* a run stopped and *how* it ended, so
-  neither ending can be mistaken for an interruption.
+  neither ending can be mistaken for an interruption. For the same reason the
+  file records the host and process that owns it: `started` is not a death, and
+  only a probe can say whether the run behind it is still going.
 - **Write failures are raised, not swallowed.** A caller decides what a failed
   write means; this module never turns one into a silent no-op. A missing trace
   is exactly the condition this file exists to prevent.
@@ -30,6 +32,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -53,6 +56,52 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _proc_start_time(pid: int) -> str | None:
+    """The kernel's start time for a pid (field 22 of /proc/<pid>/stat), or None
+    when it cannot be read - the process is gone, or this platform has no /proc."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    # The parenthesised comm can contain spaces and parentheses, so split after
+    # the LAST ')' rather than on whitespace. fields[0] is field 3 (state), which
+    # puts starttime - field 22 - at index 19.
+    fields = stat.rsplit(")", 1)[-1].split()
+    return fields[19] if len(fields) > 19 else None
+
+
+def run_is_alive(status: dict[str, Any]) -> bool | None:
+    """Whether the process that wrote this sidecar is still running.
+
+    A sidecar reading `started` says a run did not record an ending. It does NOT
+    say the run ended: a run in flight reads exactly the same, which is how a live
+    Netflix run was read as an interruption for half an hour (ADR-0021, the
+    correction to its end-to-end record). Answering that needs a probe, and a
+    probe is a fact about a host, so this returns:
+
+    - True / False when the sidecar names this host and the pid can be checked -
+      False covers both a pid that is gone and one that was recycled onto an
+      unrelated process (the recorded start time is what separates them).
+    - None when the answer cannot be established: the sidecar was written on
+      another host, has no pid (a file from before this field existed), or this
+      platform exposes no /proc to read. Unknown, never dead - the same
+      distinction this module keeps between absent and unreadable."""
+    if status.get("host") != socket.gethostname():
+        return None
+    pid = status.get("pid")
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return None
+    if not Path("/proc").is_dir():
+        return None
+    current_start = _proc_start_time(pid)
+    if current_start is None:
+        return False  # the pid is gone
+    recorded_start = status.get("pid_start")
+    if recorded_start and current_start != recorded_start:
+        return False  # the pid now belongs to a different process
+    return True
+
+
 class RunStatusRecorder:
     """Writes a run's progress to its analysis directory as the run proceeds.
 
@@ -73,6 +122,13 @@ class RunStatusRecorder:
             "last_stage": None,
             "last_stage_status": None,
         }
+        # Who is running, so a reader can ask whether that run is still alive.
+        # The pid alone cannot answer it - pids are recycled, and a stale pid
+        # would make "alive" a fact about an unrelated process - so the kernel's
+        # start time for it is recorded beside it.
+        self._data["host"] = socket.gethostname()
+        self._data["pid"] = os.getpid()
+        self._data["pid_start"] = _proc_start_time(os.getpid())
         for field_name in IDENTITY_FIELDS:
             if field_name in identity:
                 self._data[field_name] = identity[field_name]

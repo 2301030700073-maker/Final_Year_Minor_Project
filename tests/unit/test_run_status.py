@@ -1,6 +1,9 @@
 """Run-status sidecar (ADR-0021): a run's progress recorded as it proceeds, so an
 interrupted run leaves a durable account of where it stopped."""
 import json
+import os
+import socket
+from pathlib import Path
 
 import pytest
 
@@ -8,8 +11,19 @@ from storage.run_status import (
     RUN_STATUS_FILENAME,
     RunStatusRecorder,
     read_run_status,
+    run_is_alive,
     run_status_path,
 )
+
+
+def _dead_pid():
+    """A pid that cannot be allocated, so /proc has no entry for it regardless of
+    what the machine happens to be running."""
+    try:
+        pid_max = int(Path("/proc/sys/kernel/pid_max").read_text(encoding="utf-8").strip())
+    except OSError:
+        pid_max = 4194304
+    return pid_max + 1
 
 
 def _recorder(tmp_path, **identity):
@@ -156,6 +170,67 @@ def test_a_save_error_is_recorded_against_a_completed_run(tmp_path):
     assert data["state"] == "finished"
     assert data["save_error"] == "database is locked"
     assert "audit_error" not in data
+
+
+# --- `started` is not a death: the sidecar names a process, and it is probed ---
+
+
+def test_start_records_the_host_and_process_that_owns_the_run(tmp_path):
+    rec = _recorder(tmp_path)
+    rec.start()
+    data = read_run_status(tmp_path, "abc")
+    assert data["host"] == socket.gethostname()
+    assert data["pid"] == os.getpid()
+    # the start time is what keeps "alive" from becoming a fact about whatever
+    # process inherits the pid later
+    assert data["pid_start"]
+
+
+def test_run_is_alive_true_for_the_process_that_wrote_the_sidecar(tmp_path):
+    rec = _recorder(tmp_path)
+    rec.start()
+    assert run_is_alive(read_run_status(tmp_path, "abc")) is True
+
+
+def test_run_is_alive_false_for_a_pid_that_is_gone(tmp_path):
+    rec = _recorder(tmp_path)
+    rec.start()
+    path = run_status_path(tmp_path, "abc")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["pid"] = _dead_pid()
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert run_is_alive(read_run_status(tmp_path, "abc")) is False
+
+
+def test_run_is_alive_false_when_the_pid_was_recycled(tmp_path):
+    # a live pid whose recorded start time is not the one /proc reports now: the
+    # process holding this pid is not the run, so "alive" would be about someone
+    # else entirely
+    rec = _recorder(tmp_path)
+    rec.start()
+    path = run_status_path(tmp_path, "abc")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["pid_start"] = "1"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert run_is_alive(read_run_status(tmp_path, "abc")) is False
+
+
+def test_run_is_alive_is_unknown_for_another_host(tmp_path):
+    # the probe is a claim about a host, so a run on another machine cannot be
+    # called dead from here
+    rec = _recorder(tmp_path)
+    rec.start()
+    path = run_status_path(tmp_path, "abc")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["host"] = "someone-elses-box"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert run_is_alive(read_run_status(tmp_path, "abc")) is None
+
+
+def test_run_is_alive_is_unknown_without_a_recorded_pid(tmp_path):
+    # a sidecar written before the field existed, and one with no host
+    assert run_is_alive({"state": "started", "host": socket.gethostname()}) is None
+    assert run_is_alive({"state": "started"}) is None
 
 
 class _Stage:

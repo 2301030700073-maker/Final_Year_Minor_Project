@@ -8,6 +8,7 @@ fork, so 32 interrupted runs were invisible from the command line while the
 result dict held them all along.
 """
 import json
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -28,7 +29,17 @@ def _log_with_one_orphan(tmp_path, apk_hash="deadbeef"):
     return log
 
 
-def _sidecar(tmp_path, apk_hash, *, last_stage="native_scan", state="started"):
+def _dead_pid():
+    """A pid that cannot be allocated, so /proc has no entry for it."""
+    try:
+        pid_max = int(Path("/proc/sys/kernel/pid_max").read_text(encoding="utf-8").strip())
+    except OSError:
+        pid_max = 4194304
+    return pid_max + 1
+
+
+def _sidecar(tmp_path, apk_hash, *, last_stage="native_scan", state="started", dead=False,
+             host=None):
     rec = RunStatusRecorder(tmp_path, apk_hash, {"run_id": "r-orphan", "apk_hash": apk_hash})
     rec.start()
     if last_stage:
@@ -37,6 +48,16 @@ def _sidecar(tmp_path, apk_hash, *, last_stage="native_scan", state="started"):
         rec.finish(report_path="/out/r.md")
     elif state == "ended_unaudited":
         rec.finish(report_path="/out/r.md", audited=False, audit_error="audit log unwritable")
+    if dead or host:
+        # rewrite the ownership fields: a run whose process is gone, or one
+        # recorded on a machine this reader cannot probe
+        path = run_status_path(tmp_path, apk_hash)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if dead:
+            data["pid"] = _dead_pid()
+        if host:
+            data["host"] = host
+        path.write_text(json.dumps(data), encoding="utf-8")
     return rec
 
 
@@ -99,7 +120,10 @@ def test_the_note_names_the_apk_and_the_last_stage(tmp_path, monkeypatch, capsys
     out = capsys.readouterr().out
     assert "r-orphan" in out
     assert "deadbeef" in out
-    assert "last stage: native_scan" in out
+    # this sidecar was written by the live test process, so the note reports the
+    # run as in flight; the stage is still named, and the phrase is matched
+    # flattened because it now sits behind a longer prefix the console wraps
+    assert "last stage: native_scan" in " ".join(out.split())
 
 
 def test_an_unaudited_ending_is_not_reported_as_an_interruption(tmp_path, monkeypatch, capsys):
@@ -121,6 +145,49 @@ def test_an_unaudited_ending_is_not_reported_as_an_interruption(tmp_path, monkey
     assert "reached 'native_scan' then ended without an audit completion" in flat
     assert "audit log unwritable" in flat
     assert "last stage:" not in flat
+
+
+def test_an_in_flight_run_is_not_reported_as_having_never_completed(tmp_path, monkeypatch, capsys):
+    """The sidecar in this test was written by THIS process, so the run behind it
+    is demonstrably still alive. `started` is not a death, and reporting a running
+    run among the never-completed asserts an ending that has not happened - the
+    live Netflix run that was read as an interruption for half an hour."""
+    monkeypatch.setattr(cli, "ANALYSIS_ROOT", tmp_path)
+    _sidecar(tmp_path, "deadbeef", last_stage="static_scan")
+    cli._print_uncompleted_runs({
+        "uncompleted_run_details": [{"run_id": "r-orphan", "apk_hash": "deadbeef"}],
+    })
+    flat = " ".join(capsys.readouterr().out.split())
+    assert "IN FLIGHT" in flat
+    assert "still running" in flat
+    assert "last stage: static_scan" in flat
+    assert "never completed" not in flat
+
+
+def test_a_run_whose_process_is_gone_is_reported_as_ended(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "ANALYSIS_ROOT", tmp_path)
+    _sidecar(tmp_path, "deadbeef", last_stage="native_scan", dead=True)
+    cli._print_uncompleted_runs({
+        "uncompleted_run_details": [{"run_id": "r-orphan", "apk_hash": "deadbeef"}],
+    })
+    flat = " ".join(capsys.readouterr().out.split())
+    assert "ended with its process gone" in flat
+    assert "last stage: native_scan" in flat
+    assert "IN FLIGHT" not in flat
+
+
+def test_a_sidecar_from_another_host_is_not_read_as_dead(tmp_path, monkeypatch, capsys):
+    """The probe answers about a host. A run recorded elsewhere cannot be shown to
+    have ended from here, and unknown is not dead."""
+    monkeypatch.setattr(cli, "ANALYSIS_ROOT", tmp_path)
+    _sidecar(tmp_path, "deadbeef", last_stage="native_scan", host="the-collaborators-box")
+    cli._print_uncompleted_runs({
+        "uncompleted_run_details": [{"run_id": "r-orphan", "apk_hash": "deadbeef"}],
+    })
+    flat = " ".join(capsys.readouterr().out.split())
+    assert "liveness not established" in flat
+    assert "the-collaborators-box" in flat
+    assert "ended with its process gone" not in flat
 
 
 def test_the_note_says_so_when_no_sidecar_was_ever_written(tmp_path, monkeypatch, capsys):
@@ -177,7 +244,7 @@ def test_the_command_reports_orphans_before_exiting_on_chain_errors(tmp_path, mo
     # ...and the orphans are named anyway: chain integrity and run-history
     # incompleteness are independent facts about the log
     assert "r-orphan" in result.output
-    assert "never completed" in result.output
+    assert "have no completion in this log" in " ".join(result.output.split())
 
 
 # --- _print_stage is the single choke point ----------------------------------

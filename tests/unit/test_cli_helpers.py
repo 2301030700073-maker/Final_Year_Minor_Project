@@ -737,7 +737,7 @@ def test_verify_audit_log_command_reports_ok_on_valid_log(tmp_path, capsys):
     assert "1 record(s)" in out
     # r1 was authorized but never completed (no classification/completion) - the
     # OK line must NOT let an auditor read "every run finished". Surface it.
-    assert "authorized run(s) never completed" in out
+    assert "have no completion in this log" in " ".join(out.split())
     assert "r1" in out
 
 

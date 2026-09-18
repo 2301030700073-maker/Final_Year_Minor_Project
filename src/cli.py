@@ -113,7 +113,7 @@ from static.packers import detect_packers, load_packer_signatures
 from static.signatures import load_signatures, scan
 from static.stringrecover import match_recovered_strings, recover_hidden_strings
 from storage.results import existing_metadata, load_runs_for_calibration, save_metadata, save_run
-from storage.run_status import RunStatusRecorder, read_run_status
+from storage.run_status import RunStatusRecorder, read_run_status, run_is_alive
 
 app = typer.Typer()
 console = Console()
@@ -3585,9 +3585,8 @@ def _print_uncompleted_runs(result: dict) -> None:
     if not details:
         return
     console.print(
-        f"[yellow]Note: {len(details)} authorized run(s) never completed - the audit "
-        "log holds the authorization and no completion (interrupted, crashed, or "
-        "deliberately halted):[/yellow]"
+        f"[yellow]Note: {len(details)} authorized run(s) have no completion in this "
+        "log (in flight, interrupted, or deliberately halted):[/yellow]"
     )
     for entry in details:
         status = read_run_status(ANALYSIS_ROOT, entry.get("apk_hash"))
@@ -3606,10 +3605,29 @@ def _print_uncompleted_runs(result: dict) -> None:
                 f"without an audit completion ({why})"
             )
         else:
-            where = (
+            stage = (
                 f"last stage: {status.get('last_stage') or 'none recorded'} "
                 f"({status.get('last_stage_status') or 'n/a'})"
             )
+            # `started` is not a death. A run whose process is still here is in
+            # flight, and reporting it among the never-completed would assert an
+            # ending that has not happened (ADR-0021, its end-to-end correction).
+            # The probe answers about a host, so where it cannot be taken the
+            # answer is unknown - never "ended".
+            alive = run_is_alive(status)
+            if alive is True:
+                where = (
+                    f"IN FLIGHT - process {status.get('pid')} recorded by this "
+                    f"sidecar is still running; {stage}"
+                )
+            elif alive is None:
+                where = (
+                    f"{stage}; liveness not established (recorded on host "
+                    f"{status.get('host') or 'unrecorded'}, which this reader "
+                    "cannot probe)"
+                )
+            else:
+                where = f"ended with its process gone; {stage}"
         console.print(
             f"  [yellow]{entry.get('run_id')}[/yellow]  "
             f"apk={entry.get('apk_hash')}  action={entry.get('action')}  {where}"

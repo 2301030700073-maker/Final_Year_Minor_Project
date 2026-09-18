@@ -45,6 +45,18 @@ DEVICE=${SWEEP_DEVICE:-emulator-5554}
 # truth; this is only the reader's view of it, overridable so the timeout path
 # can be exercised without writing into the real outputs/ tree.
 ANALYSIS_ROOT=${SWEEP_ANALYSIS_ROOT:-outputs/analysis}
+
+# Host-suspend bookkeeping (SWEEP-FROZEN1). The clocks that BOUND this sweep and
+# the clocks that STAMP it disagree about a suspended machine, and on 2026-09-18
+# that put a row on disk no reader could reconcile: `date +%s` (the elapsed column
+# below) is wall clock, while `timeout`, `/proc/uptime` and a process's start time
+# are tick counts that stop while the host is suspended. Facebook's 7,200 s budget
+# was therefore untouched by a closed laptop lid that the memory sampler measured
+# as a 2,126 s hole, while the UTC stamps beside it included every second of it.
+# Subtracting one from the other at the target's own boundaries measures the
+# difference. The path is a seam so the arithmetic is testable without suspending
+# a machine.
+UPTIME_FILE=${SWEEP_UPTIME_FILE:-/proc/uptime}
 LOG_DIR=${SWEEP_LOG_DIR:-run_logs/sweep-$(date -u +%Y%m%dT%H%M%SZ)}
 JOURNAL="$LOG_DIR/journal.tsv"
 mkdir -p "$LOG_DIR"
@@ -155,6 +167,15 @@ trap '[ "$interrupted" -eq 1 ] || finish end' EXIT
 # sha256, which is what ingest computes for a plain .apk; a target with nothing
 # under that hash says `no sidecar` rather than leaving the field empty, because
 # "not recorded" must not read as "no stage".
+# Seconds since boot, read from a clock that stops while the host is suspended.
+# Empty when the file cannot be read - the one case the caller must not read as
+# "no suspend happened".
+uptime_seconds() {
+  local v
+  v=$(cut -d. -f1 "$UPTIME_FILE" 2>/dev/null)
+  echo "${v:-}"
+}
+
 killed_stage() {
   local apk="$1" hash sidecar
   hash=$(sha256sum "$apk" 2>/dev/null | cut -d' ' -f1)
@@ -195,6 +216,7 @@ for apk in "${TARGETS[@]}"; do
   printf "%s\tstarted\t-\t-\t0\t-\t%s\n" "$name" "$log" >> "$JOURNAL"
   echo "=== $name starting $(date -u +%FT%TZ) ==="
   start=$(date +%s)
+  start_up=$(uptime_seconds)
 
   if [ -n "${SWEEP_RUNNER:-}" ]; then
     timeout "$RUN_TIMEOUT" $SWEEP_RUNNER --apk "$apk" \
@@ -213,6 +235,7 @@ for apk in "${TARGETS[@]}"; do
   rc=$?
   child=""
   elapsed=$(( $(date +%s) - start ))
+  end_up=$(uptime_seconds)
 
   sig="-"
   if [ "$rc" -gt 128 ]; then
@@ -238,6 +261,20 @@ for apk in "${TARGETS[@]}"; do
   printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
     "$name" "$state" "$rc" "$sig" "$elapsed" "$has_report" "$log" >> "$JOURNAL"
   echo "=== $name state=$state rc=$rc signal=$sig elapsed=${elapsed}s ==="
+  # How much of that elapsed time the machine spent not running (SWEEP-FROZEN1).
+  # Written for every target the probe could reach, zero included, so the number
+  # above it is interpretable rather than inferable: a MISSING row means the probe
+  # could not run, never that no suspend happened.
+  if [[ "${start_up:-}" =~ ^[0-9]+$ ]] && [[ "${end_up:-}" =~ ^[0-9]+$ ]]; then
+    up_elapsed=$(( end_up - start_up ))
+    frozen=$(( elapsed - up_elapsed ))
+    # A wall clock that steps backwards moves this negative - a different fact,
+    # and not one this row can carry, so it is floored rather than misreported.
+    [ "$frozen" -lt 0 ] && frozen=0
+    printf -- "--\tfrozen\t%s\t%s\t%s\t%s\t%s\n" \
+      "$name" "$frozen" "$elapsed" "$up_elapsed" "$log" >> "$JOURNAL"
+  fi
+
   # A run the harness itself killed is the one case where the outcome row has a
   # cause it cannot name: the other states carry it in rc and the log. Only the
   # two killed states need it - a run that reached its own end has its stages in

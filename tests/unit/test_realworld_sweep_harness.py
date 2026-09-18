@@ -231,3 +231,96 @@ def test_a_killed_target_with_no_sidecar_says_so_rather_than_naming_no_stage(tmp
     rows = [r for r in _rows(tmp_path) if r.startswith("--\tkilled_in\t")]
     assert len(rows) == 1
     assert rows[0].split("\t")[4] == "no sidecar"
+
+
+# --- how much of a target's window the machine spent not running --------------
+
+
+def _one_target(tmp_path, runner_body, **overrides):
+    apk = tmp_path / "target.apk"
+    apk.write_bytes(b"the harness only stats and hashes this")
+    targets = tmp_path / "targets.txt"
+    targets.write_text(str(apk) + "\n", encoding="utf-8")
+    runner = tmp_path / "runner.sh"
+    runner.write_text(runner_body, encoding="utf-8")
+    runner.chmod(0o755)
+    return _run(tmp_path, SWEEP_TARGETS_FILE=targets, SWEEP_RUNNER=f"bash {runner}", **overrides)
+
+
+def _frozen_rows(tmp_path):
+    return [r for r in _rows(tmp_path) if r.startswith("--\tfrozen\t")]
+
+
+def test_a_target_whose_window_includes_a_suspended_host_says_so(tmp_path):
+    """Every clock that BOUNDS this sweep is a tick count, which stops while the
+    host is suspended, while the elapsed column is wall clock, which does not. On
+    2026-09-18 a closed laptop lid left those two disagreeing by 2,126 s and put a
+    journal row on disk that no reader could reconcile: a target's elapsed against
+    its own budget, with the fact that explains the gap recorded nowhere. The
+    divergence is measurable at the target's own boundaries. A suspend cannot be
+    induced in a test, so the seam stands in for one: a uptime file that never
+    advances is a machine that was not running for the whole window."""
+    uptime = tmp_path / "uptime"
+    uptime.write_text("12345.67 98765.00\n", encoding="utf-8")
+    proc = _one_target(tmp_path, "#!/bin/bash\nsleep 2\necho 'Report: fake'\nexit 0\n",
+                       SWEEP_UPTIME_FILE=uptime)
+    assert proc.returncode == 0, proc.stderr
+    assert _outcomes(tmp_path)[0].split("\t")[1] == "ok"
+
+    rows = _frozen_rows(tmp_path)
+    assert len(rows) == 1, _journal(tmp_path)
+    fields = rows[0].split("\t")
+    assert fields[2] == "target"
+    assert int(fields[5]) == 0, "the machine was up for none of the window"
+    assert int(fields[3]) >= 2, "the freeze is the whole of the elapsed time"
+    assert int(fields[3]) == int(fields[4])
+    # ...and it follows the row whose elapsed column it explains
+    kind = [r.split("\t")[1] for r in _rows(tmp_path)]
+    assert kind.index("ok") < kind.index("frozen")
+
+
+def test_a_target_with_no_suspend_records_a_number_rather_than_staying_silent(tmp_path):
+    """The row is written even when nothing froze, so its ABSENCE can only mean the
+    probe did not run. A row written only on divergence would make "no suspend
+    happened" and "this harness never measured" the same silence.
+
+    What the row must not show without a suspend is minutes of it. An EXACT zero is
+    not a property this measurement has: the two readings are taken microseconds
+    apart and each is truncated to whole seconds, so a target that ran for one wall
+    second can show a second of divergence, and asserting zero fails on a loaded
+    machine."""
+    proc = _one_target(tmp_path, "#!/bin/bash\necho 'Report: fake'\nexit 0\n")
+    assert proc.returncode == 0, proc.stderr
+    rows = _frozen_rows(tmp_path)
+    assert len(rows) == 1, _journal(tmp_path)
+    assert 0 <= int(rows[0].split("\t")[3]) <= 2
+
+
+def test_a_wall_clock_that_steps_backwards_is_floored_rather_than_recorded(tmp_path):
+    """A clock stepping backwards moves the subtraction negative - a different fact,
+    and not one this row carries. The runner advances the uptime file well past the
+    target's own wall-clock elapsed to drive it, so the floor is exercised
+    deterministically rather than by racing two clocks."""
+    uptime = tmp_path / "uptime"
+    uptime.write_text("12345.67 98765.00\n", encoding="utf-8")
+    proc = _one_target(
+        tmp_path,
+        '#!/bin/bash\necho "12945.00 99365.00" > "$SWEEP_UPTIME_FILE"\n'
+        "echo 'Report: fake'\nexit 0\n",
+        SWEEP_UPTIME_FILE=uptime,
+    )
+    assert proc.returncode == 0, proc.stderr
+    rows = _frozen_rows(tmp_path)
+    assert len(rows) == 1, _journal(tmp_path)
+    assert rows[0].split("\t")[3] == "0", "a negative freeze is never written"
+    assert int(rows[0].split("\t")[5]) == 600, "the raw observation is still recorded"
+
+
+def test_no_frozen_row_when_the_probe_could_not_run(tmp_path):
+    """The other half of that mapping: an unreadable /proc/uptime writes no row, so
+    a reader who finds none knows the measurement is missing rather than zero."""
+    proc = _one_target(tmp_path, "#!/bin/bash\necho 'Report: fake'\nexit 0\n",
+                       SWEEP_UPTIME_FILE=tmp_path / "not-there")
+    assert proc.returncode == 0, proc.stderr
+    assert _outcomes(tmp_path)[0].split("\t")[1] == "ok"
+    assert _frozen_rows(tmp_path) == []

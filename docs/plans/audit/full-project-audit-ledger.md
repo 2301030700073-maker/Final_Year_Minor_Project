@@ -8,7 +8,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 
 ## Scope (the denominator)
 
-- `src/`: 54 files, **23,795 LOC**
+- `src/`: 54 files, **23,823 LOC**
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
 - `tests/`: 103 files, **34,776 LOC** (more test than source; informational, see §Currency).
 - `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
@@ -67,8 +67,8 @@ module's line count unchanged escapes it.)
 | `storage/db.py` | 195 | 210 | +15 | 2026-09-09 |
 | `storage/results.py` | 218 | 250 | +32 | 2026-09-09 |
 | `stringrecover.py` | 315 | 374 | +59 | 2026-09-09 |
-| `success_checks/*.py` | 800 | 957 | +157 | re-read (undated) |
-| `synthesizer.py` | 1117 | 1,192 | +75 | 2026-09-10 |
+| `success_checks/*.py` | 800 | 963 | +163 | re-read (undated) |
+| `synthesizer.py` | 1117 | 1,214 | +97 | 2026-09-10 |
 | `ui_liveness.py` | 308 | 553 | +245 | — |
 | `upx.py` | 128 | 128 | +0 | — |
 | `webview.py` | 98 | 116 | +18 | — |

@@ -422,7 +422,7 @@ def test_native_bypass_is_symbol_driven_not_name_list_gated():
     res = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["native_ssl_pinning_verify"]), Action.SSL_ONLY)
     assert "MODULES = " not in res.source  # no name-list gate
     assert "Process.enumerateModules()" in res.source  # scan every loaded module
-    assert "findExportByName(mn, SYMS[k][0])" in res.source  # hook by symbol, per module
+    assert "findExportByName(mn, sym)" in res.source  # hook by symbol, per module
     # the family the symbol-scan covers, documented so the coverage intent is explicit
     assert "libflutter" in res.source
     assert "libunity" in res.source
@@ -861,6 +861,39 @@ def test_native_ssl_pin_bypass_covers_boringssl_family():
     assert "Process.enumerateModules()" in src
     assert "NativeCallback" in src
     assert "'.so'" in src
+
+
+def test_an_absent_symbol_and_a_refused_hook_are_reported_as_different_facts():
+    # The report renders every "[synth] " line under "hook(s) the injected script
+    # could NOT install", so what those lines say about the process is evidence. The
+    # console emitted the not-found wording from the catch around the install: a
+    # symbol the lookup HAD found and Interceptor.replace refused was reported as
+    # "no SSL_CTX_set_verify in libssl.so", and a symbol that was simply absent - a
+    # null return does not throw - produced no line at all. Absence and a refused
+    # install now name their own measurement, and the lookup throwing is a third
+    # shape rather than an absence claim.
+    from dynamic.synthesizer import _native_ssl_pin_bypass
+    src = _native_ssl_pin_bypass()
+    assert "if (!p) continue;" in src
+    assert "'[synth] no ' + SYMS[k][0] + ' in any loaded module'" in src
+    assert "' but the hook could not be installed: ' + e" in src
+    assert "'[synth] could not look up ' + sym + ' in ' + mn + ': ' + e" in src
+    # the old form - an absence claim emitted from the catch - is gone
+    assert "console.log('[synth] no ' + SYMS[k][0] + ' in ' + mn)" not in src
+
+
+def test_the_libc_path_probe_reports_a_missing_export_not_a_refused_hook():
+    # The same defect in the root arm's sibling: hidePathProbe returned silently
+    # when Module.findExportByName found nothing, and logged "no <fn> in libc.so"
+    # from the catch around Interceptor.attach - so the one case it reported as
+    # absence was the case where the symbol was present, and the case it stayed
+    # quiet about was the one where it was not. A missing openat/statx hook costs
+    # the root bypass an arm, and the report had no line saying it had.
+    from dynamic.synthesizer import _native_root_path_hiding
+    src = _native_root_path_hiding(["/system/bin/su"])
+    assert "if (!a) { console.log('[synth] no ' + fn + ' in libc.so'); return; }" in src
+    assert "' found in libc.so but the hook could not be installed: ' + e" in src
+    assert "if (!a) return;" not in src
 
 
 def test_native_root_path_hiding_covers_libc_primitives_with_correct_path_args():

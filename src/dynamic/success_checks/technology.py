@@ -202,14 +202,19 @@ def _summarize(message: dict, limit: int = _PAYLOAD_TRUNCATE) -> str:
 # third-party confirmations that the injected agent hooked native functions; they
 # are engagement evidence, not a bypass pass (root/ssl stay None - only a
 # target-specific live SuccessCheck can confirm the app's own check was defeated).
-# The injected script's own report of a hook it could NOT install, e.g.
-# "[synth] no SSL_CTX_set_verify in libssl.so". Unlike the [OK] markers below -
-# which are engagement evidence - these are the script telling us part of the
-# bypass is a no-op, and on a production target the native SSL arm is exactly
-# that: BoringSSL ships with its verify symbols stripped, so findExportByName
-# fails for every one of them. Collected so the report can say so instead of
-# leaving the reader to infer a cause for a stalled startup from evidence that
-# does not carry one (F-9).
+# The injected script's own report of a hook that is not in the process, in one of
+# the three shapes it emits - "no <sym> in <where>" (nothing exports it),
+# "<sym> found in <where> but the hook could not be installed: <e>" (present, hook
+# refused), "could not look up <sym> in <where>: <e>" (the lookup itself threw).
+# Unlike the [OK] markers below - which are engagement evidence - these are the
+# script telling us part of the bypass is a no-op, and on a production target the
+# native SSL arm is exactly that: BoringSSL ships with its verify symbols stripped,
+# so the lookup finds nothing for every one of them. Collected so the report can
+# say so instead of leaving the reader to infer a cause for a stalled startup from
+# evidence that does not carry one (F-9). The shapes are listed because the
+# producers used to log the not-found wording from the catch around the install, so
+# a line could name a symbol the lookup had in fact found, and a genuinely absent
+# symbol produced no line at all.
 _SYNTH_LOG_MARKER = "[synth] "
 _VENDOR_ROOT_MARKER = "[OK] [ROOT]"
 _VENDOR_SSL_MARKER = "[OK] [SSL]"
@@ -233,7 +238,8 @@ def _native_hook_installation_line(uninstalled: list[str], captured: bool) -> st
         return "not captured (no Frida script output this run)"
     if not uninstalled:
         return ("the injected script reported no failed hook installation this run "
-                "(it lists a hook only when a lookup for it failed)")
+                "(it names a symbol only when no loaded module exports it or the "
+                "hook could not be installed)")
     return ("hook(s) the injected script could NOT install: " + "; ".join(uninstalled))
 
 

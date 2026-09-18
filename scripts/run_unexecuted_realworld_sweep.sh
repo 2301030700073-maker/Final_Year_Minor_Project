@@ -49,6 +49,23 @@ mkdir -p "$LOG_DIR"
 # per-target rows follow.
 printf "target\tstate\trc\tsignal\telapsed_s\treport\tlog\n" > "$JOURNAL"
 
+# The journal's own identity, so a reader can tell a sweep still in flight from
+# one that died. Every target row below is written ahead of the work, so a
+# `started` row with no outcome is the record of a target that did not record an
+# end - and that is ALSO exactly what a sweep that is still running looks like.
+# Until this row existed, the journal alone could not distinguish them: the same
+# defect ADR-0021 fixed in the per-run sidecar, left in the harness that drives
+# the corpus. The pid alone is not enough either (pids are recycled, so a stale
+# one would answer for an unrelated process), so the kernel's start time for it is
+# written beside it - field 22 of /proc/<pid>/stat, taken after the last ')' and
+# therefore the 20th field of the remainder, because the comm can contain spaces.
+# A reader tests liveness by re-reading field 22 for that pid and comparing.
+_sweep_host=$(hostname)
+_sweep_pid=$$
+_sweep_pid_start=$(sed 's/^.*) //' "/proc/$$/stat" 2>/dev/null | awk '{print $20}')
+printf -- "--\tsweep_started\t%s\t%s\t%s\t0\t-\n" \
+  "$_sweep_host" "$_sweep_pid" "${_sweep_pid_start:--}" >> "$JOURNAL"
+
 # Targets: a file (one APK path per line) when given, else the built-in list.
 #
 # A missing or empty list is a failure of the sweep's own input, and by default it

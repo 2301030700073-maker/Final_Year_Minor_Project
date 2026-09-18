@@ -14,6 +14,7 @@ file of blank lines is worse still: the read succeeds, so bash says nothing at
 all and the empty verdict is the only output there is.
 """
 import os
+import socket
 import subprocess
 from pathlib import Path
 
@@ -135,3 +136,27 @@ def test_the_built_in_list_still_runs_when_no_file_is_given(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert "4 target(s) run" in proc.stdout
     assert len(_outcomes(tmp_path)) == 4
+
+
+def test_the_journal_names_the_sweep_that_wrote_it(tmp_path):
+    """A `started` target row with no outcome is the record of a target that did
+    not record an end - and it is also exactly what a sweep still in flight looks
+    like. The journal alone could not tell a dead sweep from a live one, the same
+    defect ADR-0021 fixed in the per-run sidecar. It now carries its own identity,
+    written before the first target row."""
+    runner = _fake_runner(tmp_path)
+    targets = tmp_path / "targets.txt"
+    targets.write_text(f"{REAL_APK}\n", encoding="utf-8")
+    proc = _run(tmp_path, SWEEP_TARGETS_FILE=targets, SWEEP_RUNNER=f"bash {runner}")
+    assert proc.returncode == 0, proc.stderr
+    rows = _journal(tmp_path).splitlines()
+    ident = [r for r in rows if r.startswith("--\tsweep_started\t")]
+    assert len(ident) == 1, rows
+    fields = ident[0].split("\t")
+    assert fields[2] == socket.gethostname()
+    assert fields[3].isdigit() and int(fields[3]) > 0
+    # the kernel's start time for that pid: what keeps a recycled pid from
+    # answering for the sweep that wrote this row
+    assert fields[4].isdigit(), fields
+    first_target = min(i for i, r in enumerate(rows) if "\tstarted\t" in r)
+    assert rows.index(ident[0]) < first_target

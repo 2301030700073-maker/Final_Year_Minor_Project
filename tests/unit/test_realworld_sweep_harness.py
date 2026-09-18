@@ -42,7 +42,11 @@ def _journal(tmp_path):
 
 def _rows(tmp_path):
     lines = _journal(tmp_path).splitlines()
-    return [ln for ln in lines if ln and not ln.startswith("target\t")]
+    # Drop the header by position, not by its text: an outcome row's first field is
+    # the target's name, so a target whose APK basename is `target` writes a row
+    # starting with the same bytes the header does - and matching on that text
+    # dropped that target's outcome from every reader in this file.
+    return [ln for ln in lines[1:] if ln]
 
 
 def _outcomes(tmp_path):
@@ -160,3 +164,70 @@ def test_the_journal_names_the_sweep_that_wrote_it(tmp_path):
     assert fields[4].isdigit(), fields
     first_target = min(i for i, r in enumerate(rows) if "\tstarted\t" in r)
     assert rows.index(ident[0]) < first_target
+
+
+# --- a target the harness itself killed names where it stopped -----------------
+
+
+def _timed_out(tmp_path, *, with_sidecar):
+    """Drive one target into the timeout state. The harness's own kill is the one
+    outcome whose cause the row cannot carry, so the fixture has to be a real
+    overrun: a runner that outlives SWEEP_RUN_TIMEOUT."""
+    import hashlib
+    import json
+
+    apk = tmp_path / "target.apk"
+    apk.write_bytes(b"not a real apk - the harness only stats it and hashes it")
+    analysis = tmp_path / "analysis"
+    if with_sidecar:
+        sidecar = analysis / hashlib.sha256(apk.read_bytes()).hexdigest()
+        sidecar.mkdir(parents=True)
+        (sidecar / "run_status.json").write_text(json.dumps({
+            "state": "started",
+            "in_flight_stage": "decompile",
+            "last_stage": "audit",
+            "last_stage_status": "success",
+        }), encoding="utf-8")
+    targets = tmp_path / "targets.txt"
+    targets.write_text(str(apk) + "\n", encoding="utf-8")
+    runner = tmp_path / "slow_runner.sh"
+    runner.write_text("#!/bin/bash\nsleep 5\nexit 0\n", encoding="utf-8")
+    runner.chmod(0o755)
+    return _run(tmp_path, SWEEP_TARGETS_FILE=targets, SWEEP_RUNNER=f"bash {runner}",
+                SWEEP_RUN_TIMEOUT="1", SWEEP_ANALYSIS_ROOT=str(analysis))
+
+
+def test_a_target_the_harness_killed_names_the_stage_it_was_inside(tmp_path):
+    """The outcome row for a run the HARNESS killed carries the state and the
+    elapsed time and nothing else, so a target that burned two hours of its
+    budget died leaving no place on record - the same gap ADR-0021 closed for a
+    run that killed itself, left in the harness that drives the corpus. The stage
+    is in the run's own sidecar, keyed by the APK's sha256, which is what ingest
+    keys the analysis directory by."""
+    proc = _timed_out(tmp_path, with_sidecar=True)
+    assert proc.returncode != 0, "a sweep that killed a target is not a clean sweep"
+
+    rows = [r for r in _rows(tmp_path) if r.startswith("--\tkilled_in\t")]
+    assert len(rows) == 1, _journal(tmp_path)
+    fields = rows[0].split("\t")
+    assert fields[1] == "killed_in"
+    assert fields[2] == "target"
+    assert fields[3] == "timeout"
+    # the run was mid-stage, not at the stage it had last completed
+    assert "was in decompile" in fields[4]
+    assert "last completed: audit (success)" in fields[4]
+    # ...and it follows the outcome row it explains, the way every other journal
+    # row pairs with the one above it
+    kind = [r.split("\t")[1] for r in _rows(tmp_path)]
+    assert kind.index("timeout") < kind.index("killed_in")
+
+
+def test_a_killed_target_with_no_sidecar_says_so_rather_than_naming_no_stage(tmp_path):
+    """An empty field would read as "no stage", which is a different and stronger
+    claim than "this was not recorded" - the same absent-versus-unreadable
+    distinction the sidecar's own reader keeps."""
+    proc = _timed_out(tmp_path, with_sidecar=False)
+    assert proc.returncode != 0
+    rows = [r for r in _rows(tmp_path) if r.startswith("--\tkilled_in\t")]
+    assert len(rows) == 1
+    assert rows[0].split("\t")[4] == "no sidecar"

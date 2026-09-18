@@ -40,6 +40,11 @@ cd "$(dirname "$0")/.." || exit 1
 RUN_TIMEOUT=${SWEEP_RUN_TIMEOUT:-7200}
 JUSTIFICATION=${SWEEP_JUSTIFICATION:-ACADEMIC_TRAINING_TARGET}
 DEVICE=${SWEEP_DEVICE:-emulator-5554}
+# Where the reader below looks for a run's own sidecar (ADR-0021) when the
+# harness itself had to kill a target. The CLI's analysis root is the source of
+# truth; this is only the reader's view of it, overridable so the timeout path
+# can be exercised without writing into the real outputs/ tree.
+ANALYSIS_ROOT=${SWEEP_ANALYSIS_ROOT:-outputs/analysis}
 LOG_DIR=${SWEEP_LOG_DIR:-run_logs/sweep-$(date -u +%Y%m%dT%H%M%SZ)}
 JOURNAL="$LOG_DIR/journal.tsv"
 mkdir -p "$LOG_DIR"
@@ -142,6 +147,33 @@ on_signal() {
 trap on_signal INT TERM
 trap '[ "$interrupted" -eq 1 ] || finish end' EXIT
 
+# The stage a run the harness killed was inside, read from the run's OWN sidecar
+# (ADR-0021). The row the harness writes for such a target names the state and the
+# elapsed time and nothing else, so two hours of work die leaving no place on
+# record - the same gap ADR-0021 closed for a run that killed itself, left in the
+# harness that drives the corpus. The analysis directory is keyed by the APK's
+# sha256, which is what ingest computes for a plain .apk; a target with nothing
+# under that hash says `no sidecar` rather than leaving the field empty, because
+# "not recorded" must not read as "no stage".
+killed_stage() {
+  local apk="$1" hash sidecar
+  hash=$(sha256sum "$apk" 2>/dev/null | cut -d' ' -f1)
+  [ -n "$hash" ] || { echo "hash unavailable"; return; }
+  sidecar="$ANALYSIS_ROOT/$hash/run_status.json"
+  [ -f "$sidecar" ] || { echo "no sidecar"; return; }
+  "$PY" -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+in_flight = d.get("in_flight_stage")
+last = d.get("last_stage") or "none recorded"
+status = d.get("last_stage_status") or "n/a"
+if in_flight and in_flight != last:
+    print("was in " + in_flight + " (last completed: " + last + " (" + status + "))")
+else:
+    print("last stage: " + last + " (" + status + ")")
+' "$sidecar" 2>/dev/null || echo "sidecar unreadable"
+}
+
 echo "sweep starting $(date -u +%FT%TZ) -> $LOG_DIR"
 for apk in "${TARGETS[@]}"; do
   [ -n "$apk" ] || continue
@@ -206,6 +238,14 @@ for apk in "${TARGETS[@]}"; do
   printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
     "$name" "$state" "$rc" "$sig" "$elapsed" "$has_report" "$log" >> "$JOURNAL"
   echo "=== $name state=$state rc=$rc signal=$sig elapsed=${elapsed}s ==="
+  # A run the harness itself killed is the one case where the outcome row has a
+  # cause it cannot name: the other states carry it in rc and the log. Only the
+  # two killed states need it - a run that reached its own end has its stages in
+  # its report, and its sidecar is finalized to say which ending it was.
+  if [ "$state" = timeout ] || [ "$state" = signal ]; then
+    printf -- "--\tkilled_in\t%s\t%s\t%s\t%s\t%s\n" \
+      "$name" "$state" "$(killed_stage "$apk")" "$elapsed" "$log" >> "$JOURNAL"
+  fi
   [ "$state" = ok ] || incomplete=$((incomplete + 1))
   current=""
 done

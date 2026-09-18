@@ -65,9 +65,10 @@ Three parts.
 run-status sidecar (`outputs/analysis/<hash>/run_status.json`) is written when the
 run starts - `run_id`, `apk_hash`, package, target, operator, justification,
 `git_commit`, `started_at`, `state: "started"` - and rewritten as each stage
-completes, carrying the stage's name, status and duration. It is finalized
-(`state: "finished"`, report path) after the run is saved and its completion
-audited. A sidecar left in `started` is therefore the record of a run that
+completes, carrying the stage's name, status and duration. It is finalized as soon
+as the run reaches an outcome - `state: "finished"` when its completion reached
+the log, `ended_unaudited` when that write failed - and records the report path. A
+sidecar left in `started` is therefore the record of a run that
 reached a named stage and did not reach the next one, and it survives a SIGKILL
 that could not run a handler, a `finally`, or a trap.
 
@@ -91,11 +92,13 @@ supplies the where; the DB stays a table of completed verdicts.
   distinction costs one file write per stage.
 - The 32 existing orphans are surfaced by the command that already computes them,
   and by the identity the audit log already holds - no backfill, no log rewrite.
-- A sidecar is not authoritative for whether a run finished. Finalization happens
-  last, so a run that dies between `save_run` and the finalize would leave a
-  sidecar reading `started` for a run the audit log shows as completed. The join
-  takes orphanhood from the audit log and uses the sidecar only for the stage, so
-  that window can never manufacture a phantom interrupted run.
+- A sidecar is not authoritative for whether a run finished - the audit log is -
+  and its states are not verdicts either. Finalization happens as soon as the run
+  reaches an outcome, ahead of the branches that exit non-zero, so three endings
+  stay distinct: `started` for a run that died mid-stage, `finished` for a
+  complete run whose `runs` row may be missing, and `ended_unaudited` for a run
+  that ended on purpose yet stands as an orphan in the log. The join takes
+  orphanhood from the log and uses the sidecar only for the stage and the ending.
 - A sidecar write that fails (a full disk) must not silently lose the trace: it
   prints a red caution and the run continues. Halting a 40-minute analysis over a
   telemetry write is the wrong trade, but silence is not an option either.
@@ -197,6 +200,36 @@ able to run:
   invocation that printed `Audit log integrity FAILED` for the known line-185
   fork. Before this change that command printed the fork and exited, and the
   orphan list was unreachable.
+
+### The ending that exits non-zero
+
+The implementation as first committed got this wrong; `6a17d9f4a` corrects it, and
+the correction is recorded here rather than quietly folded in. `_finalize_run`
+finalized the sidecar *after* its two branches that exit non-zero, so a run whose
+audit completion failed - precisely the run the log reports as an orphan - left
+`started` on disk while the process was still alive and its outcome was known.
+That is a false interruption claim, and it contradicts this ADR's own authority
+rule: the log says "ended without a completion", the sidecar said "still running".
+The store's rule that an absence claim needs the probe that saw it (ADR-0017) has
+a sibling here - a sidecar claiming a run never reached its end needs the run to
+have actually not reached one.
+
+Two endings were collapsed into one, and they are not the same fact: a run whose
+completion write failed ended deliberately and is an orphan, while a run that
+completed and was audited but whose `save_run` failed is complete and merely
+absent from the `runs` table. The sidecar now states which happened
+(`ended_unaudited` / `finished`) and records why (`audit_error` / `save_error`), so
+a reader holding only that file knows which end-record is missing rather than
+having to infer it from a state that named neither.
+
+Five tests pin it. Two state-level tests in `test_run_status.py` (an unaudited
+ending is not `finished`; a save error is recorded against a completed run), one
+on the note's wording in `test_uncompleted_run_surface.py` - matched against the
+flattened console text, because the message wraps at the console width and a
+phrase-spanning assertion passes or fails on where the break lands - and two that
+call `_finalize_run` with a failing completion and with a failing save, asserting
+the sidecar on disk is finalized on both paths. Those last two fail against the
+pre-fix ordering by construction: the file would still read `started`.
 
 ### What is and is not established
 

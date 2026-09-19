@@ -59,18 +59,19 @@ def test_the_record_cannot_drift_from_the_decision_it_reports():
     assert not (exempted & unaccounted)
 
 
-def _section() -> str:
-    """The render block for this evidence, bounded by the next section's opening
-    tag rather than the first `{% endif %}` (which closes an inner `if`)."""
+def _section(var: str = "platform_libs_exempted", next_var: str = "dynamic_loads") -> str:
+    """The render block for one evidence section, bounded by the NEXT section's
+    opening tag rather than the first `{% endif %}` (which can close an inner
+    `if`, and does for platform_libs_exempted)."""
     src = (_REPO / "src" / "report" / "generator.py").read_text()
-    start = src.index("{% if platform_libs_exempted -%}")
-    end = src.index("{% if dynamic_loads", start)
+    start = src.index("{% if " + var + " -%}")
+    end = src.index("{% if " + next_var, start)
     return src[start:end]
 
 
-def _render(value):
+def _render(value, var: str = "platform_libs_exempted", next_var: str = "dynamic_loads"):
     env = getattr(TEMPLATE, "environment", TEMPLATE)
-    return env.from_string(_section()).render(platform_libs_exempted=value)
+    return env.from_string(_section(var, next_var)).render(**{var: value})
 
 
 def test_the_section_names_the_libraries_and_what_was_not_claimed():
@@ -125,3 +126,32 @@ def test_the_evidence_crosses_every_seam():
     assert "native_scan_errors=native_scan_errors," in gen
     assert "{% if native_scan_errors" in gen
     assert 'errors.append(f"{lib.name}: {lib.scan_error}")' in cli
+
+
+def test_the_extraction_failure_section_names_the_member_and_what_was_not_claimed():
+    sample = "lib/x86/libfoo.so: No space left on device"
+    out = _render([sample], "extraction_failures", "native_scan_errors")
+    assert f"`{sample}`" in out
+    # The bound has to be stated, not just the list: a reader who sees a lib named
+    # here must know it counts as unread, not as absent.
+    assert "never analyzed" in out
+    # And it must be kept OUT of the unaccounted-loads section below: these
+    # libraries ARE shipped, so listing them there would claim the APK does not
+    # ship a library it does. The two sections must not read as duplicates.
+    assert "deliberately **absent**" in out
+
+
+def test_the_extraction_failure_section_stays_silent_when_empty():
+    assert _render([], "extraction_failures", "native_scan_errors").strip() == ""
+    assert _render(None, "extraction_failures", "native_scan_errors").strip() == ""
+
+
+def test_the_tool_failure_section_names_the_library_and_stays_silent_when_empty():
+    sample = "libfoo.so: ghidra timed out"
+    out = _render([sample], "native_scan_errors", "unaccounted_loads")
+    assert f"`{sample}`" in out
+    # Extracted-but-unreadable is the opposite case from the section above, and the
+    # wording is the only thing distinguishing them on the page.
+    assert "that **was** extracted" in out
+    assert _render([], "native_scan_errors", "unaccounted_loads").strip() == ""
+    assert _render(None, "native_scan_errors", "unaccounted_loads").strip() == ""

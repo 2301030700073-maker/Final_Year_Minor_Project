@@ -224,6 +224,21 @@ unaccounted-loads section below, which lists loads with **no** shipped library
 behind them: these libraries ARE shipped, so listing them there would claim the
 APK does not ship a library it does.
 {% endif %}
+{% if native_scan_errors -%}
+### Native libraries a tool could not read (coverage-limited)
+
+Each entry is a library that **was** extracted, and whose scan failed - a tool
+timeout, a non-zero exit, or an unpack that did not work:
+
+{% for e in native_scan_errors -%}
+- `{{ e | md }}`
+{% endfor %}
+
+Native coverage is `partial` or `unscannable` for that library, so a native
+NEITHER is **not** a confident negative over it (ADR-0006). Named here because the
+coverage table alone cannot be told apart from a lib that is merely obfuscated or
+parsed empty.
+{% endif %}
 {% if unaccounted_loads -%}
 ### Unaccounted native loads (boundary #4)
 
@@ -599,6 +614,7 @@ def generate_report(
     unaccounted_loads: list | None = None,
     platform_libs_exempted: list | None = None,
     extraction_failures: list | None = None,
+    native_scan_errors: list | None = None,
     dynamic_loads: list | None = None,
     js_evidence: list | None = None,
     webview_sites: list | None = None,
@@ -645,6 +661,7 @@ def generate_report(
         unaccounted_loads=unaccounted_loads,
         platform_libs_exempted=platform_libs_exempted,
         extraction_failures=extraction_failures,
+        native_scan_errors=native_scan_errors,
         dynamic_loads=dynamic_loads,
         js_evidence=js_evidence,
         webview_sites=webview_sites,

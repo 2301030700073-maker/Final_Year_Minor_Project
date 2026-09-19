@@ -350,7 +350,11 @@ def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
             for so in group:
                 libraries.append(lib if so == representative else _clone_lib_for_path(lib, so))
         if lib.scan_error:
-            errors.append(lib.scan_error)
+            # Prefixed with the library. Most producers already name it (the tool
+            # message carries the .so path it failed on) but the UPX and the
+            # Ghidra-last-resort ones do not, and the report has to identify the
+            # library without the reader cross-referencing the scan.
+            errors.append(f"{lib.name}: {lib.scan_error}")
     result = match_native(libraries, signatures)
     result.abi_coverage = compute_degradation(libraries)
     result.errors = errors
@@ -3009,6 +3013,15 @@ def run(
         extraction_failures=(
             native_evidence.extraction_failures if native_evidence is not None else None
         ),
+        # The per-lib tool failures (timeout / non-zero exit / unpack failure).
+        # These already bound native coverage through _lib_coverage's rule 4, but
+        # the bound is legible only if its cause is: the coverage table shows
+        # native=partial, which reads the same whether a tool failed, the lib was
+        # obfuscated, or it parsed empty. Same argument as dex_attribution_degraded
+        # for the java bound.
+        native_scan_errors=(
+            native_evidence.errors if native_evidence is not None else None
+        ),
         dynamic_loads=dynamic_loads or None,
         js_evidence=js_matches or None,
         webview_sites=webview_sites or None,
@@ -3512,6 +3525,7 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         unaccounted_loads=causes.get("unaccounted_loads"),
         platform_libs_exempted=causes.get("platform_libs_exempted"),
         extraction_failures=causes.get("extraction_failures"),
+        native_scan_errors=causes.get("native_scan_errors"),
         dynamic_loads=causes.get("dynamic_loads"),
         js_evidence=causes.get("js_evidence"),
         webview_sites=causes.get("webview_sites"),

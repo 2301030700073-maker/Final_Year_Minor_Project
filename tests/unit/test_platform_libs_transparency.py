@@ -114,3 +114,14 @@ def test_the_evidence_crosses_every_seam():
     assert 'causes.get("extraction_failures")' in cli
     assert "extraction_failures=extraction_failures," in gen
     assert "{% if extraction_failures" in gen
+    # And the same four for the per-lib tool failures. This one was the whole
+    # reason the check exists: the field was assigned at the scan and read by
+    # NOBODY, so a lib a tool timed out on bounded native coverage with no legible
+    # cause. The producer must also name the library - two of its three producers
+    # (UPX, Ghidra last-resort) do not name it themselves, so an unprefixed entry
+    # renders as a reason attached to no lib.
+    assert "native_scan_errors=(" in cli
+    assert 'causes.get("native_scan_errors")' in cli
+    assert "native_scan_errors=native_scan_errors," in gen
+    assert "{% if native_scan_errors" in gen
+    assert 'errors.append(f"{lib.name}: {lib.scan_error}")' in cli

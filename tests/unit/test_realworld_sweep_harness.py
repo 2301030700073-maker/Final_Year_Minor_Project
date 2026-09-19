@@ -233,6 +233,97 @@ def test_a_killed_target_with_no_sidecar_says_so_rather_than_naming_no_stage(tmp
     assert rows[0].split("\t")[4] == "no sidecar"
 
 
+# --- a sweep the MACHINE took down records where its target stopped ------------
+
+
+def _interrupted(tmp_path, *, with_sidecar):
+    """Drive one target into the interrupt state with a real TERM to the harness
+    while that target is in flight - the state every sweep killed by the host (two
+    measured: 2026-09-18 and 2026-09-19) died in. The runner is `exec sleep`, so
+    the TERM the trap sends lands on the sleep itself rather than being deferred
+    behind a foreground child the way a `sleep` in a script would defer it."""
+    import hashlib
+    import json
+    import signal
+    import time
+
+    apk = tmp_path / "target.apk"
+    apk.write_bytes(b"the harness only stats and hashes this")
+    analysis = tmp_path / "analysis"
+    if with_sidecar:
+        sidecar = analysis / hashlib.sha256(apk.read_bytes()).hexdigest()
+        sidecar.mkdir(parents=True)
+        (sidecar / "run_status.json").write_text(json.dumps({
+            "state": "started",
+            "in_flight_stage": "dynamic",
+            "last_stage": "static_scan",
+            "last_stage_status": "success",
+        }), encoding="utf-8")
+    targets = tmp_path / "targets.txt"
+    targets.write_text(str(apk) + "\n", encoding="utf-8")
+    runner = tmp_path / "slow_runner.sh"
+    runner.write_text("#!/bin/bash\nexec sleep 30\n", encoding="utf-8")
+    runner.chmod(0o755)
+
+    proc = subprocess.Popen(
+        ["bash", str(SCRIPT)],
+        env=_env(tmp_path, SWEEP_TARGETS_FILE=targets, SWEEP_RUNNER=f"bash {runner}",
+                 SWEEP_RUN_TIMEOUT="60", SWEEP_ANALYSIS_ROOT=str(analysis)),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    journal = tmp_path / "logs" / "journal.tsv"
+    # TERM only after the write-ahead row is on disk: that row is what says a target
+    # is in flight, and interrupting before it would test an idle sweep instead.
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if journal.exists() and "\tstarted\t" in journal.read_text(encoding="utf-8"):
+            break
+        time.sleep(0.1)
+    else:
+        proc.kill()
+        proc.wait(timeout=10)
+        raise AssertionError("the harness never started its target")
+    proc.send_signal(signal.SIGTERM)
+    proc.wait(timeout=30)
+    return proc
+
+
+def test_an_interrupted_sweep_names_the_stage_its_target_was_inside(tmp_path):
+    """An interrupt kills its target just as a timeout does, and the outcome row it
+    never reaches is the one that would have named the stage the target was inside.
+    Both measured interrupts left only `sweep_interrupted <target>`: the target was
+    named and its progress - up to two hours of it - was recorded nowhere, while the
+    run's own sidecar had it all along (ADR-0021)."""
+    proc = _interrupted(tmp_path, with_sidecar=True)
+    assert proc.returncode == 130, "an interrupted sweep is not a clean sweep"
+
+    rows = [r for r in _rows(tmp_path) if r.startswith("--\tkilled_in\t")]
+    assert len(rows) == 1, _journal(tmp_path)
+    fields = rows[0].split("\t")
+    assert fields[2] == "target"
+    # a distinct state from the harness's own timeout: the cause is the host, and
+    # reading the two as one would blame the target's budget for the machine's death
+    assert fields[3] == "interrupted"
+    assert "was in dynamic" in fields[4]
+    assert "last completed: static_scan (success)" in fields[4]
+    assert fields[5].isdigit(), fields
+
+    # the marker row is kept - readers keyed on it must not lose the sweep's ending
+    kind = [r.split("\t")[1] for r in _rows(tmp_path)]
+    assert "sweep_interrupted" in kind
+    assert kind.index("killed_in") < kind.index("sweep_interrupted")
+
+
+def test_an_interrupted_target_with_no_sidecar_says_so_rather_than_naming_no_stage(tmp_path):
+    """The same absent-versus-unreadable distinction the timeout path keeps: an
+    empty field would read as "no stage", a stronger claim than "not recorded"."""
+    proc = _interrupted(tmp_path, with_sidecar=False)
+    assert proc.returncode == 130
+    rows = [r for r in _rows(tmp_path) if r.startswith("--\tkilled_in\t")]
+    assert len(rows) == 1, _journal(tmp_path)
+    assert rows[0].split("\t")[4] == "no sidecar"
+
+
 # --- how much of a target's window the machine spent not running --------------
 
 

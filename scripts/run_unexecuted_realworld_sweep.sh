@@ -146,6 +146,10 @@ signal_name() {
 }
 
 current=""
+# The APK path of the target in flight, kept beside `current` (the display name):
+# the interrupt path needs it to find the run's sidecar, which is keyed by the
+# APK's sha256, and `current` alone cannot be hashed back into that.
+current_apk=""
 child=""
 incomplete=0
 interrupted=0
@@ -164,6 +168,22 @@ finish() {
 on_signal() {
   interrupted=1
   [ -n "${child:-}" ] && kill -TERM "$child" 2>/dev/null
+  # An interrupted sweep kills its target just as surely as a timeout does, and the
+  # outcome row it never reaches is the one that would have named the stage that
+  # target was inside. Two measured interrupts (2026-09-18 and 2026-09-19) both left
+  # a `sweep_interrupted` row naming the target and nothing about its progress -
+  # while the run's own sidecar held exactly that (ADR-0021). So the interrupt
+  # writes the same killed_in row the timeout path writes, from the same reader. The
+  # elapsed is measured against this target's own start and floored at 0, since a
+  # backwards-stepping wall clock is a different fact than a negative duration.
+  if [ -n "${current_apk:-}" ]; then
+    local _now _elapsed
+    _now=$(date +%s)
+    _elapsed=$(( _now - ${start:-$_now} ))
+    [ "$_elapsed" -lt 0 ] && _elapsed=0
+    printf -- "--\tkilled_in\t%s\t%s\t%s\t%s\t%s\n" \
+      "$current" interrupted "$(killed_stage "$current_apk")" "$_elapsed" "$log" >> "$JOURNAL"
+  fi
   finish interrupted
   exit 130
 }
@@ -212,12 +232,13 @@ for apk in "${TARGETS[@]}"; do
   name=$(basename "$apk" .apk)
   log="$LOG_DIR/$name.log"
   current="$name"
-
+  current_apk="$apk"
   if [ ! -f "$apk" ]; then
     printf "%s\tmissing\t-\t-\t0\t-\t%s\n" "$name" "$log" >> "$JOURNAL"
     echo "=== $name MISSING $apk ==="
     incomplete=$((incomplete + 1))
     current=""
+    current_apk=""
     continue
   fi
 
@@ -296,6 +317,7 @@ for apk in "${TARGETS[@]}"; do
   fi
   [ "$state" = ok ] || incomplete=$((incomplete + 1))
   current=""
+  current_apk=""
 done
 
 echo "sweep finished $(date -u +%FT%TZ): ${#TARGETS[@]} target(s) run, $incomplete not ok; journal $JOURNAL"

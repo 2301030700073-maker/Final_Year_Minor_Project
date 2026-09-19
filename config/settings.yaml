@@ -1,15 +1,27 @@
-# Paths, thresholds, model routing (model routing unused until Phase 5+)
+# Read by cli._load_thresholds, which reads the `thresholds` section and
+# nothing else - this file is not a path-config surface. Signature corpora come
+# from cli.CONFIG_ROOT / "signatures" / <name>.yaml, and the output roots and
+# the audit log from cli.OUTPUTS_ROOT and cli.AUDIT_LOG_PATH. Model routing is
+# unused until Phase 5+.
+#
+# The path blocks below were listed here and read by nobody, which made them
+# knobs that changed nothing: editing `outputs.audit_log` still wrote the
+# hardcoded cli.AUDIT_LOG_PATH, and editing a signature path still scanned the
+# config/signatures/ file of that name. Kept commented as intent rather than
+# deleted, because wiring a corpus path is a design change and not a lookup -
+# the report stamps which signature files a run used, so a corpus selected from
+# here would have to carry its identity into that stamp.
 
 thresholds:
   root: 0.7
   ssl: 0.7
 
-signatures:
-  root_detection: config/signatures/root_detection.yaml
-  ssl_pinning: config/signatures/ssl_pinning.yaml
-
-outputs:
-  apks: outputs/apks
-  analysis: outputs/analysis
-  reports: outputs/reports
-  audit_log: outputs/audit_log.jsonl
+# signatures:
+#   root_detection: config/signatures/root_detection.yaml
+#   ssl_pinning: config/signatures/ssl_pinning.yaml
+#
+# outputs:
+#   apks: outputs/apks
+#   analysis: outputs/analysis
+#   reports: outputs/reports
+#   audit_log: outputs/audit_log.jsonl

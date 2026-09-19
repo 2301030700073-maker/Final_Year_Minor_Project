@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 import typer
+import yaml
 
 from cli import (
     PACKAGE_TO_TARGET,
@@ -139,6 +140,23 @@ def _fake_settings(monkeypatch, body: str):
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr("builtins.open", fake_open)
+
+
+def test_settings_yaml_declares_nothing_the_loader_ignores():
+    # _load_thresholds reads the `thresholds` section and nothing else, so any
+    # other LIVE top-level key in settings.yaml is a knob that changes nothing.
+    # The file carried `signatures:` and `outputs:` blocks no code read - editing
+    # `outputs.audit_log` still wrote the hardcoded cli.AUDIT_LOG_PATH - and they
+    # are commented now. Commented keys do not load, so this asserts on what yaml
+    # actually returns: re-adding a block fails here instead of quietly shipping
+    # a config surface whose edits go nowhere.
+    body = (Path(__file__).resolve().parents[2] / "config" / "settings.yaml").read_text()
+    loaded = yaml.safe_load(body) or {}
+
+    assert set(loaded) == {"thresholds"}, (
+        f"settings.yaml carries {sorted(set(loaded) - {'thresholds'})}, which "
+        f"_load_thresholds never reads; wire it or comment it"
+    )
 
 
 def test_apply_manifest_ssl_signal_records_nsc_evidence_without_weight():

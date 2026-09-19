@@ -432,6 +432,58 @@ def test_run_capture_stage_success_records_real_flows(monkeypatch, tmp_path):
     assert [f["scheme"] for f in result.evidence["flow_summary"]] == ["https", "https"]
 
 
+def test_the_internet_baseline_is_re_established_after_the_adbd_restart(monkeypatch, tmp_path):
+    """The capture setup establishes the device's only internet path - the
+    pass-through adb reverse - and then pushes the mitmproxy CA. That push runs
+    `adb root` unconditionally, adbd restarts, and an adbd restart takes every
+    reverse tunnel with it. On WSL2 the tunnel is the device's sole route out
+    (the emulator has no direct NAT), and the device-proxy setting survives the
+    restart, so the path still reads as configured while pointing at a loopback
+    nothing is listening on. The app then browses nothing, and an app that never
+    reaches its server never performs the pinned handshake this window exists to
+    observe - an empty capture no artifact explains. Hence the baseline is
+    re-established after the push, and this pins that order rather than trusting
+    it to hold: the two calls sit forty lines apart and either one can be moved.
+    """
+    order: list[str] = []
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: True)
+    monkeypatch.setattr(mitmproxy_capture, "_windows_mitmdump", lambda: r"C:\mitmdump.exe")
+    monkeypatch.setattr(mitmproxy_capture, "_prepare_windows_confdir",
+                        lambda confdir, dest: r"C:\conf")
+    monkeypatch.setattr(mitmproxy_capture, "_write_windows_addon",
+                        lambda path, log_win: path)
+    monkeypatch.setattr(mitmproxy_capture, "_start_windows_mitmdump", lambda *a, **k: None)
+    monkeypatch.setattr(mitmproxy_capture, "_wait_windows_listening", lambda *a, **k: None)
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    monkeypatch.setattr(mitmproxy_capture, "_read_windows_text",
+                        lambda path: FIXTURE_DETAIL)
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
+                        lambda serial, port: True)
+    monkeypatch.setattr(mitmproxy_capture, "_launch_app", lambda serial, package: None)
+    monkeypatch.setattr(mitmproxy_capture.time, "sleep", lambda s: None)
+    monkeypatch.setattr(device, "create_mitm_ca",
+                        lambda confdir: confdir / "mitmproxy-ca-cert.pem")
+    monkeypatch.setattr(device, "set_http_proxy", lambda serial, host, port: None)
+    monkeypatch.setattr(device, "clear_http_proxy", lambda serial: None)
+    monkeypatch.setattr(device, "adb_reverse", lambda serial, dp, hp, add=True: None)
+    monkeypatch.setattr(pass_through_proxy, "is_listening", lambda port: True)
+    monkeypatch.setattr(device, "push_system_ca", lambda serial, cert: (
+        order.append("push_system_ca"), "/system/etc/security/cacerts/x.0")[1])
+    monkeypatch.setattr(pass_through_proxy, "ensure_internet",
+                        lambda serial, port: order.append("ensure_internet"))
+
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path, capture_window=0.1,
+    )
+    assert result.status == "success", result.error
+    assert order.count("ensure_internet") >= 2, order
+    last_baseline = max(i for i, call in enumerate(order) if call == "ensure_internet")
+    assert last_baseline > order.index("push_system_ca"), (
+        "the internet baseline must be established after the CA push - the push "
+        f"restarts adbd and drops the reverse it depends on: {order}"
+    )
+
+
 def test_run_capture_stage_exception_carries_the_frida_it_was_under(monkeypatch, tmp_path):
     # ADR-0020: a capture that dies is when "which Frida was attached?" gets
     # asked, so the record travels on the failure arm too - the same reason the

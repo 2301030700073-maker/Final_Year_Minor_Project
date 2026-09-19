@@ -1239,6 +1239,22 @@ def run_capture_stage(
     try:
         cert = device.create_mitm_ca(confdir)
         system_ca = device.push_system_ca(serial, cert)
+        if wsl2:
+            # The CA push above may have just restarted adbd - `adb root` is
+            # unconditional inside push_system_ca - and an adbd restart takes every
+            # reverse tunnel with it, including the pass-through tunnel
+            # ensure_internet placed a few lines earlier. On WSL2 that tunnel is the
+            # device's ONLY internet path (the emulator has no direct NAT). The
+            # device-proxy setting survives the restart, so the path still reads as
+            # configured while pointing at a device-side loopback nothing is
+            # listening on: the app under test then browses nothing, and an app that
+            # never reaches its server never performs the pinned handshake this
+            # window exists to observe - so the capture comes back empty for a
+            # reason no artifact names. Re-running the baseline here is what makes
+            # "established" still true at the point it is used. A re-add of the same
+            # reverse spec is idempotent, so this costs one adb call when adbd did
+            # not restart and is load-bearing when it did.
+            pass_through_proxy.ensure_internet(serial, INTERNET_PROXY_PORT)
         # The Windows mitmdump's own output. WSL2 only: the native placement
         # keeps mitmdump's stdout in-process instead (see the Popen below).
         proxy_log = ""

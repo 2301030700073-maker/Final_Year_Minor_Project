@@ -376,13 +376,16 @@ def test_a_target_whose_window_includes_a_suspended_host_says_so(tmp_path):
     The freeze is asserted against the elapsed column the row itself explains, and
     never against the fixture's own `sleep`. That sleep is not a clock: the elapsed
     column is two `date +%s` reads truncated to whole seconds, and this guest's
-    realtime clock is steered by the Windows host, so the two reads can close by
-    less than the runner ran - a two-second runner recorded 1 s of freeze on 1 run
-    in 11 here. A bound tied to the sleep tests the clock, and this file's own
-    no-suspend test already records why a tight bound around that measurement is a
-    flake rather than a test. What must hold is that the row carries a real freeze
-    - not a zero, which is what a probe that never ran looks like - and that the
-    freeze is the whole of the elapsed time it explains."""
+    realtime clock steps backwards under the Windows host's steering - sampled
+    directly at 0.353 s and 0.341 s inside one minute of sampling. A bare
+    `date`/`sleep 2`/`date` loop with no harness in it undercounts the same way (1
+    run in 30; 1 in 11 and 1 in 20 through the harness, which the bare loop
+    exonerates), so the two reads can close by less than the runner ran. A bound
+    tied to the sleep tests the clock, and this file's own no-suspend test already
+    records why a tight bound around that measurement is a flake rather than a
+    test. What must hold is that the row carries a real freeze - not a zero, which
+    is what a probe that never ran looks like - and that the freeze is the whole of
+    the elapsed time it explains."""
     uptime = tmp_path / "uptime"
     uptime.write_text("12345.67 98765.00\n", encoding="utf-8")
     proc = _one_target(tmp_path, "#!/bin/bash\nsleep 2\necho 'Report: fake'\nexit 0\n",

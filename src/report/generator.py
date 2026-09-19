@@ -342,6 +342,9 @@ string in this APK; only its *ownership* is unverified.
 {% if self_termination_note -%}
 - ⚠ **App anti-instrumentation fired (FR-4.6):** `{{ self_termination_note | md }}`. This is a **positive finding** - the app has active anti-tampering that detected the Frida/root instrumentation and self-terminated - not merely an unverified bypass. A bypass could not be confirmed *because* the app's own defenses ended the process first; treat the inconclusive/​not-verified verdict above as a consequence of that defense, not evidence the app lacks the protection.
 {% endif -%}
+{% if install_recovery_note -%}
+- ⚠ **Device state changed by this run — a differently-signed copy of the package was uninstalled:** {{ install_recovery_note | md }} This removal was **not** something this run was asked to do, and it is not reversible from here. It does not change any verdict above or below: the target analysed *is* the build installed over that copy, signed with this run's key — but the previous build's on-device data is gone, and any device-side state it held is therefore not part of this run's picture.
+{% endif -%}
 {% if verification -%}
 {% for key, value in verification.evidence_lines.items() -%}
 - {{ key }}: `{{ value }}`
@@ -592,6 +595,7 @@ def generate_report(
         **(_capture := _capture_summary(stage_results)),
         handshake_capture_note=_handshake_capture_note(verification, _capture),
         self_termination_note=_self_termination_note(stage_results),
+        install_recovery_note=_install_recovery_note(stage_results),
         manifest=manifest,
         expired_pin_sets=_expired_pin_sets(manifest, timestamp),
         coverage=coverage,
@@ -961,6 +965,52 @@ def _self_termination_note(stage_results: list[StageResult]) -> str | None:
         "target app self-terminated after resume - detected the instrumentation "
         "(Frida/root) and exited before dynamic verification could confirm a bypass"
     )
+
+
+def _install_recovery_note(stage_results: list[StageResult]) -> str | None:
+    """The device state change this run made in order to install the target, or None.
+
+    `cli.py` attaches `install_result` to the dynamic stage's evidence for exactly
+    one reason, in its own words: a device state change the operator did not ask
+    for belongs on the record, and it rides on the evidence so it reaches a written
+    report. `device.install_apk` builds that record on exactly one path - adb
+    refused the install over a differently-signed copy of the SAME package, that
+    copy was removed, and the retry then succeeded (a failed retry raises, so no
+    record exists for it). The key's presence is therefore itself the measurement:
+    this renders nothing for a run that hit no conflict, and nothing is inferred
+    from an absence.
+
+    It is rendered at all because the removal is destructive and unrequested (the
+    previous copy's data goes with it), and until now the fact reached the database
+    and the scrollback but never the artifact the operator reads - the consumer gap
+    is the same one this project has been bitten by before
+    ([[unit-tested-parser-neq-consumed-signal]]). Nothing in the sentence is
+    authored here: the package named is the conflict adb reported and the refusal
+    quoted is adb's own text.
+    """
+    dynamic_stage = next((s for s in stage_results if s.stage == "dynamic"), None)
+    if dynamic_stage is None:
+        return None
+    recovery = (dynamic_stage.evidence or {}).get("install_recovery")
+    if not isinstance(recovery, dict):
+        return None
+    if not recovery.get("recovered_from_signature_conflict"):
+        # The plain success record device.py also returns. It means no conflict was
+        # ever hit, so there is no removal to report - rendering the notice off it
+        # would assert a device change that did not happen.
+        return None
+    package = recovery.get("uninstalled_package")
+    what = f"`{package}`" if package else "a copy of this package"
+    note = (
+        f"`adb` refused to install the target because the device already held "
+        f"{what}, signed with a different key than this build. This run uninstalled "
+        f"that copy and installed the target in its place, so the run analysed a "
+        f"freshly installed target with none of the removed copy's data."
+    )
+    refusal = recovery.get("first_refusal")
+    if refusal:
+        note += f" adb's refusal, as recorded: `{refusal}`"
+    return note
 
 
 def _is_iso_date(s: str) -> bool:

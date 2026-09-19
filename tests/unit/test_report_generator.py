@@ -68,6 +68,52 @@ def test_generate_report_operator_forced_banner_keeps_static_verdict_neither(tmp
     assert "- Verdict: COVERAGE-CONFIRMED" in content
 
 
+def test_an_unrequested_device_uninstall_reaches_the_report(tmp_path):
+    # cli.py attaches install_result to the dynamic stage's evidence precisely so a
+    # device state change the operator did not ask for reaches a written report, and
+    # until now nothing rendered it: the fact lived in the database and the
+    # scrollback only, so the artifact a reviewer reads was silent about a
+    # destructive change this run made to their device.
+    report_path = generate_report(
+        run_id="rec1", apk_hash="rec001", timestamp="2026-09-19T12:00:00",
+        metadata={"hashes": {"sha256": "rec001"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[StageResult(
+            stage="dynamic", status="success",
+            evidence={"install_recovery": {
+                "recovered_from_signature_conflict": True,
+                "uninstalled_package": "com.example.app",
+                "first_refusal": "Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]",
+            }},
+        )],
+        output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Device state changed by this run" in content
+    # The sentence names the package AND quotes adb's own refusal - the measurement
+    # the claim rests on, not a bare assertion that something was removed.
+    assert "com.example.app" in content
+    assert "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in content
+
+
+def test_a_clean_install_renders_no_device_change_notice(tmp_path):
+    # Negative control. device.py returns {"recovered_from_signature_conflict":
+    # False} on the ordinary path, and a notice asserting an unrequested removal on
+    # every clean run would be boilerplate that cries wolf.
+    report_path = generate_report(
+        run_id="rec2", apk_hash="rec002", timestamp="2026-09-19T12:00:00",
+        metadata={"hashes": {"sha256": "rec002"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=[StageResult(
+            stage="dynamic", status="success",
+            evidence={"install_recovery": {"recovered_from_signature_conflict": False}},
+        )],
+        output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "Device state changed by this run" not in content
+
+
 def test_generate_report_no_forced_banner_on_normal_run(tmp_path):
     # Negative control: without the operator-forced stamp the banner must NOT appear -
     # it is provenance for an override, never boilerplate printed on every run.

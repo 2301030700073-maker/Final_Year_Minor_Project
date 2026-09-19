@@ -79,13 +79,20 @@ def _schemes_for(pair_ids: list[int]) -> list[str]:
     return schemes
 
 
-def _central_directory_offset(handle) -> int | None:
-    """The Central Directory's file offset, from the EOCD record, or None.
+def _central_directory_offset(handle) -> tuple[int | None, str]:
+    """The Central Directory's file offset from the EOCD record, or (None, why).
 
     The record is located from the tail - that is where the format puts it - but
     the offset is then taken from the record's own field rather than assumed, so
     the caller never has to know how far the directory or the signing block
     extends.
+
+    The reason travels with the None because the ways this fails are different
+    facts about the file, and a caller that reported all of them as "not a zip"
+    would be stating a cause it did not observe: a file with no EOCD record at
+    all is not the same file as one whose record is there and whose offset field
+    cannot anchor anything. The three are separated here rather than downstream
+    because this is where the evidence is.
     """
     handle.seek(0, 2)
     size = handle.tell()
@@ -94,13 +101,29 @@ def _central_directory_offset(handle) -> int | None:
     tail = handle.read(window)
     at = tail.rfind(_EOCD_MAGIC)
     if at < 0:
-        return None
+        return None, (
+            f"no End-Of-Central-Directory record in the last {window} of {size} "
+            f"bytes - not a zip"
+        )
     offset = int.from_bytes(
         tail[at + _EOCD_CD_OFFSET_AT:at + _EOCD_CD_OFFSET_AT + 4], "little"
     )
-    # A zero or out-of-file offset is not usable as an anchor; treat it as absent
+    # A zero or out-of-file offset is not usable as an anchor; report it as such
     # rather than seeking somewhere arbitrary.
-    return offset if 0 < offset <= size else None
+    if offset == 0xFFFFFFFF:
+        return None, (
+            "End-Of-Central-Directory record found, but its start-of-Central-"
+            "Directory field holds the ZIP64 sentinel 0xffffffff - the real "
+            "offset is in this file's ZIP64 EOCD record, which this reader does "
+            "not follow"
+        )
+    if not 0 < offset <= size:
+        return None, (
+            f"End-Of-Central-Directory record found, but its start-of-Central-"
+            f"Directory field reads {offset}, which is not inside the "
+            f"{size}-byte file"
+        )
+    return offset, ""
 
 
 def _parse_pairs(block: bytes) -> SigningBlock:
@@ -143,14 +166,9 @@ def read_signing_block(apk_path: Path) -> SigningBlock:
     one of its answers.
     """
     with open(apk_path, "rb") as handle:
-        handle.seek(0, 2)
-        size = handle.tell()
-        cd_offset = _central_directory_offset(handle)
+        cd_offset, cd_reason = _central_directory_offset(handle)
         if cd_offset is None:
-            return SigningBlock(
-                found=False,
-                detail=f"no End-Of-Central-Directory record in {size} bytes - not a zip",
-            )
+            return SigningBlock(found=False, detail=cd_reason)
         if cd_offset < _FOOTER_SIZE:
             return SigningBlock(
                 found=False,

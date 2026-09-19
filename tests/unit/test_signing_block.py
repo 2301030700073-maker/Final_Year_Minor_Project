@@ -121,3 +121,32 @@ def test_a_file_that_is_not_a_zip_reports_no_block(tmp_path):
     block = read_signing_block(path)
     assert block.found is False
     assert "not a zip" in block.detail
+
+
+def test_an_unusable_eocd_offset_field_is_not_reported_as_not_a_zip(tmp_path):
+    """An EOCD record that is there, with a field that cannot anchor anything, is
+    a different file from one with no EOCD at all - and reporting both as "not a
+    zip" states a cause the reader never observed. The field's own value is what
+    the detail has to name."""
+    data = bytearray(with_block(zip_bytes(), pair(V2)))
+    at = data.rfind(EOCD)
+    assert at >= 0
+    data[at + 16:at + 20] = struct.pack("<I", 0)
+    block = read_signing_block(write_apk(tmp_path, data))
+    assert block.found is False
+    assert "not a zip" not in block.detail
+    assert "start-of-Central-Directory field reads 0" in block.detail
+
+
+def test_the_zip64_sentinel_is_named_as_a_sentinel(tmp_path):
+    """0xffffffff in that field is not a 4 GB offset, it is the ZIP64 sentinel:
+    the real offset is in the ZIP64 EOCD record, which this reader does not
+    follow. Saying "not inside the file" would send a reader looking for a
+    truncation that is not there."""
+    data = bytearray(with_block(zip_bytes(), pair(V2)))
+    at = data.rfind(EOCD)
+    assert at >= 0
+    data[at + 16:at + 20] = struct.pack("<I", 0xFFFFFFFF)
+    block = read_signing_block(write_apk(tmp_path, data))
+    assert block.found is False
+    assert "ZIP64 sentinel 0xffffffff" in block.detail

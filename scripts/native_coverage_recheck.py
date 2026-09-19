@@ -12,6 +12,15 @@ This script does not re-run anything and does not touch the DB. It reads each
 APK's already-extracted .so files, applies the current gate, and prints the APKs
 whose stored claim the current code would NOT make. Those are the re-run list.
 
+One thing it cannot do, and now says so: an APK whose libraries all failed to
+extract leaves the same empty `<sha>/native/` as one that ships no native code,
+and that directory is the only record this script reads. A stored
+`fully_analyzed` with nothing on disk to apply the gate to is therefore reported
+as NOT RE-MEASURABLE, not passed over - passing over it reads as "checked and
+clean", and it is the same shape (a claim licensing a confident negative,
+resting on a scan that cannot be shown to have happened) this script exists to
+find. Only a re-run can tell the two apart.
+
 Usage: PYTHONPATH=src .venv/bin/python scripts/native_coverage_recheck.py [sha_prefix ...]
 """
 from __future__ import annotations
@@ -46,11 +55,26 @@ def latest_runs() -> list[tuple[str, str, dict]]:
 def main() -> int:
     wanted = tuple(sys.argv[1:])
     stale: list[str] = []
+    unmeasurable: list[str] = []
+    no_libs_other = 0
     for sha, ts, meta in latest_runs():
         if wanted and not sha.startswith(wanted):
             continue
         libs = sorted((ANALYSIS / sha / "native").rglob("*.so"))
         if not libs:
+            # Nothing extracted to apply the gate to - which is not the same as a
+            # sound claim. An APK whose shipped libraries all failed to extract
+            # leaves the same empty directory as one that ships none, and the
+            # extraction directory is all this script can see. `fully_analyzed` is
+            # the claim that licenses a confident negative, so that is the one that
+            # must not be passed over in silence.
+            if meta["native"] == "fully_analyzed":
+                unmeasurable.append(sha)
+                print(f"{sha[:13]} {str(meta['pkg'])[:38]:39} {ts[:19]}  "
+                      f"stored={meta['native']!s:16} now=NOT RE-MEASURABLE   libs=   0"
+                      f"  <-- nothing on disk to re-measure; re-run to earn this")
+            else:
+                no_libs_other += 1
             continue
         failures = []
         for so in libs:
@@ -74,6 +98,17 @@ def main() -> int:
         if len(failures) > 6:
             print(f"    ... and {len(failures) - 6} more")
     print()
+    if no_libs_other:
+        print(f"({no_libs_other} stored run(s) had no extracted .so and claimed no "
+              f"more than that - not re-measurable, nothing claimed.)")
+    # The caveat prints BEFORE the all-clear below, so a clean stale list is never
+    # the last thing read.
+    if unmeasurable:
+        print("NOT re-measurable here (stored native=fully_analyzed, no extracted .so on disk):")
+        for sha in unmeasurable:
+            print(f"  {sha}")
+        print("  Not confirmed good. A library that failed to extract leaves the same")
+        print("  empty directory as an APK that ships none; only a re-run separates them.")
     if stale:
         print("Re-run required (stored native=fully_analyzed the current gate would refuse):")
         for sha in stale:

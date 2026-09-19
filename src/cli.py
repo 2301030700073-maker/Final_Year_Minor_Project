@@ -2847,6 +2847,12 @@ def run(
                 capture_verification = TechnologyHooksEngagedCheck().check(
                     capture_evidence.get("frida_messages") or [],
                     app_still_running=capture_evidence.get("app_target_running"),
+                    # This window's OWN UI record, gathered by the capture stage
+                    # itself (_capture_ui_liveness) - the same input shape the
+                    # dynamic window's evaluation is given, so the two evaluations
+                    # of the ADR-0016 predicate differ only in which launch they
+                    # observed. None is honest ("not captured") and moves no
+                    # verdict; see the check's own docstring.
                     ui_liveness=capture_evidence.get("ui_liveness"),
                     window=capture_window,
                 )

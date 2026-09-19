@@ -1191,6 +1191,64 @@ def test_run_capture_stage_with_synthesized_source_never_builds_a_path(monkeypat
     assert source not in str(result.evidence)
 
 
+def test_run_capture_stage_records_this_windows_own_ui_liveness(monkeypatch, tmp_path):
+    # ADR-0016 calls the capture window a second, complete evaluation of the
+    # identical predicate, and cli.py hands that evaluation the stage's
+    # `ui_liveness`. Nothing in this stage ever wrote that key, so its `.get`
+    # returned None on every run: the second evaluation was UI-blind by
+    # construction while the dynamic window's was handed a real record. The
+    # record must therefore reach the evidence, and come from THIS window's own
+    # device sample rather than the other launch's.
+    from dynamic import ui_liveness as _uil
+    seen = []
+    record = {"screen_state": "resumed", "clickable_nodes": 3}
+
+    def fake_check(serial, package):
+        seen.append((serial, package))
+        return record
+
+    monkeypatch.setattr(_uil, "check_ui_liveness", fake_check)
+    hooks = _mock_native_run(monkeypatch, tmp_path, frida_mocks=True)
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path,
+        mitmdump_path="mitmdump", capture_window=0.1,
+        bypass_script="ssl_pinning_bypass_universal.js")
+    assert hooks["attach"] == 1
+    assert seen == [("emulator-5554", "com.example.app")]
+    assert result.evidence["ui_liveness"] is record
+
+
+def test_an_unhooked_capture_window_spends_no_ui_probe(monkeypatch, tmp_path):
+    # The ADR-0016 evaluation exists only for a window that ran under the injected
+    # bypass, so the probe is not spent on a window that has nothing to feed. The
+    # KEY is still recorded (None) on that arm, so its presence in the evidence
+    # never depends on which launch form ran.
+    from dynamic import ui_liveness as _uil
+    monkeypatch.setattr(
+        _uil, "check_ui_liveness",
+        lambda serial, package: pytest.fail("probed an un-hooked capture window"))
+    result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711)
+    assert result.evidence["bypass_applied"] is False
+    assert result.evidence["ui_liveness"] is None
+
+
+def test_capture_ui_liveness_degrades_to_not_captured(monkeypatch):
+    # The probe is a real device call. An unavailable/failing tool must record
+    # "not captured" (None) rather than a reading, and must never break the
+    # capture it is only annotating.
+    from dynamic import ui_liveness as _uil
+
+    def boom(serial, package):
+        raise RuntimeError("no device")
+
+    monkeypatch.setattr(_uil, "check_ui_liveness", boom)
+    assert mitmproxy_capture._capture_ui_liveness("s", "com.x") is None
+    monkeypatch.setattr(_uil, "check_ui_liveness",
+                        lambda serial, package: {"screen_state": "resumed"})
+    assert mitmproxy_capture._capture_ui_liveness("s", "com.x") == {
+        "screen_state": "resumed"}
+
+
 def test_cleanup_restores_pass_through_internet_on_wsl2(monkeypatch):
     # On WSL2 the device has no direct NAT, so cleanup must restore the device
     # proxy to the pass-through internet proxy - never leave it with none.
@@ -1932,6 +1990,14 @@ def _app_running_by_default(monkeypatch):
                         {"uids": set(), "samples": 3, "samples_measured": 3,
                          "measured": True, "errors": []})
     monkeypatch.setattr(_pa, "package_uid_map", lambda serial, adb=None: {})
+    # And this window's own UI-liveness record, which the ADR-0016 evaluation in
+    # cli.py reads off the stage's evidence. It is the same device-boundary probe
+    # the dynamic stage uses (real dumpsys/logcat/uiautomator - real adb), so it
+    # is stubbed here for the same reason. Neutral by default: None is exactly
+    # what an unavailable tool yields, and the check renders it honestly as "not
+    # captured", so no test can assert a UI reading it never modelled. The wiring
+    # test overrides this with a real dict and follows it into the evidence.
+    monkeypatch.setattr(_uil, "check_ui_liveness", lambda serial, package: None)
     # And the uid this stage's own on-device shell runs as, which the attribution
     # subtracts from what it credits to the app (the pre-flight probe's socket is
     # on the same table). 0 is the measured value on the reference emulator.

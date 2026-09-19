@@ -587,6 +587,33 @@ def _launch_liveness_cause(pid_after_launch: int | None,
     return False, None
 
 
+def _capture_ui_liveness(serial: str, package: str) -> dict | None:
+    """This window's device-side UI-liveness record, in the shape cli.py evaluates.
+
+    ADR-0016 calls the capture window a second, complete evaluation of the
+    identical predicate the dynamic stage's success-check ran. That check reads a
+    `ui_liveness` dict to word its SSL-handshake line (the app's UI showing a
+    certificate rejection vs no TLS activity observed) and its post-bypass
+    liveness lines - and the dynamic window IS handed one. This stage recorded no
+    such key at all, so the second evaluation read `None` on every run: UI-blind
+    by construction while the first was not. The ADR's premise held for the
+    observer stream and not for this input.
+
+    Same source as the dynamic path's (check_ui_liveness: real dumpsys/logcat/
+    uiautomator data, never fabricated) and the same graceful degradation - any
+    failure returns None, which the check renders honestly as "not captured".
+    It cannot move a verdict either way: TechnologyHooksEngagedCheck derives
+    ssl_confirmed/root_confirmed from the observer's effect messages, and
+    `ui_liveness` reaches only the wording of the lines above
+    ([[prose-caution-is-not-a-coverage-bound]], [[verdict-must-carry-its-observation]]).
+    """
+    try:
+        from dynamic.ui_liveness import check_ui_liveness
+        return check_ui_liveness(serial, package)
+    except Exception:
+        return None
+
+
 def _target_running(pid_after_launch: int | None,
                     pid_after_capture: int | None) -> bool | None:
     """Was the target app running during the capture window?
@@ -1414,6 +1441,13 @@ def run_capture_stage(
         # is only licensed if the app was there to reach it.
         pid_after_capture = _app_pid(serial, package)
         target_running = _target_running(pid_after_launch, pid_after_capture)
+        # This window's own UI record, for the ADR-0016 evaluation cli.py runs
+        # against THIS launch. Gathered only for a window that ran under the
+        # injected bypass, because that evaluation exists only for such a window -
+        # an un-hooked window has no observer in it and is not evaluated at all,
+        # so there would be nothing to feed. The key is recorded on both arms
+        # (None on the un-hooked one) so its presence never depends on the arm.
+        ui_liveness = _capture_ui_liveness(serial, package) if bypass_applied else None
 
         if wsl2:
             stdout_text = _read_flow_detail_log(log_wsl)
@@ -1620,6 +1654,11 @@ def run_capture_stage(
                     # rendered as the app choosing not to use the network.
                     "app_pid_after_launch": pid_after_launch,
                     "app_pid_after_capture": pid_after_capture,
+                    # This window's device-side UI record, in the shape the
+                    # ADR-0016 evaluation in cli.py reads (see
+                    # _capture_ui_liveness). None = not gathered (un-hooked window)
+                    # or not available; never a fabricated reading.
+                    "ui_liveness": ui_liveness,
                     # ADR-0011: the single deterministic tap this run made (or the
                     # reason it made none). Recorded unconditionally because a
                     # `tapped: True` here means part of this capture's traffic is
@@ -1723,6 +1762,9 @@ def run_capture_stage(
                 # the attribution above rests on.
                 "app_launch": launch,
                 "app_target_running": target_running,
+                # Same record on the flow-carrying arm: the ADR-0016 evaluation is
+                # run against this window whichever way the capture turned out.
+                "ui_liveness": ui_liveness,
                 # A crashed bypass hook can still let OTHER hooks yield flows, so a
                 # capture can SUCCEED with genuine {type:error} messages recorded.
                 # Store them (symmetric with the empty-flows branch) so the report

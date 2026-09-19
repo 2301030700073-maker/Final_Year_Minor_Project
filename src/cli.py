@@ -266,7 +266,14 @@ def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
     from static.jnibridge import extract_declared_natives, resolve_jni_bindings
 
     native_dir = Path(analysis_root) / apk_hash / "native"
-    so_files = extract_native_libs(apk_path, native_dir)
+    # Members the APK ships that did not land on disk - a native surface this run
+    # never reads, recorded rather than dropped (extract_native_libs). Their
+    # basenames are still "shipped": the loads reconciliation below must not read
+    # the app's own loadLibrary for one as a load from OUTSIDE the APK, which is
+    # what an extraction gap otherwise looks like from there.
+    extraction_failures: list[str] = []
+    so_files = extract_native_libs(apk_path, native_dir, failures_out=extraction_failures)
+    _failed_basenames = {Path(e.split(":", 1)[0]).name for e in extraction_failures}
     if not so_files:
         # CALIB-NATIVE-VACUOUS: the APK was enumerated and ships zero .so, so
         # there is no native surface for a root/pinning check to hide in and the
@@ -281,9 +288,19 @@ def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
         return NativeScanResult(
             libraries=[],
             abi_coverage={},
-            native_libs_absent=True,
-            unaccounted_loads=unaccounted_native_loads(_loads, set()),
-            platform_libs_exempted=platform_libs_exempted(_loads, set()),
+            # Empty because every member failed to extract is NOT "the APK ships
+            # no .so": that would grant the vacuous fully_analyzed above to a
+            # corpus we could not read at all. Only a genuinely empty member list
+            # earns it (ADR-0006).
+            native_libs_absent=not extraction_failures,
+            # Excluding the failed members' basenames here (rather than passing a
+            # bare set()) keeps this from announcing "loads a library the APK
+            # does not ship" for a lib it does ship: that surface is recorded as
+            # the extraction failure it is, and bounds native coverage from
+            # _native_unexamined instead.
+            unaccounted_loads=unaccounted_native_loads(_loads, _failed_basenames),
+            platform_libs_exempted=platform_libs_exempted(_loads, _failed_basenames),
+            extraction_failures=extraction_failures,
         )
     # Load signatures BEFORE the scan so the Gap-1 body-decompilation gate can be
     # driven by the actual detection corpus: a stripped lib whose exports/strings
@@ -354,11 +371,19 @@ def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
     # assets/*.so are both extracted+analyzed, so an assets-loaded lib is
     # accounted for - only genuinely missing/absolute-path loads surface here.
     _loads = find_external_native_loads(java_files) if java_files else []
-    _shipped = {so.name for so in so_files}
+    # The failed members' basenames join the shipped set: they ARE shipped (the
+    # APK's member list says so), and leaving them out would report the app's own
+    # loadLibrary for one as a load from outside the APK instead of as the
+    # extraction failure it is.
+    _shipped = {so.name for so in so_files} | _failed_basenames
     result.unaccounted_loads = unaccounted_native_loads(_loads, _shipped)
     # PLATFORM-LIB1 transparency: the same inputs, so what is reported as
     # exempted is exactly what the check above exempted.
     result.platform_libs_exempted = platform_libs_exempted(_loads, _shipped)
+    # The extraction gap itself (member + error), carried so the coverage bound
+    # below and the report both name the libs this run could not read rather than
+    # leaving a truncated native corpus looking complete.
+    result.extraction_failures = extraction_failures
     return result
 
 
@@ -2088,13 +2113,17 @@ def run(
     # (loaded from an absolute path, or loadLibrary("foo") with no libfoo.so
     # bundled) is likewise a loaded-but-unexamined native surface. Either one
     # downgrades the native surface to partial so a native NEITHER is never a
-    # confident negative over it (ADR-0006). Additive: never touches confidence,
-    # never invents evidence.
+    # confident negative over it (ADR-0006). An extraction gap is the third and
+    # quietest cause: a member that shipped but did not land is invisible to both
+    # of the above, because unaccounted_loads is computed against the EXTRACTED
+    # libs. Additive: never touches confidence, never invents evidence.
     _native_unexamined = (
         has_unresolved(native_evidence.jni_bindings)
         if native_evidence is not None else False
     ) or bool(
         native_evidence is not None and native_evidence.unaccounted_loads
+    ) or bool(
+        native_evidence is not None and native_evidence.extraction_failures
     )
     coverage_map = apply_unresolved_native(coverage_map, _native_unexamined)
     # Coverage-limited: dynamic class loading present -> the payload DEX is
@@ -2973,6 +3002,13 @@ def run(
         platform_libs_exempted=(
             native_evidence.platform_libs_exempted if native_evidence is not None else None
         ),
+        # A member the APK ships that did not extract, with its error. Named here
+        # for the same reason as the two above: the native surface reads `partial`
+        # once this is set, and a reader must be able to see that the bound was an
+        # unread lib rather than obfuscation or an unscannable ELF.
+        extraction_failures=(
+            native_evidence.extraction_failures if native_evidence is not None else None
+        ),
         dynamic_loads=dynamic_loads or None,
         js_evidence=js_matches or None,
         webview_sites=webview_sites or None,
@@ -3475,6 +3511,7 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         jni_bindings=causes.get("jni_bindings"),
         unaccounted_loads=causes.get("unaccounted_loads"),
         platform_libs_exempted=causes.get("platform_libs_exempted"),
+        extraction_failures=causes.get("extraction_failures"),
         dynamic_loads=causes.get("dynamic_loads"),
         js_evidence=causes.get("js_evidence"),
         webview_sites=causes.get("webview_sites"),

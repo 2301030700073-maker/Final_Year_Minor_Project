@@ -201,3 +201,58 @@ def test_extract_native_libs_raises_on_non_zip(tmp_path, monkeypatch):
     monkeypatch.setattr(native_mod.shutil, "which", lambda name: None)
     with pytest.raises(native_mod.NativeToolError):
         native_mod.extract_native_libs(apk, tmp_path / "out")
+
+
+def test_extract_native_libs_records_a_member_it_cannot_extract(tmp_path, monkeypatch):
+    """A member that ships and fails to extract is a native surface this run never
+    reads, and the returned list is shipped-AND-landed - so without the record the
+    loss is invisible downstream: cli derives `_shipped` from this return value, so
+    the app's own loadLibrary for that lib reads as a load from outside the APK
+    (false), and native coverage certifies over the libs that happened to extract.
+    The readable sibling still comes back: the per-member tolerance is kept, only
+    the silence is removed."""
+    apk = tmp_path / "app.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("lib/arm64-v8a/libgood.so", b"\x7fELFgood")
+        z.writestr("lib/arm64-v8a/libbad.so", b"\x7fELFbad")
+
+    monkeypatch.setattr(native_mod.shutil, "which", lambda name: None)
+    real_extract = zipfile.ZipFile.extract
+
+    def _extract(self, member, path=None, pwd=None):
+        if member.endswith("libbad.so"):
+            raise OSError("No space left on device")
+        return real_extract(self, member, path, pwd)
+
+    monkeypatch.setattr(zipfile.ZipFile, "extract", _extract)
+    failures: list[str] = []
+    libs = native_mod.extract_native_libs(apk, tmp_path / "out", failures_out=failures)
+
+    assert sorted(p.name for p in libs) == ["libgood.so"]
+    assert len(failures) == 1
+    assert failures[0].startswith("lib/arm64-v8a/libbad.so: ")
+    assert "No space left on device" in failures[0]
+
+
+def test_extract_native_libs_records_what_the_unzip_path_left_behind(tmp_path, monkeypatch):
+    """unzip's return code is deliberately unchecked (it exits non-zero for an APK
+    that ships no native libs, which is a legitimate 'nothing to scan'), so a
+    PARTIAL extraction by unzip is silent by construction - the reconcile is the
+    only thing that can see it. An APK shipping two libs from which nothing landed
+    must not read as an APK that ships none: that is CALIB-NATIVE-VACUOUS's
+    vacuous fully_analyzed granted to an unread corpus."""
+    apk = tmp_path / "app.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("lib/arm64-v8a/libfoo.so", b"\x7fELFfoo")
+        z.writestr("lib/x86/libbar.so", b"\x7fELFbar")
+
+    monkeypatch.setattr(native_mod.shutil, "which", lambda name: "/usr/bin/unzip")
+    monkeypatch.setattr(native_mod.subprocess, "run", lambda *a, **k: None)
+    failures: list[str] = []
+    libs = native_mod.extract_native_libs(apk, tmp_path / "out", failures_out=failures)
+
+    assert libs == []
+    assert failures == [
+        "lib/arm64-v8a/libfoo.so: not extracted",
+        "lib/x86/libbar.so: not extracted",
+    ]

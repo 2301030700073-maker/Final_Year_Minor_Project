@@ -95,12 +95,22 @@ def test_the_evidence_crosses_every_seam():
     gen = (_REPO / "src" / "report" / "generator.py").read_text()
     assert "platform_libs_exempted: list[str] = field(default_factory=list)" in native
     # Same inputs as the decision, on EVERY path: the exemption is only a record
-    # of what the check did if both read the same shipped set. The ships-no-.so
-    # path passes set() to both (the APK really does ship nothing); the analyzed
-    # path passes the extracted names to both.
-    for shipped in ("set()", "_shipped"):
+    # of what the check did if both read the same shipped set. The path that
+    # extracted nothing passes _failed_basenames to both - empty for an APK that
+    # genuinely ships no .so, and naming the unread members when the emptiness WAS
+    # an extraction loss (EXTRACT-FAIL1), so the two never read different sets; the
+    # analyzed path passes the extracted names plus those same failed basenames.
+    for shipped in ("_failed_basenames", "_shipped"):
         assert f"unaccounted_native_loads(_loads, {shipped})" in cli
         assert f"platform_libs_exempted(_loads, {shipped})" in cli
     assert "platform_libs_exempted=(" in cli
     assert 'causes.get("platform_libs_exempted")' in cli
     assert "platform_libs_exempted=platform_libs_exempted," in gen
+    # The same four seams for the extraction gap (EXTRACT-FAIL1): recorded on the
+    # result, named as a run cause (also what the record persists), read back by
+    # the regeneration path, and rendered. Blank at any one of them and an APK
+    # whose libs could not be read reports as a complete native surface.
+    assert "extraction_failures: list[str] = field(default_factory=list)" in native
+    assert 'causes.get("extraction_failures")' in cli
+    assert "extraction_failures=extraction_failures," in gen
+    assert "{% if extraction_failures" in gen

@@ -208,12 +208,29 @@ claimed here. Status meaning:
 | `{{ b.class_name | md }}` | `{{ b.method_name | md }}` | {{ b.status }} |
 {% endfor %}
 {% endif %}
+{% if extraction_failures -%}
+### Native libraries the APK ships but this run could not extract (coverage-limited)
+
+Each entry is a member the APK ships that was **never analyzed** - part of the
+app's own native surface, left unread:
+
+{% for f in extraction_failures -%}
+- `{{ f | md }}`
+{% endfor %}
+
+Native coverage is forced to `partial` and a native NEITHER is **not** a confident
+negative over it (ADR-0006). These members are deliberately **absent** from the
+unaccounted-loads section below, which lists loads with **no** shipped library
+behind them: these libraries ARE shipped, so listing them there would claim the
+APK does not ship a library it does.
+{% endif %}
 {% if unaccounted_loads -%}
 ### Unaccounted native loads (boundary #4)
 
-The explicit `System.load`/`System.loadLibrary` targets whose `.so` was **not**
-extracted and analyzed statically — loaded from an absolute path, or
-`loadLibrary("foo")` with no `libfoo.so` bundled. Each is a loaded-but-unexamined
+The explicit `System.load`/`System.loadLibrary` targets the APK does **not** ship
+by that name — loaded from an absolute path, or `loadLibrary("foo")` with no
+`libfoo.so` bundled — so no extraction could have produced them. Each is a
+loaded-but-unexamined
 native surface: native coverage is forced to `partial` and a native NEITHER is
 **not** a confident negative (ADR-0006). Only a runtime (Frida, Phase 5+) view
 can confirm what these actually load.
@@ -581,6 +598,7 @@ def generate_report(
     jni_bindings: list | None = None,
     unaccounted_loads: list | None = None,
     platform_libs_exempted: list | None = None,
+    extraction_failures: list | None = None,
     dynamic_loads: list | None = None,
     js_evidence: list | None = None,
     webview_sites: list | None = None,
@@ -626,6 +644,7 @@ def generate_report(
         jni_bindings=jni_bindings,
         unaccounted_loads=unaccounted_loads,
         platform_libs_exempted=platform_libs_exempted,
+        extraction_failures=extraction_failures,
         dynamic_loads=dynamic_loads,
         js_evidence=js_evidence,
         webview_sites=webview_sites,

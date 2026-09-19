@@ -227,6 +227,17 @@ class NativeScanResult:
     # coverage to partial so a native NEITHER never certifies a confident
     # negative over a lib that actually ran but was never read (ADR-0006).
     unaccounted_loads: list[str] = field(default_factory=list)
+    # A member the APK SHIPS that extract_native_libs could not put on disk,
+    # with the error ("lib/arm64-v8a/libfoo.so: Bad CRC-32"). Distinct from
+    # `errors` above (a tool failed on a lib we did extract) and from
+    # `unaccounted_loads` (a load with no shipped lib behind it): this is a lib
+    # we hold and never read, and it is the one that silently poisoned the other
+    # two - `unaccounted_loads` is computed against the EXTRACTED set, so the
+    # app's own loadLibrary for such a lib was reported as a load from outside
+    # the APK, and `native_libs_absent` could be set from a `so_files` that was
+    # empty only because every member failed to extract. The caller degrades
+    # native coverage to partial for it (ADR-0006) and the report names them.
+    extraction_failures: list[str] = field(default_factory=list)
     # CALIB-NATIVE-VACUOUS: True only when the APK was successfully enumerated
     # and genuinely contains zero `.so` entries. Distinguishes that provable
     # absence from the other reason `abi_coverage` can be empty (the scan did not
@@ -1191,7 +1202,9 @@ def unaccounted_native_loads(load_targets: list[str], shipped_names: set[str]) -
 _UNPACKED_WORK_SUFFIX = ".unpacked.so"
 
 
-def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
+def extract_native_libs(
+    apk_path: Path, dest_root: Path, *, failures_out: list[str] | None = None
+) -> list[Path]:
     """Extract lib/<abi>/*.so (and, boundary-4, assets/*.so) from the APK into
     dest_root. Returns the .so paths. Prefers `unzip` when present (the reference
     toolchain) and falls back to the stdlib `zipfile` module otherwise - an APK
@@ -1209,7 +1222,19 @@ def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
     also holds files no member produced: the `.unpacked.so` a previous run's UPX
     unpack wrote there. Globbing the tree alone returned that work file as a
     library the APK ships, and - for an APK that ships no .so at all - suppressed
-    the genuinely-empty answer CALIB-NATIVE-VACUOUS rests on."""
+    the genuinely-empty answer CALIB-NATIVE-VACUOUS rests on.
+
+    A member the APK ships that does not land on disk is reported through
+    `failures_out` when the caller supplies one, because the returned list is
+    shipped-AND-landed only: the loss is invisible to every consumer otherwise.
+    `_shipped` (cli) is built from this return value, so an unextracted lib
+    reads as a lib the APK does not ship - and the app's own
+    System.loadLibrary("foo") for it is then reported as a load from outside the
+    APK, which is false - while native coverage certifies over the libs that
+    happened to extract. Two producers, so both paths report alike: the stdlib
+    branch records the member and its error, and the reconcile below catches
+    whatever the unzip branch left behind (its return code is deliberately
+    unchecked, so a partial extraction there is silent by construction)."""
     unzip = shutil.which("unzip")
     dest_root = Path(dest_root)
     dest_root.mkdir(parents=True, exist_ok=True)
@@ -1255,7 +1280,14 @@ def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
             for member in shipped:
                 try:
                     z.extract(member, dest_root)
-                except (OSError, zipfile.BadZipFile):
+                except (OSError, zipfile.BadZipFile) as exc:
+                    # Skipped rather than aborting the whole extraction (a
+                    # readable sibling is still worth analysing) - but no longer
+                    # silently: the member ships and did not land, so this run
+                    # never reads it. Recorded for the caller; see the reconcile
+                    # after both paths and the docstring.
+                    if failures_out is not None:
+                        failures_out.append(f"{member}: {exc}")
                     continue
     # Note: unzip's return code is deliberately NOT checked here - it exits
     # non-zero when nothing matches 'lib/*/*.so' (an APK with no native libs),
@@ -1268,6 +1300,18 @@ def extract_native_libs(apk_path: Path, dest_root: Path) -> list[Path]:
         f for f in dest_root.rglob("*.so")
         if f.is_file() and f.relative_to(dest_root).as_posix() in shipped
     )
+    if failures_out is not None:
+        # Reconcile against what the APK ships, so the unzip branch's partial
+        # extraction is recorded too: its return code is deliberately unchecked
+        # above, and it exits 0 with members left behind. Anything shipped that
+        # is not on disk is a native surface this run did not read, whichever
+        # tool produced the gap. A leftover copy from a PREVIOUS run of the same
+        # APK cannot mask a real failure: dest_root is keyed by the APK's hash,
+        # so such a copy is byte-identical to the member we failed to write.
+        landed = {f.relative_to(dest_root).as_posix() for f in so_files}
+        recorded = {entry.split(":", 1)[0] for entry in failures_out}
+        for member in sorted(shipped - landed - recorded):
+            failures_out.append(f"{member}: not extracted")
     return so_files
 
 

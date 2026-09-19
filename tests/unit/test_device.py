@@ -7,6 +7,74 @@ import pytest
 from dynamic import device
 from dynamic.device import _find_windows_user, _wait_for_relay
 
+# The `is_listening` gate that `setup_frida_connection` re-asserts behind is a
+# real Windows-host probe, and taking it drives the live device. The unit suite
+# stubs it off wholesale in conftest (`_no_live_host_or_device`); the two tests
+# below open it deliberately, and stub `ensure_internet` beside it so that even
+# an open gate cannot reach the device.
+
+
+def test_setup_frida_connection_reasserts_internet_after_provisioning(monkeypatch):
+    """Order is the point, as it is for the reverse itself. Provisioning runs
+    `adb root`, which restarts adbd and takes the device-side tcp:8080 reverse
+    with it; the device-proxy setting survives, so the device is left pointed at
+    a loopback nothing answers. The baseline has to be re-asserted AFTER
+    provisioning, not before."""
+    from dynamic import pass_through_proxy
+    from dynamic.device import setup_frida_connection
+
+    order = []
+    instrument = {"client": "16.7", "server": "16.7",
+                  "server_source": "already_running", "handshake": None}
+    fake_device = type("F", (), {"enumerate_processes": lambda self: None})()
+    fake_mgr = type("M", (), {"add_remote_device": lambda self, addr: fake_device})()
+    fake_frida = type("FF", (), {"get_device_manager": staticmethod(lambda: fake_mgr)})()
+
+    def _provision(adb, serial):
+        order.append("provision")
+        return instrument
+
+    monkeypatch.setattr("dynamic.device._ensure_frida_server", _provision)
+    monkeypatch.setattr("dynamic.device._in_wsl", lambda: True)
+    monkeypatch.setattr("dynamic.device._adb_wrapper_path", lambda: "adb")
+    monkeypatch.setattr("dynamic.device._start_relay", lambda adb: "172.27.96.1")
+    monkeypatch.setattr("dynamic.device.frida", fake_frida)
+    monkeypatch.setattr("dynamic.pass_through_proxy.is_listening",
+                        lambda *a, **k: True)
+    monkeypatch.setattr(
+        "dynamic.pass_through_proxy.ensure_internet",
+        lambda serial, port: order.append(("internet", serial, port)))
+
+    setup_frida_connection("emulator-5554")
+    assert order == ["provision", ("internet", "emulator-5554",
+                                   pass_through_proxy.INTERNET_PROXY_PORT)]
+
+
+def test_setup_frida_connection_leaves_internet_alone_when_no_pass_through(monkeypatch):
+    # The gate is real: with nothing listening on the internet port the
+    # re-assert must not fire, because there is no baseline to restore - running
+    # it anyway would place a reverse toward a port no process owns.
+    from dynamic.device import setup_frida_connection
+
+    called = []
+    instrument = {"client": "16.7", "server": "16.7",
+                  "server_source": "already_running", "handshake": None}
+    fake_device = type("F", (), {"enumerate_processes": lambda self: None})()
+    fake_mgr = type("M", (), {"add_remote_device": lambda self, addr: fake_device})()
+    fake_frida = type("FF", (), {"get_device_manager": staticmethod(lambda: fake_mgr)})()
+
+    monkeypatch.setattr("dynamic.device._ensure_frida_server",
+                        lambda adb, serial: instrument)
+    monkeypatch.setattr("dynamic.device._in_wsl", lambda: True)
+    monkeypatch.setattr("dynamic.device._adb_wrapper_path", lambda: "adb")
+    monkeypatch.setattr("dynamic.device._start_relay", lambda adb: "172.27.96.1")
+    monkeypatch.setattr("dynamic.device.frida", fake_frida)
+    monkeypatch.setattr("dynamic.pass_through_proxy.ensure_internet",
+                        lambda *a, **k: called.append(a))
+
+    setup_frida_connection("emulator-5554")
+    assert called == []
+
 
 def test_find_windows_user_fails_loudly_when_directory_does_not_exist(tmp_path):
     # tmp_path-based, not ambient reality - /mnt/c/Users genuinely exists on

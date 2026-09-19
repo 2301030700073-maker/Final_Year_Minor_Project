@@ -266,6 +266,18 @@ def ensure_internet(serial: str, port: int = INTERNET_PROXY_PORT) -> None:
     # be loud (NFR-7, and the docstring's own promise), exactly as the capture-port
     # reverse in mitmproxy_capture.py raises. Swallowing it let ensure_internet
     # report a working internet baseline while leaving the device stranded.
+    # Root adbd BEFORE the reverse below is placed. A reverse is a listener on the
+    # DEVICE, so an adbd restart takes it with it - and a full run runs `adb root`
+    # twice more after this (the dynamic stage's Frida provisioning, the capture
+    # window's CA push), each of which restarts adbd whenever the shell is not
+    # already root. On WSL2 this tunnel is the device's only route out (no direct
+    # NAT) and the device-proxy setting survives the restart, so a later root
+    # leaves the path reading as configured while pointing at a loopback nothing
+    # answers - the app under test never reaches its server, and the observers'
+    # silence gets recorded as the app not exercising its path. Rooting here first
+    # makes all of those no-ops. Not rootable is not a failure here (see
+    # device.ensure_adbd_root): the reverse below is what decides.
+    device.ensure_adbd_root(serial)
     try:
         device.adb_reverse(serial, port, port, add=True)
     except Exception as e:

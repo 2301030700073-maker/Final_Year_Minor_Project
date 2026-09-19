@@ -466,6 +466,30 @@ def setup_frida_connection(device_serial: str) -> tuple[frida.Device, dict]:
     # never hangs silently on a dead server (principle 3).
     instrument = _ensure_frida_server(_require_adb(), device_serial)
 
+    # Provisioning above runs `adb root`, which restarts adbd whenever the shell
+    # was not already root, and an adbd restart takes every adb reverse with it.
+    # On WSL2 the reverse that matters is the pass-through tunnel: the device's
+    # ONLY route to the internet (the emulator has no direct NAT). The
+    # device-proxy setting survives the restart, so the path still reads as
+    # configured while pointing at a device-side loopback nothing answers - the
+    # app under test never reaches its server, never performs the pinned request
+    # the dynamic window exists to observe, and the in-process observers' silence
+    # is then recorded as the app not exercising its SSL path: a property of the
+    # app that is really a property of this restart. Re-asserting the baseline
+    # after provisioning is what makes that silence mean what it says, and it also
+    # heals a device left un-rooted and reverse-less by a reboot. Guarded on the
+    # pass-through already listening: a run that never set up an internet baseline
+    # is not made to start one, so root-detection-only runs keep working on a
+    # machine with no Windows-side python.
+    if _in_wsl():
+        # Local import: pass_through_proxy imports this module, so a module-level
+        # import here would be a cycle.
+        from dynamic import pass_through_proxy
+
+        if pass_through_proxy.is_listening(pass_through_proxy.INTERNET_PROXY_PORT):
+            pass_through_proxy.ensure_internet(
+                device_serial, pass_through_proxy.INTERNET_PROXY_PORT)
+
     if not _in_wsl():
         # No handshake is performed on this path - get_device only enumerates
         # attached devices; the first real talk with the server happens later at
@@ -840,6 +864,45 @@ def clear_http_proxy(serial: str) -> None:
     subprocess.run(
         [adb, "-s", serial, "shell", "settings", "delete", "global", "http_proxy"],
         capture_output=True, text=True, check=True, timeout=15,
+    )
+
+
+def ensure_adbd_root(serial: str) -> None:
+    """Make adbd root NOW, so every later `adb root` in this run is a no-op.
+
+    An adb reverse is a listener on the DEVICE, created through adbd, so it does
+    not survive an adbd restart - and `adb root` restarts adbd whenever the shell
+    is not already root, which is the state of every freshly started emulator.
+    Measured on the reference device rather than inferred: `adb root` printed
+    "restarting adbd as root" and the tcp:8080 reverse was gone afterwards,
+    re-added only by hand.
+
+    That matters because a full run performs `adb root` twice more after its
+    internet path is set up - the dynamic stage's Frida provisioning and the
+    capture window's CA push - and either would otherwise drop the pass-through
+    tunnel that is the device's ONLY route to the internet on WSL2 (no direct
+    NAT). The device-proxy setting survives the restart, so the path still reads
+    as configured while pointing at a device-side loopback nothing answers: the
+    app under test then cannot reach its server, never makes the request the run
+    is looking for, and the observers' resulting silence is recorded as a
+    property of the app. Rooting before the reverse is placed removes all of
+    that, which is why the caller that places the reverse calls this first.
+
+    Never raises on a non-rootable build: the exit status is not inspected, and
+    the `wait-for-device` after it only waits for an adbd that may be
+    restarting. A build that cannot be rooted has no such restart to survive -
+    the reverse the caller places next is what decides, as it always did."""
+    adb = _require_adb()
+    subprocess.run(
+        [adb, "-s", serial, "root"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    # adbd may be mid-restart: placing a reverse against a device that is not
+    # listening yet is how a "reverse failed" that is really a race gets
+    # reported as a wiring failure.
+    subprocess.run(
+        [adb, "-s", serial, "wait-for-device"],
+        capture_output=True, text=True, timeout=60, check=False,
     )
 
 

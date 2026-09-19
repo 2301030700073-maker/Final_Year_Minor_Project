@@ -54,6 +54,33 @@ _ANDROID_TOOLCHAIN = frozenset({
 
 
 @pytest.fixture(autouse=True)
+def _no_live_host_or_device(monkeypatch):
+    """Keep a unit test off the Windows host and off the attached device.
+
+    `device.setup_frida_connection` re-asserts the WSL2 internet baseline right
+    after it provisions Frida, gated on the pass-through proxy being up. That
+    gate is a REAL `powershell.exe Get-NetTCPConnection` probe, and on the
+    reference box the pass-through usually IS up (it is the device's normal
+    internet path, left running between runs). So a unit test that reaches
+    `setup_frida_connection` - `frida_runner.run_dynamic_stage` calls it
+    directly, and the runner's own tests do not stub it - takes the gate and
+    then runs the real `ensure_internet`: root adbd, re-place the tcp:8080
+    reverse, rewrite the device's proxy setting. That is a live device being
+    driven by a unit test, and it is invisible in exactly the way this file
+    exists to prevent - it is inert on the CI runner (`_in_wsl` is False on a
+    bare ubuntu box, and there is no powershell.exe to probe with) while being
+    live on the reference WSL2 box, so the suite's result depends on whether a
+    sweep happens to be running.
+
+    Stubbed for the whole unit suite; a test that needs the gate OPEN sets it
+    back itself (its monkeypatch runs after this fixture and wins), which is
+    what test_device.py's re-assert tests do - and they stub `ensure_internet`
+    alongside, so they never reach the device either."""
+    monkeypatch.setattr("dynamic.pass_through_proxy.is_listening",
+                        lambda *a, **k: False)
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_android_toolchain(monkeypatch):
     """Make the *ambient* Android toolchain read as absent (mirrors the runner).
 

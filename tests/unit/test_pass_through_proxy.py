@@ -24,6 +24,31 @@ from dynamic import pass_through_proxy as ptp
 from dynamic import device
 
 
+@pytest.fixture(autouse=True)
+def _no_live_adb_root(monkeypatch):
+    """`ensure_internet` roots adbd before it places the reverse - an adbd restart
+    after the fact would take the tunnel with it. The real call shells out to adb,
+    so any test here that reaches it would drive a live device (or fail on a
+    machine without adb), neither of which is what this file is testing. Stubbed
+    for every test in the file so a new test cannot forget it; the ordering it
+    protects is asserted explicitly below."""
+    monkeypatch.setattr(device, "ensure_adbd_root", lambda serial: None)
+
+
+def test_ensure_internet_roots_adbd_before_placing_the_reverse(monkeypatch):
+    """Order is the whole point. A reverse is a listener on the DEVICE, so rooting
+    adbd after placing it destroys it - and the device-proxy setting that follows
+    then points at a loopback nothing answers, which reads as a configured
+    internet path and delivers none."""
+    order = []
+    monkeypatch.setattr(ptp, "is_listening", lambda *a, **k: True)
+    monkeypatch.setattr(device, "ensure_adbd_root", lambda serial: order.append("root"))
+    monkeypatch.setattr(device, "adb_reverse", lambda *a, **k: order.append("reverse"))
+    monkeypatch.setattr(device, "set_http_proxy", lambda *a, **k: order.append("proxy"))
+    ptp.ensure_internet("emulator-5554", 8080)
+    assert order == ["root", "reverse", "proxy"]
+
+
 def test_script_template_is_valid_python_and_handles_connect():
     # The template must be syntactically valid so the Windows host can run it,
     # and it must contain the CONNECT tunnel + origin-form forwarding paths.
@@ -264,16 +289,21 @@ def test_stop_windows_passthrough_targets_only_passthrough(monkeypatch):
     assert "mitmdump" not in ps
 
 
-def test_is_listening_true_when_port_bound(monkeypatch):
+def test_probe_windows_listening_true_when_port_bound(monkeypatch):
+    # The probe itself, called directly. `is_listening` - the thin wrapper over it
+    # - is stubbed off for the whole unit suite (conftest,
+    # `_no_live_host_or_device`), because the gate it backs reaches the Windows
+    # host and, through it, the live device; so the parse logic is exercised at
+    # the function that owns it rather than through the wrapper.
     monkeypatch.setattr(ptp.subprocess, "run",
                         lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="2"))
-    assert ptp.is_listening(8080) is True
+    assert ptp._probe_windows_listening(8080, timeout=0.1) is True
 
 
-def test_is_listening_false_when_port_free(monkeypatch):
+def test_probe_windows_listening_false_when_port_free(monkeypatch):
     monkeypatch.setattr(ptp.subprocess, "run",
                         lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="0"))
-    assert ptp.is_listening(8080) is False
+    assert ptp._probe_windows_listening(8080, timeout=0.1) is False
 
 
 def test_ensure_internet_launches_passthrough_when_not_listening(monkeypatch):

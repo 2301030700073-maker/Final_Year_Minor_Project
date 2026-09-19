@@ -11,7 +11,7 @@ edit and dispositioned as **FIX** (real gap, corrected + test) or **NOT-A-GAP**
 - `src/`: 54 files, **24,626 LOC**
 - `config/`: 6 files, 4 signature YAMLs (root/ssl/native/packers).
 - `tests/`: 105 files, **36,651 LOC** (more test than source; informational, see §Currency).
-- `scripts/`: 7 files, 1,197 LOC (informational, see §Currency).
+- `scripts/`: 8 files, 1,359 LOC (informational, see §Currency - +1 file and +162 LOC since this figure was recorded: `sample_run_memory.py`, the run's memory-curve sampler, plus the sweep's journal/elapsed work and the native re-check's un-measurable arm).
 
 ## Currency — what each ✅ covers
 

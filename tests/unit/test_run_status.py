@@ -49,6 +49,95 @@ def test_start_records_identity_and_state(tmp_path):
     assert data["started_at"]
 
 
+def _pre_existing(tmp_path, **fields):
+    """A sidecar already on disk for the same APK, as a previous run left it."""
+    path = run_status_path(tmp_path, "abc")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc = {
+        "state": "started", "run_id": "earlier", "pid": _dead_pid(), "pid_start": "1",
+        "started_at": "2026-09-19T10:29:17+00:00", "last_stage": "static_scan",
+        "last_stage_status": "failed", "in_flight_stage": None, "git_commit": "55bf1d43",
+    }
+    doc.update(fields)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    return doc
+
+
+def test_a_dead_runs_record_is_replaced_without_being_reported_as_superseded(tmp_path):
+    """The ordinary re-run: the previous record's process is gone, so nothing is
+    being erased but a file, and the field says so rather than staying absent."""
+    _pre_existing(tmp_path)
+    rec = _recorder(tmp_path)
+    rec.start()
+    data = read_run_status(tmp_path, "abc")
+    assert data["state"] == "started"
+    assert data["superseded_live_run"] is None
+
+
+def test_a_live_run_being_replaced_is_recorded_rather_than_erased(tmp_path, monkeypatch):
+    """The 2026-09-19 facebook case: a second run of an APK the first is still
+    analysing overwrites the first's record - including its in_flight_stage - and
+    the first's pid is then nowhere on disk. The identity is kept in the new
+    record instead of the overwrite being silent.
+
+    `run_is_alive` is stubbed rather than given a real live foreign pid because
+    /proc is what answers it and this suite must run where /proc does not exist
+    (NFR-6); the probe itself is tested against real pids elsewhere."""
+    doc = _pre_existing(tmp_path, pid=os.getpid() + 1)
+    monkeypatch.setattr("storage.run_status.run_is_alive", lambda status: True)
+    rec = _recorder(tmp_path)
+    rec.start()
+    data = read_run_status(tmp_path, "abc")
+    assert data["superseded_live_run"] == {
+        key: doc[key] for key in (
+            "state", "run_id", "pid", "pid_start", "started_at", "last_stage",
+            "last_stage_status", "in_flight_stage", "git_commit",
+        )
+    }
+    # ...and the file is still this run's record, not the one it replaced.
+    assert data["run_id"] == "r1"
+    assert data["last_stage"] is None
+    assert data["pid"] == os.getpid()
+
+
+def test_the_superseded_run_is_still_named_when_this_run_finishes(tmp_path, monkeypatch):
+    """The note has to outlive the stages that follow it: a reader arriving after
+    the run ended is the one most likely to be holding the other run's elapsed
+    times and stage list."""
+    _pre_existing(tmp_path, pid=os.getpid() + 1)
+    monkeypatch.setattr("storage.run_status.run_is_alive", lambda status: True)
+    rec = _recorder(tmp_path)
+    rec.start()
+    rec.record({"stage": "static_scan", "status": "success", "duration_ms": 5})
+    rec.finish(report_path="/tmp/report.md")
+    data = read_run_status(tmp_path, "abc")
+    assert data["state"] == "finished"
+    assert data["superseded_live_run"]["run_id"] == "earlier"
+
+
+def test_a_record_written_by_this_same_process_is_not_a_conflict(tmp_path, monkeypatch):
+    """start() is idempotent for its own run: the file it finds is its own, and
+    reporting it as a superseded live run would invent a concurrent analysis."""
+    _pre_existing(tmp_path, pid=os.getpid(), pid_start="1")
+    monkeypatch.setattr("storage.run_status.run_is_alive", lambda status: True)
+    rec = _recorder(tmp_path)
+    rec.start()
+    assert read_run_status(tmp_path, "abc")["superseded_live_run"] is None
+
+
+def test_an_unreadable_existing_record_does_not_stop_the_new_run(tmp_path):
+    """A damaged file must not deny a run its record - the same distinction the
+    reader keeps between absent and unreadable."""
+    path = run_status_path(tmp_path, "abc")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json", encoding="utf-8")
+    rec = _recorder(tmp_path)
+    rec.start()
+    data = read_run_status(tmp_path, "abc")
+    assert data["state"] == "started"
+    assert data["superseded_live_run"] is None
+
+
 def test_record_advances_last_stage_from_objects_and_dicts(tmp_path):
     rec = _recorder(tmp_path)
     rec.start()

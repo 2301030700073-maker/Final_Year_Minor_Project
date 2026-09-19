@@ -150,7 +150,60 @@ class RunStatusRecorder:
         os.replace(tmp, self.path)
 
     def start(self) -> None:
+        """Open the record, noting the run it replaces when that run is still
+        going.
+
+        The sidecar is keyed by APK hash, so two runs of the same target write one
+        file and the second one's start erases the first one's progress -
+        including its `in_flight_stage`, the field that exists to say where a run
+        that never reaches an ending was working. Measured 2026-09-19: facebook
+        was profiled while the sweep was already inside its own facebook run; the
+        profiled run died on the evidence-table write lock (the DB's
+        one-run-at-a-time rule firing, late and indirectly) and left ITS record on
+        disk reading `static_scan (failed)`, while the sweep's run was still in
+        static_scan with its pid nowhere in the file. That run rewrote the file at
+        its next stage boundary, so the damage was bounded - but until then every
+        reader, the harness's `killed_stage` included, saw a dead run's ending and
+        read it as this run's.
+
+        Refusing to start is not this method's decision: by the time a recorder is
+        started the run is authorized and audited, and raising here would leave
+        that authorization with no completion - the orphan the audit log counts as
+        an interruption. So the record is written and what it replaced is kept
+        beside it, in a field that survives to this run's own `finish()`.
+        """
+        self._data["superseded_live_run"] = self._live_run_being_replaced()
         self._write()
+
+    def _live_run_being_replaced(self) -> dict[str, Any] | None:
+        """The identity of the run whose record this start overwrites, when that
+        run's process is still alive - else None.
+
+        None covers every case that is not a live conflict: no file, an
+        unreadable one, one written on another host, one whose pid is gone, and
+        one whose pid was recycled (run_is_alive compares the kernel's start time,
+        so a recycled pid answers False). `run_is_alive`'s None - the answer could
+        not be established - counts as not-alive here, the same way a reader is
+        told to read it: unknown is not a claim that something is running.
+        """
+        try:
+            existing = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(existing, dict):
+            return None
+        # This run's own record, not another run's.
+        if existing.get("pid") == self._data.get("pid"):
+            return None
+        if run_is_alive(existing) is not True:
+            return None
+        return {
+            key: existing.get(key)
+            for key in (
+                "state", "run_id", "pid", "pid_start", "started_at",
+                "last_stage", "last_stage_status", "in_flight_stage", "git_commit",
+            )
+        }
 
     def begin(self, stage_name: str) -> None:
         """Record that a stage has STARTED.

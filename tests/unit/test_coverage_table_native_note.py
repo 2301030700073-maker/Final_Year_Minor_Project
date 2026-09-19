@@ -48,7 +48,7 @@ def test_the_native_bound_names_the_cause_that_is_actually_present():
     )
     assert "| native | partial |" in out, out
     assert "**Native:**" in out, out
-    assert "3 loaded native target(s) the APK does not ship" in out, out
+    assert 'loaded native targets the APK does not ship (3; see "Unaccounted native loads").' in out, out
     # It must also say what the bound MEANS, not only what caused it.
     assert "a native NEITHER is not proof" in out, out
 
@@ -66,8 +66,21 @@ def test_the_note_names_only_the_causes_recorded_and_falls_back_when_none_are():
         coverage={"native": "partial"},
         extraction_failures=["lib/x86/libfoo.so: No space left on device"],
     )
-    assert "could not extract" in extracted, extracted
-    assert "loaded native target" not in extracted, extracted
+    # A single recorded cause must still end the sentence: the clauses are
+    # separated, not terminated, so the period lands after whichever is last.
+    assert (
+        "shipped libraries this run could not extract (1)." in extracted
+    ), extracted
+    assert "does not ship" not in extracted, extracted
+
+    # Two causes: the separator appears between them, once.
+    both = _render(
+        coverage={"native": "partial"},
+        unaccounted_loads=["dextricks-early"],
+        extraction_failures=["lib/x86/libfoo.so: No space left on device"],
+    )
+    assert "does not ship (1; see \"Unaccounted native loads\"); shipped libraries" in both, both
+    assert both.count("; shipped libraries") == 1, both
 
     unresolved = _render(
         coverage={"native": "partial"},
@@ -78,5 +91,5 @@ def test_the_note_names_only_the_causes_recorded_and_falls_back_when_none_are():
     # None of the four: the bound is a per-library rule, and saying anything more
     # specific than that would be inventing a cause.
     bare = _render(coverage={"native": "partial"})
-    assert "a per-library rule outside the body sweep" in bare, bare
-    assert "loaded native target" not in bare, bare
+    assert "a per-library rule outside the body sweep." in bare, bare
+    assert "does not ship" not in bare, bare

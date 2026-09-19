@@ -390,9 +390,21 @@ def _prepare_evidence_table(con: sqlite3.Connection) -> None:
 
     The DROP on a version mismatch is not belt-and-braces: a table written by an
     older shape would otherwise survive CREATE TABLE IF NOT EXISTS and fail (or
-    silently mis-map) the INSERTs below. Everything here is committed with the
-    matches themselves at the end of scan(), so a scan that dies mid-way leaves
-    the previous table intact rather than a half-cleared one."""
+    silently mis-map) the INSERTs below. The scan's rows are STAGED in a
+    per-connection temp table and swapped into `evidence` in one transaction at
+    the end of scan(), so a scan that dies mid-way leaves the previous table
+    exactly as it was rather than a half-cleared one - and, the reason the
+    staging exists, the main table is not written at all while the scan matches.
+
+    That second property is what the commit below is for. Inserting straight into
+    `evidence` opened one write transaction per scan that stayed open until the
+    final commit, so a second run of the same APK (or a leftover process from a
+    killed one) waited on a lock held for the whole match - 2,057s of static_scan
+    on the facebook corpus, against a 30s busy timeout that documents itself as
+    covering exactly this contention. Raising the timeout would trade that loud
+    failure for an unbounded hang; sizing the HOLD to the swap keeps the
+    timeout's own claim true, because a competing writer's hold is now its own
+    swap (milliseconds) rather than its whole scan."""
     con.execute("CREATE TABLE IF NOT EXISTS scan_meta (key TEXT PRIMARY KEY, value TEXT)")
     row = con.execute("SELECT value FROM scan_meta WHERE key = 'schema_version'").fetchone()
     if row is None or row[0] != str(_EVIDENCE_TABLE_SCHEMA_VERSION):
@@ -401,12 +413,22 @@ def _prepare_evidence_table(con: sqlite3.Connection) -> None:
         "CREATE TABLE IF NOT EXISTS evidence ("
         "file TEXT, signature_id TEXT, category TEXT, line INTEGER, matched_text TEXT)"
     )
-    con.execute("DELETE FROM evidence")
+    # Per-connection, so a scan always starts from an empty stage: a previous scan
+    # in this process opened its own connection and its stage died with it.
+    con.execute("DROP TABLE IF EXISTS temp.evidence_stage")
+    con.execute(
+        "CREATE TEMP TABLE evidence_stage ("
+        "file TEXT, signature_id TEXT, category TEXT, line INTEGER, matched_text TEXT)"
+    )
     con.execute(
         "INSERT INTO scan_meta(key, value) VALUES ('schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         (str(_EVIDENCE_TABLE_SCHEMA_VERSION),),
     )
+    # Close the schema/version write here so nothing the scan does can hold the
+    # main database's write lock. The staged rows need no commit of their own -
+    # they live in this connection's temp database until the swap.
+    con.commit()
 
 
 def scan(
@@ -426,9 +448,10 @@ def scan(
     large corpus doesn't accumulate unbounded rows in RAM. The in-memory return
     is unchanged, so the report pipeline is untouched.
 
-    The table describes THIS scan, and only this scan: it is cleared before the
-    first match is recorded, so a re-run of the same APK replaces the previous
-    rows instead of stacking on top of them (F-3 - see
+    The table describes THIS scan, and only this scan: it is replaced in one
+    transaction when the scan finishes (the rows stage in a temp table until
+    then), so a re-run of the same APK replaces the previous rows instead of
+    stacking on top of them (F-3 - see
     _EVIDENCE_TABLE_SCHEMA_VERSION for what that cost in practice).
 
     L-M3 (mapping.txt deobfuscation): when `mapping` is provided (a parsed R8/
@@ -569,7 +592,7 @@ def scan(
             total_counts[signature.id] += 1
             if con is not None:
                 con.execute(
-                    "INSERT INTO evidence(file, signature_id, category, line, matched_text) "
+                    "INSERT INTO evidence_stage(file, signature_id, category, line, matched_text) "
                     "VALUES (?,?,?,?,?)",
                     (str(file_path.relative_to(root)), signature.id,
                      signature.category, line_number, matched_text),
@@ -741,6 +764,16 @@ def scan(
     }
 
     if con is not None:
+        # The swap. One transaction, and the only write this scan makes to the
+        # main database: the old rows go and this scan's staged rows take their
+        # place together, so a reader never sees a half-replaced table and the
+        # write lock is held for the copy rather than for the match that produced
+        # it (see _prepare_evidence_table).
+        con.execute("DELETE FROM evidence")
+        con.execute(
+            "INSERT INTO evidence(file, signature_id, category, line, matched_text) "
+            "SELECT file, signature_id, category, line, matched_text FROM evidence_stage"
+        )
         con.commit()
         con.close()
     return evidence

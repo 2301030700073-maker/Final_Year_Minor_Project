@@ -43,6 +43,54 @@ def _rows(db, where="1=1"):
         con.close()
 
 
+def test_the_cache_lock_is_not_held_while_the_scan_matches(tmp_path, monkeypatch):
+    # A second run of the same APK is a real case - the tests above are exactly
+    # that shape - and it used to block on one write transaction that stayed open
+    # from the first match to the final commit: 2,057s of static_scan on the
+    # facebook corpus, against a 30s busy timeout whose own comment claims to
+    # cover this contention, so the second run waited and then died with
+    # "database is locked". The rows now stage in a per-connection temp table and
+    # are swapped in at the end, so a competing writer's wait is another swap
+    # rather than another scan.
+    db = tmp_path / "xref.sqlite"
+    real_connect = sqlite3.connect
+    probes = []
+
+    class _Probe:
+        """The scan's own connection, watching for its first staged insert."""
+
+        def __init__(self, con):
+            self._con = con
+
+        def __getattr__(self, name):
+            return getattr(self._con, name)
+
+        def execute(self, sql, *args):
+            if not probes and sql.lstrip().upper().startswith("INSERT INTO EVIDENCE_STAGE"):
+                # The competing writer, mid-scan, with a timeout far shorter than
+                # this scan: the write that used to raise "database is locked".
+                other = real_connect(str(db), timeout=0.5)
+                try:
+                    other.execute("CREATE TABLE IF NOT EXISTS competing_writer(x)")
+                    other.commit()
+                finally:
+                    other.close()
+                probes.append(sql)
+            return self._con.execute(sql, *args)
+
+    monkeypatch.setattr(sqlite3, "connect",
+                        lambda *a, **kw: _Probe(real_connect(*a, **kw)))
+    _scan(tmp_path, db, SIG_SU,
+          'String a = "/system/bin/su";\nString b = "/system/bin/su";\n')
+    assert probes, "no staged insert ran - the probe never reached the live path"
+    # And the staged rows still land: the swap is the write, not a lost one.
+    con = real_connect(str(db))
+    try:
+        assert con.execute("SELECT count(*) FROM evidence").fetchone()[0] == 2
+    finally:
+        con.close()
+
+
 def test_a_rerun_replaces_rows_instead_of_stacking_them(tmp_path):
     db = tmp_path / "xref.sqlite"
     body = 'String a = "/system/bin/su";\nString b = "/system/bin/su";\nString c = "/system/bin/su";\n'

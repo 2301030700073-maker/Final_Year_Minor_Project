@@ -21,6 +21,13 @@ clean", and it is the same shape (a claim licensing a confident negative,
 resting on a scan that cannot be shown to have happened) this script exists to
 find. Only a re-run can tell the two apart.
 
+The `gate=` column is the body-sweep gate ALONE, not the pipeline's coverage
+rules: it reads `fully_analyzed` for a library the pipeline may have held at
+`partial` for a reason this gate does not model (a scan error, or a rule outside
+the sweep). So `stored=partial gate=fully_analyzed` does NOT mean the stored
+verdict was wrong - only the direction that licenses a confident negative, a
+stored `fully_analyzed` the gate now refuses, is a finding here.
+
 Usage: PYTHONPATH=src .venv/bin/python scripts/native_coverage_recheck.py [sha_prefix ...]
 """
 from __future__ import annotations
@@ -71,7 +78,7 @@ def main() -> int:
             if meta["native"] == "fully_analyzed":
                 unmeasurable.append(sha)
                 print(f"{sha[:13]} {str(meta['pkg'])[:38]:39} {ts[:19]}  "
-                      f"stored={meta['native']!s:16} now=NOT RE-MEASURABLE   libs=   0"
+                      f"stored={meta['native']!s:16} gate=NOT RE-MEASURABLE   libs=   0"
                       f"  <-- nothing on disk to re-measure; re-run to earn this")
             else:
                 no_libs_other += 1
@@ -92,7 +99,7 @@ def main() -> int:
             flag = "  <-- STORED CLAIM IS UNEARNED, RE-RUN"
             stale.append(sha)
         print(f"{sha[:13]} {str(meta['pkg'])[:38]:39} {ts[:19]}  stored={meta['native']!s:16} "
-              f"now={verdict:18} libs={len(libs):4}{flag}")
+              f"gate={verdict:18} libs={len(libs):4}{flag}")
         for _, why in failures[:6]:
             print(f"    - {why}")
         if len(failures) > 6:

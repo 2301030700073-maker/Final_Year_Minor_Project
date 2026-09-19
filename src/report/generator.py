@@ -199,7 +199,7 @@ methods *actually fire* on-device is dynamic (Frida, Phase 5+) and is not
 claimed here. Status meaning:
 
 - **resolved** — a `Java_*` export statically binds the method; its body is reachable.
-- **dynamic_candidate** — no `Java_*` export, but a lib defines `JNI_OnLoad`, so the method *may* register at runtime (bodies statically invisible → surface partial).
+- **dynamic_candidate** — no `Java_*` export, but a lib defines `JNI_OnLoad`, so the method *may* register at runtime. The binding is statically invisible, but the library's bodies are still analyzed, so this status alone does NOT bound native coverage - only `unresolved` below does.
 - **unresolved** — no `Java_*` export and no `JNI_OnLoad` anywhere; a genuine unexamined surface. If any method is unresolved, native coverage is forced to `partial` and a native NEITHER is **not** a confident negative (ADR-0006).
 
 | Class | Method | Binding |

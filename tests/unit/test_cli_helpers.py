@@ -324,6 +324,29 @@ def test_git_commit_hash_dirty_tree_is_flagged(monkeypatch):
     assert _git_commit_hash() == "abc123 (dirty working tree)"
 
 
+def test_git_commit_hash_untracked_code_file_is_flagged(monkeypatch):
+    # RESID-7B covered edits to TRACKED files. An untracked module in src/ - or a
+    # signature YAML in config/, or a change under scripts/ - changes what runs while
+    # `git diff HEAD` reports a clean tree, so the stamp would name a commit that does
+    # not contain the code that produced the report. The second check is path-limited
+    # so the untracked artifacts this repo always carries cannot dirty every stamp;
+    # that limit is asserted on the command actually issued, not on the return value.
+    calls: list = []
+
+    def fake_run(cmd, capture_output, text=None, check=None):
+        calls.append(cmd)
+        if cmd == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="abc123\n", stderr="")
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="?? src/static/newthing.py\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")  # diff: clean
+    monkeypatch.setattr("cli.subprocess.run", fake_run)
+
+    assert _git_commit_hash() == "abc123 (dirty working tree)"
+    status_cmd = next(c for c in calls if c[:3] == ["git", "status", "--porcelain"])
+    assert status_cmd[-4:] == ["--", "src", "config", "scripts"]
+
+
 def test_calibration_report_command_wires_tuned_thresholds(monkeypatch):
     # G2-residual: the calibration-report command must pass the same tuned
     # root/ssl thresholds the live decision engine uses (from settings.yaml via

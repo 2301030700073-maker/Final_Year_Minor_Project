@@ -188,14 +188,30 @@ def _git_commit_hash() -> str:
     statement about which code produced the report (principle 3). Flags it the
     same way _git_last_commit_touching does, so every provenance stamp (report,
     audit log, saved run) honestly says uncommitted changes were present.
-    `git diff HEAD --quiet` covers staged and unstaged edits to tracked files
-    while ignoring untracked artifacts (outputs/, bundles) that always exist."""
+    `git diff HEAD --quiet` covers staged and unstaged edits to tracked files,
+    and an untracked file under the code's OWN directories is checked separately:
+    a new module in src/, a signature YAML in config/ or a change under scripts/
+    runs while `git diff HEAD` reports a clean tree, so the stamp would name a
+    commit that does not contain the code that produced the report - the same
+    false precision one layer down. That second check is path-limited on purpose:
+    the untracked artifacts this repo always carries (outputs/, bundles,
+    run_logs/) are not analysis code, and letting them dirty every stamp would
+    leave the flag carrying no information."""
     try:
         result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True)
         commit = result.stdout.strip()
         if not commit:
             return "unknown"
         dirty = subprocess.run(["git", "diff", "HEAD", "--quiet"], capture_output=True).returncode == 1
+        if not dirty:
+            untracked = subprocess.run(
+                ["git", "status", "--porcelain", "--untracked-files=all",
+                 "--", "src", "config", "scripts"],
+                capture_output=True, text=True,
+            )
+            dirty = untracked.returncode == 0 and any(
+                line.startswith("??") for line in (untracked.stdout or "").splitlines()
+            )
         return f"{commit} (dirty working tree)" if dirty else commit
     except Exception:
         return "unknown"

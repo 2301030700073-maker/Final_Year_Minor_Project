@@ -231,12 +231,12 @@ for apk in "${TARGETS[@]}"; do
   [ -n "$apk" ] || continue
   name=$(basename "$apk" .apk)
   log="$LOG_DIR/$name.log"
-  current="$name"
-  current_apk="$apk"
   if [ ! -f "$apk" ]; then
     printf "%s\tmissing\t-\t-\t0\t-\t%s\n" "$name" "$log" >> "$JOURNAL"
     echo "=== $name MISSING $apk ==="
     incomplete=$((incomplete + 1))
+    # Nothing was launched, so nothing is in flight: the next interrupt must not
+    # name this target, nor date it from a start time it never had.
     current=""
     current_apk=""
     continue
@@ -249,6 +249,16 @@ for apk in "${TARGETS[@]}"; do
   echo "=== $name starting $(date -u +%FT%TZ) ==="
   start=$(date +%s)
   start_up=$(uptime_seconds)
+  # The in-flight marker is set HERE - once this target's own start time is on
+  # record, and immediately before the launch - because the interrupt path stamps
+  # its row with `now - start`. Set earlier in the loop body, as it was, those two
+  # facts came apart: an interrupt landing in the gap between them named a target
+  # that had not started yet and dated it from the PREVIOUS target's start, so a
+  # fresh target would be recorded as having run for the whole of the one before
+  # it. Adjacency is what makes "a target is in flight" and "its start time is
+  # known" one fact instead of two that can disagree.
+  current="$name"
+  current_apk="$apk"
 
   if [ -n "${SWEEP_RUNNER:-}" ]; then
     timeout "$RUN_TIMEOUT" $SWEEP_RUNNER --apk "$apk" \

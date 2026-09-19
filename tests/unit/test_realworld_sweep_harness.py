@@ -324,6 +324,27 @@ def test_an_interrupted_target_with_no_sidecar_says_so_rather_than_naming_no_sta
     assert rows[0].split("\t")[4] == "no sidecar"
 
 
+def test_the_in_flight_marker_is_set_only_once_its_start_time_is_measured():
+    """The interrupt path stamps its row with `now - start`, so a target marked in
+    flight before its OWN start time was measured is dated from the previous
+    target's: a fresh target recorded as having run for the whole of the one before
+    it. The gap that allows is a few syscalls wide, so no signal can be aimed into
+    it and no runtime test can close it - the loop body's ordering is what rules it
+    out, which is what is asserted here (the same way the launcher-order test
+    inspects its implementation rather than racing a real race)."""
+    body = SCRIPT.read_text(encoding="utf-8").split("for apk in ", 1)[1]
+    assert body.index("start=$(date +%s)") < body.index('current_apk="$apk"'), (
+        "the in-flight marker must be set after this target's start time is on "
+        "record - set before it, an interrupt names a target that has not started "
+        "and dates it from the previous target's start"
+    )
+    # ...and both are set before the launch, so no target can run unmarked.
+    assert body.index('current_apk="$apk"') < body.index("SWEEP_RUNNER:-"), (
+        "the marker must be set before the launch, or a running target is not "
+        "named as in flight and an interrupt leaves it unrecorded"
+    )
+
+
 # --- how much of a target's window the machine spent not running --------------
 
 

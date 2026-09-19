@@ -2078,6 +2078,36 @@ def test_drive_ui_taps_once_the_app_owns_the_screen(monkeypatch):
     assert rec["target"]["label"] == "START"
 
 
+def test_drive_ui_tells_an_empty_hierarchy_from_a_screen_with_nothing_tappable(monkeypatch):
+    """Both parse to no targets, and the refusal's wording is a claim about the
+    SCREEN - so a hierarchy that was never read must not be reported as one that
+    offered nothing to tap. The census is what makes the difference visible in the
+    persisted evidence, which is the only place a reader can check it after the
+    device is gone (the AndroGoat capture of 2026-09-19 recorded `targets_seen: 0`
+    and could not say which of the two it had)."""
+    from dynamic import ui_liveness
+    monkeypatch.setattr(ui_liveness, "wait_for_foreground", lambda s, p: _fg(True))
+    monkeypatch.setattr(ui_liveness, "dump_ui_targets",
+                        lambda serial: {"measured": True, "reason": None, "targets": [],
+                                        "hierarchy": {"nodes": 0, "clickable": 0,
+                                                      "focusable": 0}})
+    rec = mitmproxy_capture._drive_ui("emulator-5554", "com.test.app")
+    assert rec["tapped"] is False
+    assert "no nodes at all" in rec["reason"]
+    assert rec["hierarchy"] == {"nodes": 0, "clickable": 0, "focusable": 0}
+
+    # A real screen whose items are driven by AdapterView.onItemClick carries the
+    # nodes but marks none of them clickable: the policy's own wording stands, and
+    # what it saw is recorded beside it.
+    monkeypatch.setattr(ui_liveness, "dump_ui_targets",
+                        lambda serial: {"measured": True, "reason": None, "targets": [],
+                                        "hierarchy": {"nodes": 12, "clickable": 0,
+                                                      "focusable": 0}})
+    rec = mitmproxy_capture._drive_ui("emulator-5554", "com.test.app")
+    assert rec["reason"] == "no tappable widget in the hierarchy"
+    assert rec["hierarchy"]["nodes"] == 12 and rec["targets_seen"] == 0
+
+
 # --- ADR-0012: who reached the capture proxy, recorded on the stage -----------
 
 

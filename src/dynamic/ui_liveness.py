@@ -304,6 +304,25 @@ def _parse_tap_targets(uiautomator_xml: str) -> list[dict]:
     return targets
 
 
+def _hierarchy_census(uiautomator_xml: str) -> dict:
+    """How much hierarchy the dump contained: the node count, and how many nodes
+    carried each tap-relevant attribute. Pure over the XML.
+
+    The target list alone cannot answer the question a refusal raises. "No tappable
+    widget in the hierarchy" is a claim about a SCREEN, and it is only that claim
+    when there was a screen to read: the same empty list comes from a real
+    hierarchy of forty nodes none of which is clickable (an app whose list items
+    are driven by AdapterView.onItemClick, which the dump marks neither clickable
+    nor focusable) and from a hierarchy with no nodes in it at all. Carried on
+    every dump so the two are separable from the persisted evidence alone, long
+    after the device is gone."""
+    return {
+        "nodes": len(re.findall(r"<node[^>]*", uiautomator_xml)),
+        "clickable": len(re.findall(r'<node[^>]*(?<![\w-])clickable="true"', uiautomator_xml)),
+        "focusable": len(re.findall(r'<node[^>]*(?<![\w-])focusable="true"', uiautomator_xml)),
+    }
+
+
 def _choose_tap_target(targets: list[dict]) -> tuple[dict | None, str]:
     """The single target to tap, or None with the reason it refused. Pure policy.
 
@@ -326,14 +345,23 @@ def _choose_tap_target(targets: list[dict]) -> tuple[dict | None, str]:
 
 
 def dump_ui_targets(serial: str, adb: str | None = None) -> dict:
-    """A FRESH uiautomator dump's tap targets: {"targets", "measured", "reason"}.
+    """A FRESH uiautomator dump's tap targets: {"targets", "measured", "reason",
+    "hierarchy"} - `hierarchy` being the census of what was read, or None when
+    nothing was.
 
     Carries the same stale-file guard check_ui_liveness uses, and for a sharper
     reason here. On failure `uiautomator dump` prints "ERROR: could not get idle
     state" and a STALE /sdcard/ui_dump.xml from a previous screen remains; tapping
     a coordinate read from it would press wherever an earlier screen had a button.
     A stale coordinate is worse than no coordinate, so a dump without its own
-    success marker degrades to a recorded not-measured, never to a tap."""
+    success marker degrades to a recorded not-measured, never to a tap.
+
+    The success marker is the DEVICE's claim that it wrote a file. It is not this
+    read having obtained one, and the second call can fail on its own - so a
+    retrieval that came back empty or without any markup is a not-measured with
+    its own reason. Parsed, it yields the same empty target list as a screen with
+    nothing tappable, and the caller's refusal would then state an observer
+    failure as a fact about the app's UI ([[observer-silence-is-a-fact-about-observers]])."""
     adb = adb or _adb_wrapper()
     try:
         out = subprocess.run(
@@ -342,16 +370,23 @@ def dump_ui_targets(serial: str, adb: str | None = None) -> dict:
         )
         stdout = out.stdout or ""
         if "dumped to" not in stdout:
-            return {"targets": [], "measured": False,
+            return {"targets": [], "measured": False, "hierarchy": None,
                     "reason": "uiautomator dump failed (stale file not trusted): "
                               + (stdout.strip()[:80] or "no output")}
         xml_out = subprocess.run(
             [adb, "-s", serial, "shell", "cat", "/sdcard/ui_dump.xml"],
             capture_output=True, text=True, timeout=30,
         ).stdout or ""
-        return {"targets": _parse_tap_targets(xml_out), "measured": True, "reason": None}
+        if "<" not in xml_out:
+            return {"targets": [], "measured": False, "hierarchy": None,
+                    "reason": "uiautomator reported a dump but the hierarchy could not "
+                              f"be read back ({len(xml_out)} bytes retrieved), so "
+                              "nothing here says what was on screen"}
+        return {"targets": _parse_tap_targets(xml_out), "measured": True,
+                "hierarchy": _hierarchy_census(xml_out), "reason": None}
     except Exception as e:
-        return {"targets": [], "measured": False, "reason": f"uiautomator: {e}"}
+        return {"targets": [], "measured": False, "hierarchy": None,
+                "reason": f"uiautomator: {e}"}
 
 
 def tap(serial: str, x: int, y: int, adb: str | None = None) -> None:
@@ -519,13 +554,29 @@ def check_ui_liveness(serial: str, package: str, adb: str | None = None) -> dict
             xml_out = subprocess.run(
                 [adb, "-s", serial, "shell", "cat", "/sdcard/ui_dump.xml"],
                 capture_output=True, text=True, timeout=30,
-            ).stdout
-            result["clickable_nodes"] = _parse_clickable_nodes(xml_out)
-            result["rendered_content"] = _parse_rendered_content(xml_out)
-            text_nodes = _parse_text_nodes(xml_out)
-            result["text_nodes"] = text_nodes
-            result["text_node_count"] = len(text_nodes)
-            result["screen_state"] = _classify_screen(text_nodes, result["clickable_nodes"])
+            ).stdout or ""
+            if "<" not in xml_out:
+                # The marker says the DEVICE wrote a file; it does not say this read
+                # obtained it. Parsed, an empty retrieval yields 0 clickable nodes and
+                # no text - i.e. the screen_state below would report a screen fact
+                # ("nothing tappable", "not rendered") that was never observed, the
+                # same co-sourced degradation the dump-failed arm above and the
+                # except arm below already carry, with its own label so the three
+                # failure modes stay diagnosable apart.
+                result["clickable_nodes"] = None
+                result["rendered_content"] = None
+                result["screen_state"] = "not captured (uiautomator returned no hierarchy)"
+                result["_errors"] = result.get("_errors", []) + [
+                    "uiautomator reported a dump but the hierarchy could not be read "
+                    f"back ({len(xml_out)} bytes retrieved)"
+                ]
+            else:
+                result["clickable_nodes"] = _parse_clickable_nodes(xml_out)
+                result["rendered_content"] = _parse_rendered_content(xml_out)
+                text_nodes = _parse_text_nodes(xml_out)
+                result["text_nodes"] = text_nodes
+                result["text_node_count"] = len(text_nodes)
+                result["screen_state"] = _classify_screen(text_nodes, result["clickable_nodes"])
     except Exception as e:
         # This section's co-sourced signals (clickable_nodes, rendered_content,
         # screen_state) all derive from THIS uiautomator dump + cat. When either

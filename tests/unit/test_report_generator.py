@@ -3033,6 +3033,42 @@ def _flows_stage(ui_drive):
     )
 
 
+def test_an_unread_hierarchy_is_not_rendered_as_a_gated_control(tmp_path):
+    """The refusal branch closes by telling the reader a control gated the path.
+    That is a claim about the SCREEN, and it holds only where a screen was read:
+    when the dump came back with no nodes at all the run never saw what it was
+    refusing to tap, and the report must not turn that into a gate the app has.
+    Both censuses render from the same record, so the difference is the gate."""
+    from common import StageResult
+
+    def empty_capture(ui_drive):
+        return StageResult(
+            stage="capture-traffic", status="failed",
+            evidence={"reason": "no flows captured", "proxy": "127.0.0.1:8081",
+                      "client_connections": 0, "tls_failed_clients": [],
+                      "device_reached_proxy_preflight": True, "ui_drive": ui_drive},
+            error="no traffic captured through the proxy",
+        )
+
+    unread = {"attempted": False, "tapped": False, "target": None, "selected_by": None,
+              "targets_seen": 0, "hierarchy": {"nodes": 0, "clickable": 0, "focusable": 0},
+              "reason": "the dumped hierarchy contained no nodes at all - the screen was "
+                        "never read, so nothing here says what it offered to tap"}
+    body = _render_liveness(tmp_path, empty_capture(unread), "unread")
+    assert "never read" in body
+    assert "silent on the app's UI" in body
+    assert "gated behind a control therefore stays un-exercised" not in body
+
+    # Twelve nodes and not one of them tappable - the screen WAS read, so the
+    # policy's own refusal stands and the gate sentence is available.
+    read = {"attempted": False, "tapped": False, "target": None, "selected_by": None,
+            "targets_seen": 0, "hierarchy": {"nodes": 12, "clickable": 0, "focusable": 0},
+            "reason": "no tappable widget in the hierarchy"}
+    body2 = _render_liveness(tmp_path, empty_capture(read), "read")
+    assert "gated behind a control therefore stays un-exercised" in body2
+    assert "silent on the app's UI" not in body2
+
+
 def test_capture_summary_exposes_the_ui_drive_record():
     """The drive is recorded on the stage; a consumer must be able to read it, or
     the record is a fact nothing acts on."""

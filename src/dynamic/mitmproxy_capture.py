@@ -1156,14 +1156,26 @@ def _drive_ui(serial: str, package: str) -> dict:
                           + f" ({fg['reason']}) - refusing to tap a screen the app does "
                             "not own"}
     dump = ui_liveness.dump_ui_targets(serial)
+    census = dump.get("hierarchy")
     if not dump["measured"]:
         return {"attempted": False, "tapped": False, "target": None,
-                "selected_by": None, "reason": dump["reason"]}
+                "selected_by": None, "hierarchy": census, "reason": dump["reason"]}
     target, how = ui_liveness._choose_tap_target(dump["targets"])
     if target is None:
         return {"attempted": False, "tapped": False, "target": None,
                 "selected_by": None, "targets_seen": len(dump["targets"]),
-                "reason": how}
+                # What the dump held, so the refusal below is auditable after the
+                # device is gone: the target list alone cannot tell a screen of
+                # forty nodes with nothing tappable from a hierarchy that was never
+                # read ([[verdict-must-carry-its-observation]]).
+                "hierarchy": census,
+                # The reason names a property of the SCREEN, so it stands only where
+                # there was a screen to read. nodes == 0 is the one census that makes
+                # that false; None (a caller that does not report a census) leaves the
+                # policy's own wording alone.
+                "reason": ("the dumped hierarchy contained no nodes at all - the screen "
+                           "was never read, so nothing here says what it offered to tap"
+                           if census is not None and census.get("nodes") == 0 else how)}
     try:
         ui_liveness.tap(serial, target["center"][0], target["center"][1])
     except Exception as e:

@@ -352,6 +352,64 @@ def test_cat_failure_degrades_honestly(monkeypatch):
     assert any("uiautomator" in e for e in r["_errors"])
 
 
+def test_an_unread_hierarchy_degrades_both_dump_consumers(monkeypatch):
+    """The same co-sourced asymmetry, one arm further along: `cat` SUCCEEDS but
+    returns nothing - the file was not there yet, or the read came back empty.
+    Parsed, that is 0 clickable nodes and no text, i.e. check_ui_liveness would
+    report a screen nobody read and dump_ui_targets's caller would refuse with
+    "no tappable widget in the hierarchy" about a screen it never saw. The
+    device's "dumped to" marker is its claim to have WRITTEN a file, not this
+    read having obtained one, so both consumers must degrade instead
+    ([[observer-silence-is-a-fact-about-observers]])."""
+    from dynamic import ui_liveness
+
+    def fake_run(cmd, **kw):
+        if "uiautomator" in cmd:
+            return type("R", (), {"stdout": "UI hierchary dumped to: /sdcard/ui_dump.xml"})()
+        if "cat" in cmd:
+            return type("R", (), {"stdout": ""})()
+        if "dumpsys" in cmd or "pidof" in cmd or "logcat" in cmd:
+            return type("R", (), {"stdout": ""})()
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr(ui_liveness.subprocess, "run", fake_run)
+    r = ui_liveness.check_ui_liveness("s", "com.x", adb="adb")
+    assert r["clickable_nodes"] is None
+    assert r["rendered_content"] is None
+    assert r["screen_state"] == "not captured (uiautomator returned no hierarchy)"
+    assert any("could not be read back" in e for e in r["_errors"])
+
+    out = ui_liveness.dump_ui_targets("emulator-5554", adb="/bin/adb")
+    assert out["measured"] is False and out["hierarchy"] is None
+    assert "could not be read back" in out["reason"] and "0 bytes" in out["reason"]
+
+
+def test_dump_ui_targets_carries_the_census_of_what_it_read(monkeypatch):
+    """A refusal has to stay auditable after the device is gone, and the target list
+    alone cannot say which refusal it was: a screen of many nodes with none
+    tappable and a hierarchy that was never read BOTH parse to []. The AndroGoat
+    capture of 2026-09-19 recorded `targets_seen: 0` with no way to tell them
+    apart, which is why the census rides along."""
+    from dynamic import ui_liveness
+    xml = ('<node class="android.widget.FrameLayout" bounds="[0,0][1080,1920]">'
+           '<node text="q" clickable="true" bounds="[0,0][10,10]"/>'
+           '<node text="r" focusable="true" bounds="[0,0][10,10]"/>'
+           '<node text="s" long-clickable="true" bounds="[0,0][10,10]"/>'
+           '</node>')
+
+    def fake_run(cmd, **kw):
+        stdout = ("UI hierchary dumped to: /sdcard/ui_dump.xml" if "uiautomator" in cmd
+                  else xml)
+        return type("R", (), {"stdout": stdout})()
+
+    monkeypatch.setattr(ui_liveness.subprocess, "run", fake_run)
+    out = ui_liveness.dump_ui_targets("emulator-5554", adb="/bin/adb")
+    assert out["measured"] is True
+    # four <node> openings, one clickable, one focusable - and `long-clickable` is
+    # NOT counted as clickable, the same (?<![\w-]) guard _parse_tap_targets keeps.
+    assert out["hierarchy"] == {"nodes": 4, "clickable": 1, "focusable": 1}
+
+
 def test_logcat_failure_degrades_both_anr_and_tls_to_not_captured(monkeypatch):
     # ui_liveness.py logcat except arm: the ANR scan and the TLS-trust-block scan
     # BOTH derive from the same `logcat -d` call, so when it raises both signals

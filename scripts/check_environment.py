@@ -243,7 +243,7 @@ else:
         r = subprocess.run(
             ["uv", "run", "python", "-c",
              "from dynamic.device import setup_frida_connection, discover_device; "
-             "d=setup_frida_connection(discover_device()); "
+             "d,_i=setup_frida_connection(discover_device());"
              "p=d.enumerate_processes(); print(f'{d.id}:{len(p)} processes')"],
             capture_output=True, text=True, timeout=25, env=env,
         )
@@ -265,7 +265,7 @@ else:
                 r = subprocess.run(
                     ["uv", "run", "python", "-c",
                      "from dynamic.device import setup_frida_connection, discover_device; "
-                     "d=setup_frida_connection(discover_device()); "
+                     "d,_i=setup_frida_connection(discover_device());"
                      "p=d.enumerate_processes(); print(f'{d.id}:{len(p)} processes')"],
                     capture_output=True, text=True, timeout=25, env=env,
                 )

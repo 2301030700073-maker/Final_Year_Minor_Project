@@ -888,10 +888,17 @@ def push_system_ca(serial: str, cert_path: Path) -> str:
     mount instead: a writable /data/local/tmp/cacerts staging dir (pre-seeded
     with the stock system CAs) is mounted over /system/etc/security/cacerts.
     That makes the store writable with no remount and no reboot. adb root is
-    required (bind mounts are privileged); it restarts adbd idempotently and
-    runs before any reverse/proxy is set, so no established tunnel is dropped.
-    Any failure raises loudly with the actionable hint (NFR-7). Returns the
-    system path."""
+    required (bind mounts are privileged). Its adbd restart is NOT free to a
+    caller holding an adb reverse: measured on the reference device, `adb root`
+    printed "restarting adbd as root" and the tcp:8080 reverse the device's
+    internet path depends on was gone afterwards, re-added only by hand. The
+    restart happens only when the shell is not already root, so a caller cannot
+    tell from this function's return whether its tunnel survived - a caller that
+    needs the reverse re-establishes it AFTER this call (mitmproxy_capture
+    re-runs pass_through_proxy.ensure_internet for exactly this reason; a
+    re-add of the same spec is idempotent, so it costs one adb call when no
+    restart happened). Any failure raises loudly with the actionable hint
+    (NFR-7). Returns the system path."""
     adb = _require_adb()
     hash_name = _subject_hash_old(cert_path)
     local_tmp = f"/data/local/tmp/{hash_name}.0"

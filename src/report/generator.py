@@ -188,8 +188,31 @@ Per-surface bound of this scan - a `partial`/`unscannable` surface is a lower bo
 {% if coverage.get("js") == "partial" -%}
 > **JS:** partial means the app ships a binary Hermes/bytecode bundle whose control flow can't be read (React Native release bundle) - we recover only its string constants, so a js root/SSL NEITHER is not proof a root/SSL check in the bundle is absent.{% if coverage.get("native") == "unscannable" %} Mirrors the native callout above.{% endif %}
 {% endif %}
-{# COV-HEAVY-JAVA1: gate on the ACTUAL java state, not `obfuscation_level` alone. Under heavy obfuscation java_coverage() returns `partial` from a complete/partial decompile but `unscannable` from an unknown-completeness (cached/regenerated) run (coverage.py). Firing on `heavy` alone printed "the Java surface is `partial`" beneath a coverage table showing java=`unscannable` - a false specific fact. The heavy+unknown case is already carried by the decompile-completeness=="unknown" Limitations branch; here the caveat fires only where its own assertion is true. #}{% if obfuscation_level == "heavy" and coverage.get("java") == "partial" -%}
-> **Heavy obfuscation:** the Java surface is `partial` even on a complete decompile - encrypted/unreachable strings mean a clean Java NEITHER is not proof of absence (N1/G-C).
+{# COV-HEAVY-JAVA1 + COV-JAVA-NOTE1: the note is gated on the ACTUAL java state and each clause on the exact fact it asserts. Under heavy obfuscation java_coverage() returns `partial` from a complete/partial decompile but `unscannable` from an unknown-completeness (cached/regenerated) run (coverage.py), and firing on `heavy` alone printed "the Java surface is `partial`" beneath a table showing java=`unscannable` - a false specific fact. Gating on the state alone was not enough either: SEVEN distinct causes reach `partial` - java_coverage's heavy obfuscation / detected packer / un-ruled-out packing / partial decompile, plus apply_dynamic_loading_java, apply_attribution_degraded_java and apply_unreadable_files_java - so a note naming one of them read as "the other six did not happen". Each clause below fires only on its own recorded evidence (and the same evidence the report names in the section it points at), and a `partial` with none of the seven says so rather than inventing a cause. Clauses are collected then joined: seven inline separators is where a dangling `;` or a doubled period comes from. #}
+{% if coverage.get("java") == "partial" -%}
+{% set _jc = [] -%}
+{% if obfuscation_level == "heavy" -%}
+{% set _ = _jc.append("heavy obfuscation (encrypted or unreachable strings stay unreadable even on a complete decompile - N1/G-C)") -%}
+{% endif -%}
+{% if packer_findings -%}
+{% set _ = _jc.append('a packer hiding the real DEX behind a loader (see "Packer / protector identified")') -%}
+{% endif -%}
+{% if packer_scan_incomplete -%}
+{% set _ = _jc.append("a packer scan that did not complete, so packing is un-ruled-out (PACK1)") -%}
+{% endif -%}
+{% if decompile_completeness == "partial" -%}
+{% set _ = _jc.append("an incomplete decompile (" ~ jadx_file_count ~ " file(s), jadx exit " ~ jadx_exit_code ~ " - see Limitations)") -%}
+{% endif -%}
+{% if dynamic_loads -%}
+{% set _ = _jc.append("runtime-loaded code the static scan cannot see (" ~ (dynamic_loads | length) ~ '; see "Dynamic code loading")') -%}
+{% endif -%}
+{% if dex_attribution_degraded -%}
+{% set _ = _jc.append('a DEX string scan that could not attribute matches to app-owned classes (see "DEX string attribution degraded")') -%}
+{% endif -%}
+{% if classification.unreadable_file_count -%}
+{% set _ = _jc.append("candidate files this run could not read (" ~ classification.unreadable_file_count ~ "; see the CAUTION above)") -%}
+{% endif -%}
+> **Java:** `partial` is a lower bound, not a confident negative - a Java NEITHER is not proof that a Java root/SSL check is absent. Bound by{% if _jc %} {{ _jc | join('; ') }}{% else %} a coverage rule this report does not name{% endif %}.
 {% endif %}
 {% else -%}
 Not recorded for this run.

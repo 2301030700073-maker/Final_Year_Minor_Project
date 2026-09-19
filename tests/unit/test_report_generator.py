@@ -692,8 +692,13 @@ def test_heavy_obfuscation_caveat_gated_on_actual_java_state_not_just_obfuscatio
         coverage={"java": "partial", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed"},
         **common,
     ).read_text(encoding="utf-8")
-    assert "**Heavy obfuscation:**" in fires
-    assert "the Java surface is `partial`" in fires
+    # COV-JAVA-NOTE1 rewrote the wording: the note is now the `**Java:**` one, which
+    # names every cause of a `partial` surface that this run recorded, and heavy
+    # obfuscation is one of its clauses (see test_coverage_table_java_note.py for
+    # the other six). The gate and both directions below are unchanged.
+    assert "**Java:**" in fires
+    assert "heavy obfuscation (encrypted or unreachable strings stay unreadable" in fires
+    assert "a Java NEITHER is not proof that a Java root/SSL check is absent" in fires
 
     # (b) heavy BUT java unscannable -> caveat suppressed; the table states the real
     # bound and the caveat must not assert the contradictory "partial"
@@ -704,8 +709,8 @@ def test_heavy_obfuscation_caveat_gated_on_actual_java_state_not_just_obfuscatio
         **common,
     ).read_text(encoding="utf-8")
     assert "| java | unscannable |" in suppressed          # table states the real bound
-    assert "**Heavy obfuscation:**" not in suppressed       # caveat does NOT assert "partial"
-    assert "the Java surface is `partial`" not in suppressed
+    assert "**Java:**" not in suppressed                    # caveat does NOT assert "partial"
+    assert "not proof that a Java root/SSL check is absent" not in suppressed
 
 
 def test_generate_report_lists_exported_components(tmp_path):

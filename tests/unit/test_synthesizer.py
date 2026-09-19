@@ -170,6 +170,58 @@ def test_synthesize_no_evidence_still_attempts_universal():
     assert "checkServerTrusted" in res.source
 
 
+def test_ids_routed_to_one_recipe_install_that_recipe_once():
+    # Many ids are deliberately routed to the same proven neutralizer - five
+    # pin-literal spellings are one okhttp CertificatePinner recipe, and nineteen
+    # su/path spellings are one path-hiding probe. An app matching two of them got
+    # that body appended twice, and the second copy is not inert: it re-installs
+    # hooks the first already installed. The AndroGoat run of 2026-09-19 shows the
+    # app reporting exactly that, once per symbol of the doubled recipe:
+    # '[synth] SSL_CTX_set_verify found in libssl.so but the hook could not be
+    # installed: Error: already replaced this function'.
+    root_body = ROOT_RECIPES["root_su_binary_paths"]
+    ssl_body = SSL_RECIPES["okhttp_certificate_pinner"]
+    # The routing this test is about, asserted rather than assumed: if these pairs
+    # are ever split into distinct recipes the case disappears and the test would
+    # otherwise keep passing while covering nothing.
+    assert ROOT_RECIPES["su_alternate_binary_paths"] == root_body
+    assert SSL_RECIPES["sha1_pin_hash_literal"] == ssl_body
+
+    res = synthesize(
+        _cls(Action.BOTH,
+             root_ids=["root_su_binary_paths", "su_alternate_binary_paths"],
+             ssl_ids=["okhttp_certificate_pinner", "sha1_pin_hash_literal"]),
+        Action.BOTH,
+    )
+    assert res.source.count(root_body) == 1
+    assert res.source.count(ssl_body) == 1
+    # The counts are of hooks the script installs, not of ids that matched.
+    assert res.root_hook_count == 1 and res.ssl_hook_count == 1
+    # ...while every matched id is still named. Which techniques were DETECTED is
+    # a different list from the script bodies that cover them, and the report reads
+    # this one.
+    assert set(res.applied_hooks) == {
+        "root_su_binary_paths", "su_alternate_binary_paths",
+        "okhttp_certificate_pinner", "sha1_pin_hash_literal",
+    }
+
+
+def test_every_distinct_recipe_body_reaches_the_script_exactly_once():
+    # The same rule against the whole real corpus rather than a chosen pair: with
+    # every recipe-bearing signature matched at once, the number of hooks emitted
+    # per category is the number of DISTINCT bodies. This is the assertion that
+    # fails on any future id routed to an existing recipe, not just today's pairs.
+    root_ids, ssl_ids = _real_signature_ids()
+    matched_root = sorted(set(ROOT_RECIPES) & root_ids)
+    matched_ssl = sorted(set(SSL_RECIPES) & ssl_ids)
+    res = synthesize(_cls(Action.BOTH, root_ids=matched_root, ssl_ids=matched_ssl), Action.BOTH)
+    assert res.root_hook_count == len({ROOT_RECIPES[i] for i in matched_root})
+    assert res.ssl_hook_count == len({SSL_RECIPES[i] for i in matched_ssl})
+    # superset, not equality: an anti-instrumentation detection prepends the
+    # evasion base, which is an applied hook too.
+    assert set(res.applied_hooks) >= set(matched_root) | set(matched_ssl)
+
+
 @pytest.mark.parametrize("action", [Action.ROOT_ONLY, Action.SSL_ONLY, Action.BOTH])
 def test_synthesize_never_empty_for_bypass_action(action):
     # L-M2 guarantee: any bypass action yields a real script even with no evidence.

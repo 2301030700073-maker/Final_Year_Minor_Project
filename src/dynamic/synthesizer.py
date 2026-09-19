@@ -1106,11 +1106,31 @@ def synthesize(classification: ClassificationResult, action: Action) -> Synthesi
     wants_ssl = action in (Action.SSL_ONLY, Action.BOTH)
 
     # Root: apply dedicated hooks for detected root techniques.
+    #
+    # One hook per distinct BODY, not one per id. Many ids are deliberately routed
+    # to the same proven neutralizer - ROOT_RECIPES["setenforce_permissive"] IS
+    # ROOT_RECIPES["root_runtime_exec_su"], SSL's cronet/Flutter/Netty/CWAC family
+    # IS one recipe, five pin-literal ids IS okhttp_certificate_pinner - so an app
+    # that matches two of them got that script appended twice, and the second copy
+    # is not inert: it re-installs hooks the first already installed.
+    #
+    # Measured on the AndroGoat run of 2026-09-19, where four matched ids routed to
+    # the native BoringSSL bypass: the script logged '[synth] SSL_CTX_set_verify
+    # found in libssl.so but the hook could not be installed: Error: already
+    # replaced this function' four times, once per symbol, and '[synth]
+    # okhttp3.CertificatePinner absent' four times - the count of copies of that
+    # one recipe. Both are the app reporting that it was handed the same hook
+    # twice. `applied` still names every id: the report says which techniques were
+    # DETECTED, which is a different list from the script bodies that cover them.
     if wants_root and root_ids:
+        root_seen: set[str] = set()
         for tid in sorted(root_ids):
             if tid in ROOT_RECIPES:
-                root_hooks.append(ROOT_RECIPES[tid])
                 applied.append(tid)
+                body = ROOT_RECIPES[tid]
+                if body not in root_seen:
+                    root_seen.add(body)
+                    root_hooks.append(body)
         # Any detected root technique without a dedicated hook (server-verified
         # device attestation, Xposed, Riru - no clean single hook) still gets
         # the universal root base as a SUPPLEMENT to any targeted hooks. Defeating
@@ -1122,12 +1142,17 @@ def synthesize(classification: ClassificationResult, action: Action) -> Synthesi
             root_hooks.append(UNIVERSAL_ROOT)
             universal.append("root")
 
-    # SSL: apply dedicated hooks for detected ssl techniques.
+    # SSL: apply dedicated hooks for detected ssl techniques. Same rule as root:
+    # one body per distinct neutralizer, every id still named in `applied`.
     if wants_ssl and ssl_ids:
+        ssl_seen: set[str] = set()
         for tid in sorted(ssl_ids):
             if tid in SSL_RECIPES:
-                ssl_hooks.append(SSL_RECIPES[tid])
                 applied.append(tid)
+                body = SSL_RECIPES[tid]
+                if body not in ssl_seen:
+                    ssl_seen.add(body)
+                    ssl_hooks.append(body)
         # Same supplement rule: any detected ssl technique without a dedicated
         # hook (CT verifier, CA-store trust) earns the universal SSL base too, so
         # a mixed detection is fully covered, never partially skipped.

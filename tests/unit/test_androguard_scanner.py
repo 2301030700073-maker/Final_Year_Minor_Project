@@ -299,17 +299,23 @@ class _FakeDxFail:
         raise OSError("xref walk failed")
 
 
-def test_app_owned_strings_continues_on_class_iteration_error():
-    # androguard_scanner.py:75-76: a dex whose get_classes() raises is skipped
-    # (per-dex except), and a healthy sibling dex still populates app_ns and
-    # keeps its app-owned strings - the whole pool is NOT dropped for one bad dex.
+def test_app_owned_strings_degrades_when_one_dex_cannot_be_enumerated():
+    # A dex whose get_classes() raises is still skipped per-dex, and a healthy
+    # sibling still populates app_ns, so the sibling's app-owned strings are
+    # kept - the whole pool is NOT dropped for one bad dex (asserted below).
+    # But strings xref'd from the bad dex ALONE are dropped, so the view is
+    # partial, and `degraded` is what bounds the coverage claim that rests on it
+    # (coverage.apply_attribution_degraded_java). Reporting this as fully
+    # attributed claims a scan of the app that never read part of the app.
+    # Flipping the flag costs nothing in precision: it changes no string set,
+    # since the string loop keys off app_ns, which the sibling kept non-empty.
     app_class = _FakeClass("Lcom/example/app/Main;")
     s = _FakeString("keep-me", {app_class: None})
     dexs = [_FakeDexFail(), _FakeDex([app_class])]
     dx = _FakeDx([s])
     result, degraded = _app_owned_strings(dexs, dx, "com.example.app")
     assert "keep-me" in result
-    assert degraded is False  # a healthy sibling dex preserved attribution
+    assert degraded is True
 
 
 def test_app_owned_strings_skips_none_valued_string():

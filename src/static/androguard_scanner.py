@@ -131,6 +131,7 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> tuple[set[str],
     broken view may equally have missed app-owned ones), so it must not be
     reported as an ordinary, fully-attributed scan."""
     app_ns: set[str] = set()
+    namespace_walk_failed = False
     for dex in dex_objs:
         try:
             for cls in dex.get_classes():
@@ -138,11 +139,21 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> tuple[set[str],
                 if ns is not None and _app_owned(ns, app_package):
                     app_ns.add(ns)
         except Exception:
+            # A DEX whose classes will not enumerate contributes no app-owned
+            # namespace, so a string xref'd from it ALONE takes keep=False below
+            # and is dropped - the app's own string surface, truncated, and
+            # reading exactly like a DEX that references none. A healthy sibling
+            # still populating app_ns is what hides it: `not app_ns` stays False,
+            # so the flag below would call a partly-broken view fully attributed.
+            # The xref walk's own failure is treated as the loss it is (see the
+            # except under the string loop); this one is the same loss.
+            namespace_walk_failed = True
             continue
 
     # No app-owned namespace at all => every per-string attribution below takes
-    # the whole-pool branch. Hoisted here because app_ns is loop-invariant.
-    degraded = not app_ns
+    # the whole-pool branch. Hoisted here because app_ns is loop-invariant. A
+    # walk that failed on any DEX degrades too, for the reason above.
+    degraded = namespace_walk_failed or not app_ns
     app_strings: set[str] = set()
     try:
         for s_analysis in dx.find_strings():

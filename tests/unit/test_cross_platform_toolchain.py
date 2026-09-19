@@ -145,6 +145,14 @@ def test_analyze_so_uses_pure_python_when_binutils_absent(tmp_path, monkeypatch)
     so = tmp_path / "lib.so"
     so.write_bytes(b"\x7fELF but not a real shared object")
     monkeypatch.setattr(native_mod.shutil, "which", lambda name: None)
+    # "binutils absent" has to mean the whole fallback chain is absent, not just
+    # readelf/nm/strings: with the symbol layer gone, analyze_so falls through to
+    # Ghidra headless, and on the reference box `tools/ghidra/ghidra_*/support/
+    # analyzeHeadless` is installed - so this test EXECUTED a real Ghidra run
+    # (JVM startup and all) to reach a verdict the runner reaches with no Ghidra
+    # at all. The resolution decision it asserts is the same either way, which is
+    # exactly why nobody noticed.
+    monkeypatch.setattr(native_mod, "find_ghidra_headless", lambda *a, **k: None)
 
     lib = native_mod.analyze_so(so)
     assert lib.unscannable is True

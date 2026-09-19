@@ -495,7 +495,26 @@ def test_run_capture_stage_exception_carries_the_frida_it_was_under(monkeypatch,
         def resume(self, pid):
             return None
 
+    class _Proc:
+        def __init__(self, *a, **k):
+            pass
+
+        def communicate(self, timeout=None):
+            return FIXTURE_DETAIL, ""
+
+        def terminate(self):
+            pass
+
+        def kill(self):
+            pass
+
     monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: False)
+    # The native placement SPAWNS mitmdump, and this test fakes `which` into
+    # saying it is at /usr/bin/mitmdump - which on the reference box is true, so
+    # without this stub the test launched a REAL mitmdump capture proxy on the
+    # capture port. In a sweep that is a collision with the run in flight, and on
+    # the runner it is a spawn of a binary that is not installed.
+    monkeypatch.setattr(mitmproxy_capture.subprocess, "Popen", _Proc)
     monkeypatch.setattr(mitmproxy_capture.shutil, "which", lambda name: "/usr/bin/mitmdump")
     monkeypatch.setattr(device, "create_mitm_ca", lambda confdir: confdir / "mitmproxy-ca-cert.pem")
     monkeypatch.setattr(device, "push_system_ca", lambda serial, cert: "/system/etc/security/cacerts/x.0")

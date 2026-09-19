@@ -109,6 +109,6 @@ def test_a_gate_refusal_still_flags_the_stored_claim(tmp_path, monkeypatch):
     # library the pipeline held `partial` for a reason the sweep does not model,
     # "gate=fully_analyzed" beside "stored=partial" must not read as the stored
     # verdict having been wrong - real output on 2026-09-19 produced exactly that
-    # pairing (com.whatsapp).
-    assert "gate=fully_analyzed" in out, out
+    # pairing (com.whatsapp, 16 extracted .so).
+    assert "gate=NOT fully_analyzed" in out, out
     assert "now=" not in out, out

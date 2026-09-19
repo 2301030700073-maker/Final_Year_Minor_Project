@@ -29,6 +29,25 @@
 #
 # The sweep exits nonzero if any target did not end `ok`, so a caller cannot read
 # a partial sweep as a clean one.
+#
+# SWEEP-DETACH1: launch this detached from whatever session starts it.
+# All four facebook attempts on 2026-09-18/19 ended with a `started` row and no
+# outcome row - and one with no `sweep_end` either, which is a shell killed hard
+# enough that its EXIT trap never ran. The mechanism is the launcher, not the
+# analysis: started as a background job of an interactive session, the sweep sits
+# in that session's process group (measured: sid 20269, the task shell that
+# launched it), so when the session ends the whole group is signalled - SIGTERM if
+# the shell is asked to stop, which the trap records as `sweep_interrupted`, and
+# SIGKILL if it is torn down, which leaves no row at all. Facebook's static_scan
+# alone measured 2,012 s-2,726 s across those four runs and is by far their longest
+# stage, so a kill at an arbitrary moment almost always lands inside or just after
+# it - which is why every one of those runs died looking like a failure of
+# static_scan.
+#   setsid nohup bash scripts/run_unexecuted_realworld_sweep.sh ... &
+# Detaching costs the exit status: a detached sweep's rc reaches nobody, and this
+# script's rc IS its verdict. A detached launcher reads the verdict from the
+# journal's outcome rows and `sweep_end` instead, which is why every row above is
+# written ahead of the work it describes.
 set -u
 
 cd "$(dirname "$0")/.." || exit 1

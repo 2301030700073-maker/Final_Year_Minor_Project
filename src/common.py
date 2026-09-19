@@ -846,6 +846,62 @@ TLS_HANDSHAKE_NO_COMPLETION_WORDINGS = (
 ENV_NORMALIZATION_CHECKPOINT = "env:emulator-scrub"
 
 
+def ssl_path_effects(frida_messages: list) -> dict[str, int]:
+    """What ONE observer stream says the app did with TLS, keyed by what said it.
+
+    A message counts when it could only have been emitted INSIDE a live pinned
+    connection's TLS stage:
+
+      * a `bypassEffect` - the synthesized bypass's own behavioural effect
+        ('ssl-pin-check'/'ssl-handshake'), keyed by the effect string.
+      * a message carrying a concrete `hostname`/`host` - the predefined
+        ssl_pinning_bypass_v1.js pin-check / cert-verify hooks, which are sent from
+        inside the hooked `CertificatePinner.check` / `TrustManagerImpl.verifyChain`
+        and so appear only once the app opened a pinned connection, keyed by the
+        hook that fired.
+
+    An INSTALL-time message proves the hook was PLACED, not that a request was made:
+    `bypassed:true` with no host, or `CertificatePinner present:false`, is
+    deliberately not counted - the discriminator keys on an effect or a concrete
+    host, never on `bypassed:true` alone.
+
+    It lives here, shared, because two layers ask this of the same stream and had
+    drifted apart: `report.generator._observer_signal` counted only `bypassEffect`
+    (emitted ONLY by the synthesizer), so on every target mapped to the predefined
+    script - uc*/AndroGoat - a fired pin-check scored 0 and the report asserted "the
+    app's own pinned request never executed" over a stream that said it did, while
+    `cli._ssl_path_exercised` counted it and kept the stage loudly FAILED for
+    exactly that reason. Two shapes also reach here, and both are real:
+    frida_runner stores Frida's raw `{type, payload}` envelope, mitmproxy_capture
+    stores the payload ALONE. Reading only the envelope makes a whole window's
+    messages invisible, which reads as silence - so an unrecognised shape must never
+    be skipped, and the accepted cost of looking one level down even into script
+    data is deliberate: a spurious effect keeps a loud signal loud, where a dropped
+    one invents a silence ([[verdict-must-carry-its-observation]],
+    [[probehit-value-parity-across-consumers]])."""
+    effects: dict[str, int] = {}
+    for m in frida_messages or []:
+        if not isinstance(m, dict):
+            continue
+        if m.get("type") == "error":
+            # A crashed hook carries no payload and is described by
+            # describe_frida_script_errors - never counted as an effect.
+            continue
+        payload = m.get("payload")
+        if not isinstance(payload, dict):
+            payload = m
+        effect = payload.get("bypassEffect")
+        if isinstance(effect, str):
+            effects[effect] = effects.get(effect, 0) + 1
+            continue
+        host = payload.get("hostname") or payload.get("host")
+        if isinstance(host, str) and host:
+            hook = payload.get("hook")
+            label = hook if isinstance(hook, str) and hook else host
+            effects[label] = effects.get(label, 0) + 1
+    return effects
+
+
 def describe_frida_script_errors(frida_messages: list) -> list[str]:
     """Human-readable descriptions of uncaught Frida ``{'type': 'error'}`` messages.
 

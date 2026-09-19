@@ -9,7 +9,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 from calibration.report import CalibrationReport
-from common import ClassificationResult, CorrelationResult, ENV_NORMALIZATION_CHECKPOINT, StageResult, TLS_HANDSHAKE_REJECTED, TLS_HANDSHAKE_NONE_OBSERVED, TLS_HANDSHAKE_NO_COMPLETION_WORDINGS, VerificationResult, describe_frida_script_errors
+from common import ClassificationResult, CorrelationResult, ENV_NORMALIZATION_CHECKPOINT, StageResult, TLS_HANDSHAKE_REJECTED, TLS_HANDSHAKE_NONE_OBSERVED, TLS_HANDSHAKE_NO_COMPLETION_WORDINGS, VerificationResult, describe_frida_script_errors, ssl_path_effects
 from report import attribution as attribution_module
 from static.coverage import confidence_bound, verdict_label
 from static.manifest import ManifestInfo
@@ -718,7 +718,10 @@ def _observer_signal(messages) -> dict:
     stage's launch and the capture stage's separate launch - so a capture window's
     effects are counted by exactly the rules the dynamic window's are. Two windows
     of one script counted differently is how the same evidence ends up meaning two
-    things in one report.
+    things in one report. The effect rule itself lives in `common.ssl_path_effects`,
+    shared with the pipeline's reclassifier ladder, so the two LAYERS cannot drift
+    either - they had, and this report asserted the opposite of the stage line it
+    printed beside.
 
     ENGAGE-PROBE-ROOT1 (decider-owns-its-guard + AG-SC1): root_probe_hits counts
     ONLY probeHits whose VALUE is "root", so the report's "N root probeHit(s)" line
@@ -748,7 +751,16 @@ def _observer_signal(messages) -> dict:
     checkpoints: set[str] = set()
     root_probe_hits = 0
     probe_hits_any = 0
-    ssl_effects: dict[str, int] = {}
+    # What the stream says the app did with TLS, by the SAME extractor the pipeline's
+    # reclassifier ladder reads (`common.ssl_path_effects`). Counting only
+    # `bypassEffect` here scored a fired predefined-script pin-check (uc*/AndroGoat,
+    # which send a concrete host from inside the hooked CertificatePinner.check /
+    # TrustManagerImpl.verifyChain) as 0 effects, so the capture section asserted "the
+    # app's own pinned request never executed" on a run the ladder had kept FAILED for
+    # precisely that effect - the report contradicting the stage line beside it, which
+    # is the disagreement the reclassifier exists to prevent
+    # ([[probehit-value-parity-across-consumers]]).
+    ssl_effects = ssl_path_effects(messages)
     for m in messages or []:
         if not isinstance(m, dict):
             continue
@@ -772,9 +784,6 @@ def _observer_signal(messages) -> dict:
             probe_hits_any += 1
             if payload.get("probeHit") == "root":
                 root_probe_hits += 1
-        effect = payload.get("bypassEffect")
-        if isinstance(effect, str):
-            ssl_effects[effect] = ssl_effects.get(effect, 0) + 1
     return {
         "checkpoints": checkpoints,
         "root_probe_hits": root_probe_hits,

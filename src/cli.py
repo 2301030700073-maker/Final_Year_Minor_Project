@@ -43,6 +43,7 @@ from calibration.report import compute_calibration_report
 from dataclasses import asdict, replace
 
 from common import (
+    ssl_path_effects,
     elapsed_ms,
     CATEGORIES,
     Action,
@@ -822,19 +823,16 @@ def _ssl_path_exercised(messages) -> int:
     (`universal-ssl-pinning bypassed:true` with no host, or `CertificatePinner
     present:false`) carries no host and is deliberately not counted: it proves the
     hook was PLACED, not that a request was made - so the discriminator keys on a
-    concrete host or an effect, never on `bypassed:true` alone. Shared by every
-    window's stream that Signal 2 reads, so the windows cannot drift to different
-    predicates ([[observer-silence-is-a-fact-about-observers]])."""
-    count = 0
-    for m in messages or []:
-        payload = m.get("payload") if isinstance(m, dict) else None
-        if not isinstance(payload, dict):
-            continue
-        if (isinstance(payload.get("bypassEffect"), str)
-                or isinstance(payload.get("hostname"), str)
-                or isinstance(payload.get("host"), str)):
-            count += 1
-    return count
+    concrete host or an effect, never on `bypassed:true` alone.
+
+    The rule itself is `common.ssl_path_effects`, which the report layer's
+    `_observer_signal` reads too - one extractor for both layers as well as both
+    windows, because they HAD drifted: the report counted only `bypassEffect`, so a
+    fired predefined-script pin-check scored 0 there while this ladder counted it
+    and kept the stage loud, and the two would render one stream as two different
+    findings ([[observer-silence-is-a-fact-about-observers]],
+    [[probehit-value-parity-across-consumers]])."""
+    return sum(ssl_path_effects(messages).values())
 
 
 def _upgrade_verification_from_capture_window(

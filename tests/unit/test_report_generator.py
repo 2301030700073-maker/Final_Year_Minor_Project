@@ -2182,6 +2182,53 @@ def test_observer_signal_counts_effects_by_the_shared_rules():
     assert signal["checkpoints"] == {"root_su_binary_paths"}
 
 
+def test_observer_signal_counts_a_predefined_host_effect_not_just_the_synthesizers():
+    # The predefined ssl_pinning_bypass_v1.js hooks (uc*/AndroGoat) send
+    # {"hook": ..., "host": ..., "bypassed": true} from INSIDE the hooked
+    # CertificatePinner.check / TrustManagerImpl.verifyChain, so a concrete host is
+    # proof the app opened a pinned connection. Counting only `bypassEffect` - which
+    # only the synthesizer emits - scored those 0, and the capture section then told
+    # the reader "the app's own pinned request never executed" over a stream that
+    # said it did, on a run the pipeline had kept FAILED for exactly that reason
+    # (measured on AndroGoat: TrustManagerImpl.verifyChain @ owasp.org).
+    from report.generator import _observer_signal
+
+    signal = _observer_signal([
+        {"type": "send", "payload": {"hook": "TrustManagerImpl.verifyChain",
+                                     "host": "owasp.org", "bypassed": True}},
+        # INSTALL-time: the hook was placed, no request was made - never an effect.
+        {"type": "send", "payload": {"hook": "universal-ssl-pinning", "bypassed": True}},
+    ])
+    assert signal["ssl_effects"] == {"TrustManagerImpl.verifyChain": 1}
+
+
+def test_the_two_layers_count_one_stream_identically():
+    # The pipeline's reclassifier ladder and the report's audit read the SAME stream
+    # to answer the same question - "did the app exercise its SSL path?" - and they
+    # drifted in opposite directions: the report counted only the synthesizer's
+    # effect and the ladder's envelope-only read could not see the capture window's
+    # payload-alone messages. The result was one run rendering as app-silence in the
+    # report body and a capture-path failure in the stage line above it. This is the
+    # guard against that drift returning.
+    from cli import _ssl_path_exercised
+    from report.generator import _observer_signal
+
+    streams = [
+        [{"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}}],
+        [{"hook": "TrustManagerImpl.verifyChain", "host": "owasp.org", "bypassed": True}],
+        [{"payload": {"hostname": "a.example.com"}}],
+        [{"payload": {"host": "a.example.com"}}],
+        [{"type": "send", "payload": {"hook": "certificate_pin_hash_literal"}}],
+        [{"type": "send", "payload": {"bypassed": True}}],
+        [{"type": "error", "description": "boom"}],
+        [],
+    ]
+    for stream in streams:
+        assert _ssl_path_exercised(stream) == sum(
+            _observer_signal(stream)["ssl_effects"].values()
+        ), stream
+
+
 def test_handshake_line_reconciles_captured_flows(tmp_path):
     # The success-check's "TLS handshakes completed post-bypass" line is purely
     # Frida-observer based. When the observer saw none but the capture proxy

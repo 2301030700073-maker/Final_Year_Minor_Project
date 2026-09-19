@@ -554,6 +554,12 @@ def test_ssl_path_exercised_keys_on_an_effect_or_a_host_never_on_bypassed():
     assert _ssl_path_exercised([{"payload": {"bypassEffect": "ssl-pin-check"}}]) == 1
     assert _ssl_path_exercised([{"payload": {"hostname": "a.example.com"}}]) == 1
     assert _ssl_path_exercised([{"payload": {"host": "a.example.com"}}]) == 1
+    # The capture stage stores the payload ALONE, with no {type, payload} envelope.
+    # Reading only the envelope made that window's whole stream invisible to this
+    # count, so an effect on the window being judged could not be seen at all.
+    assert _ssl_path_exercised([{"host": "a.example.com", "bypassed": True}]) == 1
+    assert _ssl_path_exercised([{"hook": "TrustManagerImpl.verifyChain",
+                                "host": "owasp.org", "bypassed": True}]) == 1
     # A real Frida error payload carries description/stack/fileName, not these keys,
     # and a non-dict message carries nothing readable. The predicate is deliberately
     # the same one this ladder used before the second window existed: narrowing it

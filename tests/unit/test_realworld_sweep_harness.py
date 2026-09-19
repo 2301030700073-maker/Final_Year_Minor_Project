@@ -284,16 +284,20 @@ def test_a_target_with_no_suspend_records_a_number_rather_than_staying_silent(tm
     probe did not run. A row written only on divergence would make "no suspend
     happened" and "this harness never measured" the same silence.
 
-    What the row must not show without a suspend is minutes of it. An EXACT zero is
-    not a property this measurement has: the two readings are taken microseconds
-    apart and each is truncated to whole seconds, so a target that ran for one wall
-    second can show a second of divergence, and asserting zero fails on a loaded
-    machine."""
+    What the row must not show without a suspend is minutes of it. The two readings
+    are separate subprocesses, each truncated to whole seconds, so a loaded machine
+    puts seconds between them: the first all-options sweep recorded `frozen 0`
+    against `423 427` for its telegram target - a 4 s divergence with no suspend
+    anywhere in the run. An exact zero is not a property this measurement has, and
+    a tight bound around it is a flake rather than a test."""
     proc = _one_target(tmp_path, "#!/bin/bash\necho 'Report: fake'\nexit 0\n")
     assert proc.returncode == 0, proc.stderr
     rows = _frozen_rows(tmp_path)
     assert len(rows) == 1, _journal(tmp_path)
-    assert 0 <= int(rows[0].split("\t")[3]) <= 2
+    # Seconds of measurement jitter, not minutes: a host that was actually absent
+    # for part of the window records that absence, which is orders of magnitude
+    # larger than anything two truncated clocks can disagree by.
+    assert 0 <= int(rows[0].split("\t")[3]) <= 10
 
 
 def test_a_wall_clock_that_steps_backwards_is_floored_rather_than_recorded(tmp_path):

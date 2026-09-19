@@ -371,7 +371,18 @@ def test_a_target_whose_window_includes_a_suspended_host_says_so(tmp_path):
     its own budget, with the fact that explains the gap recorded nowhere. The
     divergence is measurable at the target's own boundaries. A suspend cannot be
     induced in a test, so the seam stands in for one: a uptime file that never
-    advances is a machine that was not running for the whole window."""
+    advances is a machine that was not running for the whole window.
+
+    The freeze is asserted against the elapsed column the row itself explains, and
+    never against the fixture's own `sleep`. That sleep is not a clock: the elapsed
+    column is two `date +%s` reads truncated to whole seconds, and this guest's
+    realtime clock is steered by the Windows host, so the two reads can close by
+    less than the runner ran - a two-second runner recorded 1 s of freeze on 1 run
+    in 11 here. A bound tied to the sleep tests the clock, and this file's own
+    no-suspend test already records why a tight bound around that measurement is a
+    flake rather than a test. What must hold is that the row carries a real freeze
+    - not a zero, which is what a probe that never ran looks like - and that the
+    freeze is the whole of the elapsed time it explains."""
     uptime = tmp_path / "uptime"
     uptime.write_text("12345.67 98765.00\n", encoding="utf-8")
     proc = _one_target(tmp_path, "#!/bin/bash\nsleep 2\necho 'Report: fake'\nexit 0\n",
@@ -384,8 +395,8 @@ def test_a_target_whose_window_includes_a_suspended_host_says_so(tmp_path):
     fields = rows[0].split("\t")
     assert fields[2] == "target"
     assert int(fields[5]) == 0, "the machine was up for none of the window"
-    assert int(fields[3]) >= 2, "the freeze is the whole of the elapsed time"
-    assert int(fields[3]) == int(fields[4])
+    assert int(fields[3]) >= 1, "the row must carry a real freeze, not a zero"
+    assert int(fields[3]) == int(fields[4]), "the freeze is the whole of the elapsed"
     # ...and it follows the row whose elapsed column it explains
     kind = [r.split("\t")[1] for r in _rows(tmp_path)]
     assert kind.index("ok") < kind.index("frozen")

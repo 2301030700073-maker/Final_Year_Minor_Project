@@ -334,7 +334,7 @@ string in this APK; only its *ownership* is unverified.
 {% endif %}
 ## Dynamic Verification
 {% if forced_dynamic %}
-> **⚠ Operator-forced dynamic stage (`--force-dynamic`).** The static verdict is **{{ classification.action.value }}** and is **unchanged** by this run — the deterministic engine did not detect root/SSL above the threshold, and this run did not change that. An authorized operator explicitly directed an empirical bypass attempt because this target's static verdict is {% if forced_dynamic_coverage_limited %}**coverage-limited** — a lower bound over surfaces the engine could not fully analyze (e.g. a React-Native/Hermes bundle), so a NEITHER here is "unknown, not absent" (ADR-0006){% else %}a **confident negative** — all governing surfaces were fully analyzed and nothing matched, so forcing a bypass here is unusual{% endif %}. The result below is gated on **real observed behaviour**: a `dynamically_confirmed` bypass means the app's own root/pin check was actually exercised and neutralised, **not** that static detection changed. This dynamic run happened *because it was forced*, never because static promoted a finding.
+> **⚠ Operator-forced dynamic stage (`--force-dynamic`).** The static verdict is **{{ forced_dynamic_static_verdict }}** and is **unchanged** by this run — the deterministic engine did not detect root/SSL above the threshold, and this run did not change that. An authorized operator explicitly directed an empirical bypass attempt because this target's static verdict is {% if forced_dynamic_coverage_limited %}**coverage-limited** — a lower bound over surfaces the engine could not fully analyze (e.g. a React-Native/Hermes bundle), so a NEITHER here is "unknown, not absent" (ADR-0006){% else %}a **confident negative** — all governing surfaces were fully analyzed and nothing matched, so forcing a bypass here is unusual{% endif %}. The result below is gated on **real observed behaviour**: a `dynamically_confirmed` bypass means the app's own root/pin check was actually exercised and neutralised, **not** that static detection changed. This dynamic run happened *because it was forced*, never because static promoted a finding.
 
 {% endif %}
 - Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}bypass not verified (see stage status and evidence below){% endif %}{% endif %}
@@ -539,6 +539,27 @@ def _forced_dynamic(stage_results: list[StageResult]) -> bool:
     return False
 
 
+def _forced_dynamic_static_action(stage_results: list[StageResult]) -> str | None:
+    """The static verdict RECORDED at the moment the operator forced the dynamic
+    stage, or None when this run recorded none.
+
+    cli.py writes it onto the dynamic stage's evidence beside `forced_dynamic`, for
+    the same reason that flag is there: the override is a fact about the RUN, not
+    something to re-derive at render time (ADR-0005). Reading the live classification
+    printed the right verdict while it was the same object the write had seen, but a
+    regenerated report reconstructs that object from storage - and a field lost there
+    would leave the banner asserting a verdict nobody measured, silently, since Jinja
+    renders a missing attribute as a blank. The recorded value is the one the run
+    stands behind; a record written before this field existed returns None and the
+    caller falls back to the live classification, which is what it did before."""
+    for s in stage_results:
+        if s.stage == "dynamic":
+            recorded = (s.evidence or {}).get("static_action")
+            if isinstance(recorded, str) and recorded:
+                return recorded
+    return None
+
+
 def generate_report(
     run_id: str,
     apk_hash: str,
@@ -612,6 +633,9 @@ def generate_report(
         dex_attribution_degraded=dex_attribution_degraded,
         regenerated_from_stored_data=regenerated_from_stored_data,
         forced_dynamic=forced_dynamic,
+        forced_dynamic_static_verdict=(
+            _forced_dynamic_static_action(stage_results) or classification.action.value
+        ),
         forced_dynamic_coverage_limited=forced_dynamic_coverage_limited,
         confidence_bound=confidence_bound,
         verdict_label=verdict_label,

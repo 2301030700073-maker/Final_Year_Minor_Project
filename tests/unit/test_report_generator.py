@@ -68,6 +68,52 @@ def test_generate_report_operator_forced_banner_keeps_static_verdict_neither(tmp
     assert "- Verdict: COVERAGE-CONFIRMED" in content
 
 
+def test_the_forced_banner_states_the_verdict_the_run_recorded(tmp_path):
+    # The banner's sentence is a fact about THIS RUN - the verdict the operator forced
+    # the dynamic stage over - so it renders from the run's own record wherever one
+    # exists, never from the classification object a regenerated report has just
+    # reconstructed. A field lost in that reconstruction would otherwise restate a
+    # verdict nobody measured, and restate it silently: Jinja renders a missing
+    # attribute as a blank. No divergence between the two has been observed; this pins
+    # the precedence the recorded value was written for, so a future regen gap degrades
+    # to the older reading (the live object) instead of to a wrong one.
+    classification = _classification()  # the live object says ROOT_ONLY
+    forced_stage = StageResult(
+        stage="dynamic", status="success",
+        evidence={"forced_dynamic": True, "effective_dynamic_action": "BOTH",
+                  "static_action": "NEITHER"},
+    )
+    report_path = generate_report(
+        run_id="forced-rec", apk_hash="fr0001", timestamp="2026-09-19T12:00:00",
+        metadata={"hashes": {"sha256": "fr0001"}, "package": {"package_name": "com.example.app"}},
+        classification=classification, verification=None, correlation=None,
+        stage_results=[forced_stage], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "The static verdict is **NEITHER** and is **unchanged**" in content
+    assert "The static verdict is **ROOT_ONLY**" not in content
+
+
+def test_a_forced_banner_from_a_run_recorded_before_the_field_keeps_its_verdict(tmp_path):
+    # `static_action` was added to the forced record after the first forced runs were
+    # already stored, and those rows are still read by the regeneration path. Without
+    # the fallback the banner would print its verdict as a blank - the one outcome
+    # worse than the older source it read before.
+    classification = _classification()  # the live verdict, as before the field existed
+    forced_stage = StageResult(
+        stage="dynamic", status="success",
+        evidence={"forced_dynamic": True, "effective_dynamic_action": "BOTH"},
+    )
+    report_path = generate_report(
+        run_id="forced-old", apk_hash="fo0001", timestamp="2026-09-19T12:00:00",
+        metadata={"hashes": {"sha256": "fo0001"}, "package": {"package_name": "com.example.app"}},
+        classification=classification, verification=None, correlation=None,
+        stage_results=[forced_stage], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "The static verdict is **ROOT_ONLY** and is **unchanged**" in content
+
+
 def test_an_unrequested_device_uninstall_reaches_the_report(tmp_path):
     # cli.py attaches install_result to the dynamic stage's evidence precisely so a
     # device state change the operator did not ask for reaches a written report, and

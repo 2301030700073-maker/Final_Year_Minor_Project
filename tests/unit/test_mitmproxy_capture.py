@@ -1178,6 +1178,11 @@ def test_cleanup_restores_pass_through_internet_on_wsl2(monkeypatch):
     calls = {"set": 0, "clear": 0}
     monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: True)
     monkeypatch.setattr(pass_through_proxy, "is_listening", lambda *a, **k: True)
+    # The restore is now gated on the DEVICE-side leg too: a listening
+    # pass-through process says nothing about whether the adb reverse carries the
+    # device's traffic. This stub is the healthy route - the probe's own behaviour
+    # is covered by its own tests, and _cleanup must not shell out to real adb.
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy", lambda *a, **k: True)
     monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
     monkeypatch.setattr(device, "set_http_proxy",
                         lambda s, host, port: calls.__setitem__("set", calls["set"] + 1))
@@ -1214,6 +1219,61 @@ def test_cleanup_warns_when_wsl2_pass_through_down_leaves_no_internet(monkeypatc
     # NOT the generic retry-exhausted message: no adb exception occurred, the
     # cause is a specific one (pass-through down), and it must be named as such.
     assert not any("retries" in w for w in warnings), warnings
+
+
+def test_cleanup_warns_when_the_device_cannot_reach_a_listening_pass_through(monkeypatch):
+    """The pass-through process and the device's route to it are different legs of
+    the same path. `is_listening` probes the Windows-side process; the app travels
+    device-localhost -> adb reverse -> that process. When the reverse is gone the
+    process still answers a Windows-side probe while every device connect is
+    refused - so gating the restore on `is_listening` alone certified a stranded
+    device as cleanly restored. This is the state the capture window can leave
+    behind (an adbd restart drops reverses), and nothing in the artifact named it.
+    """
+    calls = {"set": 0, "clear": 0}
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: True)
+    monkeypatch.setattr(pass_through_proxy, "is_listening", lambda *a, **k: True)
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy", lambda *a, **k: False)
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    monkeypatch.setattr(device, "set_http_proxy",
+                        lambda s, host, port: calls.__setitem__("set", calls["set"] + 1))
+    monkeypatch.setattr(device, "clear_http_proxy",
+                        lambda s: calls.__setitem__("clear", calls["clear"] + 1))
+    monkeypatch.setattr(device, "adb_reverse", lambda *a, **k: None)
+    warnings = mitmproxy_capture._cleanup("emulator-5554", 8081, None)
+    # pointing the device at a loopback nothing answers is worse than clearing it:
+    # it reads as a working proxy while delivering nothing
+    assert calls["set"] == 0, "never restore a route the device cannot use"
+    assert calls["clear"] == 1
+    assert any("cannot reach it" in w and "adb reverse" in w for w in warnings), warnings
+    # ...and it must not be reported as the OTHER cause: `is_listening` was True,
+    # so a message blaming the pass-through process would name the wrong leg and
+    # send the operator to restart something that is already running.
+    assert not any("not listening" in w for w in warnings), warnings
+
+
+def test_cleanup_records_an_unprobeable_route_as_unconfirmed_not_as_down(monkeypatch):
+    """The device-side probe's third state. `_device_reaches_proxy` returns None
+    when it could not be RUN (no usable netcat, adb error) and its contract says a
+    caller must never read that as False. Folding None into "down" would strand the
+    device's internet on a probe failure; folding it into a silent clean restore
+    would assert a route nobody observed. The proxy IS restored - it is the only
+    thing that can work - and the restore is recorded as resting on the setting
+    alone."""
+    calls = {"set": 0, "clear": 0}
+    monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: True)
+    monkeypatch.setattr(pass_through_proxy, "is_listening", lambda *a, **k: True)
+    monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy", lambda *a, **k: None)
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    monkeypatch.setattr(device, "set_http_proxy",
+                        lambda s, host, port: calls.__setitem__("set", calls["set"] + 1))
+    monkeypatch.setattr(device, "clear_http_proxy",
+                        lambda s: calls.__setitem__("clear", calls["clear"] + 1))
+    monkeypatch.setattr(device, "adb_reverse", lambda *a, **k: None)
+    warnings = mitmproxy_capture._cleanup("emulator-5554", 8081, None)
+    assert calls["set"] == 1 and calls["clear"] == 0
+    assert any("could not be confirmed" in w for w in warnings), warnings
+    assert not any("cannot reach it" in w for w in warnings), warnings
 
 
 def test_cleanup_clears_proxy_on_native_linux(monkeypatch):

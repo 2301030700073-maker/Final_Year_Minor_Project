@@ -869,13 +869,37 @@ def _cleanup(serial: str, proxy_port: int, proc: subprocess.Popen | None) -> lis
     # a genuine restore so it is reported as a warning, never recorded as a clean
     # restore (the silent-failure this branch used to be - see below).
     wsl2_internet_unrestored = False
+    # WSL2-only, and distinct from the flag above: the pass-through PROCESS is up
+    # but the device cannot reach it. `is_listening` probes leg 3 of a three-leg
+    # path (device -> device proxy -> adb reverse -> Windows host -> pass-through
+    # -> internet) and says nothing about leg 2, and leg 2 is the one the app
+    # actually travels. When the reverse is gone the pass-through still answers a
+    # Windows-side probe while every device connection to 127.0.0.1:<port> is
+    # refused, so the check that used to guard this restore certified a stranded
+    # device as cleanly restored.
+    wsl2_reverse_route_down = False
+    # ...and the third state the probe can return: it could not be RUN, so the
+    # route is unknown. Recorded rather than folded into either verdict (the
+    # probe's own None contract: never asserted either way).
+    wsl2_route_unconfirmed = False
     last_exc: Exception | None = None
     on_wsl2 = _on_wsl2()
     for _ in range(CLEANUP_RETRIES):
         try:
             if on_wsl2 and pass_through_proxy.is_listening(INTERNET_PROXY_PORT):
-                device.set_http_proxy(serial, "127.0.0.1", INTERNET_PROXY_PORT)
-                restored = True
+                # The pass-through being up is necessary but not sufficient: probe
+                # the leg the app uses before calling this a restore. On WSL2,
+                # device-localhost:<port> IS the adb reverse tunnel, so a refused
+                # connect here is the reverse not carrying traffic - not the proxy
+                # process being down, which the check above already ruled out.
+                reachable = _device_reaches_proxy(serial, INTERNET_PROXY_PORT)
+                if reachable is False:
+                    device.clear_http_proxy(serial)
+                    wsl2_reverse_route_down = True
+                else:
+                    device.set_http_proxy(serial, "127.0.0.1", INTERNET_PROXY_PORT)
+                    restored = True
+                    wsl2_route_unconfirmed = reachable is None
             elif on_wsl2:
                 # Pass-through down (it died during the run) or the Windows probe
                 # could not confirm it. There is nothing to restore the device TO,
@@ -905,6 +929,26 @@ def _cleanup(serial: str, proxy_port: int, proc: subprocess.Popen | None) -> lis
             "could not be restored; the stale capture-proxy setting was cleared, "
             "but the device is left without working internet - restart the "
             "pass-through (ensure_internet) to recover"
+        )
+    elif wsl2_reverse_route_down:
+        warnings.append(
+            f"WSL2 pass-through proxy is listening on port {INTERNET_PROXY_PORT} "
+            "at cleanup, but the device cannot reach it: a connect to "
+            f"127.0.0.1:{INTERNET_PROXY_PORT} from the device itself was refused "
+            "or timed out. On WSL2 that address is the adb reverse tunnel, so the "
+            "pass-through process being up does not mean the device has internet - "
+            "the stale capture-proxy pointer was cleared instead of restored, "
+            "because pointing the device at a loopback nothing answers reads as a "
+            "working proxy while delivering no connectivity; the device is left "
+            "without working internet - re-run `scripts/emulator_proxy.py internet` "
+            "(ensure_internet) to recover"
+        )
+    elif wsl2_route_unconfirmed:
+        warnings.append(
+            f"device proxy restored to the WSL2 pass-through on port "
+            f"{INTERNET_PROXY_PORT}, but the device-side route to it could not be "
+            "confirmed - the on-device reachability probe could not be run, so this "
+            "restore rests on the proxy setting alone"
         )
     elif not restored:
         warnings.append(

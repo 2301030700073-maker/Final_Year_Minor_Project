@@ -309,9 +309,9 @@ def _ensure_frida_server(adb: str, serial: str) -> dict:
         instrument["unreadable"] = f"not read - {reason}"
         return FridaProvisioningError(message, instrument)
 
-    # 1. adbd must be root for frida-server to inject across processes. adb root
-    # is idempotent: it either restarts adbd as root or reports it is already
-    # root, both with exit 0. On a non-rootable image it fails loudly.
+    # 1. adbd must be root for frida-server to inject across processes. `adb root`
+    # exits 0 whether it restarted adbd or found it already root - and a restart
+    # drops every device-side reverse, so a caller holding one must re-place it.
     root = subprocess.run(
         [adb, "-s", serial, "root"],
         capture_output=True, text=True, timeout=30,

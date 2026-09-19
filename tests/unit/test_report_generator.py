@@ -3068,6 +3068,20 @@ def test_an_unread_hierarchy_is_not_rendered_as_a_gated_control(tmp_path):
     assert "gated behind a control therefore stays un-exercised" in body2
     assert "silent on the app's UI" not in body2
 
+    # And the arm where nothing was read at all: no census, and the stage's own
+    # flag recording that. The gate sentence is unavailable here too - it is the
+    # arm where the reason rendered immediately before it in the same paragraph
+    # says nothing was learned about the screen, so asserting a gate would
+    # contradict the sentence it is appended to.
+    never_read = {"attempted": False, "tapped": False, "target": None,
+                  "selected_by": None, "unread_hierarchy": True, "hierarchy": None,
+                  "reason": "uiautomator reported a dump but the hierarchy could not be "
+                            "read back (0 bytes retrieved), so nothing here says what "
+                            "was on screen"}
+    body3 = _render_liveness(tmp_path, empty_capture(never_read), "never_read")
+    assert "silent on the app's UI" in body3
+    assert "gated behind a control therefore stays un-exercised" not in body3
+
 
 def test_capture_summary_exposes_the_ui_drive_record():
     """The drive is recorded on the stage; a consumer must be able to read it, or

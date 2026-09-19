@@ -1186,7 +1186,15 @@ def _drive_ui(serial: str, package: str) -> dict:
     census = dump.get("hierarchy")
     if not dump["measured"]:
         return {"attempted": False, "tapped": False, "target": None,
-                "selected_by": None, "hierarchy": census, "reason": dump["reason"]}
+                "selected_by": None, "hierarchy": census,
+                # Recorded, not left to be inferred from the missing census: the
+                # report closes this refusal by telling the reader a control gated
+                # the path, and that claim rests on a screen having been read. This
+                # is the arm where none was, so the fact travels with the record -
+                # a legacy refusal has no census either, and "never read" is not a
+                # statement about it ([[verdict-must-carry-its-observation]]).
+                "unread_hierarchy": True,
+                "reason": dump["reason"]}
     target, how = ui_liveness._choose_tap_target(dump["targets"])
     if target is None:
         return {"attempted": False, "tapped": False, "target": None,

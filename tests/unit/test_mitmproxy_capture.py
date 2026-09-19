@@ -2173,6 +2173,22 @@ def test_drive_ui_tells_an_empty_hierarchy_from_a_screen_with_nothing_tappable(m
     assert rec["reason"] == "no tappable widget in the hierarchy"
     assert rec["hierarchy"]["nodes"] == 12 and rec["targets_seen"] == 0
 
+    # And the third arm: the dump itself could not be read back. No census, so the
+    # report cannot tell this from a record written before censuses existed - the
+    # stage says which it is, because the report's closing sentence about a gated
+    # control is a claim about a screen that was read.
+    monkeypatch.setattr(ui_liveness, "dump_ui_targets",
+                        lambda serial: {"measured": False, "targets": [], "hierarchy": None,
+                                        "reason": "uiautomator reported a dump but the "
+                                                  "hierarchy could not be read back "
+                                                  "(0 bytes retrieved), so nothing here "
+                                                  "says what was on screen"})
+    rec = mitmproxy_capture._drive_ui("emulator-5554", "com.test.app")
+    assert rec["tapped"] is False and rec["attempted"] is False
+    assert rec["hierarchy"] is None
+    assert rec["unread_hierarchy"] is True
+    assert "could not be read back" in rec["reason"]
+
 
 # --- ADR-0012: who reached the capture proxy, recorded on the stage -----------
 

@@ -295,10 +295,18 @@ def _collect_files(roots: list[Path]) -> list[tuple[Path, Path]]:
     """
     files = []
     for root in roots:
+        # Parts of the root itself, so the "original/" test below can slice them
+        # off without a Path.relative_to per file. That call ran once per scanned
+        # file - 357,200 of them on facebook's tree - and cost 30.6s of a 70s
+        # cProfile window (3.12's relative_to is pure Python: it validates and
+        # builds a second Path per call, which is what shows up as with_segments/
+        # __getitem__/_select_from underneath it). Anything rglob yields is the
+        # root plus at least one component, so the slice IS the same tuple.
+        root_depth = len(root.parts)
         for p in root.rglob("*"):
             if not p.is_file() or p.suffix not in SCANNED_SUFFIXES:
                 continue
-            rel_parts = p.relative_to(root).parts
+            rel_parts = p.parts[root_depth:]
             if "original" in rel_parts:
                 continue
             # Skip CFR's generated decompilation index (`<cfr-root>/summary.txt`):

@@ -425,10 +425,33 @@ def _save_registry(output_root: Path, registry: dict[str, dict]) -> None:
 
 
 def _dir_size(path: Path) -> int:
-    path = Path(path)
-    if not path.exists():
-        return 0
-    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
+    """Total size of every file under `path`, in bytes.
+
+    os.scandir rather than Path.rglob: this walks the entire decompile cache to
+    refresh one LRU entry's size on every decompile() entry, hit or miss, and on
+    facebook's tree that was 522,594 entries behind 1,306,056 rglob calls - 15.9s
+    of a 20.5s decompile stage, nearly all of it pathlib object construction
+    (measured with cProfile). scandir hands back the stat data the walk needs
+    with no Path per entry. A directory symlink is not followed, so a loop cannot
+    make this walk forever; a *file* symlink still counts, as Path.is_file does.
+    """
+    total = 0
+    stack = [os.fspath(path)]
+    while stack:
+        try:
+            entries = os.scandir(stack.pop())
+        except OSError:
+            continue
+        with entries:
+            for entry in entries:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        stack.append(entry.path)
+                    elif entry.is_file():
+                        total += entry.stat().st_size
+                except OSError:
+                    continue
+    return total
 
 
 def _touch_registry(output_root: Path, apk_hash: str) -> None:

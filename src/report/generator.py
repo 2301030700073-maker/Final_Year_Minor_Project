@@ -212,6 +212,37 @@ claimed here. Status meaning:
 | `{{ b.class_name | md }}` | `{{ b.method_name | md }}` | {{ b.status }} |
 {% endfor %}
 {% endif %}
+{% if packer_findings -%}
+### Packer / protector identified (Gap-2)
+
+The signature engine matched this APK's own surface against the versioned packer
+corpus. This is a **deterministic** identification (`deterministic_matched`), not a
+hypothesis or an AI guess:
+
+{% for p in packer_findings -%}
+- **{{ p.packer }}** (`{{ p.packer_id }}`) — matched {% for s in p.signals %}`{{ s | md }}`{% if not loop.last %}, {% endif %}{% endfor %}
+{% endfor %}
+
+A packed app's real DEX is hidden behind a loader, so the code this run decompiled
+is the **loader stub** rather than the app's own classes. The Java surface is
+therefore `partial` and a Java NEITHER here is **not** a confident negative
+(ADR-0006). The detector is signature-based, so no match is *not* proof the APK is
+unpacked - an unlisted packer still bounds the surface through the same rule.
+{% endif %}
+{% if packer_scan_incomplete -%}
+### Packer scan did not complete - packing un-ruled-out (coverage-limited)
+
+The packer stage did **not** finish this run, so nothing here establishes that the
+DEX is un-packed. That is the input the Java bound is most exposed to: a cleanly
+packed app decompiles its loader stub to an exit-0 `complete`, which on its own
+would read as a fully analyzed Java surface hiding code that was never read. Java
+coverage is therefore forced to `partial` (PACK1).
+
+This is **not** a packing detection - a failed scan is not a finding, it is a
+refusal to certify an absence that was never verified (ADR-0006), and this report
+does not claim a packer was found. The stage's own recorded failure and error are
+in the Stage results table above.
+{% endif %}
 {% if extraction_failures -%}
 ### Native libraries the APK ships but this run could not extract (coverage-limited)
 
@@ -624,6 +655,8 @@ def generate_report(
     webview_sites: list | None = None,
     dart_aot_libs: list | None = None,
     dex_attribution_degraded: bool = False,
+    packer_findings: list | None = None,
+    packer_scan_incomplete: bool = False,
     regenerated_from_stored_data: bool = False,
 ) -> Path:
     output_dir = Path(output_dir) / apk_hash
@@ -671,6 +704,8 @@ def generate_report(
         webview_sites=webview_sites,
         dart_aot_libs=dart_aot_libs,
         dex_attribution_degraded=dex_attribution_degraded,
+        packer_findings=packer_findings,
+        packer_scan_incomplete=packer_scan_incomplete,
         regenerated_from_stored_data=regenerated_from_stored_data,
         forced_dynamic=forced_dynamic,
         forced_dynamic_static_verdict=(

@@ -3032,6 +3032,19 @@ def run(
         # console output must be able to tell that DEX matches here have unverified
         # ownership (ADR-0006: the bound is only honest if its reason is legible).
         dex_attribution_degraded=_dex_attribution_degraded,
+        # Gap-2: the packer identification itself. A detected packer is the
+        # strongest reason the java surface reads `partial` - the DEX this run
+        # decompiled is a loader stub, not the app's own code - and until now the
+        # identification reached the console only (the per-finding print above), so
+        # a report could show java=partial with no cause and never state that
+        # packing was identified at all. Same argument as dex_attribution_degraded
+        # below, whose own comment already named "a packer" among the causes the
+        # coverage table cannot distinguish.
+        packer_findings=packer_findings or None,
+        # PACK1: the scan did not complete, so packing is un-ruled-out. Not a
+        # detection - the safe direction - but java_coverage() bounds the surface on
+        # it, so the bound has to be legible where it is read.
+        packer_scan_incomplete=not packer_scanned,
     )
     report_kwargs = dict(
         run_id=run_id,
@@ -3531,6 +3544,8 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         webview_sites=causes.get("webview_sites"),
         dart_aot_libs=causes.get("dart_aot_libs"),
         dex_attribution_degraded=bool(causes.get("dex_attribution_degraded", False)),
+        packer_findings=causes.get("packer_findings"),
+        packer_scan_incomplete=bool(causes.get("packer_scan_incomplete", False)),
         # The annotation-loss disclosure now fires ONLY for runs written before
         # coverage_causes existed (the column is NULL there): those genuinely cannot
         # reconstruct the cause, so the report must say so rather than let a missing

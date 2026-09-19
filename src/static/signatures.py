@@ -7,6 +7,7 @@ import sqlite3
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -206,6 +207,7 @@ def load_signatures(path: Path) -> list[Signature]:
     return load_yaml_entries(path, _validate_signature_entry, Signature)
 
 
+@lru_cache(maxsize=None)
 def _is_dotted_package_pattern(pattern: str) -> bool:
     """True for a pattern written as a dotted Java package/class name.
 
@@ -227,6 +229,25 @@ def _is_dotted_package_pattern(pattern: str) -> bool:
     The guard is deliberately narrow: at least two dots, no slash, no whitespace.
     That admits package/class names and dotted system properties (`ro.build.type`)
     and excludes path patterns (`/data/adb/ksu`), regexes, and prose fragments.
+
+    PERF2 (2026-09-19): memoized, because every one of these three questions is
+    about the PATTERN and the pattern set is fixed at load - yet _line_matches
+    asks it inside the per-line loop, once for each pattern that does not match
+    outright. A 341 s cProfile window over facebook's tree (2026-09-19) recorded
+    396,271,137 calls: 53.6 s in this function plus 44.6 s in the str.count
+    underneath, all of it recomputing an answer that could not have changed.
+    Unbounded on purpose - the key space is the corpus's distinct patterns, a few
+    hundred strings - and pure, so a hit returns exactly the bool the body would
+    have returned.
+
+    Deliberately NOT a method on Signature, which is how _compiled is memoized:
+    _line_matches is also called with duck-typed doubles that model only the
+    fields it reads (tests/unit/test_androguard_scanner.py builds them inline),
+    and a new required method on its input is an interface widening those callers
+    cannot carry: on the first attempt the doubles raised AttributeError, which
+    the DEX matcher correctly turned into a loud BrokenSignatureError naming the
+    signature rather than a silent miss - the guard working as designed, on the
+    wrong target.
     """
     return pattern.count(".") >= 2 and "/" not in pattern and " " not in pattern
 

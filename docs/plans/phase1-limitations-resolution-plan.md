@@ -12,7 +12,7 @@
 |---|---|---|
 | L-M1 | Decompile bottleneck on large apps | **[CLOSED]** multi-engine CFR fallback per-class in `decompile.py`; partial excluded from Tier 2; residual is structural (packed/Dart). |
 | L-M2 | Dynamic bypass doesn't generalize | **[CLOSED]** synthesized bypass for unknown targets (`synthesizer.py` `UNIVERSAL_ROOT`/`UNIVERSAL_SSL`); no-category targets degrade to honest `skipped`. |
-| L-M3 | Signature blind spots (12 patterns) | **[CLOSED]** 119 DEX-verified entries (48 root / 51 SSL / 12 native / 8 packers); unknown surfaced as coverage-limited, never silent-absent. |
+| L-M3 | Signature blind spots (12 patterns) | **[CLOSED]** 120 DEX-verified entries (49 root / 51 SSL / 12 native / 8 packers); unknown surfaced as coverage-limited, never silent-absent. |
 | L-M4 | `NEITHER` ≠ absence on small corpus | **[CLOSED]** confidence bound by coverage; RESID-4C warning + Tier-2 exclusion. |
 | L-M5 | SSL detection weak; no SSL Tier 2 GT | **[CLOSED]** RS_CertPinning added as `ssl:true` ground truth; NSC XML parsed as first-class SSL signal; SSL taxonomy expanded. |
 | L-M6 | Native `.so` unscannable | **[CLOSED]** `static.native` (ELF symbols + capstone bodies + UPX unpack); Dart-AOT/stripped-symbols named as structural in `project-limitations.md` §6. |

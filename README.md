@@ -8,7 +8,7 @@ Automated detection and empirically-verified bypass of Android root-detection an
 
 Everything runs from the **WSL2 Ubuntu** terminal (the repo, `uv`, `adb`, `frida` all live there); **Windows** is used only to boot the emulator. If this is a fresh checkout, do the one-time install in sections 1–4 first (uv, the Android toolchain, jadx/CFR/Ghidra). After that, this is the exact per-boot sequence — each command prints an expected line so you know it worked. Static-only analysis (`--skip-dynamic`, recipe A below) needs **none** of steps 1–4 here — skip straight to it.
 
-**Where the configuration lives** (`config/`): `settings.yaml` (decision thresholds `root: 0.7` / `ssl: 0.7`, output paths), `signatures/*.yaml` (119 versioned detection rules: 48 root, 51 ssl, 12 native, 8 packers), `ground_truth.yaml` (the independent calibration truth used by `calibration-report`).
+**Where the configuration lives** (`config/`): `settings.yaml` (decision thresholds `root: 0.7` / `ssl: 0.7`, output paths), `signatures/*.yaml` (120 versioned detection rules: 49 root, 51 ssl, 12 native, 8 packers), `ground_truth.yaml` (the independent calibration truth used by `calibration-report`).
 
 ### 0. One-time / after every `git pull`
 ```bash

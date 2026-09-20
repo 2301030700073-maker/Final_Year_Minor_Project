@@ -42,7 +42,7 @@ These were arrived at deliberately, after critiquing an earlier, over-scoped ver
   - Internal data models are plain stdlib `@dataclass` (see `src/common.py`) — **not** Pydantic.
 - Static-analysis tooling (system-level, version-pinned in `README.md`, **not** `uv`-managed): jadx, apktool, androguard, aapt2, readelf/strings, capstone, **Ghidra headless** (native function-body decompilation), **UPX** (native unpacking).
 - Dynamic-analysis tooling: adb, Frida, objection, mitmproxy.
-- Signature rules: hand-authored YAML, versioned (`config/signatures/` — 119 entries: 48 root, 51 ssl, 12 native, 8 packers).
+- Signature rules: hand-authored YAML, versioned (`config/signatures/` — 120 entries: 49 root, 51 ssl, 12 native, 8 packers).
 - AI (Phase 5+ only, not present in the core): local models via Ollama for code-reasoning/hypothesis work; a large-context model for report synthesis; a vision model for screenshot verification. Specific model selection is deferred to each phase's build time, not committed now.
 
 ## Development / execution environment split

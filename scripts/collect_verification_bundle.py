@@ -321,11 +321,6 @@ def main() -> int:
         (bundle_dir / "cli_output.txt").write_text(
             pipeline_result["stdout"] + "\n" + pipeline_result["stderr"], encoding="utf-8"
         )
-        # Scoped to this specific APK's hash - outputs/reports/ and
-        # outputs/analysis/ both accumulate across every APK and every run
-        # ever done locally; a bundle should only ever contain evidence for
-        # what this invocation actually analyzed, not everything lying
-        # around in the working directory.
         # Scoped to this specific run's apk_hash - outputs/reports/ and
         # outputs/analysis/ both accumulate across every APK and every run
         # ever done locally; a bundle should only ever contain evidence for

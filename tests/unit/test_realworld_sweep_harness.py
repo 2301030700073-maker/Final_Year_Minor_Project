@@ -14,9 +14,13 @@ file of blank lines is worse still: the read succeeds, so bash says nothing at
 all and the empty verdict is the only output there is.
 """
 import os
+import re
+import shutil
 import socket
 import subprocess
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "run_unexecuted_realworld_sweep.sh"
@@ -68,7 +72,22 @@ def _fake_runner(tmp_path):
     return runner
 
 
-REAL_APK = "APK_Test/downloads/AndroGoat.apk"
+# A TRACKED APK, not one of the whole-app downloads beside it. `.gitignore`
+# excludes `*.apk`, so everything under APK_Test/downloads/ exists only on a
+# machine that fetched it - and the unit-suite job's contract is that it "runs
+# anywhere with no Android toolchain" (.github/workflows/unit-tests.yml). Six
+# tests in this file pointed at a download and passed here while failing in CI
+# with "1 not ok": the harness journals a path that is not a file as `missing`,
+# which is its own correct behaviour, so the failure read as the harness logic
+# breaking rather than as an input CI never had.
+REAL_APK = "APK_Test/UnCrackable-Level1.apk"
+
+# The script's built-in list, read from the script rather than copied: a
+# divergence would make the skip below describe targets the script does not use.
+_BUILT_IN_TARGETS = re.findall(
+    r'^\s*"(APK_Test/[^"]+\.apk)"\s*$', SCRIPT.read_text(encoding="utf-8"), re.M
+)
+assert _BUILT_IN_TARGETS, "the script's built-in target list moved or changed shape"
 
 
 def test_a_missing_targets_file_is_a_loud_failure(tmp_path):
@@ -122,6 +141,25 @@ def test_the_verdict_names_how_many_targets_ran(tmp_path):
     assert _outcomes(tmp_path)[0].split("\t")[1] == "ok"
 
 
+def test_the_target_apk_these_tests_name_is_one_the_checkout_carries():
+    """The rule the six tests above rest on, asserted rather than documented: a
+    unit test may only name an APK the checkout itself carries. An ignored path
+    passes on the reference machine and fails in CI, and the CI failure looks
+    like the code under test breaking - which is how this file spent a red run
+    reading as a harness defect. `git ls-files` is the same question the CI job
+    asks, so a file that is present but untracked cannot satisfy it either."""
+    if shutil.which("git") is None:
+        pytest.skip("no git on PATH; tracked-ness cannot be established here")
+    proc = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", REAL_APK],
+        cwd=REPO, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, (
+        f"{REAL_APK} is not tracked by git, so the unit suite would pass here and "
+        f"fail wherever it is absent: {proc.stderr.strip()}"
+    )
+
+
 def test_a_missing_apk_is_not_ok(tmp_path):
     # the harness's own check, pinned here because the tests above depend on it:
     # a path that is not a file cannot be a target that ran
@@ -133,6 +171,15 @@ def test_a_missing_apk_is_not_ok(tmp_path):
     assert _outcomes(tmp_path)[0].split("\t")[1] == "missing"
 
 
+@pytest.mark.skipif(
+    not all((REPO / p).exists() for p in _BUILT_IN_TARGETS),
+    reason=(
+        "the script's built-in list names whole-app downloads under "
+        "APK_Test/downloads/, which .gitignore excludes and nothing fetches in "
+        "CI - so the default path cannot reach its '4 target(s) run' verdict "
+        "there. Named, not counted: " + ", ".join(_BUILT_IN_TARGETS)
+    ),
+)
 def test_the_built_in_list_still_runs_when_no_file_is_given(tmp_path):
     # the guards must not reject the default path
     runner = _fake_runner(tmp_path)

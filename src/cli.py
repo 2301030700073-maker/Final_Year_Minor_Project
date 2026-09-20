@@ -3057,6 +3057,13 @@ def run(
             if native_evidence is not None
             else None
         ),
+        # COV-JS-NOTE1: `js` is the third surface the coverage table bounds, and
+        # its note asserted a cause rather than the cause: `partial` comes from a
+        # binary bundle really being there OR from ASSET-DROP1's un-extracted
+        # asset surface, and only the first was ever named. Both facts are already
+        # computed here; they just never reached the report.
+        js_binary_bundle=bool(has_binary_bundle),
+        js_asset_surface_extracted=bool(_asset_surface_extracted),
     )
     report_kwargs = dict(
         run_id=run_id,
@@ -3559,6 +3566,10 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         packer_findings=causes.get("packer_findings"),
         packer_scan_incomplete=bool(causes.get("packer_scan_incomplete", False)),
         packed_native_libs=causes.get("packed_native_libs"),
+        # COV-JS-NOTE1: absent on a run stored before these fields - None, which
+        # the template reads as "not recorded", never as "no".
+        js_binary_bundle=causes.get("js_binary_bundle"),
+        js_asset_surface_extracted=causes.get("js_asset_surface_extracted"),
         # The annotation-loss disclosure now fires ONLY for runs written before
         # coverage_causes existed (the column is NULL there): those genuinely cannot
         # reconstruct the cause, so the report must say so rather than let a missing

@@ -772,7 +772,15 @@ def test_generate_report_js_partial_coverage_gets_its_own_callout(tmp_path):
     )
     content = report_path.read_text(encoding="utf-8")
     assert "| js | partial |" in content
-    assert "binary Hermes/bytecode bundle" in content
+    # COV-JS-NOTE1: this test used to pin the note's wording, which asserted the
+    # app ships a Hermes bundle - a cause this run never recorded, and the wrong
+    # one whenever the surface is partial because ASSET-DROP1 never put the asset
+    # surface on disk. The callout's existence and its consequence are what this
+    # test is for; which cause it names is pinned cause-by-cause in
+    # test_coverage_table_js_note.py, including that a run recording no cause
+    # names none rather than inventing a bundle.
+    assert "> **JS:**" in content
+    assert "is a lower bound, not a confident negative" in content
 
 
 def test_generate_report_renders_dart_aot_snapshot_block_when_present(tmp_path):

@@ -187,8 +187,24 @@ Per-surface bound of this scan - a `partial`/`unscannable` surface is a lower bo
 {% set _packed_bound = (packed_native_libs or [])|rejectattr("coverage", "equalto", "fully_analyzed")|list -%}
 > **Native:** `partial` is a lower bound, not a confident negative - a native NEITHER is not proof that a native root/SSL check is absent. Bound by{% if unaccounted_loads %} loaded native targets the APK does not ship ({{ unaccounted_loads|length }}; see "Unaccounted native loads"){% endif %}{% if extraction_failures %}{% if unaccounted_loads %};{% endif %} shipped libraries this run could not extract ({{ extraction_failures|length }}){% endif %}{% if native_scan_errors %}{% if unaccounted_loads or extraction_failures %};{% endif %} libraries a tool could not read ({{ native_scan_errors|length }}){% endif %}{% if _unres %}{% if unaccounted_loads or extraction_failures or native_scan_errors %};{% endif %} declared `native` methods no library binds (see the JNI map){% endif %}{% if _packed_bound %}{% if unaccounted_loads or extraction_failures or native_scan_errors or _unres %};{% endif %} packed libraries whose code stays behind their stub ({{ _packed_bound|length }}; see "Native libraries detected as packed"){% endif %}{% if not (unaccounted_loads or extraction_failures or native_scan_errors or _unres or _packed_bound) %} a per-library rule outside the body sweep{% endif %}.
 {% endif %}
+{# COV-JS-NOTE1: `partial` has TWO recorded causes in js_surface_coverage - a binary
+bundle genuinely present (has_binary_bundle), and ASSET-DROP1's un-extracted asset
+surface, where has_binary_bundle reads False precisely because nothing reached the
+scan roots to walk. The note asserted the first unconditionally, so an app shipping NO
+bundle at all (UnCrackable-Level1, confirmed against a real report) was told it ships a
+React Native bytecode bundle - a false specific fact of the COV-HEAVY-JAVA1 class.
+Each clause now fires only on its own recorded fact. `js_asset_surface_extracted ==
+false` and NOT `is not true`: a run predating the field must not have its missing fact
+read as a NO and manufacture the very clause this is fixing. #}
 {% if coverage.get("js") == "partial" -%}
-> **JS:** partial means the app ships a binary Hermes/bytecode bundle whose control flow can't be read (React Native release bundle) - we recover only its string constants, so a js root/SSL NEITHER is not proof a root/SSL check in the bundle is absent.{% if coverage.get("native") == "unscannable" %} Mirrors the native callout above.{% endif %}
+{% set _jsc = [] -%}
+{% if js_binary_bundle -%}
+{% set _ = _jsc.append("a binary Hermes/bytecode bundle whose control flow cannot be read (React Native release bundle) - only its string constants are recovered") -%}
+{% endif -%}
+{% if js_asset_surface_extracted == false -%}
+{% set _ = _jsc.append("an asset surface this run never put on disk, so a JS bundle the APK does carry would be invisible to every scan root (ASSET-DROP1)") -%}
+{% endif -%}
+> **JS:** `partial` is a lower bound, not a confident negative - a js root/SSL NEITHER is not proof that a root/SSL check in a bundle is absent. Bound by{% if _jsc %} {{ _jsc | join('; ') }}{% else %} a coverage rule this report does not name{% endif %}.{% if coverage.get("native") == "unscannable" %} Mirrors the native callout above.{% endif %}
 {% endif %}
 {# COV-HEAVY-JAVA1 + COV-JAVA-NOTE1: the note is gated on the ACTUAL java state and each clause on the exact fact it asserts. Under heavy obfuscation java_coverage() returns `partial` from a complete/partial decompile but `unscannable` from an unknown-completeness (cached/regenerated) run (coverage.py), and firing on `heavy` alone printed "the Java surface is `partial`" beneath a table showing java=`unscannable` - a false specific fact. Gating on the state alone was not enough either: SEVEN distinct causes reach `partial` - java_coverage's heavy obfuscation / detected packer / un-ruled-out packing / partial decompile, plus apply_dynamic_loading_java, apply_attribution_degraded_java and apply_unreadable_files_java - so a note naming one of them read as "the other six did not happen". Each clause below fires only on its own recorded evidence (and the same evidence the report names in the section it points at), and a `partial` with none of the seven says so rather than inventing a cause. Clauses are collected then joined: seven inline separators is where a dangling `;` or a doubled period comes from. #}
 {% if coverage.get("java") == "partial" -%}
@@ -706,6 +722,12 @@ def generate_report(
     packer_findings: list | None = None,
     packer_scan_incomplete: bool = False,
     packed_native_libs: list | None = None,
+    # COV-JS-NOTE1: the two recorded causes of a `partial` js surface, so the
+    # coverage table can name the one that holds instead of asserting a bundle.
+    # None means the run never recorded the fact (a pre-field run being
+    # regenerated) - NOT "no".
+    js_binary_bundle: bool | None = None,
+    js_asset_surface_extracted: bool | None = None,
     regenerated_from_stored_data: bool = False,
 ) -> Path:
     output_dir = Path(output_dir) / apk_hash
@@ -756,6 +778,8 @@ def generate_report(
         packer_findings=packer_findings,
         packer_scan_incomplete=packer_scan_incomplete,
         packed_native_libs=packed_native_libs,
+        js_binary_bundle=js_binary_bundle,
+        js_asset_surface_extracted=js_asset_surface_extracted,
         regenerated_from_stored_data=regenerated_from_stored_data,
         forced_dynamic=forced_dynamic,
         forced_dynamic_static_verdict=(

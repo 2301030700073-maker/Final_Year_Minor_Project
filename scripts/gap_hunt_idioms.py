@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -75,6 +76,32 @@ def _app_package(analysis_dir: Path) -> str | None:
     return pkg
 
 
+PROGRESS_EVERY = 20000
+
+
+def _progress_line(done: int, start: float) -> str:
+    """One liveness line for a sweep that otherwise prints nothing for minutes.
+
+    Measured 2026-09-20: the default glob reads 1.8 GB / 411,428 files in about nine
+    minutes, and stdout stays silent from the header until the walk finishes - which
+    is indistinguishable from a hang when watched, and was misread as one. A line
+    naming the count and the elapsed seconds is enough to tell the two apart without
+    inspecting /proc."""
+    return f"[gap-hunt] {done} files read, {time.monotonic() - start:.0f}s elapsed"
+
+
+def _emit_progress(done: int, start: float, stream=None) -> None:
+    """Emitted on the interval only, to stderr: stdout carries the report, and a
+    progress line there would land in the middle of a piped result. The stream is
+    resolved per call rather than bound as a default argument, which would pin it
+    to the sys.stderr that existed at import and bypass a later redirect or capture
+    (a test capturing stderr saw nothing until this changed)."""
+    if done % PROGRESS_EVERY:
+        return
+    print(_progress_line(done, start),
+          file=sys.stderr if stream is None else stream, flush=True)
+
+
 def main() -> None:
     glob_pattern = sys.argv[1] if len(sys.argv) > 1 else "*.java"
     print(f"### sweeping {glob_pattern} under outputs/analysis")
@@ -85,12 +112,16 @@ def main() -> None:
             "apps": set(), "examples": [], "covered_by": set()}
         for k in CANDIDATES
     }
+    start = time.monotonic()
+    files_read = 0
     analysis_root = Path("outputs/analysis")
     for analysis_dir in sorted(analysis_root.iterdir()):
         if not analysis_dir.is_dir():
             continue
         pkg = _app_package(analysis_dir)
         for path in analysis_dir.rglob(glob_pattern):
+            files_read += 1
+            _emit_progress(files_read, start)
             try:
                 text = path.read_text(errors="ignore")
             except OSError:

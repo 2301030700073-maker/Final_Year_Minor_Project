@@ -66,6 +66,7 @@ from dynamic.success_checks.uncrackable2 import UnCrackable2SuccessCheck
 from dynamic.success_checks.uncrackable3 import UnCrackable3SuccessCheck
 from dynamic.success_checks.technology import (
     SSL_CONFIRMATION_LINE,
+    WINDOWED_NATIVE_HOOK_INSTALLATION_PREFIX,
     SSL_HANDSHAKE_LINE,
     TechnologyHooksEngagedCheck,
     liveness_evidence_lines,
@@ -904,14 +905,23 @@ def _upgrade_verification_from_capture_window(
     this function performs the merge without deciding to: the upgrade-only property
     stays visible at the call site rather than buried in here.
 
-    With an existing verification, ONLY the two SSL lines move. The capture window
-    cannot speak to root - its bypass is pinning-only by construction (ADR-0015), so
-    it carries no root recipe and observed no root probe - and its post-bypass
-    liveness belongs to a different launch than the one the run's lines were measured
-    in. Both stay exactly as the dynamic window measured them. The two keys are the
-    check's own constants rather than literals here: a rename in one file that
-    silently stopped merging them would leave a report whose SSL verdict and SSL
-    evidence line contradict each other, with nothing raising.
+    With an existing verification, ONLY the two SSL lines move, plus the capture
+    launch's own native-hook statement when its check filed one (ADR-0023). The
+    capture window cannot speak to root - its bypass is pinning-only by construction
+    (ADR-0015), so it carries no root recipe and observed no root probe - and its
+    post-bypass liveness belongs to a different launch than the one the run's lines
+    were measured in. Those stay exactly as the dynamic window measured them. The
+    two keys are the check's own constants rather than literals here: a rename in one
+    file that silently stopped merging them would leave a report whose SSL verdict
+    and SSL evidence line contradict each other, with nothing raising.
+
+    The hook line is adopted rather than overwritten, and only in its windowed form
+    (ADR-0023): it reports what the script injected into ONE process managed to
+    install, so the capture launch's answer neither replaces nor is replaced by the
+    dynamic launch's. Selective by construction - an unattributed hook line is the
+    dynamic window's own key and is left alone, which is also what keeps this
+    function from becoming a general evidence merge that would drag the capture
+    launch's liveness and root lines across with it.
 
     With no existing verification (the dynamic stage produced none), the capture
     window's own evaluation becomes the run's. Its root lines say no root-artifact
@@ -920,15 +930,15 @@ def _upgrade_verification_from_capture_window(
     pinning-only bypass."""
     if verification is None:
         return capture_verification
-    return replace(
-        verification,
-        ssl_bypassed=True,
-        evidence_lines={
-            **verification.evidence_lines,
-            SSL_HANDSHAKE_LINE: capture_verification.evidence_lines[SSL_HANDSHAKE_LINE],
-            SSL_CONFIRMATION_LINE: capture_verification.evidence_lines[SSL_CONFIRMATION_LINE],
-        },
-    )
+    merged_lines = {
+        **verification.evidence_lines,
+        SSL_HANDSHAKE_LINE: capture_verification.evidence_lines[SSL_HANDSHAKE_LINE],
+        SSL_CONFIRMATION_LINE: capture_verification.evidence_lines[SSL_CONFIRMATION_LINE],
+    }
+    for key, value in capture_verification.evidence_lines.items():
+        if key.startswith(WINDOWED_NATIVE_HOOK_INSTALLATION_PREFIX):
+            merged_lines[key] = value
+    return replace(verification, ssl_bypassed=True, evidence_lines=merged_lines)
 
 
 def _reclassify_empty_capture(

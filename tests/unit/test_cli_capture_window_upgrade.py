@@ -10,12 +10,15 @@ hooked and recorded messages, and a non-confirming window leaves the run's
 verification untouched.
 """
 
+from dataclasses import replace
+
 from common import VerificationResult
 from dynamic.success_checks.technology import (
     SSL_CONFIRMATION_LINE,
     SSL_HANDSHAKE_LINE,
     TechnologyHooksEngagedCheck,
-)
+    NATIVE_HOOK_INSTALLATION_LINE,
+    WINDOWED_NATIVE_HOOK_INSTALLATION_PREFIX,)
 
 import cli
 
@@ -44,6 +47,14 @@ def _capture_window_verification() -> VerificationResult:
         window="in this run's capture window, launched by am start",
     )
     assert verification.ssl_bypassed is True, verification.evidence_lines
+    # ADR-0023 premise: the check files its hook statement under a key carrying
+    # this window, which is what lets the merge keep it beside the dynamic
+    # launch's. If a later change made that key constant again, the test below
+    # would assert about a merge that can no longer preserve both.
+    assert any(
+        k.startswith(WINDOWED_NATIVE_HOOK_INSTALLATION_PREFIX)
+        for k in verification.evidence_lines
+    ), verification.evidence_lines
     return verification
 
 
@@ -60,10 +71,59 @@ def _dynamic_window_verification() -> VerificationResult:
             "root bypass confirmation basis": (
                 "app's own root-check probed a root artifact and was answered-false"
             ),
+            # ADR-0023's shape: the dynamic launch's own hook statement, which the
+            # capture launch's answer must not be able to replace.
+            NATIVE_HOOK_INSTALLATION_LINE: (
+                "hook(s) the injected script could NOT install: SSL_CTX_set_custom_verify"
+            ),
             SSL_HANDSHAKE_LINE: "none observed by the in-app SSL observer",
             SSL_CONFIRMATION_LINE: "not confirmed (need BOTH the app's pin-check to run "
                                    "without rejecting and a TLS handshake to complete)",
         },
+    )
+
+
+def test_upgrade_keeps_both_launches_hook_installation_statements():
+    """ADR-0023, on the run that produced it. The capture launch reported four
+    native SSL hooks it could not install ("already replaced this function")
+    while the dynamic launch's stream carried none of that - and cli.py discarded
+    the capture launch's statement, leaving a report whose only hook line says
+    "no failed hook installation this run", a claim about the RUN that one of its
+    two launches contradicts. Both statements must survive the merge, each under
+    the key that names its launch."""
+    capture = _capture_window_verification()
+    dynamic = _dynamic_window_verification()
+    merged = cli._upgrade_verification_from_capture_window(capture, dynamic)
+
+    windowed = [
+        k for k in capture.evidence_lines
+        if k.startswith(WINDOWED_NATIVE_HOOK_INSTALLATION_PREFIX)
+    ]
+    assert len(windowed) == 1, capture.evidence_lines
+    assert merged.evidence_lines[windowed[0]] == capture.evidence_lines[windowed[0]]
+    assert merged.evidence_lines[NATIVE_HOOK_INSTALLATION_LINE] == (
+        dynamic.evidence_lines[NATIVE_HOOK_INSTALLATION_LINE]
+    )
+
+
+def test_upgrade_does_not_adopt_an_unattributed_hook_statement():
+    """The other half of the same rule. A hook line filed under the BARE key
+    belongs to the run's own launch - the one whose verdict this merge is
+    upgrading - so adopting it would let the second launch's statement overwrite
+    the first's, which is the defect ADR-0023 exists to close, one window over
+    from where F-9 closed it. The merge copies windowed hook lines only."""
+    dynamic = _dynamic_window_verification()
+    capture = _capture_window_verification()
+    capture = replace(
+        capture,
+        evidence_lines={
+            **capture.evidence_lines,
+            NATIVE_HOOK_INSTALLATION_LINE: "no failed hook installation",
+        },
+    )
+    merged = cli._upgrade_verification_from_capture_window(capture, dynamic)
+    assert merged.evidence_lines[NATIVE_HOOK_INSTALLATION_LINE] == (
+        dynamic.evidence_lines[NATIVE_HOOK_INSTALLATION_LINE]
     )
 
 

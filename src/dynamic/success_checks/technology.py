@@ -229,6 +229,36 @@ SSL_HANDSHAKE_LINE = "TLS handshakes completed post-bypass"
 SSL_CONFIRMATION_LINE = "SSL bypass confirmation basis"
 
 
+# ADR-0023. The native-hook statement is the one line that answers a question
+# about a LAUNCH rather than about the app: "did the script injected into THIS
+# process install its hooks" has a different answer per launch, and both answers
+# are true. The SSL pair above is the opposite case - one question about the app,
+# two observers of it - so cli.py lifts the capture window's values over the
+# dynamic window's. Doing that here would destroy the dynamic launch's statement,
+# which is exactly the F-9 evidence the line exists to carry. So the key is
+# windowed instead of constant, and no merge can silently replace a finding with
+# another launch's non-finding.
+NATIVE_HOOK_INSTALLATION_LINE = "Native hook installation (script's own report)"
+# One definition of the windowed spelling: the producer writes keys with
+# native_hook_installation_key() and the merger in cli.py selects them with this
+# prefix, so the two cannot drift into "the merge stopped matching" silence.
+WINDOWED_NATIVE_HOOK_INSTALLATION_PREFIX = NATIVE_HOOK_INSTALLATION_LINE + "; "
+
+
+def native_hook_installation_key(window: str | None = None) -> str:
+    """The evidence key the native-hook statement is filed under. An unlabelled
+    launch (the dynamic window, which is the run's own) keeps the bare constant;
+    a labelled one carries its window, so the two launches' statements coexist in
+    one evidence dict rather than the second overwriting the first.
+
+    The window belongs in the key here, not in the value as it does for the SSL
+    pair: the value is the statement about one launch, and repeating the window
+    inside it would render the label twice on one report line."""
+    if not window:
+        return NATIVE_HOOK_INSTALLATION_LINE
+    return WINDOWED_NATIVE_HOOK_INSTALLATION_PREFIX + window
+
+
 def _native_hook_installation_line(uninstalled: list[str], captured: bool) -> str:
     """Tri-state on purpose: "the script reported no failure" and "the script's
     output was not captured" are different facts, and only the first says anything
@@ -416,7 +446,9 @@ class TechnologyHooksEngagedCheck:
             # used to omit that entirely while explaining a stalled startup with a
             # cause the evidence did not carry. Rendered generically (the report
             # loops evidence_lines), so no template change is needed.
-            "Native hook installation (script's own report)": (
+            # ADR-0023: windowed key, so the capture launch's own statement of
+            # the same question lands BESIDE this one instead of replacing it.
+            native_hook_installation_key(window): (
                 _native_hook_installation_line(not_installed, captured=bool(messages))
             ),
             SSL_HANDSHAKE_LINE: (

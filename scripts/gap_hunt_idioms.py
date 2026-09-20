@@ -1,6 +1,10 @@
 """Measured gap-hunt: which REAL root-detection / SSL-pinning idioms exist in the
 decompiled corpus but match NO signature in the corpus?
 
+The corpus is whatever the glob argument selects (default "*.java") - it is not the
+APK. A ZERO line is scoped to that glob in its own text, so it is never read as an
+absence claim over code this sweep does not open.
+
 Not speculative - every candidate below is a technique that real apps actually
 ship. The output is evidence for a decision, not a decision: a candidate with
 hits only in bundled third-party code is not automatically a gap (that is what
@@ -73,7 +77,9 @@ def _app_package(analysis_dir: Path) -> str | None:
 
 def main() -> None:
     glob_pattern = sys.argv[1] if len(sys.argv) > 1 else "*.java"
-    print(f"### sweeping {glob_pattern}")
+    print(f"### sweeping {glob_pattern} under outputs/analysis")
+    print("    (the glob is the whole corpus read here: a ZERO below is absent from\n"
+          "     THOSE files, not from the APK - DEX/smali and native libs are not read)")
     hits: dict[str, dict] = {
         k: {"total": 0, "app_owned": 0, "uncovered": 0, "uncovered_app_owned": 0,
             "apps": set(), "examples": [], "covered_by": set()}
@@ -119,7 +125,11 @@ def main() -> None:
     for name in sorted(hits, key=lambda n: -hits[n]["uncovered_app_owned"]):
         r = hits[name]
         if not r["total"]:
-            print(f"[ZERO] {name}: not present anywhere in the corpus")
+            # Scoped to the glob actually swept: the default is *.java, so a bare
+            # "anywhere in the corpus" asserted an absence over DEX/smali and native
+            # libs this sweep never read - and this output is evidence for whether to
+            # add a signature, where the difference is the whole question.
+            print(f"[ZERO] {name}: no hit in any {glob_pattern} file under outputs/analysis")
             continue
         print(
             f"\n[{name}] total={r['total']} app_owned={r['app_owned']} "

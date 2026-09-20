@@ -109,3 +109,26 @@ def test_every_key_is_replayed_by_regenerate_report():
     """The live render and the stored render must read the same set."""
     replayed = set(regenerate_replay_names())
     assert [k for k in KEYS if k not in replayed] == []
+
+
+def test_every_generate_report_parameter_is_replayed_by_the_stored_render():
+    """The same rule as above, for EVERY parameter - not just the coverage_causes keys.
+
+    The keys checked above are the ones that travel the coverage_causes path, so
+    they are guarded by construction; every other parameter is passed literally by
+    the live render and had nothing asserting that _regenerate_report passes it
+    too. A parameter the stored render omits silently takes its DEFAULT - the
+    regenerated report then shows a value the run never recorded, which is exactly
+    how 12 dataclass fields were lost and how ManifestInfo lost its attack-surface
+    and SSL-policy facts. The difference is only that the loss would happen one
+    level up, at the render call rather than inside a reconstructor.
+
+    Falsified by deleting one keyword from the _regenerate_report call.
+    """
+    params = set(generate_report_params())
+    replayed = set(regenerate_replay_names())
+    assert len(params) >= 30 and len(replayed) >= 30, (len(params), len(replayed))
+    assert sorted(params - replayed) == [], (
+        "a parameter the stored render does not pass comes back as its default in "
+        "every regenerated report"
+    )

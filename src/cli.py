@@ -3588,7 +3588,7 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         # reconstruct the cause, so the report must say so rather than let a missing
         # section read as "cause absent" (ADR-0006). A run WITH persisted causes
         # regenerates faithfully and needs no disclaimer.
-        regenerated_from_stored_data=run.coverage_causes is None,
+        regenerated_with_annotation_loss=run.coverage_causes is None,
     )
 
 

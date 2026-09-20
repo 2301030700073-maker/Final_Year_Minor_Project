@@ -859,7 +859,7 @@ def test_generate_report_declares_annotation_loss_when_regenerated(tmp_path):
         classification=_classification(), verification=None, correlation=None,
         coverage={"java": "partial", "native": "fully_analyzed", "manifest": "fully_analyzed", "js": "fully_analyzed"},
         stage_results=[], output_dir=tmp_path,
-        regenerated_from_stored_data=True,
+        regenerated_with_annotation_loss=True,
     )
     content = report_path.read_text(encoding="utf-8")
     assert "Report regenerated from stored data (annotation loss)" in content

@@ -456,7 +456,7 @@ checks.
 | `{{ d | md }}` |
 {% endfor %}
 {% endif %}
-{% if regenerated_from_stored_data -%}
+{% if regenerated_with_annotation_loss -%}
 ### Report regenerated from stored data (annotation loss)
 
 This report was re-rendered from the persisted run record, not produced by a live
@@ -757,7 +757,13 @@ def generate_report(
     # incomplete). None is "not recorded" - a pre-field run - never "no".
     manifest_parsed: bool | None = None,
     manifest_resources_complete: bool | None = None,
-    regenerated_from_stored_data: bool = False,
+    # Renamed from `regenerated_from_stored_data`, which was true of every
+    # regeneration - including the ones this must NOT fire for - so the name said
+    # nothing. This is the ANNOTATION-LOSS case only: a run stored before
+    # coverage_causes existed, whose bound causes cannot be reconstructed. Passing
+    # True for a modern regen renders a section whose every sentence ("the cause
+    # annotations ... are not persisted columns") would be false.
+    regenerated_with_annotation_loss: bool = False,
 ) -> Path:
     output_dir = Path(output_dir) / apk_hash
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -811,7 +817,7 @@ def generate_report(
         js_asset_surface_extracted=js_asset_surface_extracted,
         manifest_parsed=manifest_parsed,
         manifest_resources_complete=manifest_resources_complete,
-        regenerated_from_stored_data=regenerated_from_stored_data,
+        regenerated_with_annotation_loss=regenerated_with_annotation_loss,
         forced_dynamic=forced_dynamic,
         forced_dynamic_static_verdict=(
             _forced_dynamic_static_action(stage_results) or classification.action.value

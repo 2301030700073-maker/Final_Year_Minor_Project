@@ -651,6 +651,30 @@ def _lib_coverage(lib: NativeLibrary) -> str:
         return "fully_analyzed"
 
 
+def packed_library_rows(libs: list[NativeLibrary]) -> list[dict]:
+    """The packed libraries a scan saw, each with the coverage state its packed
+    state left it at (Gap-4), for the report's provenance section.
+
+    `_lib_coverage` is asked here rather than re-derived by the caller: a packed
+    lib that WAS unpacked and then body-scanned reaches `fully_analyzed`
+    (native.py's first branch), so a caller deciding "packed means bound" from
+    `lib.packed` alone would print a specific fact that is false - and would list
+    a library under a coverage bound it did not cause. Only the packed libs are
+    returned, and `packer` is carried rather than the string "UPX" being assumed
+    by whoever renders it."""
+    return [
+        {
+            "name": lib.name,
+            "abi": lib.abi,
+            "packer": lib.packer,
+            "unpacked": lib.unpacked,
+            "coverage": _lib_coverage(lib),
+        }
+        for lib in libs
+        if lib.packed
+    ]
+
+
 def compute_degradation(libs: list[NativeLibrary]) -> dict[str, str]:
     """Per-ABI coverage state (G10 + G-B + G6), worst-wins within each ABI.
 

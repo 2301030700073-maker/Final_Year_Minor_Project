@@ -183,7 +183,9 @@ Per-surface bound of this scan - a `partial`/`unscannable` surface is a lower bo
 {% endif %}
 {% if coverage.get("native") == "partial" -%}
 {% set _unres = (jni_bindings or [])|selectattr("status", "equalto", "unresolved")|list -%}
-> **Native:** `partial` is a lower bound, not a confident negative - a native NEITHER is not proof that a native root/SSL check is absent. Bound by{% if unaccounted_loads %} loaded native targets the APK does not ship ({{ unaccounted_loads|length }}; see "Unaccounted native loads"){% endif %}{% if extraction_failures %}{% if unaccounted_loads %};{% endif %} shipped libraries this run could not extract ({{ extraction_failures|length }}){% endif %}{% if native_scan_errors %}{% if unaccounted_loads or extraction_failures %};{% endif %} libraries a tool could not read ({{ native_scan_errors|length }}){% endif %}{% if _unres %}{% if unaccounted_loads or extraction_failures or native_scan_errors %};{% endif %} declared `native` methods no library binds (see the JNI map){% endif %}{% if not (unaccounted_loads or extraction_failures or native_scan_errors or _unres) %} a per-library rule outside the body sweep{% endif %}.
+{# Gap-4: only the packed libs whose OWN coverage the packing left below fully_analyzed bound this surface. A packed lib that was unpacked and body-scanned reaches fully_analyzed, and naming it here would assert it caused a bound it did not - the false-specific-fact failure COV-HEAVY-JAVA1 records. #}
+{% set _packed_bound = (packed_native_libs or [])|rejectattr("coverage", "equalto", "fully_analyzed")|list -%}
+> **Native:** `partial` is a lower bound, not a confident negative - a native NEITHER is not proof that a native root/SSL check is absent. Bound by{% if unaccounted_loads %} loaded native targets the APK does not ship ({{ unaccounted_loads|length }}; see "Unaccounted native loads"){% endif %}{% if extraction_failures %}{% if unaccounted_loads %};{% endif %} shipped libraries this run could not extract ({{ extraction_failures|length }}){% endif %}{% if native_scan_errors %}{% if unaccounted_loads or extraction_failures %};{% endif %} libraries a tool could not read ({{ native_scan_errors|length }}){% endif %}{% if _unres %}{% if unaccounted_loads or extraction_failures or native_scan_errors %};{% endif %} declared `native` methods no library binds (see the JNI map){% endif %}{% if _packed_bound %}{% if unaccounted_loads or extraction_failures or native_scan_errors or _unres %};{% endif %} packed libraries whose code stays behind their stub ({{ _packed_bound|length }}; see "Native libraries detected as packed"){% endif %}{% if not (unaccounted_loads or extraction_failures or native_scan_errors or _unres or _packed_bound) %} a per-library rule outside the body sweep{% endif %}.
 {% endif %}
 {% if coverage.get("js") == "partial" -%}
 > **JS:** partial means the app ships a binary Hermes/bytecode bundle whose control flow can't be read (React Native release bundle) - we recover only its string constants, so a js root/SSL NEITHER is not proof a root/SSL check in the bundle is absent.{% if coverage.get("native") == "unscannable" %} Mirrors the native callout above.{% endif %}
@@ -265,6 +267,29 @@ This is **not** a packing detection - a failed scan is not a finding, it is a
 refusal to certify an absence that was never verified (ADR-0006), and this report
 does not claim a packer was found. The stage's own recorded failure and error are
 in the Stage results table above.
+{% endif %}
+{% if packed_native_libs -%}
+### Native libraries detected as packed (Gap-4)
+
+Each row was identified as **packed** from the ELF's own markers (UPX sections /
+`UPX!` magic), not from a heuristic. A packed library's symbols and strings live
+behind a compressed stub, so an unpacked one is analyzed from the
+**reconstructed** copy rather than the bytes the APK ships - recorded here because
+that is a provenance fact about this run's analysis, not an implementation detail:
+
+| Library | ABI | Packer | Analyzed from | This library's coverage |
+|---|---|---|---|---|
+{% for lib in packed_native_libs -%}
+| `{{ lib.name | md }}` | `{{ lib.abi | md }}` | {{ lib.packer or "unidentified" }} | {% if lib.unpacked %}the unpacked copy (not the shipped bytes){% else %}**the packed stub only**{% endif %} | {{ lib.coverage }} |
+{% endfor %}
+{% set _packed_bound = packed_native_libs|rejectattr("coverage", "equalto", "fully_analyzed")|list -%}
+{% if _packed_bound -%}
+A library whose coverage is below `fully_analyzed` is one the packing still bounds:
+the bytes that were read are the stub's, so whatever it unpacks to at runtime was
+never examined and a native NEITHER over that library is **not** a confident
+negative (ADR-0006). A row showing `fully_analyzed` is the opposite case - it was
+unpacked and its real code was analyzed, which is why it is not counted as a bound.
+{% endif %}
 {% endif %}
 {% if extraction_failures -%}
 ### Native libraries the APK ships but this run could not extract (coverage-limited)
@@ -680,6 +705,7 @@ def generate_report(
     dex_attribution_degraded: bool = False,
     packer_findings: list | None = None,
     packer_scan_incomplete: bool = False,
+    packed_native_libs: list | None = None,
     regenerated_from_stored_data: bool = False,
 ) -> Path:
     output_dir = Path(output_dir) / apk_hash
@@ -729,6 +755,7 @@ def generate_report(
         dex_attribution_degraded=dex_attribution_degraded,
         packer_findings=packer_findings,
         packer_scan_incomplete=packer_scan_incomplete,
+        packed_native_libs=packed_native_libs,
         regenerated_from_stored_data=regenerated_from_stored_data,
         forced_dynamic=forced_dynamic,
         forced_dynamic_static_verdict=(

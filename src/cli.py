@@ -108,6 +108,7 @@ from static.native import (
     extract_native_libs,
     load_native_signatures,
     match_native,
+    packed_library_rows,
 )
 from static.obfuscation import detect_obfuscation_level
 from static.packers import detect_packers, load_packer_signatures
@@ -3045,6 +3046,17 @@ def run(
         # detection - the safe direction - but java_coverage() bounds the surface on
         # it, so the bound has to be legible where it is read.
         packer_scan_incomplete=not packer_scanned,
+        # Gap-4: the packed NATIVE libraries, with the coverage each one's packed
+        # state left it at. Until now the identification lived only on the
+        # NativeLibrary dataclass (one test asserted the field was set; no source
+        # consumer read it), so a report could show native=partial with no cause
+        # and never record that a library was packed or that its code was analyzed
+        # from a reconstructed copy rather than the shipped bytes.
+        packed_native_libs=(
+            (packed_library_rows(native_evidence.libraries) or None)
+            if native_evidence is not None
+            else None
+        ),
     )
     report_kwargs = dict(
         run_id=run_id,
@@ -3546,6 +3558,7 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         dex_attribution_degraded=bool(causes.get("dex_attribution_degraded", False)),
         packer_findings=causes.get("packer_findings"),
         packer_scan_incomplete=bool(causes.get("packer_scan_incomplete", False)),
+        packed_native_libs=causes.get("packed_native_libs"),
         # The annotation-loss disclosure now fires ONLY for runs written before
         # coverage_causes existed (the column is NULL there): those genuinely cannot
         # reconstruct the cause, so the report must say so rather than let a missing

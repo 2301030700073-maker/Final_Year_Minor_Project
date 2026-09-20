@@ -7,19 +7,24 @@ implementation: reading the run process alone understates the figure by whatever
 a worker pool is holding, and matching the CLI loosely makes the sampler watch
 itself or a non-analysis command.
 """
-import importlib.util
 import os
+import types
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 
-_spec = importlib.util.spec_from_file_location(
-    "sample_run_memory", REPO / "scripts" / "sample_run_memory.py"
-)
-mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(mod)
+# Compile the source rather than importing it: the bytecode cache is keyed on the
+# source's size and whole-second mtime, so a same-size edit made in the same second
+# - exactly what a mutate-and-restore falsification does - serves stale bytecode,
+# and the test then asserts against code that is no longer in the file. That trap
+# produced a false failure in a sibling loader (tests/unit/test_gap_hunt_progress
+# .py); the same staleness would let a test pass against code that is not there.
+_SRC = REPO / "scripts" / "sample_run_memory.py"
+mod = types.ModuleType("sample_run_memory")
+mod.__file__ = str(_SRC)
+exec(compile(_SRC.read_text(encoding="utf-8"), str(_SRC), "exec"), mod.__dict__)
 
 
 def test_the_sample_covers_the_process_tree_not_just_the_run():

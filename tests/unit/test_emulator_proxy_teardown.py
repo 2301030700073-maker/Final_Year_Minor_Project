@@ -10,13 +10,23 @@ capture port has no internet at all.
 """
 
 import subprocess
+import types
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-import emulator_proxy as ep  # noqa: E402
+# Compile the source rather than importing it: the bytecode cache is keyed on the
+# source's size and whole-second mtime, so a same-size edit made in the same second
+# - exactly what a mutate-and-restore falsification does - serves stale bytecode,
+# and the test then asserts against code that is no longer in the file. That trap
+# produced a false failure in a sibling loader (tests/unit/test_gap_hunt_progress
+# .py); the same staleness would let a test pass against code that is not there.
+_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "emulator_proxy.py"
+ep = types.ModuleType("emulator_proxy")
+ep.__file__ = str(_SCRIPT)
+exec(compile(_SCRIPT.read_text(encoding="utf-8"), str(_SCRIPT), "exec"), ep.__dict__)
 
 
 def _stub_windows(monkeypatch):

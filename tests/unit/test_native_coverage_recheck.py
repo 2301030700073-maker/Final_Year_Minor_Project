@@ -18,7 +18,7 @@ rather than re-implementing its loop.
 from __future__ import annotations
 
 import contextlib
-import importlib.util
+import types
 import io
 import json
 import sqlite3
@@ -44,9 +44,16 @@ def _load(tmp_path: Path, rows: list[tuple[str, str]]):
     con.commit()
     con.close()
 
-    spec = importlib.util.spec_from_file_location("native_coverage_recheck", _SCRIPT)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    # Compile the source rather than importing it: the bytecode cache is keyed on the
+    # source's size and whole-second mtime, so a same-size edit made in the same second
+    # - exactly what a mutate-and-restore falsification does - serves stale bytecode,
+    # and the test then asserts against code that is no longer in the file. That trap
+    # produced a false failure in a sibling loader (tests/unit/test_gap_hunt_progress
+    # .py); the same staleness would let a test pass against code that is not there.
+    _src = Path(_SCRIPT)
+    mod = types.ModuleType("native_coverage_recheck")
+    mod.__file__ = str(_src)
+    exec(compile(_src.read_text(encoding="utf-8"), str(_src), "exec"), mod.__dict__)
     # The module calls logger.remove() at import (it is a CLI script). Put the
     # default handler back so importing it cannot silence the suite's own logging.
     from loguru import logger as _loguru

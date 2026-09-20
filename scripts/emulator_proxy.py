@@ -63,9 +63,16 @@ def capture() -> None:
         print(f"[ok] captured {result.evidence['flows_count']} decrypted flows")
         for h in result.evidence.get("hosts", []):
             print("      ", h)
+        print("[ok] device restored to pass-through internet proxy (internet still works)")
     else:
+        # The stage did not report success, so the restore it performs at the end of a
+        # capture is not something this script can report: printing it here asserted a
+        # state nobody measured, and a device left pointed at the capture port has no
+        # internet at all. Say what is known and what to do about it.
         print(f"[!] capture: {result.evidence.get('reason', 'failed')}")
-    print("[ok] device restored to pass-through internet proxy (internet still works)")
+        print("[!] the device proxy was NOT confirmed restored - "
+              f"run `{Path(__file__).name} internet` to reassert it before any run "
+              "that needs working internet")
     return result
 
 
@@ -78,19 +85,37 @@ def internet() -> None:
 def down() -> None:
     import subprocess
     adb = _adb()
+    # Every adb step here is best-effort by design (the emulator may already be gone),
+    # but "best-effort" is not "done": swallowing the failure and then printing one
+    # unqualified success line reports a teardown nobody measured, in the script whose
+    # own docstring promises it fails loudly. Each step records its own outcome and the
+    # summary carries them.
+    failures: list[str] = []
     for port in (CAPTURE_PORT, PASS_PORT):
         try:
             subprocess.run([adb, "-s", SERIAL, "reverse", "--remove", f"tcp:{port}"],
                            check=True, timeout=15)
-        except Exception:
-            pass
+        except Exception as exc:
+            failures.append(f"reverse --remove tcp:{port}: {type(exc).__name__}: {exc}")
     try:
         subprocess.run([adb, "-s", SERIAL, "shell", "settings", "delete", "global",
                         "http_proxy"], check=True, timeout=15)
-    except Exception:
-        pass
+    except Exception as exc:
+        failures.append(f"clear global http_proxy: {type(exc).__name__}: {exc}")
+    # Not best-effort: a proxy left running on the Windows host keeps a port bound and
+    # keeps MITM-ing whatever still points at it, so its failure must reach the caller
+    # as an exception rather than as a line in the summary.
     mc._stop_windows_mitmdump()
     ptp.stop_windows_passthrough()
+    if failures:
+        print(f"[!] teardown incomplete - {len(failures)} device step(s) did not succeed:")
+        for f in failures:
+            print(f"      {f}")
+        print("    the Windows-host proxies were still stopped; the device may still")
+        print(f"    route through them - re-run `{Path(__file__).name} down` once the")
+        print("    device is reachable, or clear the proxy with `adb shell settings put")
+        print("    global http_proxy :0`")
+        raise SystemExit(1)
     print("[ok] reverses removed, proxy cleared, both Windows proxies stopped")
 
 

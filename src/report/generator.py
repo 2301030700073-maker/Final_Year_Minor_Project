@@ -492,8 +492,14 @@ string in this APK; only its *ownership* is unverified.
 > **⚠ Operator-forced dynamic stage (`--force-dynamic`).** The static verdict is **{{ forced_dynamic_static_verdict }}** and is **unchanged** by this run — the deterministic engine did not detect root/SSL above the threshold, and this run did not change that. An authorized operator explicitly directed an empirical bypass attempt because this target's static verdict is {% if forced_dynamic_coverage_limited %}**coverage-limited** — a lower bound over surfaces the engine could not fully analyze (e.g. a React-Native/Hermes bundle), so a NEITHER here is "unknown, not absent" (ADR-0006){% else %}a **confident negative** — all governing surfaces were fully analyzed and nothing matched, so forcing a bypass here is unusual{% endif %}. The result below is gated on **real observed behaviour**: a `dynamically_confirmed` bypass means the app's own root/pin check was actually exercised and neutralised, **not** that static detection changed. This dynamic run happened *because it was forced*, never because static promoted a finding.
 
 {% endif %}
-- Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}bypass not verified (see stage status and evidence below){% endif %}{% endif %}
-- SSL bypassed: {% if verification %}{% if verification.ssl_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.ssl_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason %}not run ({{ dynamic_skip_reason }}){% else %}bypass not verified (see stage status and evidence below){% endif %}{% endif %}
+{# The "not run" claim is gated on the RECORDED stage status, not on the reason's
+   presence. cli.py only produces a reason for a `skipped` stage, but the stored
+   column carries no such gate, so a FAILED dynamic setup stores its failure text
+   there too (11 such rows in a real results.db) - and a regenerated report read
+   them back as "not run". A stage that was attempted and failed must read as
+   unverified, not as never-attempted. See _dynamic_stage_status. #}
+- Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason and dynamic_stage_status not in ("success", "failed") %}not run ({{ dynamic_skip_reason }}){% else %}bypass not verified (see stage status and evidence below){% endif %}{% endif %}
+- SSL bypassed: {% if verification %}{% if verification.ssl_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.ssl_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason and dynamic_stage_status not in ("success", "failed") %}not run ({{ dynamic_skip_reason }}){% else %}bypass not verified (see stage status and evidence below){% endif %}{% endif %}
 {% if self_termination_note -%}
 - ⚠ **App anti-instrumentation fired (FR-4.6):** `{{ self_termination_note | md }}`. This is a **positive finding** - the app has active anti-tampering that detected the Frida/root instrumentation and self-terminated - not merely an unverified bypass. A bypass could not be confirmed *because* the app's own defenses ended the process first; treat the inconclusive/​not-verified verdict above as a consequence of that defense, not evidence the app lacks the protection.
 {% endif -%}
@@ -715,6 +721,37 @@ def _forced_dynamic_static_action(stage_results: list[StageResult]) -> str | Non
     return None
 
 
+def _dynamic_stage_status(stage_results: list[StageResult]) -> str | None:
+    """The status the RUN recorded for its dynamic stage, or None when no row recorded one.
+
+    The bypassed lines say "not run (<reason>)" when `dynamic_skip_reason` is set.
+    That sentence was correct while the value was only ever produced under a status
+    gate - cli.py computes it as `evidence["reason"]` **iff** the stage's status is
+    "skipped", so a live report only ever makes the claim for a stage that genuinely
+    never ran. The stored column has no such gate (storage/results.py takes the
+    reason whenever the evidence carries one), and the dynamic setup-failure path
+    does carry one, so 11 rows in a real results.db are `failed` with the failure
+    text in that column. A regenerated report read those rows back as "not run
+    (dynamic setup failed before the app could run ...)" - a stage that was attempted
+    and failed, described as one that was never attempted, which is exactly the
+    distinction the stage status exists to keep.
+
+    Gate on the RECORDED status rather than the reason's presence, and read it from
+    stage_results, which both the live and the regenerated render already pass: the
+    fix then also repairs rows already stored, which are never rewritten.
+
+    The test is a disjunction over the statuses that prove the stage ran ("success",
+    "failed"), so an unrecognised value - or a record that predates stage_results
+    entirely, which returns None - keeps the historical reading. That direction is
+    deliberate: the reason column's own documented meaning is "dynamic never ran"
+    (storage/db.py), so a silent record is no evidence to overturn it, whereas a
+    record that names a run is."""
+    for s in stage_results:
+        if s.stage == "dynamic":
+            return s.status
+    return None
+
+
 def generate_report(
     run_id: str,
     apk_hash: str,
@@ -770,6 +807,8 @@ def generate_report(
     report_path = output_dir / f"{run_id}.md"
 
     forced_dynamic = _forced_dynamic(stage_results)
+    # Whether the "not run (<reason>)" sentence is warranted at all - see the helper.
+    dynamic_stage_status = _dynamic_stage_status(stage_results)
     # Coverage-limited vs confident-negative wording reuses the classification's own
     # unknown_uncovered marker - the same signal the live Decision-line caveat gates
     # on (cli.py) - not a parallel predicate (caveat-gate-matches-its-text).
@@ -783,6 +822,7 @@ def generate_report(
         classification=classification,
         verification=verification,
         dynamic_skip_reason=dynamic_skip_reason,
+        dynamic_stage_status=dynamic_stage_status,
         correlation_skip_reason=correlation_skip_reason,
         correlation=correlation,
         stage_results=stage_results,

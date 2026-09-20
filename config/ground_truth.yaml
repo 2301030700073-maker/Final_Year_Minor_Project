@@ -183,9 +183,13 @@ bea63726d7025d2bb8f81bf7f94fa096a9f86090d724086f3640c3957536f232:  # com.redshif
     corpus can attribute (only js_root_su fires). Adding it therefore LOWERS
     root recall. It is added anyway: a calibration corpus that quietly omits a
     known miss reports a recall it has not earned.
-    SSL: null - deliberately NOT established. The static engine reports
-    ssl=1.00 for this APK, but promoting that to ground truth is precisely the
-    circularity this file forbids, and there is no ssl_bypassed=True run for it
-    (dynamic SSL was never confirmed on this target). Establishing it would
-    require reading the app's own pinning implementation directly, which has not
-    been done - so the field stays null rather than being forced.
+    SSL: null - deliberately NOT established. The static engine reported
+    ssl=1.00 for this APK when this entry was written (2026-08-15 .. 2026-09-01,
+    25 runs); it has reported 0.00 since 2026-09-05, after the shared
+    third-party attribution gate stopped counting bundled TLS evidence
+    (setSSLSocketFactory, sslcontext_init_with_trustmanager,
+    okhttp_hostname_verifier_set, nsc_debug_overrides) as the app's own. Neither
+    figure is ground truth, and promoting either to one is precisely the
+    circularity this file forbids: there is no ssl_bypassed=True run for this
+    target, and reading the app's own pinning implementation directly has not
+    been done. The field stays null rather than being forced.

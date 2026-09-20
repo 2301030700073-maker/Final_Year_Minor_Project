@@ -37,9 +37,18 @@ PYBIN="$PROJECT_DIR/.venv/bin/python"
 
 log() { echo "[emulator-up] $*"; }
 
+# Every adb call below is bounded. This script is wired to run at shell open and its
+# header promises it "can never break your startup" - but a wedged adb server (a known
+# WSL2/Windows-interop failure mode, the same class as device.py's un-timeouted calls)
+# hangs `adb version` forever, and with it every new terminal. A bounded call that
+# times out lands on the skip path below, which is the correct answer for a hook: no
+# device to fix, nothing to do.
+ADB_TIMEOUT="${EMULATOR_ADB_TIMEOUT:-10}"
+adb() { timeout "$ADB_TIMEOUT" "$ADB" "$@"; }
+
 # adb may be unavailable / WSL interop may be down (e.g. a sandboxed context) - never
 # error out of a shell-startup hook because of it.
-if ! "$ADB" version >/dev/null 2>&1; then
+if ! adb version >/dev/null 2>&1; then
   log "adb not usable here - skipping (nothing to do)."
   exit 0
 fi
@@ -49,7 +58,7 @@ fi
 # is instant, never an 8s hang. (get-state prints "device" only when connected AND
 # online; "offline"/absent => nothing to do. An offline device - e.g. the known
 # post-`adb reboot` brick - is deliberately left untouched.)
-state="$("$ADB" -s "$SERIAL" get-state 2>/dev/null | tr -d '\r')"
+state="$(adb -s "$SERIAL" get-state 2>/dev/null | tr -d '\r')"
 if [ "$state" != "device" ]; then
   log "no online $SERIAL (get-state='${state:-none}') - skipping (nothing to do)."
   exit 0
@@ -61,7 +70,7 @@ fi
 have_device=0
 end=$(( $(date +%s) + WAIT_SECS ))
 while [ "$(date +%s)" -le "$end" ]; do
-  booted="$("$ADB" -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r ')"
+  booted="$(adb -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r ')"
   [ "$booted" = "1" ] && { have_device=1; break; }
   sleep 1
 done
@@ -82,9 +91,14 @@ fi
 # Verify the device proxy setting actually took - the exact thing lost on a fresh boot
 # (Android's NetworkStack applies the legacy http_proxy string form, which is what
 # device.set_http_proxy writes).
-proxy="$("$ADB" -s "$SERIAL" shell settings get global http_proxy 2>/dev/null | tr -d '\r ')"
+proxy="$(adb -s "$SERIAL" shell settings get global http_proxy 2>/dev/null | tr -d '\r ')"
 if [ "$proxy" = "127.0.0.1:8080" ]; then
-  log "OK: $SERIAL internet is up (device proxy -> $proxy; Windows-host pass-through, no MITM, pinning apps work)."
+  # What was measured: ensure_internet raised unless the Windows-host proxy listens and
+  # the adb reverse was re-added, and the device proxy setting is read right here. What
+  # was NOT measured is that traffic actually flows - only a request from the device can
+  # show that - so this names the three legs rather than reporting "internet is up" off
+  # a setting, which is what a fresh boot loses.
+  log "OK: $SERIAL proxy path restored - device proxy -> $proxy, Windows-host pass-through listening, adb reverse in place (no MITM; pinning apps work)."
   exit 0
 fi
 

@@ -87,6 +87,19 @@ def main() -> int:
     if a is None or b is None:
         print("  incomplete")
         return 1
+    # The contrast is attributable only when BOTH arms actually produced a flow
+    # list. A failed WITHOUT arm leaves an empty host set, and `b - a` then reads
+    # every host the script decrypted as decrypting ONLY with the script - the
+    # bypass claim asserted from an arm that never ran, which is the one thing
+    # this A/B exists to avoid (NFR-7, principle 3). A capture that fails for an
+    # unrelated reason (no internet, app crash, port conflict) is exactly when
+    # that happens, so it is not a rare shape.
+    incomplete = [name for name, r in (("WITHOUT script", a), ("WITH script", b))
+                  if r.status != "success"]
+    if incomplete:
+        print(f"  NOT ATTRIBUTABLE - {' and '.join(incomplete)} did not complete "
+              f"(status: {a.status} / {b.status}); no bypass claim is made from this pair")
+        return 1
     a_hosts = set(a.evidence.get("hosts", []))
     b_hosts = set(b.evidence.get("hosts", []))
     print(f"  without script: {len(a_hosts)} host(s) decrypted -> {sorted(a_hosts)}")

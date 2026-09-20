@@ -3064,6 +3064,17 @@ def run(
         # computed here; they just never reached the report.
         js_binary_bundle=bool(has_binary_bundle),
         js_asset_surface_extracted=bool(_asset_surface_extracted),
+        # COV-MANIFEST-NOTE1: the manifest surface governs ssl and can be bounded
+        # two ways - the manifest did not parse (unscannable) or resource
+        # resolution was incomplete (partial, H3: a declared NSC that is missing or
+        # unparseable). Both facts are computed here and, like the js pair, reached
+        # no artifact: the coverage table rendered `| manifest | partial |` with no
+        # cause while java, native and js each explained theirs.
+        manifest_parsed=(manifest_stage.status == "success"),
+        manifest_resources_complete=(
+            bool(manifest_info.resources_complete)
+            if manifest_stage.status == "success" else False
+        ),
     )
     report_kwargs = dict(
         run_id=run_id,
@@ -3570,6 +3581,8 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         # the template reads as "not recorded", never as "no".
         js_binary_bundle=causes.get("js_binary_bundle"),
         js_asset_surface_extracted=causes.get("js_asset_surface_extracted"),
+        manifest_parsed=causes.get("manifest_parsed"),
+        manifest_resources_complete=causes.get("manifest_resources_complete"),
         # The annotation-loss disclosure now fires ONLY for runs written before
         # coverage_causes existed (the column is NULL there): those genuinely cannot
         # reconstruct the cause, so the report must say so rather than let a missing

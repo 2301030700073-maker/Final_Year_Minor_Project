@@ -104,7 +104,12 @@ def test_all_seven_causes_render_as_one_sentence():
         dex_attribution_degraded=True,
         classification=types.SimpleNamespace(unreadable_file_count=5),
     )
-    body = out.split("Bound by", 1)[1]
+    # The java NOTE's own line, not the whole rendered region: that region also
+    # holds the sibling surfaces' notes, so a note added beside this one would be
+    # read as part of this sentence - which is exactly what happened when the
+    # manifest note landed after it.
+    note = [ln for ln in out.splitlines() if ln.startswith("> **Java:**")][0]
+    body = note.split("Bound by", 1)[1]
     # The ordering check needs each clause in FULL: HEAVY above is a prefix, so
     # measuring a boundary from it would land mid-clause.
     heavy_full = (HEAVY + " even on a complete decompile - N1/G-C)")
@@ -122,7 +127,7 @@ def test_all_seven_causes_render_as_one_sentence():
         if prev_end is not None:
             assert body[prev_end:i] == "; ", (phrase, repr(body[prev_end:i]))
         prev_end = i + len(phrase)
-    assert body[prev_end:] == ".\n\n", repr(body[prev_end:])
+    assert body[prev_end:] == ".", repr(body[prev_end:])
 
 
 def test_unscannable_or_fully_analyzed_java_gets_no_partial_note():

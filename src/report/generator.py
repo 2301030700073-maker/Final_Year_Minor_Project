@@ -232,6 +232,23 @@ read as a NO and manufacture the very clause this is fixing. #}
 {% endif -%}
 > **Java:** `partial` is a lower bound, not a confident negative - a Java NEITHER is not proof that a Java root/SSL check is absent. Bound by{% if _jc %} {{ _jc | join('; ') }}{% else %} a coverage rule this report does not name{% endif %}.
 {% endif %}
+{# COV-MANIFEST-NOTE1: the manifest surface was the last of the four with no callout -
+java, native and js each explain their bound, while `| manifest | partial |` (or
+unscannable) rendered bare. It governs SSL ONLY (ssl->{java,native,manifest,js}), so
+the sentence names ssl, never root. Both causes are recorded facts (H3): a manifest
+that did not parse is `unscannable`; a parse that resolved resources incompletely is
+`partial`. Each clause fires on its own fact, and `== false` rather than `is not true`
+keeps a pre-field run's missing fact from reading as a NO. #}
+{% if coverage.get("manifest") in ("partial", "unscannable") -%}
+{% set _mc = [] -%}
+{% if manifest_parsed == false -%}
+{% set _ = _mc.append("a binary AndroidManifest.xml that did not parse, so debuggable, network-security-config and the exported-component surface are unknown, not absent") -%}
+{% endif -%}
+{% if manifest_resources_complete == false -%}
+{% set _ = _mc.append("resource resolution that did not complete (a declared value such as a network-security-config that is missing or unparseable), so a resource-backed declaration may be unresolved") -%}
+{% endif -%}
+> **Manifest:** `{{ coverage.get("manifest") }}` is a lower bound, not a confident negative - an ssl NEITHER is not proof that a certificate-pinning declaration is absent. Bound by{% if _mc %} {{ _mc | join('; ') }}{% else %} a coverage rule this report does not name{% endif %}.
+{% endif %}
 {% else -%}
 Not recorded for this run.
 {% endif %}
@@ -728,6 +745,11 @@ def generate_report(
     # regenerated) - NOT "no".
     js_binary_bundle: bool | None = None,
     js_asset_surface_extracted: bool | None = None,
+    # COV-MANIFEST-NOTE1: the two recorded causes of a bounded manifest surface
+    # (unscannable = the manifest did not parse; partial = resource resolution was
+    # incomplete). None is "not recorded" - a pre-field run - never "no".
+    manifest_parsed: bool | None = None,
+    manifest_resources_complete: bool | None = None,
     regenerated_from_stored_data: bool = False,
 ) -> Path:
     output_dir = Path(output_dir) / apk_hash
@@ -780,6 +802,8 @@ def generate_report(
         packed_native_libs=packed_native_libs,
         js_binary_bundle=js_binary_bundle,
         js_asset_surface_extracted=js_asset_surface_extracted,
+        manifest_parsed=manifest_parsed,
+        manifest_resources_complete=manifest_resources_complete,
         regenerated_from_stored_data=regenerated_from_stored_data,
         forced_dynamic=forced_dynamic,
         forced_dynamic_static_verdict=(

@@ -119,7 +119,18 @@ def test_the_report_states_the_corpus_it_ran_against(tmp_path):
         classification=_classification(), verification=None, correlation=None,
         stage_results=[], output_dir=tmp_path, signature_corpus=corpus,
     )
-    assert f"**Signature corpus:** `{corpus}`" in report_path.read_text(encoding="utf-8")
+    content = report_path.read_text(encoding="utf-8")
+    assert f"**Signature corpus:** `{corpus}`" in content
+    # Scope, not just value. The hash covers the YAML set, and detection patterns
+    # also live in hermes.py's JS idiom lists (they emit evidence carrying real
+    # signature ids), so a 64-character digest under a bare heading reads as "all
+    # the rules" when it is one of two corpora. ADR-0022 records the asymmetry;
+    # the reader of a report never sees the ADR.
+    assert "the four YAML files under `config/signatures/` only" in content
+    # And the methodology paragraph must name the second corpus too - it used to
+    # say detection matches "a hand-authored, versioned signature set
+    # (`config/signatures/`)", which reads as the definition of the method.
+    assert "compiled into `src/static/hermes.py`" in content
 
 
 def test_a_run_without_a_recorded_corpus_says_so_and_never_renders_blank(tmp_path):

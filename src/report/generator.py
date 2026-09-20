@@ -98,7 +98,7 @@ TEMPLATE = _env.from_string("""\
 **Generated:** {{ timestamp }}
 **Analysis code:** {{ git_commit or "unknown" }}
 {% if signature_corpus -%}
-**Signature corpus:** `{{ signature_corpus }}`
+**Signature corpus:** `{{ signature_corpus }}` (the four YAML files under `config/signatures/` only - the JS idioms compiled into `src/static/hermes.py` are code, so they are covered by the Analysis-code line above, not by this hash)
 {% else -%}
 **Signature corpus:** not recorded for this run - it predates ADR-0022, which is the only way a stored run can lack one: every run saved since records a fingerprint of the corpus it loaded, so this absence is a date, not a derivation that failed. It is deliberately not backfilled: 183 of the stored runs were analysed from a dirty working tree, whose rule set is not recoverable from its commit, and a number derived from one would be a plausible value standing in for an unobserved one.
 {% endif %}
@@ -628,7 +628,7 @@ No traffic was captured ({{ capture_reason or "reason not recorded" }}).{% if ca
 
 This report is produced by a deterministic, signature-based pipeline (ADR-0001) - no AI/LLM component decides whether root-detection or SSL-pinning is present (ADR-0003).
 
-**Static detection is signature-based.** Root-detection and SSL-pinning are identified by matching decompiled sources/resources against a hand-authored, versioned signature set (`config/signatures/`). A detection-shaped indicator that matches no known pattern is not silently dropped: it is surfaced in the Decision line as **Coverage-limited (unknown, not absent)** and a NEITHER in that case is a lower bound, not a confident negative. The genuinely structural residual is only that a technique leaving no detection-shaped evidence at all (nothing for a signature to match) cannot be enumerated - we cannot list what we never see. This is structural, not specific to this run.
+**Static detection is signature-based.** Root-detection and SSL-pinning are identified by matching decompiled sources/resources against a hand-authored, versioned signature set (`config/signatures/`), together with the JS idiom lists compiled into `src/static/hermes.py` for Hermes and React-Native bundles - a second corpus that lives in code rather than in that set, and so is covered by the Analysis-code line rather than by the Signature corpus hash above. A detection-shaped indicator that matches no known pattern is not silently dropped: it is surfaced in the Decision line as **Coverage-limited (unknown, not absent)** and a NEITHER in that case is a lower bound, not a confident negative. The genuinely structural residual is only that a technique leaving no detection-shaped evidence at all (nothing for a signature to match) cannot be enumerated - we cannot list what we never see. This is structural, not specific to this run.
 
 **Decompilation is not guaranteed to succeed.** jadx has failed outright on some real-world APKs tested against this pipeline - F-Droid, Root Checker, and the Nexus Launcher system app all failed to decompile - and larger/heavily-obfuscated production apps typically only partial-decompile rather than failing cleanly (e.g. PropertyGuru, 151MB React Native, exits with status 1 after producing ~27,720 source files). The partial-output-tolerance path keeps whatever jadx did produce instead of discarding it, but a partial run is a lower bound, not a definitive scan. See `docs/execution_changes/phase-1-changes-and-lessons.md`.
 

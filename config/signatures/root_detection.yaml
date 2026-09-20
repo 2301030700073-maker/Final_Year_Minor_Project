@@ -558,6 +558,23 @@
     - "checkSELinuxAccess"
   evidence_type: bytecode_string
 
+# The SELinux *enforce node* read - the state check, not the API query above. The
+# node holds "0" when SELinux is permissive, i.e. tampered. Verified in a real
+# APK (com.facebook.katana, classes14.dex string pool, read straight from the
+# .dex): the node is read twice and the method returns true when its first line
+# equals "0", then falls through to ro.debuggable / ro.secure, which
+# build_props_probe already covers - so the method is root detection and this was
+# the one line in it with no rule. A full, structurally-unlikely path, therefore
+# more specific than a generic SELinux API name; still corroborative at 0.3,
+# since hardening and MDM code read the same node.
+- id: selinux_enforce_node_read
+  category: root
+  weight: 0.3
+  pattern_type: string_literal
+  patterns:
+    - "/sys/fs/selinux/enforce"
+  evidence_type: bytecode_string
+
 # --- Xposed / LSPosed / Riru / module-framework era (2026, web-grounded) ---
 # The 2026 detection surface moved beyond the su binary to framework/module
 # injection: Xposed, LSPosed (the modern Xposed for Magisk/Zygisk), Riru (Zygote
@@ -860,13 +877,18 @@
   evidence_type: bytecode_string
 
 # A remounted rw /system is a classic post-root indicator; modern apps parse
-# /proc/mounts / mount output for it.
+# /proc/mounts / mount output for it. Both spellings are carried because the
+# native analog (native_proc_mounts_check) lists both and only this java half was
+# missing "/proc/self/mounts" - verified as a real string constant in
+# com.facebook.katana's classes14.dex (strings -a on the .dex, not via jadx), in a
+# method that then reads ro.debuggable / ro.secure.
 - id: rw_system_mount_check
   category: root
   weight: 0.2
   pattern_type: regex
   patterns:
     - "/proc/mounts"
+    - "/proc/self/mounts"
     - "SystemMount"
     - "isSystemRW"
   evidence_type: bytecode_string

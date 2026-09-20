@@ -103,6 +103,15 @@ def main() -> int:
         if meta["native"] == "fully_analyzed" and failures:
             flag = "  <-- STORED CLAIM IS UNEARNED, RE-RUN"
             stale.append(sha)
+        elif meta["native"] != "fully_analyzed" and not failures:
+            # The one direction that is NOT a finding, and the only line on screen
+            # that says so. This column is the body-sweep gate alone: a library can
+            # be held at `partial` by a cause the sweep does not model (a scan error,
+            # or a coverage rule outside it). Real output on 2026-09-20 printed 90
+            # extracted .so beside stored=partial (com.allproperty.android.consumer
+            # .my), which reads as the pipeline's own verdict having been wrong - the
+            # docstring explained the pairing and the console did not.
+            flag = "  <-- gate is the body-sweep alone; NOT a finding"
         print(f"{sha[:13]} {str(meta['pkg'])[:38]:39} {ts[:19]}  stored={meta['native']!s:16} "
               f"gate={verdict:18} libs={len(libs):4}{flag}")
         for _, why in failures[:6]:

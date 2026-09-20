@@ -112,3 +112,48 @@ def test_a_gate_refusal_still_flags_the_stored_claim(tmp_path, monkeypatch):
     # pairing (com.whatsapp, 16 extracted .so).
     assert "gate=NOT fully_analyzed" in out, out
     assert "now=" not in out, out
+
+
+def _one_decodable_lib(mod, sha: str) -> None:
+    """A run with an extracted lib the gate will pass. The decoder is stubbed by the
+    caller: the sweep itself is exercised elsewhere, and what these two tests are
+    about is the text printed beside its verdict."""
+    so = mod.ANALYSIS / sha / "native" / "arm64-v8a" / "libapp.so"
+    so.parent.mkdir(parents=True)
+    so.write_bytes(b"\x7fELF (contents are the stub's business)")
+
+
+def test_a_gate_pass_over_a_stored_partial_is_labelled_not_a_finding(tmp_path, monkeypatch):
+    """Real output on 2026-09-20 printed this pairing (com.allproperty.android.
+    consumer.my, 90 extracted .so): stored=partial beside gate=fully_analyzed. The
+    column is the body-sweep gate ALONE, so its pass does not make the pipeline's
+    `partial` wrong - a scan error or a rule outside the sweep can hold a library
+    there. The docstring says as much and the console said nothing, which is the
+    reader's only channel."""
+    sha = "d" * 64
+    mod = _load(tmp_path, [(sha, "partial")])
+    _one_decodable_lib(mod, sha)
+    monkeypatch.setattr(mod, "_recover_body_calls", lambda _p: (True, [("a", "b")]))
+
+    out = _run(mod, monkeypatch)
+
+    assert "gate=fully_analyzed" in out, out
+    assert "NOT a finding" in out, out
+    assert "UNEARNED" not in out, out
+    assert "Re-run required" not in out, out
+
+
+def test_a_confirmed_claim_does_not_get_the_not_a_finding_label(tmp_path, monkeypatch):
+    """The control for the label above: a stored `fully_analyzed` the gate agrees
+    with is a confirmation, and must not be annotated as a non-finding - the label
+    would then say nothing about which row a reader should act on."""
+    sha = "e" * 64
+    mod = _load(tmp_path, [(sha, "fully_analyzed")])
+    _one_decodable_lib(mod, sha)
+    monkeypatch.setattr(mod, "_recover_body_calls", lambda _p: (True, [("a", "b")]))
+
+    out = _run(mod, monkeypatch)
+
+    assert "gate=fully_analyzed" in out, out
+    assert "NOT a finding" not in out, out
+    assert "UNEARNED" not in out, out

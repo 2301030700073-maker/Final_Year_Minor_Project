@@ -51,8 +51,13 @@ def latest_runs() -> list[tuple[str, str, dict]]:
     con = sqlite3.connect(DB)
     out = []
     for sha, ts in con.execute("select apk_sha256, max(timestamp) from runs group by apk_sha256"):
+        # ORDER BY rowid pins "the latest of the runs sharing this second": the
+        # timestamp is second-granular, so a retry inside the same second leaves two
+        # rows, and [-1] over an unordered result picks between them by whatever
+        # order SQLite happened to return rather than by which ran last.
         row = con.execute(
-            "select coverage, package_name from runs where apk_sha256=? and timestamp=?", (sha, ts)
+            "select coverage, package_name from runs where apk_sha256=? and timestamp=?"
+            " order by rowid", (sha, ts)
         ).fetchall()[-1]
         cov = json.loads(row[0]) if row[0] else {}
         out.append((sha, ts, {"pkg": row[1], "native": cov.get("native"), "cov": cov}))
@@ -121,7 +126,11 @@ def main() -> int:
         for sha in stale:
             print(f"  {sha}")
     else:
-        print("No stored native=fully_analyzed claim is refused by the current gate.")
+        # Scoped to what was actually measured: when the NOT-RE-MEASURABLE block above
+        # is non-empty, an unqualified all-clear quantifies over stored claims this
+        # script could not open - the exact false-absence shape it exists to catch.
+        print("No stored native=fully_analyzed claim is refused by the current gate "
+              "among the runs it could re-measure above.")
     return 0
 
 

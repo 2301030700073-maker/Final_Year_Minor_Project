@@ -29,6 +29,44 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BUNDLE_ROOT = REPO_ROOT / "docs" / "plans" / "handoff" / "bundles"
 
+# The directories that hold the code under test. The pipeline answers "is the
+# code committed?" with a path-limited check for exactly this reason (see cli.py's
+# dirty stamp): a new module in src/, a signature YAML in config/ or an edit under
+# scripts/ runs while `git diff HEAD` reports a clean tree, so the untracked half
+# is checked - but ONLY there. This bundle ships the report whose provenance stamp
+# that is, so the two must judge the same tree the same way; a blunt
+# `git status --porcelain` counted every artifact this repo always carries
+# (outputs/, bundles, run_logs/, editor dirs) and printed "uncommitted changes
+# present" for a fully committed tree - contradicting the report in the same
+# bundle. The raw porcelain output, junk and all, is still shipped in
+# environment.json: this narrows the CLAIM, it hides nothing.
+CODE_PATHSPEC = ("src", "config", "scripts")
+
+
+def working_tree_dirty(repo_root: Path = REPO_ROOT) -> bool | None:
+    """Whether the code under test differs from HEAD. None when git cannot say.
+
+    Returns None rather than False for a directory that is not a repo (or a
+    missing git binary): "I could not measure this" is not "the tree is clean",
+    and the summary renders it as unknown instead of claiming either."""
+    try:
+        tracked = subprocess.run(
+            ["git", "diff", "HEAD", "--quiet"], cwd=repo_root, capture_output=True
+        )
+    except (FileNotFoundError, OSError):
+        return None
+    if tracked.returncode not in (0, 1):  # 128 = not a repo / no HEAD yet
+        return None
+    if tracked.returncode == 1:
+        return True
+    untracked = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", *CODE_PATHSPEC],
+        cwd=repo_root, capture_output=True, text=True,
+    )
+    if untracked.returncode != 0:
+        return None
+    return any(line.startswith("??") for line in (untracked.stdout or "").splitlines())
+
 
 def _sha256_of(path: Path) -> str:
     digest = hashlib.sha256()
@@ -103,6 +141,10 @@ def collect_environment() -> dict:
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "git_commit": _run(["git", "rev-parse", "HEAD"]),
         "git_status_porcelain": _run(["git", "status", "--porcelain"]),
+        # The path-limited judgement (see CODE_PATHSPEC) that the SUMMARY states,
+        # kept beside the raw porcelain above so the narrow claim never replaces
+        # the full picture - the reader can always see the artifacts it excludes.
+        "working_tree_dirty_code": working_tree_dirty(),
         "python_version": _run([sys.executable, "--version"]),
         "uv_version": _run(["uv", "--version"]),
         "tool_versions": {
@@ -178,9 +220,23 @@ def export_calibration_snapshot(bundle_dir: Path) -> None:
 
 def write_summary(bundle_dir: Path, environment: dict, test_result: dict, pipeline_result: dict | None) -> None:
     lines = ["# Verification Bundle Summary", "", f"Generated: {environment['timestamp_utc']}", ""]
-    lines.append(f"Git commit tested: `{environment['git_commit']['stdout'].strip()}`")
-    dirty = bool(environment["git_status_porcelain"]["stdout"].strip())
-    lines.append(f"Working tree clean: {'no - uncommitted changes present' if dirty else 'yes'}")
+    head = environment["git_commit"]["stdout"].strip()
+    lines.append(
+        f"Git commit tested: `{head}`" if head
+        else "- Git commit tested: **unavailable** (git not found, or not a repository) - "
+             "the run below is therefore not bound to a commit"
+    )
+    dirty = environment.get("working_tree_dirty_code")
+    state = {
+        False: "yes",
+        True: "no - uncommitted changes under src/, config/ or scripts/",
+        None: "unknown - git could not answer (see environment.json)",
+    }[dirty]
+    lines.append(f"Working tree clean (code under src/, config/, scripts/): {state}")
+    lines.append(
+        "- Untracked artifacts elsewhere in the tree are listed in environment.json "
+        "and are not counted here - they are not the code under test."
+    )
     lines.append("")
     lines.append("## Tool versions")
     for name, info in environment["tool_versions"].items():

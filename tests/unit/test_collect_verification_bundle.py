@@ -1,6 +1,9 @@
 import json
+import re
+import subprocess
 import sys
 import time
+from pathlib import Path
 
 import collect_verification_bundle as bundle
 
@@ -147,3 +150,86 @@ def test_find_fresh_report_returns_none_when_reports_root_is_absent(tmp_path):
     from collect_verification_bundle import _find_fresh_report
 
     assert _find_fresh_report("a" * 32, tmp_path / "outputs" / "reports") is None
+
+
+# --- the working-tree claim -------------------------------------------------
+#
+# The SUMMARY tells the collaborator whether the tested commit matches the tree
+# the tests ran against. It answered with a blunt `git status --porcelain`, which
+# counts every untracked artifact (outputs/, run_logs/, editor dirs) this repo
+# always carries - so it printed "no - uncommitted changes present" for a fully
+# committed tree, contradicting the provenance stamp the report in the SAME
+# bundle carries, which is path-limited on purpose (cli.py's dirty stamp) for
+# exactly this reason. These pin the rule; the parity test pins the pathspec.
+
+def _git(cwd, *args):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def _committed_repo(tmp_path):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "bundle@test")
+    _git(tmp_path, "config", "user.name", "bundle test")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "module.py").write_text("x = 1\n", encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "init")
+    return tmp_path
+
+
+def test_untracked_artifacts_outside_the_code_dirs_are_not_a_dirty_tree(tmp_path):
+    repo = _committed_repo(tmp_path)
+    (repo / "outputs" / "reports").mkdir(parents=True)
+    (repo / "outputs" / "reports" / "r.md").write_text("r", encoding="utf-8")
+    (repo / "run_logs").mkdir()
+    (repo / "run_logs" / "run.log").write_text("l", encoding="utf-8")
+    assert bundle.working_tree_dirty(repo) is False, (
+        "artifacts this repo always carries must not read as uncommitted code"
+    )
+
+
+def test_an_untracked_file_under_a_code_dir_is_dirty(tmp_path):
+    repo = _committed_repo(tmp_path)
+    (repo / "src" / "new_module.py").write_text("y = 2\n", encoding="utf-8")
+    assert bundle.working_tree_dirty(repo) is True
+
+
+def test_an_edit_to_a_tracked_file_is_dirty(tmp_path):
+    repo = _committed_repo(tmp_path)
+    (repo / "src" / "module.py").write_text("x = 999\n", encoding="utf-8")
+    assert bundle.working_tree_dirty(repo) is True
+
+
+def test_a_directory_that_is_not_a_repo_reads_as_unknown_not_clean(tmp_path):
+    assert bundle.working_tree_dirty(tmp_path) is None, (
+        "git failing to answer is not evidence that the tree is clean"
+    )
+
+
+def test_the_pathspec_matches_the_pipelines_own_dirty_stamp():
+    """The bundle must not disagree with the report it ships about the same tree."""
+    cli = (Path(__file__).resolve().parents[2] / "src" / "cli.py").read_text(encoding="utf-8")
+    m = re.search(r'"--porcelain"[^)]*?"--",\s*((?:"[a-z_]+",?\s*)+)', cli, re.S)
+    assert m, "the pipeline's path-limited dirty check moved - update this guard"
+    assert tuple(re.findall(r'"([a-z_]+)"', m.group(1))) == bundle.CODE_PATHSPEC
+
+
+def test_the_summary_states_the_code_dirty_state_and_never_guesses_it(tmp_path):
+    """"clean" is a measurement; git being unavailable is a third state, not "yes"."""
+    lines = {}
+    for value, expected in ((False, "yes"), (True, "no"), (None, "unknown")):
+        env = {
+            "timestamp_utc": "2026-01-01T00:00:00+00:00",
+            "git_commit": {"found": True, "stdout": "abc123\n", "exit_code": 0},
+            "git_status_porcelain": {"found": True, "stdout": "?? junk\n", "exit_code": 0},
+            "working_tree_dirty_code": value,
+            "tool_versions": {},
+            "adb_devices": {"exit_code": 0},
+            "frida_ps_dash_U": {"exit_code": 0},
+        }
+        bundle.write_summary(tmp_path, env, {"exit_code": 0}, None)
+        text = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
+        line = [ln for ln in text.splitlines() if ln.startswith("Working tree")][0]
+        assert expected in line, (value, line)
+        lines[value] = line
+    assert "src" in lines[False], "the claim must name what it measured"

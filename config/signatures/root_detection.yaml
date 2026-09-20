@@ -805,6 +805,13 @@
 # while removing both measured false firings. The 11 literals below are the
 # emulator-only values this signature is named for.
 #
+# The runtime counterpart is untouched and stays: synthesizer.py's
+# `emulator_detection` ROOT_RECIPE scrubs HARDWARE/PRODUCT/DEVICE/BOARD/MODEL/
+# FINGERPRINT/MANUFACTURER only when the live value already contains an emulator
+# marker. That is precisely the discrimination a substring match cannot make -
+# the hook sees the VALUE and acts on it; the pattern list only ever saw the
+# field name. Do not "restore" `Build.HARDWARE` here to match the recipe.
+#
 # EMU-RECALL1 - the five literals below were missing, and their absence produced
 # a MEASURED false negative rather than a theoretical one. InsecureBankv2
 # (ground truth root: true) carries a real app-owned `checkIfDeviceIsEmulator()`

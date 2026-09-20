@@ -200,6 +200,10 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
             # run carried none.
             coverage_causes=run_data.get("coverage_causes"),
             git_commit=run_data.get("git_commit"),
+            # ADR-0022: the corpus identity, written as recorded. None is a real
+            # value here (a run that predates the field), so it is stored as NULL
+            # rather than re-derived - there is nothing to re-derive it from.
+            signature_corpus=run_data.get("signature_corpus"),
             target=run_data.get("target"),
             package_name=run_data.get("package_name"),
             # Item 1: surface the bundled-SDK qualifier on the denormalized row

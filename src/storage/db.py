@@ -115,6 +115,12 @@ class RunRecord(Base):
     coverage_causes: Mapped[dict | None] = mapped_column(JSON)
 
     git_commit: Mapped[str | None] = mapped_column(String)
+    # ADR-0022: a fingerprint of the signature corpus this run loaded, so the rule
+    # set behind a verdict is a lookup rather than a reconstruction. NULL on the
+    # runs that predate it - deliberately never backfilled, because 183 of them ran
+    # from a dirty working tree whose YAML is not recoverable from the commit, and a
+    # derived value would be a plausible number standing in for an unobserved one.
+    signature_corpus: Mapped[str | None] = mapped_column(String)
     target: Mapped[str | None] = mapped_column(String)
     # Authoritative app identity, denormalized from apks.package_name so a run
     # row carries it without the join. `target` above is an operator-supplied

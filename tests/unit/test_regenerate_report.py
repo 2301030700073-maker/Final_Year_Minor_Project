@@ -59,6 +59,11 @@ def _run(coverage_causes):
         correlation_skip_reason=None,
         manifest_json=None,
         coverage=dict(COVERAGE),
+        # ADR-0022: a run stored before the field. _regenerate_report reads this
+        # attribute directly rather than via getattr, so the double has to carry it -
+        # and it must be the real column name, so a rename breaks this loudly here
+        # rather than silently rendering "not recorded" for a run that recorded one.
+        signature_corpus=None,
     )
 
 

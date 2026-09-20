@@ -44,7 +44,7 @@ RUN_STATUS_FILENAME = "run_status.json"
 # Identity fields copied from the caller at start. Kept as a tuple so the
 # recorder and any reader agree on what an identity is, and so a field added here
 # shows up in both without a second edit.
-IDENTITY_FIELDS = ("run_id", "apk_hash", "package_name", "target", "action", "operator", "justification", "git_commit")
+IDENTITY_FIELDS = ("run_id", "apk_hash", "package_name", "target", "action", "operator", "justification", "git_commit", "signature_corpus")
 
 
 def run_status_path(analysis_root: Path | str, apk_hash: str) -> Path:

@@ -112,7 +112,7 @@ from static.native import (
 )
 from static.obfuscation import detect_obfuscation_level
 from static.packers import detect_packers, load_packer_signatures
-from static.signatures import load_signatures, scan
+from static.signatures import corpus_fingerprint, load_signatures, scan
 from static.stringrecover import match_recovered_strings, recover_hidden_strings
 from storage.results import existing_metadata, load_runs_for_calibration, save_metadata, save_run
 from storage.run_status import RunStatusRecorder, read_run_status, run_is_alive
@@ -131,6 +131,19 @@ console = Console()
 # input.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_ROOT = PROJECT_ROOT / "config"
+
+# ADR-0022: the detection corpus is one named set of files, listed here and
+# nowhere else. Every loader call site reads its path out of this mapping, and a
+# run records a fingerprint of exactly these bytes. Both halves matter: a glob
+# over the directory would silently include a stray file and produce a hash no
+# run could reproduce, and a fifth corpus file loaded from a path written inline
+# somewhere would be invisible to the hash entirely.
+SIGNATURE_CORPUS: dict[str, Path] = {
+    "root_detection": CONFIG_ROOT / "signatures" / "root_detection.yaml",
+    "ssl_pinning": CONFIG_ROOT / "signatures" / "ssl_pinning.yaml",
+    "native_detection": CONFIG_ROOT / "signatures" / "native_detection.yaml",
+    "packers": CONFIG_ROOT / "signatures" / "packers.yaml",
+}
 
 OUTPUTS_ROOT = Path("outputs")
 ANALYSIS_ROOT = OUTPUTS_ROOT / "analysis"
@@ -308,7 +321,7 @@ def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
     # overlap a signature pattern gets its bodies decompiled even with no Java_*
     # export (closing the stripped-non-JNI blind spot). The trigger set is the
     # union of every pattern - self-maintaining as signatures are added.
-    signatures = load_native_signatures(CONFIG_ROOT / "signatures" / "native_detection.yaml")
+    signatures = load_native_signatures(SIGNATURE_CORPUS["native_detection"])
     triggers = security_triggers(signatures)
     libraries = []
     errors: list[str] = []
@@ -1444,6 +1457,11 @@ def run(
 
     run_id = uuid.uuid4().hex
     git_commit = _git_commit_hash()
+    # ADR-0022: the corpus identity, resolved beside the code identity and for the
+    # same reason - the run is about to acquire a record and both facts describe
+    # what it is analysing. Taken before any of the corpus is loaded, which is what
+    # makes the recorded value the corpus the run started with.
+    signature_corpus = corpus_fingerprint(SIGNATURE_CORPUS.values())
     operator = _operator_identity()
 
     # --- auth gate (M3): validate the justification BEFORE any real analysis ---
@@ -1652,6 +1670,7 @@ def run(
             "operator": operator,
             "justification": justification,
             "git_commit": git_commit,
+            "signature_corpus": signature_corpus,
         },
     )
     _RUN_STATUS.start()
@@ -1692,10 +1711,10 @@ def run(
     # cannot tell which signature corpus each loaded. Name them per-corpus so
     # the table is unambiguous (root vs ssl signature set).
     root_sig_stage, root_signatures = _wrap_stage(
-        "signature_load:root", load_signatures, CONFIG_ROOT / "signatures" / "root_detection.yaml"
+        "signature_load:root", load_signatures, SIGNATURE_CORPUS["root_detection"]
     )
     ssl_sig_stage, ssl_signatures = _wrap_stage(
-        "signature_load:ssl", load_signatures, CONFIG_ROOT / "signatures" / "ssl_pinning.yaml"
+        "signature_load:ssl", load_signatures, SIGNATURE_CORPUS["ssl_pinning"]
     )
     stage_results.append(root_sig_stage)
     stage_results.append(ssl_sig_stage)
@@ -2005,7 +2024,7 @@ def run(
     # whenever the DEX is not fully readable. androguard absence/unreadability
     # degrades to a note, not a halt (enhancement source, like the androguard
     # DEX scan).
-    packer_signatures = load_packer_signatures(CONFIG_ROOT / "signatures" / "packers.yaml")
+    packer_signatures = load_packer_signatures(SIGNATURE_CORPUS["packers"])
     packer_stage, packer_findings = _wrap_stage(
         "packers", detect_packers, apk, packer_signatures
     )
@@ -3090,6 +3109,7 @@ def run(
         output_dir=REPORTS_ROOT,
         manifest=manifest_info if manifest_stage.status == "success" else None,
         git_commit=git_commit,
+        signature_corpus=signature_corpus,
         coverage=coverage_map,
         obfuscation_level=obfuscation_level,
         operator=operator,
@@ -3115,6 +3135,7 @@ def run(
             "dynamic_skip_reason": dynamic_skip_reason,
             "stage_results": stage_results,
             "git_commit": git_commit,
+            "signature_corpus": signature_corpus,
             "target": target,
             "package_name": package_name,
             "coverage": coverage_map,
@@ -3566,6 +3587,12 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         correlation_skip_reason=run.correlation_skip_reason,
         manifest=_manifest_from_json(run.manifest_json),
         git_commit=rendering_commit,
+        # ADR-0022: read from the record, never re-derived. Unlike the line above -
+        # deliberately the RENDERING commit, since that is the code that produced
+        # this file - the corpus is the rule set the ANALYSIS ran under, and the
+        # record is the only place it survives. None is the honest "not recorded
+        # for this run", which the template renders as such rather than as blank.
+        signature_corpus=run.signature_corpus,
         coverage=run.coverage,
         obfuscation_level=run.obfuscation_level,
         jni_bindings=causes.get("jni_bindings"),

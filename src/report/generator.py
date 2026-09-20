@@ -97,6 +97,11 @@ TEMPLATE = _env.from_string("""\
 **Run ID:** {{ run_id }}
 **Generated:** {{ timestamp }}
 **Analysis code:** {{ git_commit or "unknown" }}
+{% if signature_corpus -%}
+**Signature corpus:** `{{ signature_corpus }}`
+{% else -%}
+**Signature corpus:** not recorded for this run - either it predates ADR-0022, or its corpus was not derived. It is deliberately not backfilled: 183 of the stored runs were analysed from a dirty working tree, whose rule set is not recoverable from its commit, and a number derived from one would be a plausible value standing in for an unobserved one.
+{% endif %}
 {% if operator or justification -%}
 **Authorized by:** {{ operator or "unknown" }} (justification: {{ justification or "not stated" }})
 {% endif %}
@@ -766,6 +771,11 @@ def generate_report(
     correlation_skip_reason: str | None = None,
     manifest: ManifestInfo | None = None,
     git_commit: str | None = None,
+    # ADR-0022: the rule corpus the ANALYSIS ran against - not the one rendering
+    # this file. Unlike git_commit above (which a regeneration deliberately resets
+    # to the rendering commit), this is always read from the run's own record: it is
+    # the fact that is unrecoverable if the report does not carry it.
+    signature_corpus: str | None = None,
     coverage: dict | None = None,
     obfuscation_level: str | None = None,
     operator: str | None = None,
@@ -818,6 +828,7 @@ def generate_report(
         run_id=run_id,
         timestamp=timestamp,
         git_commit=git_commit,
+        signature_corpus=signature_corpus,
         metadata=_as_attrdict(metadata),
         classification=classification,
         verification=verification,

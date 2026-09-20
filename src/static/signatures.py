@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import sqlite3
 import time
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -201,6 +203,40 @@ def _validate_signature_entry(entry: dict, path: Path) -> None:
                     f"{path}: signature '{sig_id}' has an invalid regex pattern "
                     f"{pattern!r} - {exc}"
                 ) from exc
+
+
+def corpus_fingerprint(paths: Iterable[Path]) -> str:
+    """A content fingerprint of a rule corpus - the identity a run records for
+    the rules it was analysed against (ADR-0022).
+
+    SHA-256 over each file's name and bytes, in name order. The name is included
+    so a rename moves the hash as much as an edit does: the corpus's identity is
+    the set of files and their contents, not the concatenation of some bytes.
+
+    Taken once, before the corpus is loaded. A file edited while a run is in
+    flight is therefore fingerprinted at its pre-run bytes - which is what "the
+    corpus this run used" has to mean when four files are read at four different
+    moments and there is no way to hash and load them atomically as a set.
+
+    A missing path RAISES rather than being skipped. Fingerprinting the subset
+    that happens to exist would name a rule set no run ever loaded, which is the
+    silent-substitution failure this project forbids (Principle 3).
+    """
+    digest = hashlib.sha256()
+    for path in sorted(paths, key=lambda p: p.name):
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            raise FileNotFoundError(
+                f"signature corpus file is not readable: {path} ({exc}) - refusing to "
+                "fingerprint a partial corpus, which would name a rule set the run "
+                "never loaded"
+            ) from exc
+        digest.update(path.name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(data)
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def load_signatures(path: Path) -> list[Signature]:

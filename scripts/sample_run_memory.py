@@ -19,6 +19,14 @@ rss_tree_kb (it plus every descendant), cpu_s_tree, n_procs, state. A sample
 taken while no run is in flight writes pid "-" and zeroes, so a gap in the run's
 coverage is visible as a gap in the file rather than as a missing row.
 
+Lifecycle: it waits for a run to appear, samples it, and stops GRACE_SAMPLES
+intervals after that run exits - so an invocation ends with the run it was
+started for instead of appending `no-run` rows forever. An instance started and
+then abandoned before any run appears keeps waiting, and it still holds the
+output file; a second start against that same file is therefore refused loudly,
+naming the pids already writing it, rather than silently interleaving a second
+row onto every timestamp.
+
 Usage: sample_run_memory.py [out.tsv] [interval_seconds]
 """
 from __future__ import annotations
@@ -120,24 +128,94 @@ def summarize(table: dict[int, tuple[int, int, int, str]], pid: int) -> tuple[in
     return parent[1], rss_tree, cpu_tree, len(tree), parent[3]
 
 
+SCRIPT_NAME = Path(__file__).name  # this file, as /proc shows it in a cmdline
+GRACE_SAMPLES = 3
+
+
+def _cmdline_of(pid: int) -> list[str]:
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return []
+    return [tok for tok in raw.decode("utf-8", "replace").split("\0") if tok]
+
+
+def _ancestors(pid: int, table: dict[int, tuple[int, int, int, str]]) -> set[int]:
+    """This process and every parent above it. `uv run python <this script>` makes
+    the uv wrapper our PARENT carrying the same argv - it is the same invocation,
+    not a rival writer, and counting it would refuse every documented start."""
+    chain: set[int] = set()
+    while pid in table and pid not in chain:
+        chain.add(pid)
+        pid = table[pid][0]
+    return chain
+
+
+def sibling_writers(out: Path, table=None, cmdline=None) -> list[int]:
+    """Other live processes sampling into the SAME file.
+
+    Two writers interleave two rows onto every timestamp, so the header's "one row
+    per sample" stops being true and a reader cannot tell a doubled curve from a
+    sampling fault - the record is quietly wrong in exactly the case it exists to
+    settle (ADR-0021). Detected from argv rather than a lock file so an instance
+    started from another terminal is caught too, which is how a leftover from an
+    earlier run is found."""
+    table = _proc_table() if table is None else table
+    cmdline = _cmdline_of if cmdline is None else cmdline
+    mine = _ancestors(os.getpid(), table)
+    hits = []
+    for pid in table:
+        if pid in mine:
+            continue
+        argv = cmdline(pid)
+        if any(tok.endswith(SCRIPT_NAME) for tok in argv) and str(out) in argv:
+            hits.append(pid)
+    return sorted(hits)
+
+
 def main() -> int:
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "run_logs/run_memory.tsv")
     interval = float(sys.argv[2]) if len(sys.argv) > 2 else 20.0
+    siblings = sibling_writers(out)
+    if siblings:
+        pids = " ".join(str(p) for p in siblings)
+        print(
+            f"refusing to sample into {out}: {pids} already writing it. Two writers put "
+            f"two rows on every timestamp and the file stops meaning what its header says. "
+            f"Kill {'it' if len(siblings) == 1 else 'them'} first: kill {pids}",
+            file=sys.stderr,
+        )
+        return 1
     out.parent.mkdir(parents=True, exist_ok=True)
     if not out.exists():
         out.write_text(
             "utc\tpid\trss_kb\trss_tree_kb\tcpu_s_tree\tn_procs\tstate\n", encoding="utf-8"
         )
+    seen_run = False
+    idle_streak = 0
     while True:
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         pid = find_run()
         if pid is None:
             row = f"{stamp}\t-\t0\t0\t0.0\t0\tno-run"
+            if seen_run:
+                idle_streak += 1
         else:
             rss, rss_tree, cpu_tree, n_procs, state = summarize(_proc_table(), pid)
             row = f"{stamp}\t{pid}\t{rss}\t{rss_tree}\t{cpu_tree:.1f}\t{n_procs}\t{state}"
+            seen_run = True
+            idle_streak = 0
         with out.open("a", encoding="utf-8") as fh:
             fh.write(row + "\n")
+        if idle_streak >= GRACE_SAMPLES:
+            # Measured 2026-09-20: this loop had no exit at all, so every invocation
+            # left a writer appending `no-run` rows forever, and four of them ended up
+            # interleaved on one run's file. It now ends with the run it was started for.
+            print(
+                f"the run exited and stayed gone for {GRACE_SAMPLES} samples - stopping; "
+                f"{out} covers that run."
+            )
+            return 0
         time.sleep(interval)
 
 

@@ -1,11 +1,40 @@
 # Plan: record the signature corpus a run was analysed against (ADR-0022)
 
-Status: implemented 2026-09-20 (`d5d1899f4`). Written 2026-09-20.
+Status: implemented 2026-09-20 (`d5d1899f4`), steps 1-8 complete.
+Written 2026-09-20.
 Decision of record: `docs/plans/adr/0022-a-run-records-the-corpus-it-ran.md`.
 
-Steps 1-6 and 8 are in. Step 7 - the run on the reference environment - has not
-been made yet, so the column and the rendered line are asserted by fixtures
-only; the first real run is what proves the wiring end to end.
+Step 7 ran on the reference environment the same day. The InsecureBankv2 run
+`a4963707…` recorded `6bd43fc72cf8…` in all three surfaces - the `runs` row, the
+`run_status.json` sidecar, and the rendered report - and each equals a fresh
+`corpus_fingerprint` over `config/signatures/` at that moment. That equality is
+the check that matters: it says the recorded value is the corpus the run LOADED,
+not merely one it could have computed.
+
+**Step 7's wording was wrong, and the correction is the useful part.** It said to
+"read one pre-ADR-0022 report and confirm it states the reason rather than a
+blank". Such a report has no such line at all - no template edit can retroactively
+add one to a file already on disk - so there was nothing to read. The sentence
+appears only when an old run is REGENERATED through the current template. Done
+that way instead: `_regenerate_report` against the real `RunRecord` for
+`1650270a…`, with `REPORTS_ROOT` redirected to a temp directory so
+`outputs/reports/` was never touched. That also covered two things the fixtures
+cannot - the stored NULL read off a real ORM row rather than a `SimpleNamespace`
+double, and the audit-log authorization lookup that SUCCEEDS
+(`tests/unit/test_regenerate_report.py` points at a missing log on purpose, so
+only the *unavailable* branch is asserted there).
+
+### Do not backfill this column with `re-attribute --force`
+
+The temptation will be to run it so the historical reports gain the corpus line.
+It should not be run. `re-attribute` regenerates a report only for rows whose
+attribution CHANGED (the `if changed:` gate in `cli.py`), so a plain run leaves
+the 264 historical reports alone - which is right, because for those runs there
+is genuinely nothing to record. `--force` reaches every row, and regeneration
+deliberately rewrites the `Analysis code:` line to the RENDERING commit: one
+`--force` pass would reset the provenance of every report in the evidence base to
+whatever commit happened to be checked out, buying a "not recorded" line on 264
+historical runs at the cost of the record of which code produced them.
 
 ### Where the implementation departed from this plan
 

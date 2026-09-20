@@ -1,7 +1,35 @@
 # Plan: record the signature corpus a run was analysed against (ADR-0022)
 
-Status: proposed - not implemented. Written 2026-09-20.
+Status: implemented 2026-09-20 (`d5d1899f4`). Written 2026-09-20.
 Decision of record: `docs/plans/adr/0022-a-run-records-the-corpus-it-ran.md`.
+
+Steps 1-6 and 8 are in. Step 7 - the run on the reference environment - has not
+been made yet, so the column and the rendered line are asserted by fixtures
+only; the first real run is what proves the wiring end to end.
+
+### Where the implementation departed from this plan
+
+- **Step 1** takes `Iterable[Path]`, not `Sequence[Path]`, and sorts by file name
+  itself rather than requiring an ordered caller - the one ordering that must
+  hold is the function's business, not a precondition a caller can get wrong.
+- **Step 3** was four insertion points, not one: the recorder's identity dict,
+  `save_payload`, `report_kwargs`, and `_regenerate_report`. Two of those are in
+  `cli.py`'s mid-body and the plan's single-line sketch did not reflect that.
+- **Step 6 turned out to be a no-op as written.** The template-coverage guard
+  derives its variable set from the `render(...)` call's own kwargs, so passing
+  `signature_corpus=` into that call satisfies it with no second edit. The risk
+  the step existed for - an unguarded variable rendering as a silent blank - is
+  handled by the explicit else-branch instead, and asserted directly: the
+  not-recorded report is checked for the sentence AND for the absence of both a
+  blank and a literal `None`.
+- **Work the plan did not foresee.** `tests/unit/test_regenerate_report.py`'s
+  `SimpleNamespace` double had to carry the new column. It was updated rather
+  than making the read `getattr(run, "signature_corpus", None)`, because
+  swallowing a missing column would render "not recorded" for a run that DID
+  record a corpus - a wrong claim in place of a loud break.
+- **Step 8 was 8 rows, not 2.** The suite count and `tests/` LOC moved as
+  expected, but five per-module currency rows in the ledger had also gone stale,
+  one per touched module, plus the `src/` denominator.
 
 ## What is being built
 

@@ -78,3 +78,64 @@ def test_a_successful_capture_still_reports_the_restore(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "[ok] captured 2 decrypted flows" in out, out
     assert "device restored to pass-through internet proxy" in out, out
+
+
+# --- a removal with nothing to remove is the end state, not a failure ---------
+#
+# `reverse --remove tcp:8081` exits nonzero in two states that need opposite
+# reporting: a listener genuinely stuck, and no listener at all. Real output on
+# 2026-09-20 (internet mode, which reverses the pass-through port only) printed
+# `listener 'tcp:8081' not found` - the second state, counted as a failed step and
+# followed by a warning that the device may still route through the Windows
+# proxies, which sends the operator to clear a route that is already gone. Only
+# `adb reverse --list` separates the two.
+
+def _stub_adb(monkeypatch, *, stuck_removes=(), reversed_ports=()):
+    """Answer the teardown's two adb questions by argv: remove this reverse, and list
+    the reverses that exist."""
+    def fake_run(argv, **k):
+        if "reverse" in argv and "--list" in argv:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="".join(f"{ep.SERIAL} tcp:{p} tcp:{p}\n" for p in reversed_ports))
+        if "reverse" in argv and "--remove" in argv:
+            if argv[argv.index("--remove") + 1] in stuck_removes:
+                raise subprocess.CalledProcessError(1, argv)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+
+def test_a_port_that_was_never_reversed_is_not_a_teardown_failure(monkeypatch, capsys):
+    _stub_windows(monkeypatch)
+    _stub_adb(monkeypatch, stuck_removes=(f"tcp:{ep.CAPTURE_PORT}",),
+              reversed_ports=(ep.PASS_PORT,))
+
+    ep.down()  # must not raise: nothing is left undone
+
+    out = capsys.readouterr().out
+    assert f"tcp:{ep.CAPTURE_PORT} was already absent" in out, out
+    assert "teardown incomplete" not in out, out
+    assert "may still" not in out, out
+
+
+def test_a_listener_still_in_the_reverse_list_is_still_a_failure(monkeypatch, capsys):
+    """The control: the measured-absent arm must not swallow a listener that is still
+    there. The list is the only thing that tells them apart, so this arm keeps its
+    exit code - and the third state (adb cannot list at all) stays a failure too,
+    which is the `removed nothing` test above."""
+    _stub_windows(monkeypatch)
+    _stub_adb(monkeypatch, stuck_removes=(f"tcp:{ep.CAPTURE_PORT}",),
+              reversed_ports=(ep.PASS_PORT, ep.CAPTURE_PORT))
+
+    try:
+        ep.down()
+    except SystemExit as exc:
+        assert exc.code == 1, exc.code
+    else:
+        raise AssertionError("a listener still in the reverse list must not exit 0")
+
+    out = capsys.readouterr().out
+    assert "teardown incomplete - 1 device step(s) did not succeed" in out, out
+    assert f"tcp:{ep.CAPTURE_PORT}" in out, out
+    assert "was already absent" not in out, out

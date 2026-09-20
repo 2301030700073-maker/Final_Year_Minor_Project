@@ -82,6 +82,28 @@ def internet() -> None:
           f"no MITM, pinning apps work)")
 
 
+def _reversed_ports(adb: str) -> set[int] | None:
+    """The ports SERIAL currently has reversed, or None if adb could not say.
+
+    Measured rather than inferred from an exit code, because `reverse --remove` exits
+    nonzero in two states that need opposite reporting: a listener genuinely stuck, and
+    no listener at all. Real output on 2026-09-20 printed `listener 'tcp:8081' not
+    found` in internet mode, which reverses the pass-through port only - the second
+    state, where the teardown has nothing left to undo and is already done. Only the
+    reverse list separates them. When adb cannot answer at all (device gone) neither
+    can we, so the step stays a failure rather than being assumed clean.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run([adb, "-s", SERIAL, "reverse", "--list"],
+                             check=True, capture_output=True, text=True, timeout=15).stdout
+    except Exception:
+        return None
+    return {int(tok[4:]) for line in out.splitlines() for tok in line.split()
+            if tok.startswith("tcp:") and tok[4:].isdigit()}
+
+
 def down() -> None:
     import subprocess
     adb = _adb()
@@ -91,11 +113,21 @@ def down() -> None:
     # own docstring promises it fails loudly. Each step records its own outcome and the
     # summary carries them.
     failures: list[str] = []
+    absent: list[int] = []
     for port in (CAPTURE_PORT, PASS_PORT):
         try:
             subprocess.run([adb, "-s", SERIAL, "reverse", "--remove", f"tcp:{port}"],
                            check=True, timeout=15)
         except Exception as exc:
+            # A removal that fails because there was nothing to remove is the end state
+            # this step exists to reach - not a step that "did not succeed". Counting it
+            # as one printed "teardown incomplete" and then warned that the device may
+            # still route through the Windows proxies, sending the operator to clear a
+            # route that does not exist.
+            live = _reversed_ports(adb)
+            if live is not None and port not in live:
+                absent.append(port)
+                continue
             failures.append(f"reverse --remove tcp:{port}: {type(exc).__name__}: {exc}")
     try:
         subprocess.run([adb, "-s", SERIAL, "shell", "settings", "delete", "global",
@@ -107,6 +139,10 @@ def down() -> None:
     # as an exception rather than as a line in the summary.
     mc._stop_windows_mitmdump()
     ptp.stop_windows_passthrough()
+    if absent:
+        ports = ", ".join(f"tcp:{p}" for p in absent)
+        print(f"[ok] {ports} was already absent from `adb reverse --list` - nothing to "
+              f"remove, and no route left through it")
     if failures:
         print(f"[!] teardown incomplete - {len(failures)} device step(s) did not succeed:")
         for f in failures:

@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, "src")
 
-from common import derive_namespace, is_third_party_file  # noqa: E402
+from common import is_third_party_decompiled_file  # noqa: E402
 from static.signatures import _line_matches, load_signatures  # noqa: E402
 
 SIGS = (
@@ -107,6 +107,10 @@ def main() -> None:
     print(f"### sweeping {glob_pattern} under outputs/analysis")
     print("    (the glob is the whole corpus read here: a ZERO below is absent from\n"
           "     THOSE files, not from the APK - DEX/smali and native libs are not read)")
+    print("    (uncovered = unmatched by the two loaded sets, root_detection.yaml and\n"
+          "     ssl_pinning.yaml. native_detection.yaml and packers.yaml are NOT loaded,\n"
+          "     so a hit can still be the java counterpart of a native signature - check\n"
+          "     that before reading this column as 'the project has no rule for this')")
     hits: dict[str, dict] = {
         k: {"total": 0, "app_owned": 0, "uncovered": 0, "uncovered_app_owned": 0,
             "apps": set(), "examples": [], "covered_by": set()}
@@ -128,8 +132,16 @@ def main() -> None:
                 continue
             if not COMBINED.search(text):
                 continue
-            ns = derive_namespace(str(path))
-            third_party = is_third_party_file(ns, pkg)
+            # The product's path-level helper, NOT derive_namespace directly: CFR writes
+            # <analysis>/<sha>/cfr/<pkg>/... with no `sources` marker, so derive_namespace
+            # returns 'outputs.analysis.<sha>.cfr.okhttp3.internal', matches no vendor
+            # prefix, and reads every bundled-SDK file as APP-owned (CFR-NS1, already fixed
+            # in the product at common.namespace_of_decompiled_path). This column is what
+            # the report ranks by, so it has to be the shared definition or nothing - the
+            # first run of this sweep labelled the same class APP under cfr and 3P under
+            # jadx, and inflated app_owned for every candidate by the whole cfr half of the
+            # corpus (201,604 of 411,428 files).
+            third_party = is_third_party_decompiled_file(str(path), pkg)
             for lineno, line in enumerate(text.splitlines(), 1):
                 m = COMBINED.search(line)
                 if not m or not m.lastgroup:

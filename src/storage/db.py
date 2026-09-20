@@ -78,6 +78,10 @@ class RunRecord(Base):
     ssl_detected: Mapped[bool | None] = mapped_column(Boolean, index=True)
 
     dynamic_status: Mapped[str | None] = mapped_column(String)  # success/failed/skipped
+    # Written under the live path's status gate: only a `skipped` stage yields a
+    # reason, so a failed dynamic setup stores NULL here (its cause is the stage's
+    # `error`, rendered in the Stage Results table) and the column means what the
+    # comment at correlation_skip_reason says - dynamic never ran.
     dynamic_skip_reason: Mapped[str | None] = mapped_column(String)
     root_bypassed: Mapped[bool | None] = mapped_column(Boolean, index=True)
     ssl_bypassed: Mapped[bool | None] = mapped_column(Boolean, index=True)

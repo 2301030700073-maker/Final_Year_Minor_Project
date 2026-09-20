@@ -3109,6 +3109,10 @@ def run(
             "verification": verification,
             "correlation": correlation_result,
             "correlation_skip_reason": correlation_skip_reason,
+            # The GATED value (None unless the stage was skipped), not something
+            # storage re-derives from the stage's evidence - the failure path
+            # records a reason too, and the column means "dynamic never ran".
+            "dynamic_skip_reason": dynamic_skip_reason,
             "stage_results": stage_results,
             "git_commit": git_commit,
             "target": target,

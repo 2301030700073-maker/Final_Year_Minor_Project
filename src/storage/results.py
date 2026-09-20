@@ -149,6 +149,15 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
     decompile_evidence = decompile_stage.get("evidence") or {}
     dynamic_stage = next((s for s in stage_results if s.get("stage") == "dynamic"), {})
     dynamic_evidence = dynamic_stage.get("evidence") or {}
+    # The live path computes this under a status gate (cli.py: only a `skipped`
+    # stage yields a reason, so a FAILED dynamic setup does not) and passes the
+    # result explicitly - mirroring correlation_skip_reason above. Reading it off
+    # the stage's evidence instead took the reason whenever one was present, and
+    # the setup-failure path records one, so `failed` rows carried the failure
+    # text in a column whose meaning is "dynamic never ran" and a regenerated
+    # report rendered a stage that was attempted as one that never was. The
+    # derivation stays as the fallback for a caller that passes no key.
+    dynamic_skip_reason = run_data.get("dynamic_skip_reason", dynamic_evidence.get("reason"))
 
     evidence_lines = verification_fields.get("evidence_lines") or {}
 
@@ -172,7 +181,7 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
             ssl_confidence=ssl.get("confidence"),
             ssl_detected=ssl.get("detected"),
             dynamic_status=dynamic_stage.get("status"),
-            dynamic_skip_reason=dynamic_evidence.get("reason"),
+            dynamic_skip_reason=dynamic_skip_reason,
             root_bypassed=verification_fields.get("root_bypassed"),
             ssl_bypassed=verification_fields.get("ssl_bypassed"),
             anomaly_flagged="anomaly" in evidence_lines,

@@ -396,3 +396,64 @@ def test_load_runs_for_calibration_round_trips_distinctive_values(tmp_path):
     assert row.root_threshold == 0.6
     assert row.ssl_threshold == 0.55
     assert row.timestamp is not None  # stamped at save_run time
+
+
+FAILED_SETUP = (
+    "dynamic setup failed before the app could run - no usable device/emulator, "
+    "or the APK could not be installed/verified"
+)
+
+
+def _failed_dynamic_payload(**extra):
+    verdict = CategoryVerdict(confidence=0.2, detected=False, evidence=[])
+    return {
+        "classification": ClassificationResult(action=Action.NEITHER, root=verdict, ssl=verdict),
+        "stage_results": [
+            {"stage": "dynamic", "status": "failed", "evidence": {"reason": FAILED_SETUP}},
+        ],
+        **extra,
+    }
+
+
+def test_a_failed_dynamic_stage_stores_no_skip_reason(tmp_path):
+    # The live path computes the value under a status gate (cli.py: only a
+    # `skipped` stage produces one) and passes the result explicitly. Taking the
+    # reason off the stage's evidence instead - which the dynamic setup-failure
+    # path also records - stored the failure text in a column documented as
+    # "dynamic never ran", so a regenerated report rendered the failed stage as
+    # one that was never attempted.
+    save_metadata(tmp_path, "abc123", {"package": {"package_name": "test.app"}})
+    save_run(tmp_path, "abc123", "run5", _failed_dynamic_payload(dynamic_skip_reason=None))
+
+    with Session(get_engine(tmp_path)) as session:
+        record = session.get(RunRecord, "run5")
+        assert record.dynamic_status == "failed"
+        assert record.dynamic_skip_reason is None
+
+
+def test_a_payload_without_the_key_keeps_the_derived_reason(tmp_path):
+    # The overreach guard: a caller that does not pass the live value (a stored
+    # payload written before this change, or a test constructing one) must behave
+    # exactly as it did - the derivation stays the fallback.
+    save_metadata(tmp_path, "abc123", {"package": {"package_name": "test.app"}})
+    save_run(tmp_path, "abc123", "run6", _failed_dynamic_payload())
+
+    with Session(get_engine(tmp_path)) as session:
+        assert session.get(RunRecord, "run6").dynamic_skip_reason == FAILED_SETUP
+
+
+def test_a_genuine_skip_still_stores_its_reason(tmp_path):
+    # The column's documented meaning, unchanged: this is the value the live path
+    # passes, and 145 rows carry it.
+    verdict = CategoryVerdict(confidence=0.2, detected=False, evidence=[])
+    save_metadata(tmp_path, "abc123", {"package": {"package_name": "test.app"}})
+    save_run(tmp_path, "abc123", "run7", {
+        "classification": ClassificationResult(action=Action.NEITHER, root=verdict, ssl=verdict),
+        "stage_results": [
+            {"stage": "dynamic", "status": "skipped", "evidence": {"reason": "--skip-dynamic passed"}},
+        ],
+        "dynamic_skip_reason": "--skip-dynamic passed",
+    })
+
+    with Session(get_engine(tmp_path)) as session:
+        assert session.get(RunRecord, "run7").dynamic_skip_reason == "--skip-dynamic passed"

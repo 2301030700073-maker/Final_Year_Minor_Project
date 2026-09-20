@@ -49,3 +49,20 @@ def test_a_run_is_matched_by_its_own_argv_shape():
     # not a non-analysis subcommand
     assert not mod.is_run_argv([".venv/bin/python3", "src/cli.py", "regen", "--run-id", "x"])
     assert not mod.is_run_argv([".venv/bin/python3", "src/cli.py"])
+
+
+def test_the_documented_m_cli_spelling_is_matched_too():
+    """Every documented invocation is `python -m cli run` (README, the handoffs,
+    the verification bundle), whose argv carries no `cli.py` path segment. Matching
+    only the file-spelling meant the sampler logged `no-run` for the entire run it
+    was started to sample - an empty curve reported as a still machine."""
+    from sample_run_memory import is_run_argv
+
+    assert is_run_argv(["/usr/bin/python3", "-m", "cli", "run", "--apk", "x"])
+    # What /proc actually holds: uv execs python, so the wrapper never appears in
+    # the cmdline - the exec'd argv is what this has to match.
+    assert is_run_argv(["python", "-m", "cli", "run", "--apk", "x"])
+    # Still not this sampler, and still not a non-run subcommand.
+    assert not is_run_argv(["/usr/bin/python3", "-m", "scripts.sample_run_memory", "out.tsv"])
+    assert not is_run_argv(["/usr/bin/python3", "-m", "cli", "regen", "--run-id", "x"])
+    assert not is_run_argv(["/usr/bin/python3", "-m", "cli"])

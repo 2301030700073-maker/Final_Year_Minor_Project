@@ -71,10 +71,25 @@ def _tree(table: dict[int, tuple[int, int, int, str]], root: int) -> list[int]:
 
 def is_run_argv(argv: list[str]) -> bool:
     """Whether a /proc cmdline is the analysis CLI's `run` command. Pure, so the
-    two ways this can go wrong are testable: matching this sampler's own process
-    (it would then watch itself), and matching a non-`run` subcommand (a `regen`
-    or `verify-audit-log` process is not an analysis run to sample)."""
-    return len(argv) >= 3 and argv[1].endswith("cli.py") and argv[2] == "run"
+    ways this can go wrong are testable: matching this sampler's own process (it
+    would then watch itself), matching a non-`run` subcommand (a `regen` or
+    `verify-audit-log` process is not an analysis run to sample), and - the one
+    that was wrong in practice - failing to match the spelling everyone actually
+    types.
+
+    Every documented invocation is `python -m cli run` (README.md, the phase
+    handoffs, the verification bundle), whose argv is
+    ['python', '-m', 'cli', 'run', ...]. A `<<argv[1]>>.endswith("cli.py")` test
+    matches none of them, so the sampler wrote `no-run` rows for the whole of
+    every run started the documented way - an empty memory curve, which is the
+    one artifact this script exists to produce, reported as "nothing was running"
+    rather than as "the detector did not recognise it". Both spellings are matched
+    now."""
+    if len(argv) < 3:
+        return False
+    if argv[1].endswith("cli.py"):
+        return argv[2] == "run"
+    return argv[1] == "-m" and argv[2] == "cli" and len(argv) > 3 and argv[3] == "run"
 
 
 def find_run() -> int | None:

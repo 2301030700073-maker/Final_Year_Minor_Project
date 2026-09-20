@@ -238,14 +238,21 @@ unscannable) rendered bare. It governs SSL ONLY (ssl->{java,native,manifest,js})
 the sentence names ssl, never root. Both causes are recorded facts (H3): a manifest
 that did not parse is `unscannable`; a parse that resolved resources incompletely is
 `partial`. Each clause fires on its own fact, and `== false` rather than `is not true`
-keeps a pre-field run's missing fact from reading as a NO. #}
+keeps a pre-field run's missing fact from reading as a NO.
+The resource clause is a covering DISJUNCTION, not a cause: the run records only the
+boolean, and `_resources_complete` reaches False four ways (an NSC file missing from
+the decoded tree, one that will not parse, an opaque resource id the resolver cannot
+map, or no decoded resource tree at all because apktool failed - cli.py reads the
+manifest straight from the APK so the stage succeeds anyway). Naming one of those
+four would be the same defect these callouts were fixed for, so the clause names the
+set and the consequence. #}
 {% if coverage.get("manifest") in ("partial", "unscannable") -%}
 {% set _mc = [] -%}
 {% if manifest_parsed == false -%}
 {% set _ = _mc.append("a binary AndroidManifest.xml that did not parse, so debuggable, network-security-config and the exported-component surface are unknown, not absent") -%}
 {% endif -%}
 {% if manifest_resources_complete == false -%}
-{% set _ = _mc.append("resource resolution that did not complete (a declared value such as a network-security-config that is missing or unparseable), so a resource-backed declaration may be unresolved") -%}
+{% set _ = _mc.append("resource resolution that did not complete - a network-security-config that is missing or unparseable, an opaque resource id the reader could not map, or a decoded resource tree that was never produced - so a resource-backed declaration may be unresolved") -%}
 {% endif -%}
 > **Manifest:** `{{ coverage.get("manifest") }}` is a lower bound, not a confident negative - an ssl NEITHER is not proof that a certificate-pinning declaration is absent. Bound by{% if _mc %} {{ _mc | join('; ') }}{% else %} a coverage rule this report does not name{% endif %}.
 {% endif %}

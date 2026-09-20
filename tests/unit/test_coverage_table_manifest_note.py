@@ -58,6 +58,17 @@ def test_an_incomplete_resource_pass_is_named_as_the_cause(tmp_path):
     assert FALLBACK not in note, note
 
 
+def test_the_resource_clause_is_a_disjunction_not_a_single_cause(tmp_path):
+    """`_resources_complete` reaches False four ways and the run records only the
+    boolean, so naming one arm asserts a cause the run never observed - the exact
+    defect the java/native/js callouts were fixed for."""
+    note = _note(_render(tmp_path, manifest_parsed=True, manifest_resources_complete=False))
+    for arm in ("a network-security-config that is missing or unparseable",
+                "an opaque resource id the reader could not map",
+                "a decoded resource tree that was never produced"):
+        assert arm in note, (arm, note)
+
+
 def test_an_unparsed_manifest_is_named_as_the_cause(tmp_path):
     note = _note(_render(tmp_path, manifest="unscannable",
                          manifest_parsed=False, manifest_resources_complete=False))

@@ -218,6 +218,30 @@ def export_calibration_snapshot(bundle_dir: Path) -> None:
     (bundle_dir / "calibration_runs_snapshot.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
 
+def outcome_label(result: dict, *, ok: str, failed: str, artifact: str) -> str:
+    """The one-line verdict for a collected command - three states, not two.
+
+    `_run` returns exit_code None for two different events: the binary was never
+    found, and the command was killed at its timeout. Neither is a failure - both
+    are "no outcome was measured" - and folding them into the failure arm prints a
+    FAILURES verdict the collector never observed. A reader then cannot tell an
+    environment that cannot run the tests from a tree that fails them, and those
+    call for opposite responses (install the toolchain vs. bisect the change). The
+    exit code itself is still printed by the caller, unaltered, so the raw fact is
+    never replaced by this sentence.
+
+    Same class as the pipeline's aggregate-returncode rule: a 0/1 fold erases the
+    timeout sentinel, so the sentinel gets its own arm.
+    """
+    if not result["found"]:
+        return f"NOT RUN - `{result['command'].split()[0]}` was not found, so no outcome was measured"
+    if result["exit_code"] is None:
+        return f"NOT RUN - the command hit its time limit before reporting; no outcome was measured (see {artifact})"
+    if result["exit_code"] == 0:
+        return ok
+    return f"{failed} - see {artifact}"
+
+
 def write_summary(bundle_dir: Path, environment: dict, test_result: dict, pipeline_result: dict | None) -> None:
     lines = ["# Verification Bundle Summary", "", f"Generated: {environment['timestamp_utc']}", ""]
     head = environment["git_commit"]["stdout"].strip()
@@ -249,7 +273,7 @@ def write_summary(bundle_dir: Path, environment: dict, test_result: dict, pipeli
     lines.append("## Unit tests")
     lines.append(
         f"- Exit code: {test_result['exit_code']} "
-        f"({'all passed' if test_result['exit_code'] == 0 else 'FAILURES - see pytest_output.txt'})"
+        f"({outcome_label(test_result, ok='all passed', failed='FAILURES', artifact='pytest_output.txt')})"
     )
     lines.append("")
     lines.append("## Calibration snapshot (FR-9.2)")
@@ -262,7 +286,7 @@ def write_summary(bundle_dir: Path, environment: dict, test_result: dict, pipeli
     else:
         lines.append(
             f"- Exit code: {pipeline_result['exit_code']} "
-            f"({'succeeded' if pipeline_result['exit_code'] == 0 else 'FAILED - see cli_output.txt'})"
+            f"({outcome_label(pipeline_result, ok='succeeded', failed='FAILED', artifact='cli_output.txt')})"
         )
         lines.append("- Full console output: `cli_output.txt`")
         lines.append("- Copied reports (if any): `reports/<apk_hash>/`")

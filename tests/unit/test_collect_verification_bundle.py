@@ -227,9 +227,88 @@ def test_the_summary_states_the_code_dirty_state_and_never_guesses_it(tmp_path):
             "adb_devices": {"exit_code": 0},
             "frida_ps_dash_U": {"exit_code": 0},
         }
-        bundle.write_summary(tmp_path, env, {"exit_code": 0}, None)
+        bundle.write_summary(tmp_path, env, _run_shape(0), None)
         text = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
         line = [ln for ln in text.splitlines() if ln.startswith("Working tree")][0]
         assert expected in line, (value, line)
         lines[value] = line
     assert "src" in lines[False], "the claim must name what it measured"
+
+
+# --- the outcome fold -------------------------------------------------------
+#
+# `_run` returns exit_code None for two different events: the binary was never
+# found, and the command was killed at its timeout. Neither is a verdict. The
+# SUMMARY folded both into the failure arm, so a missing toolchain and a real test
+# failure printed the same word - the one distinction the collaborator needs most,
+# since the fixes are opposite. These go through write_summary rather than calling
+# the helper, so the wiring is what is asserted.
+
+def _summary_env():
+    return {
+        "timestamp_utc": "2026-01-01T00:00:00+00:00",
+        "git_commit": {"found": True, "stdout": "abc123\n", "exit_code": 0},
+        "git_status_porcelain": {"found": True, "stdout": "", "exit_code": 0},
+        "working_tree_dirty_code": False,
+        "tool_versions": {},
+        "adb_devices": {"exit_code": 0},
+        "frida_ps_dash_U": {"exit_code": 0},
+    }
+
+
+def _run_shape(exit_code, found=True):
+    """The dict `_run` returns - the only shape write_summary is ever handed."""
+    return {"command": "uv run pytest tests/unit -v", "found": found, "exit_code": exit_code,
+            "stdout": "", "stderr": ""}
+
+
+def _line(tmp_path, text, prefix, occurrence=0, **kwargs):
+    """The Nth SUMMARY line with this prefix. Both outcome lines start "- Exit
+    code:", and picking the first silently asserted the unit-test line while
+    claiming to check the pipeline one."""
+    bundle.write_summary(tmp_path, _summary_env(), **kwargs)
+    body = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
+    match = [ln for ln in body.splitlines() if ln.startswith(prefix)]
+    assert len(match) > occurrence, (prefix, occurrence, body)
+    return match[occurrence]
+
+
+def test_a_command_that_never_reported_is_not_reported_as_a_failure(tmp_path):
+    """No outcome measured is a third state, not the failure arm."""
+    for result, fragment in (
+        ({"command": "uv run pytest tests/unit -v", "found": False, "exit_code": None},
+         "NOT RUN"),
+        ({"command": "uv run pytest tests/unit -v", "found": True, "exit_code": None},
+         "time limit"),
+    ):
+        line = _line(tmp_path, "unit", "- Exit code:", test_result=result, pipeline_result=None)
+        assert fragment in line, (result, line)
+        assert "FAILURES" not in line, (result, line)
+        assert "all passed" not in line, (result, line)
+
+
+def test_a_command_that_reported_still_gets_its_pass_or_fail_verdict(tmp_path):
+    line = _line(tmp_path, "u", "- Exit code:",
+                 test_result={"command": "uv run pytest", "found": True, "exit_code": 0}, pipeline_result=None)
+    assert "all passed" in line, line
+    line = _line(tmp_path, "u", "- Exit code:",
+                 test_result={"command": "uv run pytest", "found": True, "exit_code": 1}, pipeline_result=None)
+    assert "FAILURES - see pytest_output.txt" in line, line
+
+
+def test_the_pipeline_line_keeps_the_same_distinction(tmp_path):
+    """The same fold sat on the pipeline line; a reader needs the same three states."""
+    base = {"command": "env PYTHONPATH=src uv run python -m cli run", "stdout": "", "stderr": ""}
+    cases = (
+        (dict(base, found=False, exit_code=None), ("NOT RUN", "- Exit code: None"), ("FAILED", "succeeded")),
+        (dict(base, found=True, exit_code=None), ("NOT RUN", "cli_output.txt"), ("FAILED", "succeeded")),
+        (dict(base, found=True, exit_code=0), ("succeeded",), ("NOT RUN", "FAILED")),
+        (dict(base, found=True, exit_code=1), ("FAILED - see cli_output.txt",), ("NOT RUN", "succeeded")),
+    )
+    for result, required, forbidden in cases:
+        line = _line(tmp_path, "p", "- Exit code:", occurrence=1,
+                     test_result=_run_shape(0), pipeline_result=result)
+        for fragment in required:
+            assert fragment in line, (result, fragment, line)
+        for fragment in forbidden:
+            assert fragment not in line, (result, fragment, line)

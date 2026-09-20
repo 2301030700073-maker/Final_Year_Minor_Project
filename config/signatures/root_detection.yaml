@@ -778,13 +778,32 @@
 # Build/system-property values that only an emulator exposes and treats the
 # result as "not rooted" (MSTG-RESILIENCE-1/2). These emulator-only literals
 # are structurally distinctive - `ro.kernel.qemu`, `ro.boot.qemu`, the
-# `sdk_gphone`/`goldfish` build product/hardware names, and the `Build.HARDWARE`
-# constant used to compare to them - so matching one requires the app to
-# genuinely probe for an emulator. Same ADR-0006 discipline as the boot probe:
-# additive, corroborative weight, not yet corpus-validated on the reference
-# device. Absence is NOT evidence of a physical device. Deliberately OMITS bare
-# `Build.FINGERPRINT`/`Build.MODEL`/`isEmulator` alone (too generic - read by
-# benign device-ID analytics), keeping only the emulator-specific values.
+# `sdk_gphone`/`goldfish` build product/hardware names - so matching one
+# requires the app to genuinely probe for an emulator. Same ADR-0006 discipline
+# as the boot probe: additive, corroborative weight, not yet corpus-validated on
+# the reference device. Absence is NOT evidence of a physical device.
+# Deliberately OMITS bare `Build.FINGERPRINT`/`Build.MODEL`/`isEmulator` alone
+# (too generic - read by benign device-ID analytics), keeping only the
+# emulator-specific values.
+#
+# HARDWARE-GENERIC1 - `Build.HARDWARE` sat in this list and violated exactly the
+# exemption above. An earlier draft of this comment called it "the
+# `Build.HARDWARE` constant used to compare to them", but the matcher is a plain
+# substring match over decompiled text: it sees the constant, never the
+# comparison. Measured over the stored corpus (263 runs, 63 with this
+# signature): it produced 184 evidence rows, and in exactly 2 runs it was the
+# only literal that matched. Both are benign third-party code with no emulator
+# check anywhere in the app:
+#   com.jerboa 2026-08-21   coil/util/SvgUtils.java - Coil's SVG feature probe
+#   com.wdiodemoapp 08-26   androidx/camera/**/quirk/*.java - CameraX device
+#                           workarounds comparing Build.HARDWARE to a model
+#                           name; this put root at 0.45 on two emulator
+#                           signatures alone with app_owned=0.
+# In every OTHER run that matched, an emulator-specific literal co-occurred
+# (`goldfish` in all of them) and confidence is summed once per signature ID,
+# not per pattern - so dropping this one literal costs zero measured recall
+# while removing both measured false firings. The 11 literals below are the
+# emulator-only values this signature is named for.
 #
 # EMU-RECALL1 - the five literals below were missing, and their absence produced
 # a MEASURED false negative rather than a theoretical one. InsecureBankv2
@@ -834,7 +853,6 @@
     - "goldfish"
     - "generic_x86"
     - "generic_arm64"
-    - "Build.HARDWARE"
     - "google_sdk"
     - "Genymotion"
     - "Android SDK built for x86"
@@ -908,7 +926,13 @@
 
 # Non-goldfish emulator markets: BlueStacks/Nox/Genymotion ship distinctive
 # package names an app can query; `ranchu` is the QEMU device model. Classic
-# anti-emulator markers complementing the goldfish Build.HARDWARE signature.
+# anti-emulator markers complementing the `goldfish` signature.
+#
+# `ranchu` stays on the far side of HARDWARE-GENERIC1's line. It also fires in
+# CameraX's quirk classes (which compare `Build.HARDWARE` to "ranchu"), but
+# naming an emulator is itself the signal this corpus keys on. Reading a build
+# field is not: it says nothing until you can see what it is compared against,
+# and a substring matcher cannot. Keep the emulator names, drop the bare reads.
 - id: emulator_market_artifacts
   category: root
   weight: 0.2

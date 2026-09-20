@@ -1514,6 +1514,31 @@ def test_scan_matches_emulator_detection_and_not_benign(tmp_path):
     assert not any(e.signature_id == "emulator_detection" for e in evidence.root_evidence)
 
 
+def test_scan_does_not_match_emulator_detection_on_a_bare_build_hardware_read(tmp_path):
+    # HARDWARE-GENERIC1. `Build.HARDWARE` is a bare Build.<FIELD> read, and the
+    # matcher sees the constant without ever seeing what the app compares it to.
+    # The real shapes that fired this signature in the stored corpus are exactly
+    # this one: Coil's SvgUtils (SVG feature detection) and CameraX's quirk
+    # classes (camera workarounds against a device model name) - the only 2 runs
+    # where Build.HARDWARE was the sole matching literal, both in third-party
+    # code with no emulator check anywhere in the app. The pattern is gone; this
+    # fixture is what says so. The model name below is a real device codename,
+    # not an emulator one, deliberately: naming an emulator is still the signal
+    # (see emulator_market_artifacts' `ranchu`), reading a build field is not.
+    (tmp_path / "Quirk.java").write_text(
+        "public class Quirk {\n"
+        "    static boolean isAffected() {\n"
+        "        String hw = android.os.Build.HARDWARE;\n"
+        "        return hw.equals(\"samsungexynos9810\") || hw.startsWith(\"qcom\");\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
+    evidence = scan(tmp_path, signatures)
+    assert not any(e.signature_id == "emulator_detection" for e in evidence.root_evidence)
+
+
 def test_scan_matches_build_props_probe_and_not_benign(tmp_path):
     # A real build-props probe reads ro.debuggable / ro.build.fingerprint to
     # fingerprint a debug build; a benign string that merely mentions a property

@@ -136,6 +136,42 @@ def test_a_run_without_a_recorded_corpus_says_so_and_never_renders_blank(tmp_pat
     assert "**Signature corpus:** not recorded for this run" in content
     assert "**Signature corpus:** `None`" not in content
     assert "**Signature corpus:**\n" not in content
+    # One cause, not a list of them. The sentence used to offer two - "either it
+    # predates ADR-0022, or its corpus was not derived" - and only the first can
+    # happen: the sole writer of a runs row sets the key unconditionally. A hedge
+    # over an unreachable cause is not caution, it is cover: a future regression
+    # that stopped populating the field would render as "not derived" and every
+    # test here would still pass, because this branch is the one they assert.
+    assert "it predates ADR-0022" in content
+    assert "not derived" not in content
+
+
+def test_only_one_place_can_create_a_runs_row():
+    """The sentence above claims a missing corpus means the run predates the
+    field, and that claim is only as good as the writer count. One writer, whose
+    payload always carries the fingerprint, makes it true; a second - a row
+    recorded for a run that halted before the fingerprint was taken, say - makes
+    it false for that row while every test still passes, since a NULL is exactly
+    what they assert. So the invariant is held here, structurally, and whoever
+    adds a second writer is stopped and made to decide what its corpus value is.
+
+    Reads src/ as text rather than importing it, so it stays toolchain-free."""
+    constructions = []
+    for path in sorted((_REPO / "src").rglob("*.py")):
+        if path.parent.name == "storage" and path.name == "db.py":
+            continue  # the model's own definition, not a write
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"\bRunRecord\s*\(", line):
+                constructions.append(f"{path.relative_to(_REPO)}:{number}")
+    assert len(constructions) == 1, (
+        f"a runs row can now be written from {constructions}; the report tells a "
+        "reader that a missing corpus fingerprint means the run predates ADR-0022, "
+        "so every new writer must record one"
+    )
+    assert constructions[0].startswith("src/storage/results.py:"), (
+        f"the runs row is now written from {constructions[0]} - all run persistence "
+        "belongs to the storage layer, where save_run holds the payload contract"
+    )
 
 
 def test_a_regenerated_report_carries_the_stored_corpus_not_the_live_one(monkeypatch, tmp_path):

@@ -100,7 +100,7 @@ TEMPLATE = _env.from_string("""\
 {% if signature_corpus -%}
 **Signature corpus:** `{{ signature_corpus }}`
 {% else -%}
-**Signature corpus:** not recorded for this run - either it predates ADR-0022, or its corpus was not derived. It is deliberately not backfilled: 183 of the stored runs were analysed from a dirty working tree, whose rule set is not recoverable from its commit, and a number derived from one would be a plausible value standing in for an unobserved one.
+**Signature corpus:** not recorded for this run - it predates ADR-0022, which is the only way a stored run can lack one: every run saved since records a fingerprint of the corpus it loaded, so this absence is a date, not a derivation that failed. It is deliberately not backfilled: 183 of the stored runs were analysed from a dirty working tree, whose rule set is not recoverable from its commit, and a number derived from one would be a plausible value standing in for an unobserved one.
 {% endif %}
 {% if operator or justification -%}
 **Authorized by:** {{ operator or "unknown" }} (justification: {{ justification or "not stated" }})

@@ -91,7 +91,8 @@ in `IDENTITY_FIELDS`, one report line beside `Analysis code`, and one entry in
 the report template's variable-coverage guard - an unguarded Jinja variable
 renders as a silent blank, which is the failure mode that guard exists for.
 
-**A limit, stated rather than left to be assumed.** The hash covers the four
+**A limit, stated rather than left to be assumed - CLOSED 2026-09-24, see the
+section at the end of this ADR.** The hash covers the four
 YAML files in `config/signatures/`. This project has a *second* detection
 surface carried in code rather than YAML: the hardcoded JS idiom lists in
 `src/static/hermes.py` (`JS_ROOT_IDIOMS`, `JS_SSL_IDIOMS`), whose ids can never
@@ -100,9 +101,65 @@ this hash. That asymmetry is accepted here deliberately, because those idioms
 live in a Python file whose commit is recorded - but it is named, so that no
 reader assumes "corpus hash" means "every rule that could have fired".
 
+*Left standing above as what was decided at the time. The asymmetry turned out to
+be closable without the larger change the next paragraph rules out, because those
+lists are bounded data in the same way the YAML is - see "Closed" below.*
+
 **What this does not fix.** The dirty-tree problem for *code* remains: a run
 from a dirty tree still cannot name the code it ran. Hashing the Python source
 tree would be a larger change (import-time graphs, generated files, the
 vendored Ghidra bundle) and is not attempted here. This ADR closes the corpus
 half because the corpus is a small, bounded, explicitly-listed set of files -
 the condition that made a hash feasible in the first place.
+
+## Closed: the second detection surface is in the hash (2026-09-24)
+
+The limit above was named rather than assumed, which made it checkable, and it has
+been checked and closed. The JS idiom lists are bounded data in the same way the
+YAML is, so they did not need the source-tree hash the last paragraph rules out.
+What closing them needed was three things, two of which are only visible once you
+try:
+
+1. **The weight moved beside the lists.** `JS_EVIDENCE_WEIGHT` (0.2) lived in
+   `cli.py` and was the constant every JS idiom match was emitted at. Hashing the
+   patterns alone would have moved the recorded identity when a rule changed but
+   *not* when its influence over a verdict did: the weight is summed into a
+   category score, so changing it alters what a NEITHER means with every pattern
+   byte-identical. Two rules that produce different verdicts cannot share one
+   identity. It now lives in `hermes.py`, beside the lists it scales.
+
+2. **`js_idiom_fingerprint()`** (`src/static/hermes.py`) hashes that surface as
+   data - each entry's list, id, category, regex source and flags, plus the weight
+   - sorted, so reordering the lists (which changes nothing about what matches)
+   does not move it while a one-pattern edit does. `corpus_fingerprint`
+   (`src/static/signatures.py`) folds it in, so the one recorded value covers both
+   surfaces and no call site can record a run against half the rules.
+
+3. **`_JS_IDIOM_LISTS` is a declared registry**, the JS analogue of
+   `SIGNATURE_CORPUS`: a third idiom list added to `hermes.py` and not registered
+   would fire rules the hash never described. Held structurally by
+   `test_every_js_idiom_list_is_registered`, which also asserts its own pattern
+   matched something, so a stale regex cannot satisfy it vacuously.
+
+**What it costs.** A fingerprint recorded before this change was taken over the
+YAML files alone, so a value from before it is not comparable with one from after,
+even when the rules are identical - and comparing two runs' corpus is exactly what
+a reader does with this field. Both the report's `Signature corpus` line and
+`corpus_fingerprint`'s own docstring say so. No stored fingerprint is rewritten:
+the existing rows stay as recorded, because re-deriving one would attribute
+today's rule set to a run that never loaded it - the misattribution this
+fingerprint exists to prevent.
+
+**What is still not covered, named so that "closed" is not read as "complete".**
+Two surfaces remain outside this value, and both are code covered by
+`Analysis code`:
+
+* The Python that *runs* the rules - the dirty-tree problem above, unchanged.
+* `src/static/indicators.py`: `ROOT_INDICATORS`, `SSL_INDICATORS`,
+  `NATIVE_ROOT_INDICATORS`, `NATIVE_SSL_INDICATORS` are hardcoded pattern lists
+  whose matches mark a verdict `coverage_limited`
+  (`coverage.py`'s `verdict_label` docstring: that flag is the union of the
+  governing-surface bound *and* unattributed detection indicators), so a NEITHER
+  is certified or reads `Inconclusive` according to content this hash does not
+  cover. Editing one of those lists changes what the platform will certify while
+  the recorded corpus stays still - the same asymmetry, one surface over.

@@ -78,8 +78,9 @@ cost, and it was being paid under a stated reason that was false.
    negatives remain outside Tier-2 under this decision. Narrowing the Java bound
    for the minification rule is admissible only against a measured audit of the
    corpus's pattern shapes - how many of the 120 patterns target an app-authored
-   identifier versus a string literal or a library name - and that audit has not
-   been run, so no narrowing is claimed here.
+   identifier versus a string literal or a library name. That audit was run on
+   2026-09-24 and it closes the narrowing: see "The pattern-shape audit, run"
+   below.
 
 ## Consequences
 
@@ -96,3 +97,72 @@ relaxation presented as an improvement, resting on the unmeasured premise that
 no corpus pattern is an app-authored identifier. That premise is checkable, and
 until it is checked, acting on it would certify two ground-truthed negatives on
 a guess: the failure mode ADR-0006 exists to prevent.
+
+## The pattern-shape audit, run (2026-09-24)
+
+Decision 4 made narrowing conditional on measuring one thing: how much of the
+corpus is a *value* - which a rename cannot erase, because the value must appear
+verbatim or the shape is structural - versus a bare *name*, which a rename can.
+That audit has now been run. It closes the narrowing.
+
+Structural census of the shipped corpus, by `pattern_type`:
+
+| file | signatures | `string_literal` | `regex` | `class_reference` |
+|---|---|---|---|---|
+| `root_detection.yaml` | 49 | 41 | 4 | 4 |
+| `ssl_pinning.yaml` | 51 | 32 | 17 | 2 |
+| `native_detection.yaml` | 12 | 8 (`embedded_string`) | - | 4 (`export_symbol`) |
+
+A type alone does not settle it - a `string_literal` can hold a bare identifier
+just as easily as a path or an uppercase constant - so the classification was
+taken per pattern, not per type. A first pass keyed on "bare camelCase ⇒
+app-authored" flagged 26 root, 18 ssl and 6 native signatures, and was rejected
+as a classifier: it swept up platform and library API names that R8 *preserves*
+as external references (`setSSLSocketFactory`, `setCertificateEntry`,
+`setDefaultHostnameVerifier`, `SSL_CTX_set_cert_verify_callback`, `HurlStack`,
+`CertificatePinner`) as though they were app declarations. The replacement is
+empirical rather than shape-based: grep a *declaration* of each distinct bare
+name across all 38 stored decompiled corpora. 54 names; 23 declaration hits:
+
+* **1** is declared only by a known namespace - `CertificatePinner` →
+  `okhttp3` - which is exactly the "kept library name" case decision 4 allowed
+  for.
+* **5** are declared by third-party SDK namespaces that are not the scanned
+  app's own code: `com/facebook/react/modules/network` (`NetworkingModule`,
+  `OkHttpClientFactory`, `CustomClientBuilder`) and
+  `com/google/android/play/core/integrity` (`StandardIntegrityManager`,
+  `IntegrityTokenResponse`). A bundled SDK's classes are renamed by the host
+  app's R8 unless that SDK ships keep rules, so these are still renameable in
+  principle - but the statement "declared by a known library" cannot be made
+  about them from this evidence either.
+* **48 are declared in no stored corpus at all** - including the ones this
+  question turns on for SSL: `expectCertificatePin`, `spkiSha256Pin`,
+  `initializeSslPinning`, `SSLPinningIntegration`, `SSLPinningX509TrustManager`,
+  `TSKPinningValidator`, `PowerAuthSslPinningValidationStrategy`, and
+  `TrustKitBuilder`; and, on the native side, the export symbols `checkRoot`,
+  `isRooted` and `checkCertificatePinning` (which the Java surface does not
+  govern in any case).
+
+That 48-name bucket is not evidence of authorship, and the audit does not claim
+it is: a *declaration-line* grep reports a name as absent from the corpus when
+the source that declares it simply is not in the corpus, which is true of every
+JDK and Android platform API in the list (`CertPathValidator`,
+`setDefaultHostnameVerifier`, `PKIXBuilderParameters`). So the bucket mixes two
+things the pattern alone cannot separate - a platform name whose declaring
+source is unavailable here, and an app- or SDK-authored name a rename erases.
+
+Both limits point the same way, which is why the audit settles the question
+*against* narrowing rather than merely failing to settle it for it: the premise
+decision 4 named - that the name-shaped patterns are literals or kept library
+names, so a minified corpus bounds nothing they cover - is **measured false**.
+At minimum `CertificatePinner` and the integrity/React-Native names are keyed on
+declared identifiers, and the majority of the name-shaped patterns could not be
+attributed to a library at all. A minified app that bundles a pinning SDK whose
+classes R8 renamed stays invisible to the name-keyed half of
+`ssl_pinning.yaml`, and that is a case the Java bound covers correctly.
+
+Therefore: **UC1's and UC2's ground-truthed SSL true negatives stay outside
+Tier-2** (`ssl` `Excl partial = 12` in the calibration report), now for a reason
+that has been measured rather than assumed, and revisiting that exclusion
+requires new evidence - a specific app shown to pin through patterns of the
+value-shaped kind only - not a re-reading of this audit.

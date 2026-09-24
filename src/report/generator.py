@@ -619,7 +619,9 @@ Raw flow file: `{{ capture_flows_path }}`
 > **Partial capture — certificate refusals:** the capture proxy recorded {{ capture_tls_failed_clients | length }} client TLS handshake(s) it refused its own certificate for ({% for f in capture_tls_failed_clients %}`{{ f.host or 'host not captured' }}`{% if not loop.last %}, {% endif %}{% endfor %}). Those connections were **not** decrypted — the app rejected the proxy's CA on them, the proxy-side signature of certificate pinning — so the flow list above is a lower bound, and the hosts named here are exactly the ones this capture could **not** see into. Their traffic is unmeasured by this run.
 {% endif -%}
 {% else -%}
-{% if capture_not_applicable -%}
+{% if capture_not_attempted -%}
+No traffic was captured because **the capture stage was not attempted**: the app declares **no `android.permission.INTERNET` permission** ({{ capture_not_applicable_reason }}), so it cannot open a network socket and no capture window was opened for it - no proxy was installed and no launch was issued for this stage (ADR-0024). This is a not-applicable capture, not a failed one, and not a reclassified failure: nothing ran.
+{% elif capture_not_applicable -%}
 No traffic was captured, and the capture stage was **reclassified from a bare failure to _skipped — not applicable_** because a signal that reads none of this capture's own flow list {% if capture_non_java_tls_layers %}showed the empty capture is not a proxy/wiring fault — though **not** that the app stayed silent{% else %}proved this run's empty capture was expected, not a proxy/wiring fault{% endif %}: {{ capture_not_applicable_reason or capture_reason or "reason not recorded" }}. This is the pipeline's authoritative reason, recorded when the stage was classified (from the manifest, the device-side reachability probe, the in-process SSL observer, or the app's own scan-corpus coverage limits) — **not** a cause re-derived here from the empty flow list. The capture stage is honest: an empty capture is reported here with its recorded reason, never a fabricated flow list.
 {% if capture_non_java_tls_layers %}
 > **Why the in-process observers cannot speak for this app:** the dynamic stage's TLS observers (`CertificatePinner.check`, `TrustManagerImpl.verifyChain`) are **Java-stack** hooks, and this app has at least one network path outside that stack ({% for l in capture_non_java_tls_layers %}{{ l }}{% if not loop.last %}, {% endif %}{% endfor %}). Their silence is therefore **uninformative** on this run: it is neither evidence the app made no request nor evidence it made one, because a request on such a path never reaches those hooks either way. Pinning on that path is confirmed or refuted only by a runtime that sees its TLS stack — never by the absence of these messages (ADR-0006).
@@ -1438,6 +1440,10 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
             # (RPT-TMPLCOV1).
             "capture_not_applicable": False,
             "capture_not_applicable_reason": None,
+            # ADR-0024 pairs the not-applicable state with a second, distinct one:
+            # never attempted vs attempted-and-reclassified. Defaults keep a run
+            # with no capture stage on the reclassified wording it always had.
+            "capture_not_attempted": False,
             # No capture stage ran, so no cleanup could have leaked a device
             # proxy / adb reverse / stray mitmdump: empty list (same type as the
             # present path - uniform key set so the template never references an
@@ -1495,6 +1501,12 @@ def _capture_summary(stage_results: list[StageResult]) -> dict:
         # [[crashed-capture-stage-true-reason]]).
         "capture_not_applicable": capture_stage.status == "skipped",
         "capture_not_applicable_reason": evidence.get("not_applicable_reason"),
+        # ADR-0024: the producer writes this marker only in the guard that answers
+        # a no-INTERNET manifest BEFORE the launch, so it separates "never ran"
+        # from "ran, captured nothing, and was reclassified" without deriving either
+        # from an absence. Pre-existing runs read False and keep the reclassified
+        # sentence they were measured under.
+        "capture_not_attempted": bool(evidence.get("not_attempted")),
         "capture_flows": flows,
         "capture_decrypted_flows": decrypted_flows,
         "capture_cleartext_flows": cleartext_flows,

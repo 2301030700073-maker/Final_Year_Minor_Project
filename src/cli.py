@@ -822,6 +822,40 @@ def _print_stage(result: StageResult) -> None:
             _caution_sidecar(exc)
 
 
+def _js_surface_console_note(
+    coverage_map, entries_in_apk, surface_extracted
+) -> str | None:
+    """Console mirror of the report's ASSET-TRI1 qualifier for the js surface.
+
+    For an APK that lists no `assets/` entries the report says the `partial` js
+    reading is this rule's conservative reading of an ABSENT surface, not a bundle
+    this run failed to look at. The console printed the same bound with no
+    qualifier - on the three UnCrackable runs of 2026-09-24 it said
+    `upper bound: java=partial, js=partial` and `js=partial` in the coverage-bound
+    line for APKs whose record reads `js_asset_entries_in_apk: 0`, naming a
+    coverage bound over a surface those apps do not have. Same parity rule as
+    `_completeness_console_caveat`: the report carries the cause, so the console
+    does too ([[docstring-caveat-reaches-no-reader]]).
+
+    Returns None unless the js reading is actually `partial` AND the record says the
+    APK ships no asset surface at all. The gate names the exact value the note's
+    own sentence asserts, so a map carrying no js verdict (or any third state a
+    later change introduces) gets no explanation rather than a wrong one. And
+    `entries_in_apk is None` (an unlistable archive) is unknown, never an absence
+    (ASSET-TRI1).
+    """
+    if coverage_map.get("js") != "partial":
+        return None
+    if entries_in_apk != 0 or surface_extracted:
+        return None
+    return (
+        "[dim]Note: `js=partial` here is this rule's conservative reading of an "
+        "ABSENT surface - the APK lists no `assets/` entries at all, so there is "
+        "no JS bundle this run failed to extract (ASSET-DROP1); the report says "
+        "the same.[/dim]"
+    )
+
+
 def _completeness_console_caveat(
     completeness: str, jadx_file_count, jadx_exit_code
 ) -> str | None:
@@ -1128,6 +1162,55 @@ def _failure_correlation_note(
     if correlation.unverified:
         return "correlation=UNVERIFIED"
     return "correlation=MATCH"
+
+
+def _capture_not_attempted(manifest_info) -> StageResult | None:
+    """The capture record for an app that cannot open a socket at all, else None.
+
+    A manifest with no `android.permission.INTERNET` makes the capture window
+    inapplicable BEFORE it opens: the permission is enforced by the kernel on the
+    app's uid, so the app cannot produce a flow for the proxy to record, and any
+    flow the window shows belongs to another uid (ADR-0024). Measured 2026-09-24
+    on the three UnCrackable runs, all three declaring `perms=[]`:
+
+      - UC1 run 51d0f0c0: the emulator's Google services put 3 flows in the
+        window, so the stage recorded `success` over `android.clients.google.com`
+        / `android.googleapis.com` / `www.google.com` while its OWN attribution
+        recorded `reached: False` ("uid 10175 (owasp.mstg.uncrackable1) held no
+        socket to the capture proxy in any of 7 readable sample(s)"), and the
+        console printed `OK capture-traffic (28096ms)`.
+      - UC2 55c96579 / UC3 a3f3f2fa: 0 device flows, so the ladder's Signal 1
+        reclassified them to skipped-not-applicable - the same app, same state,
+        a different record because of what a background app did.
+
+    The ladder's rule was already right; its precondition (`reason in ("no flows
+    captured", "no traffic captured")`) is what let a foreign flow defeat it. The
+    reason is also knowable eight stages earlier, so the guard moves in front of
+    the launch and the 24-28s of device time goes with it.
+
+    `manifest_info is None` (a manifest that did not parse) returns None and
+    keeps the old path - this asserts only what the parsed manifest states.
+    """
+    if manifest_info is None:
+        return None
+    permissions = getattr(manifest_info, "permissions", None) or []
+    if "android.permission.INTERNET" in permissions:
+        return None
+    return StageResult(
+        stage="capture-traffic",
+        status="skipped",
+        evidence={
+            # NOT "no flows captured": nothing ran, and the two are different
+            # records ([[not-attempted-neq-skipped]]). The ladder's own first line
+            # keys on those two strings, so this stage passes through it untouched.
+            "reason": "capture not attempted",
+            "not_attempted": True,
+            "not_applicable_reason": "no INTERNET permission",
+            "declared_permissions": sorted(permissions),
+        },
+        error=None,
+        duration_ms=0,
+    )
 
 
 def _reclassify_empty_capture(
@@ -2528,6 +2611,13 @@ def run(
     # ship no scannable .so, so native=unscannable alone already blocks a
     # confident root/ssl NEITHER).
     console.print(f"[dim]{coverage_bound_line(coverage_map)}[/dim]")
+    # ASSET-DROP1 parity: a `js=partial` bound over an APK that ships no asset
+    # surface at all is explained on the report, so it is explained here too.
+    _js_surface_note = _js_surface_console_note(
+        coverage_map, _asset_entries_in_apk, _asset_surface_extracted
+    )
+    if _js_surface_note:
+        console.print(_js_surface_note)
     # L-M4: mirror the report's per-category confidence lines on the console so
     # the numeric confidence a reviewer watches is never read as a bare point
     # estimate on a coverage-limited category. confidence_bound appends the
@@ -3060,7 +3150,11 @@ def run(
             if not skip_dynamic and dynamic_action in (Action.SSL_ONLY, Action.BOTH):
                 capture_bypass = synthesize(classification, Action.SSL_ONLY).source
             _begin_stage("capture-traffic")
-            capture_stage = mitmproxy_capture.run_capture_stage(
+            # ADR-0024: a manifest declaring no `android.permission.INTERNET` is
+            # answered before the launch (the helper documents the measured runs
+            # where the window opened anyway and the record called the emulator's
+            # own traffic this app's). None means "run the stage".
+            capture_stage = _capture_not_attempted(manifest_info) or mitmproxy_capture.run_capture_stage(
                 capture_serial, package_name, ANALYSIS_ROOT / "captures",
                 drive_ui=drive_ui,
                 # by SOURCE, not by filename: the synthesized bypass is generated in

@@ -20,6 +20,31 @@ import typer
 
 import cli
 from common import StageResult
+from static.manifest import ManifestInfo
+
+
+def _declare_internet(monkeypatch):
+    """An app that can actually open a socket, for the capture-mechanics tests.
+
+    ADR-0024: a manifest with no `android.permission.INTERNET` is answered BEFORE
+    the capture window opens, so a target that declares no permissions never
+    reaches the window these tests exercise. The text fixture manifest cannot
+    express permissions (static.manifest's decoded-XML path reads none from
+    `<manifest/>` or from a `uses-permission` child), so the parsed value is
+    supplied at the same boundary the harness already stubs - cli.parse_manifest,
+    which cli resolves from module globals at the call site.
+    """
+    monkeypatch.setattr(
+        cli,
+        "parse_manifest",
+        lambda *a, **kw: ManifestInfo(
+            debuggable=False,
+            network_security_config=None,
+            permissions=["android.permission.INTERNET"],
+        ),
+    )
+
+
 
 
 def _ok(stage: str, **evidence) -> StageResult:
@@ -47,6 +72,10 @@ def run_setup(tmp_path, monkeypatch):
     apktool_dir = tmp_path / "apktool"
     apktool_dir.mkdir(parents=True)
     (apktool_dir / "AndroidManifest.xml").write_text("<manifest/>", encoding="utf-8")
+    # ADR-0024: the capture window is answered BEFORE it opens for an app that
+    # declares no `android.permission.INTERNET`, and the app under analysis here is
+    # a network app (the capture-window tests below exercise exactly that window).
+    _declare_internet(monkeypatch)
 
     monkeypatch.setattr(cli, "ANALYSIS_ROOT", tmp_path / "analysis")
     monkeypatch.setattr(cli, "REPORTS_ROOT", tmp_path / "reports")

@@ -1249,6 +1249,19 @@ def _reclassify_empty_capture(
                 ("this capture window's own observer", capture_messages),
             )
         ssl_effects = sum(_ssl_path_exercised(msgs) for _, msgs in window_messages)
+        # Scope of this two-window read, and why the report scopes it the other way.
+        # The STATUS stays deliberately conservative across BOTH windows: an effect in
+        # either launch makes "the app did not exercise its network/SSL path" false as
+        # a claim about the APP, and the failure this ladder exists to prevent is the
+        # opposite one - downgrading a real capture-path break to "not applicable" -
+        # so any window's effect keeps the stage loud. The report's empty-capture
+        # paragraph is scoped to the window whose flows it explains, because there the
+        # claim is about a WINDOW: a dynamic-window effect is named as this run's other
+        # launch (which runs against the pass-through internet proxy, not the capture
+        # proxy) and is never rendered as a capture-path failure of a window whose own
+        # observer recorded none (CAPTURE-WINDOW-SCOPE1). The two are consistent - the
+        # conservative status carries the stage's own window-scoped reason, and the
+        # paragraph names the launch its evidence came from.
         # Named so that a reason concluding app-silence cannot read as though more
         # windows were consulted than actually were.
         windows = " and ".join(name for name, _ in window_messages)

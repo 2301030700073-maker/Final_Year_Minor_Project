@@ -52,13 +52,25 @@ even when it changes nothing, for the same reason running a backfill is.
 must not abort the other 263. The summary separates **regenerated**,
 **refused** (the REGEN-FIELDLOSS2 guard) and **failed** (an exception), because
 collapsing them would render a row that cannot be repaired as one that merely
-errored.
+errored. The refusal raises a distinct `RegenerationRefused`, so that split is
+structural rather than decided by matching a row's own error text - a category
+inferred from a string is one refactor away from silently collapsing into
+`failed`.
 
-**4. `--dry-run` writes nothing.** It renders into a temporary tree and reports
-the same three categories. A bulk rewrite of hundreds of consumer-facing files
-should be previewable with the real renderer rather than described in prose -
-this ADR's own numbers came from exactly such a run, and reconstructing it by
-hand is not something a second person should have to repeat.
+**4. `--dry-run` writes no report file.** It renders into a temporary tree,
+reports the same three categories, and deletes the tree. A bulk rewrite of
+hundreds of consumer-facing files should be previewable with the real renderer
+rather than described in prose - this ADR's own numbers came from exactly such a
+run, and reconstructing it by hand is not something a second person should have
+to repeat. It is still **recorded** (decision 2): a preview is a real act by a
+real operator against real stored state, and the record's `dry_run` flag is what
+keeps it distinguishable from a rewrite.
+
+Making the preview honest required splitting the regeneration root in two:
+`out_root` is where the render is written, `source_root` is where the report
+already on disk is read from. With a single root the REGEN-FIELDLOSS2 guard would
+inspect the empty temporary tree, find no report, and report **zero refusals** -
+a preview confidently wrong about the one category it exists to surface.
 
 **5. `--missing-corpus` restricts the sweep to rows whose recorded corpus is
 None.** The default is every row; the flag is the common case, and it is a filter

@@ -461,6 +461,60 @@ def record_re_attribution(
     return _append_outcome(audit_log_path, record, start)
 
 
+def record_report_regeneration(
+    audit_log_path: Path,
+    justification: str,
+    operator: str,
+    git_commit: str,
+    regenerated_run_ids: list[str],
+    refused_run_ids: list[str],
+    failed_run_ids: list[str],
+    dry_run: bool,
+    missing_corpus_only: bool,
+    tool_version: str = "0.1.0",
+) -> StageResult:
+    """Append an audit record for a `regen-reports` sweep (FR-8/ADR-0005/ADR-0027).
+
+    regen-reports rewrites consumer-facing reports in bulk from stored rows - a
+    write to analysis state that happens OUTSIDE the run flow (no
+    record_authorization/record_classification fire for it), so it carries the
+    same M3 authorization gate as `re-attribute` and lands on the same chained
+    trail. Running it is a traceable act even when it changes nothing, which is
+    also why a `--dry-run` is recorded: the preview is a real act by a real
+    operator against real stored state, and `dry_run` says it wrote no report file.
+
+    The three outcome categories are recorded as SEPARATE run-id lists rather than
+    a single count, because they mean different things and collapsing them would
+    render a row that cannot be repaired as one that merely errored (ADR-0027
+    decision 3): `regenerated` was written, `refused` hit the REGEN-FIELDLOSS2
+    guard and was deliberately left alone, `failed` raised for some other reason.
+    Fails loudly as a StageResult when a corrupt log blocks the write."""
+    start = time.monotonic()
+    if not validate_justification(justification):
+        return StageResult(
+            stage="audit", status="failed", evidence={},
+            error=_invalid_justification_error(justification),
+            duration_ms=elapsed_ms(start),
+        )
+    record = {
+        "event": "reports_regenerated",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "justification": justification,
+        "operator": operator,
+        "tool_version": tool_version,
+        "git_commit": git_commit,
+        "runs_regenerated": len(regenerated_run_ids),
+        "runs_refused": len(refused_run_ids),
+        "runs_failed": len(failed_run_ids),
+        "regenerated_run_ids": regenerated_run_ids,
+        "refused_run_ids": refused_run_ids,
+        "failed_run_ids": failed_run_ids,
+        "dry_run": dry_run,
+        "missing_corpus_only": missing_corpus_only,
+    }
+    return _append_outcome(audit_log_path, record, start)
+
+
 def authorization_for_run(audit_log_path: Path, run_id: str) -> dict | None:
     """Recover a run's original authorization (operator + justification) from the
     immutable audit log by run_id, for faithful report regeneration.

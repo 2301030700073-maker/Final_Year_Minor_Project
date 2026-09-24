@@ -34,6 +34,7 @@ from audit.attestation import (
     validate_justification,
     record_run_completion,
     record_re_attribution,
+    record_report_regeneration,
     verify_audit_log,
     authorization_for_run,
 )
@@ -3875,7 +3876,22 @@ _CAUSE_SECTION_HEADINGS: tuple[str, ...] = (
 )
 
 
-def _regenerate_report(run, apk, rendering_commit: str) -> None:
+class RegenerationRefused(RuntimeError):
+    """A row whose stored report is the only copy of something a re-render cannot
+    reproduce (REGEN-FIELDLOSS2). A distinct type, not a message match: ADR-0027
+    reports `refused` and `failed` as SEPARATE categories, and a category decided
+    by string-matching its own error text is one refactor away from silently
+    collapsing into `failed`."""
+
+
+def _regenerate_report(
+    run,
+    apk,
+    rendering_commit: str,
+    *,
+    out_root: Path | None = None,
+    source_root: Path | None = None,
+) -> None:
     # `run` is intentionally un-annotated: RunRecord is imported function-locally
     # inside the re-attribute command (~line 1027), so it is not in module scope
     # here. With `from __future__ import annotations` any annotation would be a
@@ -3890,7 +3906,18 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
     commit (the report was rendered by it), so the Analysis-code line isn't
     misattributed to the original run's pre-feature commit (item 2). Raises on
     malformed stored data - the caller records the error loudly rather than
-    swallowing it (NFR-1)."""
+    swallowing it (NFR-1).
+
+    `out_root` is where the report is written and `source_root` is where the
+    EXISTING one is read from; both default to REPORTS_ROOT. They are separate
+    parameters for one reason (ADR-0027 decision 4): a `--dry-run` renders into a
+    temporary tree while the stored reports stay where they are, and the
+    REGEN-FIELDLOSS2 guard below must still read the report ON DISK. With a single
+    root, a dry run would look for the existing file inside the empty temp tree,
+    find nothing, and report zero refusals - the one category the preview exists
+    to surface."""
+    out_root = out_root if out_root is not None else REPORTS_ROOT
+    source_root = source_root if source_root is not None else out_root
     cls = _classification_from_json(run.classification_json or {})
     metadata = (apk.raw_metadata if apk else None) or {
         "package": {"package_name": run.package_name or ""},
@@ -3920,12 +3947,12 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
     # lossier render. The caller records the failure per row and carries on
     # (NFR-1: loud, never silent). Backfilling coverage_causes is the real fix for
     # such a row; until then its stored report is left exactly as it is.
-    _regen_target = REPORTS_ROOT / run.apk_sha256 / f"{run.run_id}.md"
+    _regen_target = source_root / run.apk_sha256 / f"{run.run_id}.md"
     if not causes and _regen_target.exists():
         _existing = _regen_target.read_text(encoding="utf-8", errors="replace")
         _lost = [h for h in _CAUSE_SECTION_HEADINGS if f"### {h}" in _existing]
         if _lost:
-            raise RuntimeError(
+            raise RegenerationRefused(
                 f"refusing to regenerate {run.run_id}: its coverage_causes column is "
                 f"empty, but the stored report carries {len(_lost)} cause section(s) "
                 f"nothing can reproduce ({'; '.join(_lost[:3])}"
@@ -3962,7 +3989,7 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         verification=_verification_from_json(run.verification_json),
         correlation=_correlation_from_json(run.correlation_json),
         stage_results=[_stage_from_json(s) for s in (run.stage_results_json or [])],
-        output_dir=REPORTS_ROOT,
+        output_dir=out_root,
         dynamic_skip_reason=run.dynamic_skip_reason,
         correlation_skip_reason=run.correlation_skip_reason,
         manifest=_manifest_from_json(run.manifest_json),
@@ -4347,6 +4374,153 @@ def verify_device_cmd(
         f"[bold green]FRIDA_OK[/bold green] connected, {count} process(es) on "
         f"{device_serial} - ready for a dynamic scan"
     )
+
+
+@app.command("regen-reports")
+def regen_reports_cmd(
+    justification: str = typer.Option(
+        ...,
+        "--justification",
+        help="Authorization justification for rewriting stored reports in bulk - "
+        "must be OWN_APP, CTF, ACADEMIC_TRAINING_TARGET, or "
+        "AUTHORIZED_ENGAGEMENT:<id> (FR-8.1/ADR-0005). Required: this rewrites "
+        "consumer-visible reports and must be as traceable as the runs that "
+        "produced them.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Render every selected report into a temporary tree and write no "
+        "report file. The three outcome categories are reported exactly as a real "
+        "sweep reports them, because the refusal guard reads the report already "
+        "on disk rather than the one being written.",
+    ),
+    missing_corpus: bool = typer.Option(
+        False,
+        "--missing-corpus",
+        help="Restrict the sweep to rows whose recorded signature corpus is None "
+        "(a run rendered before ADR-0022). Default: every stored row.",
+    ),
+):
+    """Re-render stored reports from their own rows, in bulk (ADR-0027).
+
+    `re-attribute` regenerates only the rows it CHANGES, which is correct for a
+    backfill and useless for a refresh: a report can be stale relative to its row
+    for reasons re-attribute never touches (F2, REGEN-FIELDLOSS1, DYN-SKIPSTATUS1).
+    This command owns that refresh. It exists as a command rather than a one-off
+    script because a bulk rewrite of consumer-facing state outside the run flow is
+    exactly the class of act Principle 7 exists to put on the audit trail.
+
+    It re-derives NOTHING (ADR-0027 decision 6): the corpus comes from the row
+    (ADR-0022), the obfuscation level and its rule from the row (ADR-0026), and
+    the classification from the row. `Analysis code:` names the RENDERING commit,
+    because that is the code that produced this file.
+
+    A regenerated report is not the artefact the original run produced - its
+    `Generated:` timestamp, `Analysis code:` line and body wording become today's.
+    That trade is stated in the ADR; an operator who wants the originals preserved
+    should not run this, and that is a legitimate choice rather than a mistake.
+    """
+    # Same M3 auth gate as re-attribute (ADR-0005 / ADR-0027 decision 2). This
+    # rewrites consumer-visible reports OUTSIDE the run flow, so no
+    # record_authorization/record_classification fires for it. Validated BEFORE
+    # any render or write, so an invalid justification touches nothing.
+    if not validate_justification(justification):
+        console.print(
+            f"[bold red]Invalid --justification '{justification}' - aborting before "
+            "regen-reports. Use one of OWN_APP, CTF, ACADEMIC_TRAINING_TARGET, or "
+            "AUTHORIZED_ENGAGEMENT:<id>.[/bold red]"
+        )
+        raise typer.Exit(code=1)
+    # A6: an unverifiable operator aborts before any render, so the sweep never
+    # runs unattributable.
+    operator = _operator_identity()
+    rendering_commit = _git_commit_hash()
+
+    import shutil
+    import tempfile
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from storage.db import ApkRecord, RunRecord, get_engine
+
+    # ADR-0027 decision 4: a dry run renders with the REAL renderer into a
+    # throwaway tree, then deletes it, so a preview cannot be wrong about what a
+    # real sweep would produce.
+    dry_root = Path(tempfile.mkdtemp(prefix="regen-reports-")) if dry_run else None
+    regenerated_run_ids: list[str] = []
+    refused_run_ids: list[str] = []
+    failed_run_ids: list[str] = []
+    try:
+        with Session(get_engine(ANALYSIS_ROOT)) as session:
+            rows = session.execute(
+                select(RunRecord, ApkRecord)
+                .outerjoin(ApkRecord, RunRecord.apk_sha256 == ApkRecord.sha256)
+            ).all()
+            # ADR-0027 decision 5: a filter on the RECORD, never a re-derivation.
+            selected = [
+                (run, apk)
+                for run, apk in rows
+                if not missing_corpus or run.signature_corpus is None
+            ]
+            for run, apk in selected:
+                try:
+                    _regenerate_report(
+                        run,
+                        apk,
+                        rendering_commit,
+                        out_root=dry_root,
+                        source_root=REPORTS_ROOT,
+                    )
+                except RegenerationRefused as exc:
+                    # Deliberately NOT a failure. The row cannot be repaired and
+                    # its stored report is the only surviving copy of what it
+                    # carries, so it is left exactly as it is and named here rather
+                    # than counted away (ADR-0027 decision 3).
+                    refused_run_ids.append(run.run_id)
+                    console.print(f"[yellow]REFUSED  {run.run_id}: {exc}[/yellow]")
+                except Exception as exc:  # NFR-1: fail loudly, never silently
+                    failed_run_ids.append(run.run_id)
+                    console.print(f"[bold red]FAILED   {run.run_id}: {exc}[/bold red]")
+                else:
+                    regenerated_run_ids.append(run.run_id)
+    finally:
+        if dry_root is not None:
+            shutil.rmtree(dry_root, ignore_errors=True)
+
+    # ADR-0027 decision 2: running it is a traceable act even when it changes
+    # nothing - and a dry run is running it. `dry_run` in the record says it wrote
+    # no report file, so the trail distinguishes a preview from a rewrite.
+    audit = record_report_regeneration(
+        audit_log_path=AUDIT_LOG_PATH,
+        justification=justification,
+        operator=operator,
+        git_commit=rendering_commit,
+        regenerated_run_ids=regenerated_run_ids,
+        refused_run_ids=refused_run_ids,
+        failed_run_ids=failed_run_ids,
+        dry_run=dry_run,
+        missing_corpus_only=missing_corpus,
+    )
+    if audit.status == "failed":
+        console.print(
+            f"[bold red]regen-reports finished but its audit record could not be "
+            f"appended: {audit.error}[/bold red]"
+        )
+    console.print(
+        f"[bold green]{'would regenerate' if dry_run else 'regenerated'} "
+        f"{len(regenerated_run_ids)} report(s); "
+        f"{len(refused_run_ids)} refused (unreproducible - left exactly as they "
+        f"are); {len(failed_run_ids)} failed[/bold green]"
+    )
+    if refused_run_ids or failed_run_ids:
+        console.print(
+            "[bold red]Nothing was written for the rows above. A refusal is not a "
+            "failure: for those rows the stored report is the only copy of its own "
+            "cause sections, and backfilling coverage_causes is the real fix "
+            "(ADR-0027, REGEN-FIELDLOSS2).[/bold red]"
+        )
 
 
 if __name__ == "__main__":

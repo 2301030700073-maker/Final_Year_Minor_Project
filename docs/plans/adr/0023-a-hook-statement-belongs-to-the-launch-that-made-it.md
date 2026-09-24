@@ -77,11 +77,31 @@ putting the window in both would render the same label twice on one line.
   survive a real upgrade, and the check's own tests tie the bare key to
   `native_hook_installation_key()`.
 
-## Left open
+## Follow-up: the duplicate install, root-caused and fixed
 
-Why a freshly spawned capture launch reports "already replaced this function"
-for four symbols. `frida_runner.py` merges the synthesized source and the root
-envelope into a single load, and the synthesizer's dedupe is by recipe *body*
-identity, so two different bodies hooking one symbol would install twice. This
-is a question about the synthesizer's dedupe, not about this contract, and it is
-recorded as unresolved rather than settled here.
+The four-symbol "already replaced this function" statement was left open above
+with a hypothesis that turned out to be wrong in its specifics. It is not two
+different bodies hooking one symbol and defeating an identity-based dedupe; it
+is **one** arm reaching the same process twice.
+
+`SSL_RECIPES` routes five ssl ids — `native_ssl_pinning_verify`,
+`native_pinning_embedded`, `native_ssl_custom_verify_callback`,
+`cronet_cert_verifier`, `pin_cronet_add_public_key_pins` — to a body that *is*
+the native BoringSSL arm. `UNIVERSAL_SSL` contains that same arm, and the
+supplement rule appends `UNIVERSAL_SSL` whenever any selected ssl id has no
+dedicated recipe. An app that matches one of those five ids *and* one unmapped
+ssl id therefore receives the arm twice, and the second copy is not inert: it
+re-replaces every symbol the first already replaced. Frida refuses the second
+`Interceptor.replace`, so the arm's catch reported four hooks it "could not
+install" that were installed — a false bound on the one line whose whole job is
+stating the real ones. `SYNTH-DEDUP1`'s dedupe is by whole recipe body and
+cannot see a component two bodies share.
+
+Two guards now hold, at different levels: the composition keeps a shared
+component in the first body carrying it and strips it from the others, and the
+arm's own JS replaces an address once per process with the flag set only after a
+replace returns, so a genuine installation failure still reports.
+
+Open remains the empirical half only: the fix is verified by unit test and
+against the recorded logs that carry the four lines, but the fresh capture
+window that would show the line absent is the reference-box re-run.

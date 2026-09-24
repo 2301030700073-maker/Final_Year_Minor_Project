@@ -1009,6 +1009,89 @@ def _merge_capture_window_evaluation(
             merged_lines[key] = value
 
 
+def _success_check_stage(target: str, verification: "VerificationResult") -> StageResult:
+    """The stage row for a target-specific success check that RAN and returned.
+
+    The status is success because the check completed and its verdict is
+    carried in the evidence: root_bypassed/ssl_bypassed are the two fields the
+    check exists to produce, and reporting them here is what lets the report's
+    Stage Results table and the stored stage_results_json show the same verdict
+    the Dynamic Verification section states.
+    """
+    return StageResult(
+        stage="success-check",
+        status="success",
+        evidence={
+            "target": target,
+            "root_bypassed": verification.root_bypassed,
+            "ssl_bypassed": verification.ssl_bypassed,
+        },
+    )
+
+
+def _failure_dynamic_note(
+    dynamic_status: str,
+    dynamic_failed: bool,
+    capture_failed: bool,
+    verification: "VerificationResult | None",
+) -> str:
+    """What the run RECORDED about the dynamic bypass, for the failure footer.
+
+    "was not confirmed" is a claim about the verification, so it is read from
+    the verification rather than inferred from the stage status. Measured on
+    the 2026-09-24 AndroGoat run bcfc5364: the success check set root_bypassed
+    AND ssl_bypassed True, and the footer still said "the dynamic bypass ran
+    but was not confirmed" - a false claim about the run, on the record the
+    operator reads first. The traffic clause is gated on capture_failed for the
+    same reason: it was appended unconditionally, so a run that failed the
+    dynamic stage while capturing fine was told no traffic was captured.
+    """
+    if dynamic_status == "skipped":
+        note = "dynamic verification was not attempted (no bypass technique to apply)"
+    elif dynamic_failed:
+        note = "the dynamic bypass ran but failed"
+    else:
+        confirmed = [
+            name
+            for name, ok in (
+                ("root", getattr(verification, "root_bypassed", None)),
+                ("ssl", getattr(verification, "ssl_bypassed", None)),
+            )
+            if ok
+        ]
+        note = (
+            f"the dynamic bypass was CONFIRMED for {'/'.join(confirmed)}"
+            if confirmed
+            else "the dynamic bypass ran but was not confirmed"
+        )
+    if capture_failed:
+        note += ", and no traffic was captured"
+    return note
+
+
+def _failure_correlation_note(
+    correlation: "CorrelationResult | None", skip_reason: str | None
+) -> str:
+    """The correlation state, named the way the report names it.
+
+    Mirrors the tri-state ladder in report/generator.py's "Static vs. Dynamic
+    Correlation" block (MISMATCH / COVERAGE-CONFIRMED / UNVERIFIED / MATCH) -
+    change one, change the other. The footer hardcoded
+    "correlation=not_attempted", which was false on every run whose correlation
+    was evaluated: run bcfc5364 stored matches=True and rendered
+    "Verdict: MATCH" while the console said not_attempted.
+    """
+    if correlation is None or skip_reason:
+        return "correlation=not_attempted"
+    if correlation.mismatches:
+        return "correlation=MISMATCH"
+    if correlation.coverage_confirmed:
+        return "correlation=COVERAGE-CONFIRMED"
+    if correlation.unverified:
+        return "correlation=UNVERIFIED"
+    return "correlation=MATCH"
+
+
 def _reclassify_empty_capture(
     capture_stage: StageResult,
     manifest_info,
@@ -2845,6 +2928,19 @@ def run(
                                 )
                             )
                         correlation_result = correlation_module.correlate(classification, verification)
+                        # Record the check that produced this verification. Its
+                        # FAILURE arm below already appends a stage row; the
+                        # success arm appended nothing, so on a KNOWN target the
+                        # stage that promoted root/ssl from a target-specific
+                        # success check left no trace in stage_results, no line
+                        # in the console and no row in the report's Stage
+                        # Results. Measured on the 2026-09-24 AndroGoat run
+                        # bcfc5364 (a known target): root_bypassed and
+                        # ssl_bypassed both True, correlation MATCH - and not
+                        # one stage named success-check anywhere in the run.
+                        check_stage = _success_check_stage(target, verification)
+                        stage_results.append(check_stage)
+                        _print_stage(check_stage)
                     except Exception as exc:
                         # GAP-2 on an unexpected success-check exception for a
                         # known target: preserve the static report, surface the
@@ -3280,16 +3376,16 @@ def run(
         # dynamic run with no target-specific success check), not that dynamic did
         # not run - the ROOT_ONLY case runs dynamic (as "machinery ran; bypass not
         # confirmed") and only the capture fails. Say what actually happened.
-        if dynamic_stage.status == "skipped":
-            dynamic_note = "dynamic verification was not attempted (no bypass technique to apply)"
-        elif dynamic_failed:
-            dynamic_note = "the dynamic bypass ran but failed"
-        else:
-            dynamic_note = "the dynamic bypass ran but was not confirmed, and no traffic was captured"
+        dynamic_note = _failure_dynamic_note(
+            dynamic_stage.status, dynamic_failed, capture_failed, verification
+        )
+        correlation_note = _failure_correlation_note(
+            correlation_result, correlation_skip_reason
+        )
         console.print(
             f"[bold red]{', '.join(failures)} - "
             f"static analysis and report were still produced; {dynamic_note} "
-            f"(correlation=not_attempted).[/bold red]"
+            f"({correlation_note}).[/bold red]"
         )
         raise typer.Exit(code=1)
 

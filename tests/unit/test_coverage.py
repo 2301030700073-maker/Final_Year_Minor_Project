@@ -1,6 +1,8 @@
 """Unit tests for static/coverage.py - the per-surface coverage contract and the
 G-A per-category surface-set exclusion (F2). Pure module, no I/O/toolchain."""
 
+from pathlib import Path
+
 from common import CategoryVerdict
 from static.coverage import (
     GOVERNING_SURFACES,
@@ -164,11 +166,14 @@ def test_governing_surfaces_match_the_doc():
 
 
 def test_js_surface_coverage_degrades_only_on_binary_bundle():
-    # No binary JS bundle -> vacuously fully_analyzed (no JS, or plain-text JS the
-    # text engine already scans); a Hermes/bytecode bundle we can't fully read is
-    # partial so a NEITHER is never a confident negative over bundle-hidden logic.
-    assert js_surface_coverage(False) == "fully_analyzed"
-    assert js_surface_coverage(True) == "partial"
+    # A bundle the walk actually FOUND is partial whatever the APK's asset listing
+    # says - the walk covers every decoded root, not just assets/ (HERM2), so this
+    # arm is the one that cannot be talked out of the bound by a count.
+    assert js_surface_coverage(True, True, 25, "complete") == "partial"
+    assert js_surface_coverage(True, True, 0, "complete") == "partial"
+    # No binary JS bundle, surface read -> vacuously fully_analyzed (no JS, or
+    # plain-text JS the text engine already scans).
+    assert js_surface_coverage(False, True, 25, "complete") == "fully_analyzed"
 
 
 def test_js_surface_coverage_degrades_when_asset_surface_missing():
@@ -179,11 +184,52 @@ def test_js_surface_coverage_degrades_when_asset_surface_missing():
     # (assets/index.android.bundle, which scans to root-detection evidence) was
     # present in NEITHER root. has_binary_bundle then read False and `js` read
     # `fully_analyzed` - a confident negative over a bundle nobody read. The
-    # un-extracted surface must degrade instead.
-    assert js_surface_coverage(False, asset_surface_extracted=False) == "partial"
-    assert js_surface_coverage(True, asset_surface_extracted=False) == "partial"
-    # The extracted case keeps the original, bundle-sensitive semantics.
-    assert js_surface_coverage(False, asset_surface_extracted=True) == "fully_analyzed"
+    # un-extracted surface must degrade instead: the APK lists its assets and none
+    # of them reached disk.
+    assert js_surface_coverage(False, asset_surface_extracted=False,
+                               asset_entries_in_apk=25, decompile_completeness="complete") == "partial"
+    assert js_surface_coverage(True, asset_surface_extracted=False,
+                               asset_entries_in_apk=25, decompile_completeness="complete") == "partial"
+    # An archive that could not be listed at all is unknown, never an absence -
+    # which is also the lazy per-DEX path, where the extractor never sees the APK.
+    assert js_surface_coverage(False, False, None, "complete") == "partial"
+    assert js_surface_coverage(False, True, None, "complete") == "partial"
+
+
+def test_an_apk_with_no_asset_surface_is_not_bounded_by_one():
+    """ADR-0025. `asset_surface_extracted` is `asset_file_count > 0`, so it read
+    False for apps with no `assets/` entries at all and held `js` at partial with
+    a bound the app does not have. Measured 2026-09-24: every `false` on disk was
+    that case (AndroGoat x2, UnCrackable-Level1, InsecureBankv2, RS_CertPinning),
+    and the three UnCrackable runs record `asset_entries_in_apk: 0` with
+    `decompile_completeness: "complete"`."""
+    assert js_surface_coverage(False, False, 0, "complete") == "fully_analyzed"
+    # ...but the walk can only find a bundle in what the decode produced, so a
+    # decode that did not complete keeps the bound even though the surface is
+    # absent - and every other label, and a field nobody recorded, is not
+    # "complete" and degrades the same way.
+    assert js_surface_coverage(False, False, 0, "partial") == "partial"
+    assert js_surface_coverage(False, False, 0, "unknown") == "partial"
+    assert js_surface_coverage(False, False, 0, None) == "partial"
+
+
+def test_an_unrecorded_surface_degrades_rather_than_licensing_a_clean_read():
+    """One meaning per value: the defaults are the conservative ones, so a caller
+    that has not been handed the recorded facts degrades instead of certifying."""
+    assert js_surface_coverage(False) == "partial"
+    assert js_surface_coverage(False, True) == "partial"
+    assert js_surface_coverage(False, True, None, "complete") == "partial"
+
+
+def test_the_run_hands_the_decider_every_recorded_fact():
+    """A rule is only as good as what the run hands it: the sidecar records the
+    entry count and the completeness, so both must reach the call
+    ([[unit-tested-parser-neq-consumed-signal]])."""
+    text = (Path(__file__).resolve().parents[2] / "src" / "cli.py").read_text()
+    call = text[text.index('coverage_map["js"] = js_surface_coverage('):]
+    assert "_asset_surface_extracted" in call[:200]
+    assert "_asset_entries_in_apk" in call[:200]
+    assert "_decompile_completeness" in call[:200]
 
 
 def test_is_dart_aot_lib_recognizes_flutter_snapshots():

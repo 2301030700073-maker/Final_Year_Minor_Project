@@ -27,7 +27,6 @@ from report.generator import generate_report
 
 from cli import (
     _capture_not_attempted,
-    _js_surface_console_note,
     _reclassify_empty_capture,
 )
 
@@ -167,33 +166,13 @@ def test_the_not_attempted_sentence_claims_no_evidence_it_does_not_have(tmp_path
     assert "no flows recorded" not in content  # the failed-stage diagnosis
 
 
-# --- the console mirrors the js surface qualifier --------------------------
-
-
-def test_the_absent_asset_surface_is_explained_on_the_console():
-    note = _js_surface_console_note({"js": "partial"}, 0, False)
-    assert note and "no `assets/` entries at all" in note
-    assert "ASSET-DROP1" in note
-
-
-def test_the_note_is_absent_for_every_other_state():
-    # a complete js reading needs no note
-    assert _js_surface_console_note({"js": "fully_analyzed"}, 0, False) is None
-    # a surface the APK DOES ship is a real bound; the loss wording is the report's
-    assert _js_surface_console_note({"js": "partial"}, 25, False) is None
-    # an unlistable archive is unknown, never an absence
-    assert _js_surface_console_note({"js": "partial"}, None, False) is None
-    # extracted surface with 0 entries cannot happen, but 0 must never mean "lost"
-    assert _js_surface_console_note({"js": "partial"}, 0, True) is None
-    assert _js_surface_console_note({}, 0, False) is None
-
-
-def test_the_console_note_is_wired_to_the_coverage_bound_print():
+def test_the_reading_that_state_needed_is_gone_with_the_state():
+    """ADR-0025 removed the state the console note explained - an asset-less APK
+    with a clean decode no longer reads `js: partial` at all - so the note went
+    with it rather than staying as unreachable code asserting a reading the
+    project stopped making."""
     text = (REPO_ROOT / "src" / "cli.py").read_text()
-    i = text.index("coverage_bound_line(coverage_map)")
-    window = text[i : i + 400]
-    assert "_js_surface_console_note(" in window
-    assert "_asset_entries_in_apk" in window and "_asset_surface_extracted" in window
+    assert "_js_surface_console_note" not in text
 
 
 def test_the_skip_reason_reaches_the_console():

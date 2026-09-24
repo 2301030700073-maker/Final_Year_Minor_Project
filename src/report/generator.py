@@ -206,19 +206,28 @@ read as a NO and manufacture the very clause this is fixing. #}
 {% if js_binary_bundle -%}
 {% set _ = _jsc.append("a binary Hermes/bytecode bundle whose control flow cannot be read (React Native release bundle) - only its string constants are recovered") -%}
 {% endif -%}
-{# ASSET-TRI1: `js_asset_surface_extracted == false` is THREE states - the APK
+{# ASSET-TRI1 + ADR-0025: `js_asset_surface_extracted == false` is THREE states - the APK
 ships no `assets/` entries at all (nothing is hidden), it ships a surface that
 did not reach disk (the real loss ASSET-DROP1 exists for), or the archive could
-not be listed. The clause below asserted the second for all three, and every
+not be listed. The clause here asserted the second for all three, and every
 false on disk measured 2026-09-24 was the first: AndroGoat x2, UnCrackable-Level1,
 InsecureBankv2 and RS_CertPinning all ship zero `assets/` entries, so the report
 told a reader its `js` bound came from an asset surface the run failed to put on
 disk, for apps that have no asset surface to lose. `js_asset_entries_in_apk` is
-the APK's own listing (None = unlistable), and each clause now fires on its own
-recorded fact. None, not 0, is left as the unknown case: a run predating the
-field keeps the older wording rather than being told the app ships no assets. #}
-{% if js_asset_entries_in_apk == 0 -%}
-{% set _ = _jsc.append("no asset surface at all - the APK lists no `assets/` entries, so an un-extracted tree hides nothing here; the `partial` is this rule's conservative reading of an absent surface, not a bundle this run failed to look at (ASSET-DROP1)") -%}
+the APK's own listing (None = unlistable), and each clause fires on its own
+recorded fact.
+
+ADR-0025 then took the first state out of `partial` altogether: an asset-less APK
+whose decode completed reads `js: fully_analyzed` and reaches no clause here at
+all. The one way an asset-less APK still reads `partial` is a decode that did not
+complete, because the bundle walk can only find a bundle in the roots the decode
+produced - and that is what the clause below names. It is gated on the exact
+recorded label (`== "partial"`, like the java clause's own partial-decompile
+clause), so a run predating the field, or one whose completeness reads `unknown`,
+is never told a cause it did not record: it falls through to the unnamed-rule
+wording instead. #}
+{% if js_asset_entries_in_apk == 0 and decompile_completeness == "partial" -%}
+{% set _ = _jsc.append("a decompile that did not complete, over an APK that lists no `assets/` entries at all - the bundle walk can only find a bundle in the roots the decode produced (ADR-0025)") -%}
 {% endif -%}
 {% if js_asset_surface_extracted == false and js_asset_entries_in_apk != 0 -%}
 {% set _ = _jsc.append("an asset surface this run never put on disk, so a JS bundle the APK does carry would be invisible to every scan root (ASSET-DROP1)") -%}

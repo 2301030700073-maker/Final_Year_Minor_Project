@@ -822,40 +822,6 @@ def _print_stage(result: StageResult) -> None:
             _caution_sidecar(exc)
 
 
-def _js_surface_console_note(
-    coverage_map, entries_in_apk, surface_extracted
-) -> str | None:
-    """Console mirror of the report's ASSET-TRI1 qualifier for the js surface.
-
-    For an APK that lists no `assets/` entries the report says the `partial` js
-    reading is this rule's conservative reading of an ABSENT surface, not a bundle
-    this run failed to look at. The console printed the same bound with no
-    qualifier - on the three UnCrackable runs of 2026-09-24 it said
-    `upper bound: java=partial, js=partial` and `js=partial` in the coverage-bound
-    line for APKs whose record reads `js_asset_entries_in_apk: 0`, naming a
-    coverage bound over a surface those apps do not have. Same parity rule as
-    `_completeness_console_caveat`: the report carries the cause, so the console
-    does too ([[docstring-caveat-reaches-no-reader]]).
-
-    Returns None unless the js reading is actually `partial` AND the record says the
-    APK ships no asset surface at all. The gate names the exact value the note's
-    own sentence asserts, so a map carrying no js verdict (or any third state a
-    later change introduces) gets no explanation rather than a wrong one. And
-    `entries_in_apk is None` (an unlistable archive) is unknown, never an absence
-    (ASSET-TRI1).
-    """
-    if coverage_map.get("js") != "partial":
-        return None
-    if entries_in_apk != 0 or surface_extracted:
-        return None
-    return (
-        "[dim]Note: `js=partial` here is this rule's conservative reading of an "
-        "ABSENT surface - the APK lists no `assets/` entries at all, so there is "
-        "no JS bundle this run failed to extract (ASSET-DROP1); the report says "
-        "the same.[/dim]"
-    )
-
-
 def _completeness_console_caveat(
     completeness: str, jadx_file_count, jadx_exit_code
 ) -> str | None:
@@ -2478,9 +2444,11 @@ def run(
     # js/root/ssl NEITHER is never a confident negative over bundle-hidden logic
     # (ADR-0006). Always set (fully_analyzed when no binary bundle), because `js` is
     # now a governing surface in coverage.py.
-    # ASSET-DROP1: an asset surface that was never extracted makes has_binary_bundle
-    # meaningless (a bundle in the APK is invisible to every scan root), so `js`
-    # must degrade to partial rather than certify a confident negative over it.
+    # ASSET-DROP1 + ADR-0025: `has_binary_bundle` is only as trustworthy as the
+    # roots the walk covered, and the guard below used to be one count-derived
+    # boolean. It is now the three facts the run recorded, so an APK that ships no
+    # `assets/` entries at all is not held at `partial` by a surface it does not
+    # have (see js_surface_coverage for the state table).
     # Default False, not True. An absent field means this surface's evidence was
     # never recorded on the path that produced it, and "we did not record it" has
     # to degrade the surface - never license `js: fully_analyzed` over assets
@@ -2495,7 +2463,19 @@ def run(
     # app that ships no asset surface and for one whose surface was dropped, and
     # the report named the second cause for the first case.
     _asset_entries_in_apk = decompile_result.evidence.get("asset_entries_in_apk")
-    coverage_map["js"] = js_surface_coverage(has_binary_bundle, _asset_surface_extracted)
+    # ADR-0025: the fact `asset_surface_extracted` was standing in for when the APK
+    # ships no `assets/` at all - whether the decode that produced the roots the
+    # bundle walk covered ran to completion. `"complete"` is the only label that
+    # earns the vacuous reading; anything else (partial, unknown, or a field this
+    # run never recorded, which reads as None) keeps the surface at `partial`,
+    # because the walk can only find a bundle in what the decode produced.
+    _decompile_completeness = decompile_result.evidence.get("decompile_completeness")
+    coverage_map["js"] = js_surface_coverage(
+        has_binary_bundle,
+        _asset_surface_extracted,
+        _asset_entries_in_apk,
+        _decompile_completeness,
+    )
     # Flutter/Dart-AOT: a release Flutter app compiles its Dart logic (the real
     # root/SSL detection surface) into a native snapshot blob - libapp.so /
     # dart.so - that native symbol/string/Ghidra tooling cannot analyze like a
@@ -2611,13 +2591,6 @@ def run(
     # ship no scannable .so, so native=unscannable alone already blocks a
     # confident root/ssl NEITHER).
     console.print(f"[dim]{coverage_bound_line(coverage_map)}[/dim]")
-    # ASSET-DROP1 parity: a `js=partial` bound over an APK that ships no asset
-    # surface at all is explained on the report, so it is explained here too.
-    _js_surface_note = _js_surface_console_note(
-        coverage_map, _asset_entries_in_apk, _asset_surface_extracted
-    )
-    if _js_surface_note:
-        console.print(_js_surface_note)
     # L-M4: mirror the report's per-category confidence lines on the console so
     # the numeric confidence a reviewer watches is never read as a bare point
     # estimate on a coverage-limited category. confidence_bound appends the

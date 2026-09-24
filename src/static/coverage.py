@@ -185,6 +185,8 @@ def dart_aot_coverage(
 def js_surface_coverage(
     has_binary_bundle: bool,
     asset_surface_extracted: bool = True,
+    asset_entries_in_apk: int | None = None,
+    decompile_completeness: str | None = None,
 ) -> Coverage:
     """Real-world gap A1: a Hermes/bytecode JS bundle (React Native release
     `assets/index.android.bundle`, `.hbc`) is binary, so the text engine skips it
@@ -194,18 +196,43 @@ def js_surface_coverage(
     present the surface is vacuously `fully_analyzed` (either no JS, or plain-text
     JS the signature engine already scans).
 
-    ASSET-DROP1: `has_binary_bundle` is only trustworthy if the asset surface was
-    actually put on disk for the scan roots to walk. When it was NOT extracted
-    (asset_surface_extracted=False - e.g. the lazy per-DEX jadx path, which never
-    sees the APK, combined with an apktool that timed out mid-smali), a bundle
-    that IS in the APK is invisible: `has_binary_bundle` reads False and the
-    surface would read `fully_analyzed` over a bundle nobody read. That is the
-    exact confident-negative-over-an-unread-surface failure ADR-0006 forbids, so
-    an un-extracted asset surface degrades `js` to `partial` (unknown, not
-    absent) instead. This can only ever make the verdict more conservative."""
-    if not asset_surface_extracted:
+    ADR-0025: the asset side of that reading is taken from the three facts the run
+    records, not from one count-derived boolean. The previous gate was
+    `asset_surface_extracted` alone, which is `asset_file_count > 0` and is False
+    for two different worlds - an APK that ships no `assets/` entries at all, and
+    one whose surface did not reach disk - so it held the js surface at `partial`
+    for apps that have no surface to lose. Every `false` measured on disk on
+    2026-09-24 was the first case (AndroGoat x2, UnCrackable-Level1,
+    InsecureBankv2, RS_CertPinning), and the three UnCrackable runs record
+    `asset_entries_in_apk: 0` with `decompile_completeness: "complete"`.
+
+    So, in order:
+
+    - a binary bundle the walk FOUND is a real bound whatever the listing says;
+      the walk covers every decoded root rather than `assets/` alone (HERM2), so
+      a bundle under `res/raw/` is already found this way;
+    - an unlistable archive (`asset_entries_in_apk is None`) is unknown, never an
+      absence - which is also the lazy per-DEX path, where the extractor never
+      sees the APK - and unknown degrades, exactly like a fact nobody recorded;
+    - an APK listing `assets/` entries that did not reach disk is the loss
+      ASSET-DROP1 exists for, and stays `partial`;
+    - an APK listing none is not bounded by a surface it does not have, but only
+      when the roots the walk covered were complete. `decompile_completeness` is
+      that fact and `"complete"` alone earns the upgrade, because the walk can
+      only find a bundle in what the decode produced; unrecorded, unknown or
+      partial completeness is not `"complete"` and keeps the surface `partial`.
+
+    Every default is the conservative one (extracted=True, entries=None,
+    completeness=None leaves `partial`), so a caller that has not been given the
+    recorded facts degrades rather than licenses a confident negative - the same
+    direction as every other bound in this module."""
+    if has_binary_bundle:
         return "partial"
-    return "partial" if has_binary_bundle else "fully_analyzed"
+    if asset_entries_in_apk is None:
+        return "partial"
+    if asset_entries_in_apk > 0:
+        return "fully_analyzed" if asset_surface_extracted else "partial"
+    return "fully_analyzed" if decompile_completeness == "complete" else "partial"
 
 
 def apply_unresolved_native(

@@ -78,25 +78,33 @@ becomes:
 | `> 0`, surface not extracted | `False` | `partial` | a real loss: ASSET-DROP1, unchanged |
 
 `has_binary_bundle` stays the first row: a bundle the walk actually found is a
-real bound on the js surface no matter what the APK's asset listing says. The
-entry count defaults to `None`, so every existing two-argument caller keeps
-today's behaviour exactly - the upgrade travels only where a caller passes the
-recorded count, and the ASSET-DROP1 degradation survives for the unknown case
-(`tests/unit/test_coverage.py:183-186` asserts precisely those calls).
+real bound on the js surface no matter what the APK's asset listing says. Every
+default is the conservative one - `asset_entries_in_apk=None` and
+`decompile_completeness=None` both land on `partial` - so the upgrade travels
+only where a caller passes the recorded facts, and a caller that has not been
+handed them degrades instead of certifying. That is a change for the two
+existing two-argument calls (`js_surface_coverage(False)` read
+`fully_analyzed`; it now reads `partial`, since unrecorded is not absent): it is
+the safe direction, and the assertions that encoded the old reading were
+rewritten in the same commit rather than kept as a licence for the new rule to
+read a missing fact as a NO.
 
 **2. The incompleteness the old flag was standing in for must be carried
 explicitly, or the upgrade is unsound.** `asset_surface_extracted` was doing two
 jobs: recording a real extraction loss, and accidentally protecting an asset-less
-APK whose *decode* was incomplete. The first job stays (row 5). The second must
-be carried by its own recorded fact, because the walk can only find what the
-roots contain: the call site passes the decompile stage's own completeness - the
-sidecar already records `apktool_timed_out` and `jadx_timed_out`
-(`decompile.py:93-94`), and the unlistable-archive case is already row 2. A
-completeness signal that is absent, unreadable, or unknown yields the
-conservative `partial`, never `fully_analyzed`: an unread signal is unknown, and
-unknown is the case ADR-0006 forbids certifying. The lazy per-DEX path, where
-jadx never sees the APK at all, is row 2 by construction (`extract_assets`
-returns `None` when the path is not a file).
+APK whose *decode* was incomplete. The first job stays (row 5). The second is
+carried by its own recorded fact, because the walk can only find what the roots
+contain: the completeness label the decompile stage already writes
+(`decompile_completeness`, the same field the report's partial-decompile CAUTION
+and the calibration Tier-2 exclusion read), and the unlistable-archive case is
+already row 2. Only the label `"complete"` earns the upgrade: a label that is
+absent, unreadable or `"unknown"` yields the conservative `partial`, never
+`fully_analyzed`, because an unread signal is unknown and unknown is the case
+ADR-0006 forbids certifying. The lazy per-DEX path, where jadx never sees the APK
+at all, is row 2 by construction (`extract_assets` returns `None` when the path is
+not a file). No new field is introduced: all four inputs are values the run
+already records, and the report template already reads `decompile_completeness`
+for its java clause.
 
 **3. This is a verdict change and is treated as one.** `js` governs root and SSL,
 so `apply_coverage_bound` no longer sets `coverage_limited` on those verdicts for

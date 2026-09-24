@@ -461,6 +461,14 @@ def _native_ssl_pin_bypass() -> str:
         "];\n"
         "var mods = Process.enumerateModules();\n"
         "var seen = {};\n"
+        "// One address is replaced once per process, however many copies of this arm\n"
+        "// the composition emits: a second Interceptor.replace on a live address is\n"
+        "// refused by Frida ('already replaced this function'), and this arm's catch\n"
+        "// then reports a hook it could not install - naming a bound that does not\n"
+        "// exist on the one line whose whole job is stating the real ones. The flag is\n"
+        "// set only once a replace has returned, so a genuine failure still reports.\n"
+        "var replaced = globalThis.__synth_native_ssl_replaced ||\n"
+        "               (globalThis.__synth_native_ssl_replaced = {});\n"
         "for (var i = 0; i < mods.length; i++) {\n"
         "  var mn = mods[i].name;\n"
         "  if (mn.indexOf('.so') === -1) continue;\n"
@@ -471,14 +479,63 @@ def _native_ssl_pin_bypass() -> str:
         "    catch (e) { console.log('[synth] could not look up ' + sym + ' in ' + mn + ': ' + e); continue; }\n"
         "    if (!p) continue;\n"
         "    seen[sym] = true;\n"
-        "    try { Interceptor.replace(p, new NativeCallback(SYMS[k][1], 'int', SYMS[k][2])); }\n"
-        "    catch (e) { console.log('[synth] ' + sym + ' found in ' + mn + ' but the hook could not be installed: ' + e); }\n"
+        "    var addr = p.toString();\n"
+        "    if (replaced[addr]) continue;\n"
+        "    try {\n"
+        "      Interceptor.replace(p, new NativeCallback(SYMS[k][1], 'int', SYMS[k][2]));\n"
+        "      replaced[addr] = true;\n"
+        "    } catch (e) { console.log('[synth] ' + sym + ' found in ' + mn + ' but the hook could not be installed: ' + e); }\n"
         "  }\n"
         "}\n"
         "for (var k = 0; k < SYMS.length; k++) {\n"
         "  if (!seen[SYMS[k][0]]) console.log('[synth] no ' + SYMS[k][0] + ' in any loaded module');\n"
         "}\n"
     )
+
+
+# The native arm as a module-level string, so the composition can recognise it
+# inside a recipe body. It is one component shared by several bodies rather than
+# one body: five ssl ids route to a body containing it, and UNIVERSAL_SSL contains
+# it too.
+NATIVE_SSL_PIN_ARM = _native_ssl_pin_bypass()
+
+
+def _dedupe_shared_fragment(hooks: list[str], fragment: str) -> list[str]:
+    """Keep a component that more than one body contains in the FIRST body
+    carrying it, and strip it from the others.
+
+    The whole-body dedupe in `synthesize` cannot see this case: the bodies differ,
+    only a component of them is shared. The native BoringSSL arm is the one that
+    matters - five ssl ids route to a body containing it, and UNIVERSAL_SSL also
+    contains it - so an app matching one of those ids AND any ssl id with no
+    dedicated recipe (the supplement rule) was handed the arm twice and replaced
+    every symbol it resolved a second time. Measured as four '[synth] <sym> found
+    in libssl.so but the hook could not be installed: Error: already replaced this
+    function' lines, on AndroGoat 2026-09-19 and again in the PropertyGuru capture
+    window of 2026-09-20. The Java neutralizers tolerate a second install (the last
+    identical implementation wins); the native arm does not, which is why only it
+    ever reported.
+
+    Stripping from the later holders rather than from the first keeps the install
+    order the composition already had. The arm is a self-contained block of
+    statements, so the remainder is still valid script.
+    """
+    holders = [i for i, body in enumerate(hooks) if fragment in body]
+    if len(holders) < 2:
+        return hooks
+    keep = holders[0]
+    out: list[str] = []
+    for i, body in enumerate(hooks):
+        if i == keep:
+            out.append(body)
+            continue
+        stripped = body.replace(fragment, "").strip()
+        # A body that WAS the fragment (five ssl ids route to the arm alone) installs
+        # nothing once the arm is kept elsewhere, so it is dropped rather than left
+        # as an empty entry in the joined script.
+        if stripped:
+            out.append(stripped)
+    return out
 
 
 def _ssl_effect_observer() -> str:
@@ -1195,7 +1252,14 @@ def synthesize(classification: ClassificationResult, action: Action) -> Synthesi
     # (universal empty) is byte-identical to before.
     env_hooks: list[str] = [_environment_normalization()] if universal else []
 
-    all_hooks = evasion_hooks + env_hooks + root_hooks + ssl_hooks
+    # Components shared between bodies install once. The bodies themselves are
+    # already deduped above; this is the level below, where UNIVERSAL_SSL and a
+    # targeted body carry the same native arm (see _dedupe_shared_fragment for the
+    # measured defect). Ordered after every append so it sees the final lists, and
+    # before the join so no consumer can observe the duplicate.
+    all_hooks = _dedupe_shared_fragment(
+        evasion_hooks + env_hooks + root_hooks + ssl_hooks, NATIVE_SSL_PIN_ARM
+    )
     # Checkpoints for the technology-level "hooks engaged" signal cover BOTH the
     # dedicated recipe hooks AND the category universal base (labelled
     # universal:<cat>). Without this, a bypass that only used the universal base

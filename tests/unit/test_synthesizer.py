@@ -12,7 +12,12 @@ from pathlib import Path
 import pytest
 
 from common import Action, CategoryVerdict, ClassificationResult, Evidence
-from dynamic.synthesizer import ROOT_RECIPES, SSL_RECIPES, synthesize
+from dynamic.synthesizer import (
+    NATIVE_SSL_PIN_ARM,
+    ROOT_RECIPES,
+    SSL_RECIPES,
+    synthesize,
+)
 from static.native import load_native_signatures
 from static.signatures import load_signatures
 
@@ -1012,6 +1017,56 @@ def test_native_root_exec_blocking_blocks_root_binaries_only():
     assert "probeHit" in src
     # per-symbol try/catch so a missing export degrades silently, not a hard fail
     assert "try {" in src
+
+
+def test_a_component_two_bodies_share_is_installed_once():
+    """SYNTH-DEDUP1's sibling, one level down. That fix deduped whole BODIES, which
+    cannot see two bodies that share a COMPONENT. The native BoringSSL arm is the
+    case: five ssl ids route to a body that IS that arm, UNIVERSAL_SSL also contains
+    it, so an app matching one of those ids AND any ssl id with no dedicated recipe
+    - which earns the universal base through the supplement rule - was handed the
+    arm twice.
+
+    The second copy is not inert: it re-replaces every symbol the first already
+    replaced, and Frida refuses, so the script reports four hooks it 'could not
+    install' that are installed. Measured on AndroGoat 2026-09-19 and again in the
+    PropertyGuru capture window of 2026-09-20, four lines reading 'found in
+    libssl.so but the hook could not be installed: Error: already replaced this
+    function'.
+
+    The premise is asserted rather than assumed: if the supplement stopped firing
+    for this pair of ids, the test would pass on a script that never had the
+    duplicate."""
+    r = synthesize(
+        _cls(Action.SSL_ONLY, ssl_ids=["native_ssl_pinning_verify",
+                                       "certificate_transparency_verifier"]),
+        Action.SSL_ONLY,
+    )
+    assert "ssl" in r.universal_categories, "the supplement rule did not fire; premise"
+    assert SSL_RECIPES["native_ssl_pinning_verify"] == NATIVE_SSL_PIN_ARM, "premise"
+    assert r.source.count(NATIVE_SSL_PIN_ARM) == 1, (
+        f"the native arm is emitted {r.source.count(NATIVE_SSL_PIN_ARM)} times, so "
+        "every symbol it resolves is replaced more than once"
+    )
+
+
+def test_the_native_arm_replaces_an_address_once_per_process():
+    """The composition above is one guard; this is the other, in the script itself.
+    However many copies of the arm end up in a source - a future body that embeds
+    it, or a merge this composition does not perform - a live address is replaced
+    once, because the second Interceptor.replace is refused and this arm's catch
+    would report it as a hook it could not install.
+
+    The flag is set only once a replace has RETURNED, so a genuine failure is not
+    swallowed by the guard: it reports, as before."""
+    assert "if (replaced[addr]) continue;" in NATIVE_SSL_PIN_ARM
+    assert NATIVE_SSL_PIN_ARM.count("Interceptor.replace(") == 1
+    replace_block = NATIVE_SSL_PIN_ARM.split("Interceptor.replace(", 1)[1]
+    before_catch = replace_block.split("catch", 1)[0]
+    assert "replaced[addr] = true;" in before_catch, (
+        "the flag must be set on success only, or a real failure would be skipped "
+        "as a duplicate"
+    )
 
 
 def test_both_action_covers_each_relevant_category_independently():

@@ -23,6 +23,12 @@ from typing import Literal
 
 ObfuscationLevel = Literal["clear", "light", "heavy"]
 
+# ADR-0026: which rule produced a `heavy` reading. The two bound a negative for
+# different reasons - encrypted literals are unrecoverable, minified identifiers
+# are rewritten - so the record carries the rule and the report names it, instead
+# of rendering the encryption wording over a corpus that fired the ratio rule.
+ObfuscationReason = Literal["string_encryption", "minified_names"]
+
 # G7: single-char class-name ratio thresholds. > 0.40 heavy, > 0.10 light,
 # else clear. Documented as empirical starting points (N3), not asserted.
 HEAVY_RATIO = 0.40
@@ -273,14 +279,24 @@ def _minified_name_ratio(names: list[str]) -> float:
     return minified / len(app_names)
 
 
-def detect_obfuscation_level(java_files: list[Path], app_package: str | None = None) -> ObfuscationLevel:
-    """Two deterministic rules. G7 (class-name ratio) first, plus the R8 string-
-    encryption fingerprint: string encryption hides the very literals the
-    signature corpus matches, so its presence alone forces `heavy` (-> Java
-    surface partial via N1/G-C) regardless of class names. Empty corpus =>
-    'clear' (nothing to observe; the coverage contract separately marks a
-    low-corpus Java surface partial via decompile_completeness, so this can't
-    over-claim absence).
+def detect_obfuscation_with_reason(
+    java_files: list[Path], app_package: str | None = None
+) -> tuple[ObfuscationLevel, ObfuscationReason | None]:
+    """Two deterministic rules, returning the level AND the rule that produced it
+    (ADR-0026). G7 (class-name ratio) first, plus the R8 string-encryption
+    fingerprint: string encryption hides the very literals the signature corpus
+    matches, so its presence alone forces `heavy` (-> Java surface partial via
+    N1/G-C) regardless of class names. Empty corpus => 'clear' (nothing to
+    observe; the coverage contract separately marks a low-corpus Java surface
+    partial via decompile_completeness, so this can't over-claim absence).
+
+    The rule is reported, not only the level, because the two rules say different
+    things about WHY a clean read is not a negative: an encrypted app's literals
+    are unrecoverable, while a minified app's identifiers have been rewritten. One
+    sentence for both stated a bound the run had not measured - measured
+    2026-09-24, both heavy UnCrackable corpora fired the ratio rule (0.800, 0.895)
+    with string_encryption False, while their reports claimed encrypted/unreachable
+    strings. None is returned for clear/light, where no rule bounded anything.
 
     OBF-VENDOR1: `app_package` scopes the string-encryption signal to the app's
     OWN code - a bundled SDK's encrypted strings are the vendor's, not the app
@@ -288,12 +304,19 @@ def detect_obfuscation_level(java_files: list[Path], app_package: str | None = N
     (see _any_string_encryption). None (the default) reduces to the recognized-
     vendor exclusion, matching find_dynamic_loading / find_webview_js."""
     if _any_string_encryption(java_files, app_package):
-        return "heavy"
+        return "heavy", "string_encryption"
     names = _class_simple_names(java_files)
     # Single source of truth for the class-name thresholds: obfuscation_from_names
     # holds the ratio->level logic, and detect delegates to it (rather than
     # duplicating the comparison here) so the two can never drift apart.
-    return obfuscation_from_names(names)
+    level = obfuscation_from_names(names)
+    return level, ("minified_names" if level == "heavy" else None)
+
+
+def detect_obfuscation_level(java_files: list[Path], app_package: str | None = None) -> ObfuscationLevel:
+    """The level alone, for callers that do not render a cause. Delegates, so the
+    two entry points can never disagree - see detect_obfuscation_with_reason."""
+    return detect_obfuscation_with_reason(java_files, app_package)[0]
 
 
 def obfuscation_from_names(names: list[str]) -> ObfuscationLevel:

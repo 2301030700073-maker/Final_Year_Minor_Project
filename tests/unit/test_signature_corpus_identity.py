@@ -206,6 +206,10 @@ def test_a_regenerated_report_carries_the_stored_corpus_not_the_live_one(monkeyp
     run = SimpleNamespace(
         run_id="corpus3", apk_sha256="abc123", timestamp="2026-09-20T10:00:00",
         package_name="com.example.app", obfuscation_level=None,
+        # ADR-0026: the rule beside the level. The regen path reads both off the
+        # same row, so a fixture standing in for that row carries both; None is
+        # this run's "not recorded" and must not be defaulted by the renderer.
+        obfuscation_reason=None,
         classification_json={
             "action": "NEITHER",
             "root": {"confidence": 0.0, "detected": False, "evidence": []},

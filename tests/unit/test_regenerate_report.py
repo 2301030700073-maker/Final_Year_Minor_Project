@@ -46,6 +46,10 @@ def _run(coverage_causes):
         timestamp="2026-09-20T10:00:00",
         package_name="com.example.app",
         obfuscation_level=None,
+        # ADR-0026: the rule beside the level, read off the same row by the regen
+        # path. None is this fixture's legacy run, and is what every run predating
+        # the column carries - "not recorded", never a re-derived guess.
+        obfuscation_reason=None,
         classification_json={
             "action": "NEITHER",
             "root": {"confidence": 0.2, "detected": False, "evidence": []},

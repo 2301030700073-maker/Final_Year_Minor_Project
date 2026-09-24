@@ -18,7 +18,7 @@ never shadows CFR's fuller recovery) and prove end-to-end that a detection idiom
 present ONLY in the CFR recovery is now seen.
 """
 
-from cli import _full_java_corpus, _max_obfuscation, _obfuscation_level_over_corpus
+from cli import _full_java_corpus, _max_obfuscation, _obfuscation_over_corpus
 from static.dynload import find_dynamic_loading
 from static.webview import find_webview_js
 
@@ -137,7 +137,10 @@ def test_obfuscation_detects_cfr_only_string_encryption(tmp_path):
     from static.obfuscation import detect_obfuscation_level
 
     assert detect_obfuscation_level(_full_java_corpus([jadx])) == "clear"
-    assert _obfuscation_level_over_corpus(jadx, cfr) == "heavy"
+    # ADR-0026: the floor reports the rule of the reading that produced `heavy` -
+    # here CFR's recovered class carries the encryption fingerprint the jadx-only
+    # corpus did not, so the reason travels with the level.
+    assert _obfuscation_over_corpus(jadx, cfr) == ("heavy", "string_encryption")
 
 
 def test_obfuscation_floor_resists_ratio_dilution(tmp_path):
@@ -157,5 +160,7 @@ def test_obfuscation_floor_resists_ratio_dilution(tmp_path):
 
     # Un-floored, the union ratio (2/8 = 0.25) would read `light` - dilution.
     assert detect_obfuscation_level(_full_java_corpus([jadx, cfr])) == "light"
-    # Floored against the jadx-only heavy reading, it stays heavy.
-    assert _obfuscation_level_over_corpus(jadx, cfr) == "heavy"
+    # Floored against the jadx-only heavy reading, it stays heavy - and the rule
+    # that survives the floor is the jadx-only reading's ratio, never a rule
+    # inferred from the level alone (ADR-0026).
+    assert _obfuscation_over_corpus(jadx, cfr) == ("heavy", "minified_names")

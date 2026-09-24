@@ -683,7 +683,12 @@ def test_heavy_obfuscation_caveat_gated_on_actual_java_state_not_just_obfuscatio
     # contradicting the table - when heavy but java is unscannable.
     common = dict(
         classification=_classification(), verification=None, correlation=None,
-        obfuscation_level="heavy", stage_results=[], output_dir=tmp_path,
+        # ADR-0026: the note names the RECORDED rule, so a heavy run has to say
+        # which one produced the level. This case is the encryption rule; the
+        # minified and unrecorded wordings are pinned in
+        # test_coverage_table_java_note.py.
+        obfuscation_level="heavy", obfuscation_reason="string_encryption",
+        stage_results=[], output_dir=tmp_path,
     )
     # (a) heavy AND java partial -> caveat fires (assertion is true)
     fires = generate_report(
@@ -697,7 +702,7 @@ def test_heavy_obfuscation_caveat_gated_on_actual_java_state_not_just_obfuscatio
     # obfuscation is one of its clauses (see test_coverage_table_java_note.py for
     # the other six). The gate and both directions below are unchanged.
     assert "**Java:**" in fires
-    assert "heavy obfuscation (encrypted or unreachable strings stay unreadable" in fires
+    assert "heavy obfuscation: the app's own string literals are encrypted" in fires
     assert "a Java NEITHER is not proof that a Java root/SSL check is absent" in fires
 
     # (b) heavy BUT java unscannable -> caveat suppressed; the table states the real

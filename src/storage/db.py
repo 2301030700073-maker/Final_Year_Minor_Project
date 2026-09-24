@@ -143,6 +143,14 @@ class RunRecord(Base):
     # of dropping them. None on runs that predate persistence (unrecoverable).
     manifest_json: Mapped[dict | None] = mapped_column(JSON)
     obfuscation_level: Mapped[str | None] = mapped_column(String)
+    # ADR-0026: which rule produced a `heavy` level - "string_encryption" (the
+    # app's own literals are unrecoverable) or "minified_names" (its identifiers
+    # were rewritten). The two bound a negative for different reasons, so the
+    # report names the recorded rule instead of one sentence standing for both,
+    # which stated an encrypted-strings bound over a corpus that had fired the
+    # ratio rule. None = not recorded: every run predating this column, and every
+    # clear/light run, where no rule bounded anything.
+    obfuscation_reason: Mapped[str | None] = mapped_column(String)
 
     classification_json: Mapped[dict] = mapped_column(JSON)
     verification_json: Mapped[dict | None] = mapped_column(JSON)  # None if dynamic stage skipped

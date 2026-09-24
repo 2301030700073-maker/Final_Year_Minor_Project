@@ -111,7 +111,7 @@ from static.native import (
     match_native,
     packed_library_rows,
 )
-from static.obfuscation import detect_obfuscation_level
+from static.obfuscation import detect_obfuscation_with_reason
 from static.packers import detect_packers, load_packer_signatures
 from static.signatures import corpus_fingerprint, load_signatures, scan
 from static.stringrecover import match_recovered_strings, recover_hidden_strings
@@ -602,9 +602,10 @@ def _max_obfuscation(a, b):
     return a if _OBF_ORDER[a] >= _OBF_ORDER[b] else b
 
 
-def _obfuscation_level_over_corpus(jadx_output, cfr_output, app_package=None):
+def _obfuscation_over_corpus(jadx_output, cfr_output, app_package=None):
     """DYNCOV1 (obfuscation half): read obfuscation over BOTH the jadx-only corpus
-    and the full jadx+CFR corpus, returning the more-severe.
+    and the full jadx+CFR corpus, returning the more-severe level AND the rule that
+    produced it (ADR-0026).
 
     `_jadx_covered` credits the CFR recovery toward a `complete` completeness label,
     so string-encryption OR heavy minification in a class jadx failed on but CFR
@@ -615,10 +616,26 @@ def _obfuscation_level_over_corpus(jadx_output, cfr_output, app_package=None):
     under corpus widening: CFR's extra classes could in principle dilute a heavy
     reading downward. So we FLOOR the wider reading at the jadx-only reading - the
     CFR classes can only ever RAISE the level, never dilute it. Conservative in the
-    one safe direction (more partial), never sharpening a negative."""
-    jadx_level = detect_obfuscation_level(_full_java_corpus([jadx_output]), app_package)
-    full_level = detect_obfuscation_level(_full_java_corpus([jadx_output, cfr_output]), app_package)
-    return _max_obfuscation(jadx_level, full_level)
+    one safe direction (more partial), never sharpening a negative.
+
+    The reason reported is one belonging to a reading that actually returned
+    `heavy`: when both corpora are heavy under different rules, the encryption
+    fingerprint is the more specific statement about why the literals are out of
+    reach and wins. A level below `heavy` bounded nothing, so it reports no rule -
+    None, never a rule inferred from the level alone (ADR-0026)."""
+    jadx_level, jadx_reason = detect_obfuscation_with_reason(
+        _full_java_corpus([jadx_output]), app_package)
+    full_level, full_reason = detect_obfuscation_with_reason(
+        _full_java_corpus([jadx_output, cfr_output]), app_package)
+    level = _max_obfuscation(jadx_level, full_level)
+    if level != "heavy":
+        return level, None
+    reason = (
+        "string_encryption"
+        if "string_encryption" in (jadx_reason, full_reason)
+        else "minified_names"
+    )
+    return level, reason
 
 
 def _apply_manifest_ssl_signal(static_evidence, manifest_info) -> None:
@@ -2265,14 +2282,18 @@ def run(
     # coverage (heavy -> partial, N1/G-C); native degradation + manifest parse
     # drive native/manifest coverage. The per-surface map is persisted per run
     # and feeds the report + calibration exclusion (G1/F2/G-A).
-    obfuscation_stage, obfuscation_level = _wrap_stage(
-        "obfuscation", _obfuscation_level_over_corpus, jadx_output, cfr_output,
+    obfuscation_stage, obfuscation_result = _wrap_stage(
+        "obfuscation", _obfuscation_over_corpus, jadx_output, cfr_output,
         ingest_result.evidence["package"]["package_name"],
     )
     stage_results.append(obfuscation_stage)
     _print_stage(obfuscation_stage)
     if obfuscation_stage.status == "failed":
         _halt(stage_results)
+    # Unpacked only after the halt: a failed stage returns None as its value, so
+    # unpacking the pair above would raise TypeError before _halt could report the
+    # real failure - the stage's own error, not a plumbing one (ADR-0026).
+    obfuscation_level, obfuscation_reason = obfuscation_result
 
     # --- packer / protector identification (Gap-2) + coverage ---
     # A detected packer forces the Java/DEX surface to partial - the real DEX is
@@ -3419,6 +3440,7 @@ def run(
         signature_corpus=signature_corpus,
         coverage=coverage_map,
         obfuscation_level=obfuscation_level,
+        obfuscation_reason=obfuscation_reason,
         operator=operator,
         justification=justification,
         **coverage_causes,
@@ -3448,6 +3470,9 @@ def run(
             "coverage": coverage_map,
             "coverage_causes": coverage_causes,
             "obfuscation_level": obfuscation_level,
+            # ADR-0026: persisted beside the level it explains, so a regenerated
+            # report names the rule this analysis fired.
+            "obfuscation_reason": obfuscation_reason,
             "manifest": asdict(manifest_info) if manifest_info else None,
         },
         completion_kwargs=dict(
@@ -3902,6 +3927,10 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         signature_corpus=run.signature_corpus,
         coverage=run.coverage,
         obfuscation_level=run.obfuscation_level,
+        # ADR-0026: the rule comes from the record like the level does. A run that
+        # predates the column carries None, and the report says the level decided
+        # the bound without claiming a rule.
+        obfuscation_reason=run.obfuscation_reason,
         jni_bindings=causes.get("jni_bindings"),
         unaccounted_loads=causes.get("unaccounted_loads"),
         platform_libs_exempted=causes.get("platform_libs_exempted"),

@@ -237,8 +237,23 @@ wording instead. #}
 {# COV-HEAVY-JAVA1 + COV-JAVA-NOTE1: the note is gated on the ACTUAL java state and each clause on the exact fact it asserts. Under heavy obfuscation java_coverage() returns `partial` from a complete/partial decompile but `unscannable` from an unknown-completeness (cached/regenerated) run (coverage.py), and firing on `heavy` alone printed "the Java surface is `partial`" beneath a table showing java=`unscannable` - a false specific fact. Gating on the state alone was not enough either: SEVEN distinct causes reach `partial` - java_coverage's heavy obfuscation / detected packer / un-ruled-out packing / partial decompile, plus apply_dynamic_loading_java, apply_attribution_degraded_java and apply_unreadable_files_java - so a note naming one of them read as "the other six did not happen". Each clause below fires only on its own recorded evidence (and the same evidence the report names in the section it points at), and a `partial` with none of the seven says so rather than inventing a cause. Clauses are collected then joined: seven inline separators is where a dangling `;` or a doubled period comes from. #}
 {% if coverage.get("java") == "partial" -%}
 {% set _jc = [] -%}
+{# ADR-0026: `heavy` has two producers - the R8/ProGuard string-encryption
+   fingerprint and the class-name minification ratio - and this clause stated one
+   of them for both. The encrypted-strings wording was rendered over runs whose
+   corpus fires the ratio rule and carries no encryption fingerprint at all:
+   measured 2026-09-24, UC1 ratio 0.800 and UC2 0.895 with string_encryption
+   False, both printing "encrypted or unreachable strings stay unreadable" beside
+   65/65 root signature matches read out of that same corpus. Each rule now has
+   its own clause, and a `heavy` whose rule the run did not record says that
+   rather than defaulting to the more familiar one. #}
 {% if obfuscation_level == "heavy" -%}
-{% set _ = _jc.append("heavy obfuscation (encrypted or unreachable strings stay unreadable even on a complete decompile - N1/G-C)") -%}
+{% if obfuscation_reason == "string_encryption" -%}
+{% set _ = _jc.append("heavy obfuscation: the app's own string literals are encrypted, so they stay unreadable even on a complete decompile - N1/G-C") -%}
+{% elif obfuscation_reason == "minified_names" -%}
+{% set _ = _jc.append("heavy obfuscation: identifiers have been minified, so a signature keyed on an app-authored class or method name cannot be ruled out by a clean read - N1/G-C") -%}
+{% else -%}
+{% set _ = _jc.append("heavy obfuscation (this run recorded no rule behind the level - N1/G-C)") -%}
+{% endif -%}
 {% endif -%}
 {% if packer_findings -%}
 {% set _ = _jc.append('a packer hiding the real DEX behind a loader (see "Packer / protector identified")') -%}
@@ -837,6 +852,10 @@ def generate_report(
     signature_corpus: str | None = None,
     coverage: dict | None = None,
     obfuscation_level: str | None = None,
+    # ADR-0026: which rule produced a `heavy` level ("string_encryption" /
+    # "minified_names"), so the java note names the recorded rule. None = the run
+    # recorded none (a run predating the column) or the level is not `heavy`.
+    obfuscation_reason: str | None = None,
     operator: str | None = None,
     justification: str | None = None,
     jni_bindings: list | None = None,
@@ -910,6 +929,7 @@ def generate_report(
         expired_pin_sets=_expired_pin_sets(manifest, timestamp),
         coverage=coverage,
         obfuscation_level=obfuscation_level,
+        obfuscation_reason=obfuscation_reason,
         operator=operator,
         justification=justification,
         jni_bindings=jni_bindings,

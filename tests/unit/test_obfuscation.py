@@ -551,3 +551,47 @@ def test_any_string_encryption_skips_unreadable_entry(tmp_path):
     d.mkdir()
     (tmp_path / "MainActivity.java").write_text("public class MainActivity {}\n")
     assert _any_string_encryption([d, tmp_path / "MainActivity.java"]) is False
+
+
+def test_the_heavy_level_reports_which_rule_produced_it(tmp_path):
+    """ADR-0026: `heavy` has two producers, so the record carries which one fired
+    and the report names the recorded rule. Measured 2026-09-24 on the three
+    UnCrackable corpora: both heavy ones fire the ratio rule (0.800 / 0.895) with
+    `string_encryption` False, so a caller that inferred the rule FROM the level -
+    which is what the report did - stated an encrypted-strings bound for a corpus
+    that contains no encryption at all."""
+    from static.obfuscation import (
+        detect_obfuscation_level,
+        detect_obfuscation_with_reason,
+    )
+
+    enc = tmp_path / "enc"
+    enc.mkdir()
+    (enc / "Enc.java").write_text(
+        "class Enc {\n"
+        "  String d(){ int[] a = {104,101,108,108,111,119,111,114,108};"
+        " return new String(a); }\n"
+        "}\n"
+    )
+    assert detect_obfuscation_with_reason(sorted(enc.glob("*.java"))) == (
+        "heavy", "string_encryption")
+
+    # Three single-char declarations out of four: ratio 0.75 > HEAVY_RATIO, and no
+    # encryption fingerprint anywhere - the rule the UnCrackable runs fired.
+    mini = tmp_path / "min"
+    mini.mkdir()
+    for nm in ("a", "b", "c"):
+        (mini / f"{nm}.java").write_text(f"class {nm} {{}}\n")
+    (mini / "Clear.java").write_text("class Clear {}\n")
+    assert detect_obfuscation_with_reason(sorted(mini.glob("*.java"))) == (
+        "heavy", "minified_names")
+
+    clear = tmp_path / "clear"
+    clear.mkdir()
+    (clear / "MainActivity.java").write_text("class MainActivity {}\n")
+    # No rule bounded anything here, so no reason is reported - None, never a rule
+    # inferred from the level.
+    assert detect_obfuscation_with_reason(sorted(clear.glob("*.java"))) == ("clear", None)
+    # The level-only entry point delegates, so the two can never disagree.
+    assert detect_obfuscation_level(sorted(clear.glob("*.java"))) == "clear"
+    assert detect_obfuscation_level(sorted(mini.glob("*.java"))) == "heavy"

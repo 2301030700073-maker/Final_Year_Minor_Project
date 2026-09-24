@@ -223,6 +223,10 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
             # regeneration stays faithful (None on runs that predate this).
             manifest_json=run_data.get("manifest"),
             obfuscation_level=run_data.get("obfuscation_level"),
+            # ADR-0026: the rule behind that level, saved beside it so a
+            # regenerated report names the rule the ANALYSIS fired rather than the
+            # one the rendering code would otherwise assume.
+            obfuscation_reason=run_data.get("obfuscation_reason"),
             classification_json=classification,
             verification_json=verification,
             correlation_json=correlation,

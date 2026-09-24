@@ -14,6 +14,15 @@ recorded, gate every clause on its own evidence, and say plainly when none of th
 is (rather than picking one, which is the false-specific-fact failure COV-HEAVY-JAVA1
 records). These are render-level on purpose - the defect was in what the page said,
 not in the coverage arithmetic, which was correct throughout.
+
+ADR-0026 split the heavy clause itself. The cause count is still seven, but one of
+them (`java_coverage`'s heavy obfuscation) has two producers - the string-encryption
+fingerprint and the class-name minification ratio - and the single clause stated the
+first for both. Measured 2026-09-24: both heavy UnCrackable corpora fire the ratio
+rule (0.800, 0.895) with no encryption fingerprint at all, so their reports claimed
+unreadable strings over a corpus that had just yielded 65/65 root signature matches.
+Each rule now has its own clause, and a `heavy` whose rule the run did not record
+says so rather than defaulting to the more familiar wording.
 """
 
 from __future__ import annotations
@@ -25,7 +34,12 @@ from report.generator import TEMPLATE
 
 _REPO = Path(__file__).resolve().parents[2]
 
-HEAVY = "heavy obfuscation (encrypted or unreachable strings stay unreadable"
+# ADR-0026: one constant per rule the run can have recorded, plus the wording for a
+# `heavy` that recorded none. Each is a prefix of the full clause so the ordering
+# check below can measure clause boundaries without matching mid-clause.
+HEAVY_ENCRYPTED = "heavy obfuscation: the app's own string literals are encrypted"
+HEAVY_MINIFIED = "heavy obfuscation: identifiers have been minified"
+HEAVY_NO_RULE = "heavy obfuscation (this run recorded no rule behind the level"
 PACKED = 'a packer hiding the real DEX behind a loader (see "Packer / protector identified")'
 PACKER_UNRULED = "a packer scan that did not complete, so packing is un-ruled-out (PACK1)"
 PARTIAL_DECOMPILE = "an incomplete decompile (1234 file(s), jadx exit 1 - see Limitations)"
@@ -46,6 +60,7 @@ def _render(**ctx) -> str:
     env = getattr(TEMPLATE, "environment", TEMPLATE)
     base = {
         "obfuscation_level": None,
+        "obfuscation_reason": None,
         "unaccounted_loads": None,
         "extraction_failures": None,
         "native_scan_errors": None,
@@ -65,7 +80,15 @@ def _render(**ctx) -> str:
 
 def test_each_recorded_cause_is_named_when_it_is_present():
     cases = {
-        "heavy": ({"obfuscation_level": "heavy"}, HEAVY),
+        "heavy, strings encrypted": (
+            {"obfuscation_level": "heavy", "obfuscation_reason": "string_encryption"},
+            HEAVY_ENCRYPTED,
+        ),
+        "heavy, identifiers minified": (
+            {"obfuscation_level": "heavy", "obfuscation_reason": "minified_names"},
+            HEAVY_MINIFIED,
+        ),
+        "heavy, rule not recorded": ({"obfuscation_level": "heavy"}, HEAVY_NO_RULE),
         "packed": ({"packer_findings": [{"packer_id": "x", "packer": "X", "signals": []}]}, PACKED),
         "packer scan failed": ({"packer_scan_incomplete": True}, PACKER_UNRULED),
         "partial decompile": ({"decompile_completeness": "partial", "jadx_exit_code": 1},
@@ -92,10 +115,45 @@ def test_a_java_partial_with_no_recorded_cause_says_so_rather_than_picking_one()
     assert ";" not in out.split("Bound by", 1)[1], out
 
 
+def test_a_minified_app_is_never_told_its_strings_are_encrypted():
+    """ADR-0026's defect, pinned in the direction it actually failed. The one heavy
+    clause was rendered for every `heavy` reading, including the corpora that fire
+    the class-name ratio rule with no encryption fingerprint anywhere in them -
+    measured 2026-09-24, UC1 ratio 0.800 and UC2 0.895, string_encryption False on
+    both. A reader of those reports was told the literals stayed unreadable by the
+    same run that matched 65/65 root signatures out of them.
+
+    Asserted on the NOTE LINE, not the rendered region: the region also carries the
+    sibling surfaces' notes and the R8 caveat, and a word appearing elsewhere in it
+    would make an absence assertion here prove nothing."""
+    def note(**ctx) -> str:
+        out = _render(coverage={"java": "partial"}, **ctx)
+        return [ln for ln in out.splitlines() if ln.startswith("> **Java:**")][0]
+
+    minified = note(obfuscation_level="heavy", obfuscation_reason="minified_names")
+    assert HEAVY_MINIFIED in minified, minified
+    assert "encrypted" not in minified, minified
+    # The bound is still stated as a bound - only its cause changed.
+    assert "not proof that a Java root/SSL check is absent" in minified, minified
+
+    # A run that recorded no rule says exactly that rather than borrowing the more
+    # familiar wording: None is "not recorded", never a licence to pick one.
+    unrecorded = note(obfuscation_level="heavy")
+    assert HEAVY_NO_RULE in unrecorded, unrecorded
+    assert "encrypted" not in unrecorded, unrecorded
+    assert "minified" not in unrecorded, unrecorded
+
+    # And the encryption clause is not dead: it renders for the rule it describes.
+    assert HEAVY_ENCRYPTED in note(
+        obfuscation_level="heavy", obfuscation_reason="string_encryption"
+    )
+
+
 def test_all_seven_causes_render_as_one_sentence():
     out = _render(
         coverage={"java": "partial"},
         obfuscation_level="heavy",
+        obfuscation_reason="string_encryption",
         packer_findings=[{"packer_id": "x", "packer": "X", "signals": []}],
         packer_scan_incomplete=True,
         decompile_completeness="partial",
@@ -110,10 +168,10 @@ def test_all_seven_causes_render_as_one_sentence():
     # manifest note landed after it.
     note = [ln for ln in out.splitlines() if ln.startswith("> **Java:**")][0]
     body = note.split("Bound by", 1)[1]
-    # The ordering check needs each clause in FULL: HEAVY above is a prefix, so
-    # measuring a boundary from it would land mid-clause.
-    heavy_full = (HEAVY + " even on a complete decompile - N1/G-C)")
-    assert heavy_full.startswith(HEAVY)
+    # The ordering check needs each clause in FULL: the constants above are
+    # prefixes, so measuring a boundary from one would land mid-clause.
+    heavy_full = HEAVY_ENCRYPTED + ", so they stay unreadable even on a complete decompile - N1/G-C"
+    assert heavy_full.startswith(HEAVY_ENCRYPTED)
     phrases = [heavy_full, PACKED, PACKER_UNRULED, PARTIAL_DECOMPILE, DYNAMIC_LOAD,
                ATTRIB_DEGRADED, UNREADABLE]
     # Every clause is present, in the order the template builds them, and the text

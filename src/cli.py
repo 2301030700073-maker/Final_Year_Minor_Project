@@ -772,11 +772,49 @@ def _begin_stage(stage_name: str) -> None:
         _caution_sidecar(exc)
 
 
+def _stage_skip_reason(result: StageResult) -> str | None:
+    """The reason a SKIPPED stage recorded for itself, for the console to print.
+
+    A skipped stage explains itself in its evidence, never in `error`: every
+    reclassified capture stage carries `not_applicable_reason` (the ladder's
+    proxy-independent cause, which generator.py:1497 renders with precedence over
+    everything else), and the other skip arms carry `reason` ("--skip-dynamic
+    passed", "no success check registered for unknown target ..."). Measured over
+    outputs/analysis/results.db on 2026-09-24: 166 skipped stages, 152 with only
+    `reason`, 9 with `not_applicable_reason`, 5 with neither - and NOT ONE with
+    `error` set. `_print_stage` printed `error` alone, so the console showed a bare
+    `SKIPPED capture-traffic (25742ms)` for the AndroGoat run 085a8c10 while the
+    report and the stored evidence both carried the reason; a 25-second stage
+    disappeared with no explanation on the one channel the operator is watching
+    ([[docstring-caveat-reaches-no-reader]]).
+
+    Precedence matches the report's: the classification-time reason outranks the
+    stage's own inferential one ([[not-attempted-neq-skipped]]). None means the
+    stage recorded no reason at all - the console then prints nothing extra, which
+    is what it does today.
+    """
+    if result.status != "skipped":
+        return None
+    evidence = result.evidence or {}
+    for key in ("not_applicable_reason", "reason"):
+        value = evidence.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _print_stage(result: StageResult) -> None:
     icon = {"success": "[green]OK[/green]", "failed": "[bold red]FAILED[/bold red]", "skipped": "[yellow]SKIPPED[/yellow]"}[result.status]
     console.print(f"{icon}  {result.stage}  ({result.duration_ms}ms)")
     if result.error:
         console.print(f"    [red]{result.error}[/red]")
+    else:
+        # A skipped stage's reason is recorded, not raised, so it lives in
+        # evidence rather than `error`; without this the console's skip lines
+        # carried no reason at all ([[docstring-caveat-reaches-no-reader]]).
+        skip_reason = _stage_skip_reason(result)
+        if skip_reason:
+            console.print(f"    [yellow]{skip_reason}[/yellow]")
     if _RUN_STATUS is not None:
         try:
             _RUN_STATUS.record(result)

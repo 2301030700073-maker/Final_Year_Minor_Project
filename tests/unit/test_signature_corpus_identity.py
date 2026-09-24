@@ -8,6 +8,15 @@ stored runs). The corpus had no identity anywhere.
 These tests cover the fingerprint itself, the invariant that makes it mean
 something (one list of corpus files, so nothing can be analysed without being
 identified), and both branches of the report line.
+
+ADR-0022 named a limit when it was written: the hash covered the four YAML files
+and not the JS idiom lists in `hermes.py`, a second detection surface carried in
+code whose ids can never appear in a YAML-derived set. That limit is closed here,
+so the same three things are asserted for the second surface: it moves the hash
+when its patterns change, it moves it when the weight scaling them changes (a
+verdict-level difference the pattern text alone would not show), and every idiom
+list in `hermes.py` must be registered, so a third one cannot fire rules the
+recorded fingerprint does not describe.
 """
 
 from __future__ import annotations
@@ -121,16 +130,22 @@ def test_the_report_states_the_corpus_it_ran_against(tmp_path):
     )
     content = report_path.read_text(encoding="utf-8")
     assert f"**Signature corpus:** `{corpus}`" in content
-    # Scope, not just value. The hash covers the YAML set, and detection patterns
-    # also live in hermes.py's JS idiom lists (they emit evidence carrying real
-    # signature ids), so a 64-character digest under a bare heading reads as "all
-    # the rules" when it is one of two corpora. ADR-0022 records the asymmetry;
-    # the reader of a report never sees the ADR.
-    assert "the four YAML files under `config/signatures/` only" in content
-    # And the methodology paragraph must name the second corpus too - it used to
-    # say detection matches "a hand-authored, versioned signature set
-    # (`config/signatures/`)", which reads as the definition of the method.
+    # Scope, not just value. The hash covers BOTH detection surfaces now, and the
+    # line used to say the opposite - that the JS idioms were code, covered by the
+    # Analysis-code line and not by this hash. A reader of the report never sees the
+    # ADR, so a stale scope sentence is the whole of what they know about the value.
+    assert "both detection surfaces" in content
+    assert "the JS idiom lists and the weight scaling them in `src/static/hermes.py`" in content
+    # And the comparability limit of the change itself: a fingerprint from before it
+    # was taken over the files alone, so two reports either side of it can differ by
+    # scheme with identical rules.
+    assert "not comparable with one from after" in content
+    assert "the JS idioms compiled into" not in content
+    # The methodology paragraph must name the second surface as part of the same
+    # recorded corpus too - it used to say that second corpus "is covered by the
+    # Analysis-code line rather than by the Signature corpus hash above".
     assert "compiled into `src/static/hermes.py`" in content
+    assert "rather than by the Signature corpus hash above" not in content
 
 
 def test_a_run_without_a_recorded_corpus_says_so_and_never_renders_blank(tmp_path):
@@ -223,3 +238,63 @@ def test_a_regenerated_report_carries_the_stored_corpus_not_the_live_one(monkeyp
     content = (tmp_path / "reports" / "abc123" / "corpus3.md").read_text(encoding="utf-8")
     assert f"**Signature corpus:** `{stored}`" in content
     assert live not in content
+
+
+def _live_corpus() -> str:
+    return corpus_fingerprint(_REPO / "config" / "signatures" / f"{n}.yaml" for n in _CORPUS_NAMES)
+
+
+def test_editing_a_js_idiom_moves_the_recorded_corpus():
+    """ADR-0022's deferral, closed. The JS idiom lists are a second detection
+    surface, so a run analysed against them and one analysed against a changed set
+    are not the same run and must not record the same identity.
+
+    Appended to the live list rather than monkeypatched onto the module attribute,
+    because the fingerprint reaches the list through the declared registry: a patch
+    that replaced `hermes.JS_ROOT_IDIOMS` would leave the registry pointing at the
+    original, and the test would then be asserting about a patch rather than about
+    what a run reads. Popped in a finally, so a failure here cannot leak an idiom
+    into the rest of the session."""
+    from static import hermes
+
+    baseline = _live_corpus()
+    hermes.JS_ROOT_IDIOMS.append(("js_test_added", "root", re.compile(r"no-run-has-this")))
+    try:
+        assert _live_corpus() != baseline, "a new JS idiom did not move the corpus identity"
+    finally:
+        hermes.JS_ROOT_IDIOMS.pop()
+    assert _live_corpus() == baseline, "the identity is not a function of the rules alone"
+
+
+def test_changing_the_js_weight_moves_the_recorded_corpus(monkeypatch):
+    """The weight scaling the JS idioms is part of the surface, not a detail beside
+    it: every match contributes it to a category sum, so doubling it changes what a
+    verdict reads while every pattern stays byte-identical. A hash over the pattern
+    text alone would call those two rule sets the same."""
+    from static import hermes
+
+    baseline = _live_corpus()
+    monkeypatch.setattr(hermes, "JS_EVIDENCE_WEIGHT", hermes.JS_EVIDENCE_WEIGHT + 0.2)
+    assert _live_corpus() != baseline, "a changed JS weight left the corpus identity unmoved"
+    monkeypatch.undo()
+    assert _live_corpus() == baseline
+
+
+def test_every_js_idiom_list_is_registered():
+    """The JS half of the invariant the YAML test above holds. The hash is only as
+    good as the set of lists it is taken over: a third `JS_*_IDIOMS` list added to
+    hermes.py and not registered in `_JS_IDIOM_LISTS` would fire rules the recorded
+    fingerprint never described, and every run would record an identity that was
+    never the set of rules it used. Read as text, so it holds for a list nothing
+    imports yet - and asserted non-empty, because a pattern that stopped matching
+    would otherwise satisfy this vacuously."""
+    from static import hermes
+
+    text = (_REPO / "src" / "static" / "hermes.py").read_text(encoding="utf-8")
+    declared = set(re.findall(r"^(JS_[A-Z_]+_IDIOMS)\s*:", text, re.MULTILINE))
+    registered = {name for name, _ in hermes._JS_IDIOM_LISTS}
+    assert declared, "no JS idiom lists matched in hermes.py - the pattern is stale"
+    assert declared == registered, (
+        f"JS idiom lists declared but not registered, so the recorded corpus would "
+        f"not cover them: {sorted(declared - registered)}"
+    )

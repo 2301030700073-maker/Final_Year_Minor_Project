@@ -24,6 +24,7 @@ from common import (
     load_yaml_entries,
 )
 from static.deobfuscate import MappingTable, deobfuscate_source
+from static.hermes import js_idiom_fingerprint
 from static.indicators import find_indicator_categories
 
 # L-M3 (S1): scan the fallback evidence layer too. jadx's .java decompile can be
@@ -221,6 +222,13 @@ def corpus_fingerprint(paths: Iterable[Path]) -> str:
     A missing path RAISES rather than being skipped. Fingerprinting the subset
     that happens to exist would name a rule set no run ever loaded, which is the
     silent-substitution failure this project forbids (Principle 3).
+
+    Covers BOTH detection surfaces (ADR-0022's deferral, closed): these files, and
+    the JS idiom lists compiled into `hermes.py` - folded in below, and hashed as
+    data because they are not files. One consequence is worth knowing before
+    comparing two reports: a fingerprint recorded before this change was taken
+    over the files alone, so a run from either side of it is not comparable to the
+    other by this value even when the rules are identical.
     """
     digest = hashlib.sha256()
     for path in sorted(paths, key=lambda p: p.name):
@@ -236,6 +244,8 @@ def corpus_fingerprint(paths: Iterable[Path]) -> str:
         digest.update(b"\0")
         digest.update(data)
         digest.update(b"\0")
+    digest.update(js_idiom_fingerprint().encode("utf-8"))
+    digest.update(b"\0")
     return digest.hexdigest()
 
 

@@ -91,7 +91,12 @@ from static.coverage import (
     verdict_label,
 )
 from static.dynload import find_dynamic_loading
-from static.hermes import is_binary_bundle, is_bundle_candidate, scan_bundle
+from static.hermes import (
+    JS_EVIDENCE_WEIGHT,
+    is_binary_bundle,
+    is_bundle_candidate,
+    scan_bundle,
+)
 from static.webview import find_webview_js
 from static.jnibridge import has_unresolved
 from static.deobfuscate import find_mapping_file, parse_mapping
@@ -459,14 +464,13 @@ def _merge_dex_evidence(static_evidence, dex_evidence, signatures, app_package) 
     return added
 
 
-_JS_EVIDENCE_WEIGHT = 0.2
-
-
 def _merge_js_evidence(static_evidence, js_matches) -> int:
     """Merge Hermes/binary JS-bundle idiom matches into StaticEvidence. Each
     `js_matches` entry is (sig_id, category, matched_text, file) recovered from a
     binary JS bundle's string table - deterministic evidence (the literal is really
-    present in the app) at a modest fixed weight, because we recover string
+    present in the app) at a modest fixed weight (`JS_EVIDENCE_WEIGHT`, hermes.py,
+    kept beside the idiom lists it scales so the recorded corpus identity covers
+    both), because we recover string
     constants, not full JS control flow (the surface stays `partial`). Deduped per
     signature_id across bundles and routed by category like _merge_dex_evidence.
     Returns the number of new signatures added."""
@@ -481,7 +485,7 @@ def _merge_js_evidence(static_evidence, js_matches) -> int:
             matched_text=matched_text[:200],
             verification_state="deterministic_matched",
         )
-        if _route_evidence(static_evidence, sig_id, category, _JS_EVIDENCE_WEIGHT, ev, already):
+        if _route_evidence(static_evidence, sig_id, category, JS_EVIDENCE_WEIGHT, ev, already):
             added += 1
     return added
 

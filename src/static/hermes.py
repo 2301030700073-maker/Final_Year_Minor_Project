@@ -24,6 +24,7 @@ over-claims a confident negative.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
@@ -99,6 +100,52 @@ JS_SSL_IDIOMS: list[tuple[str, str, re.Pattern[str]]] = [
         re.compile(r"sha256/|pin-set|network_security_config|ssl-pinning|ssl_pin"),
     ),
 ]
+
+# The weight every JS idiom match is emitted at, beside the lists it scales.
+# Moved here from cli.py by the ADR-0022 closure: the lists and this weight are
+# ONE detection surface, and a corpus identity that hashed the patterns while the
+# constant scaling them lived in another module would move when the rules changed
+# but not when their influence over a verdict did.
+JS_EVIDENCE_WEIGHT = 0.2
+
+# Every JS idiom list, so the corpus identity below can never cover a subset of
+# them: a new list that is not registered here would fire rules the recorded hash
+# does not describe - the hole `SIGNATURE_CORPUS` closes for the YAML half, which
+# `test_every_js_idiom_list_is_registered` holds here structurally.
+_JS_IDIOM_LISTS: tuple[tuple[str, list[tuple[str, str, re.Pattern[str]]]], ...] = (
+    ("JS_ROOT_IDIOMS", JS_ROOT_IDIOMS),
+    ("JS_SSL_IDIOMS", JS_SSL_IDIOMS),
+)
+
+
+def js_idiom_fingerprint() -> str:
+    """The identity of the JS idiom corpus - ADR-0022's second detection surface.
+
+    The YAML corpus is fingerprinted from its files (`signatures.corpus_fingerprint`),
+    but these idioms are Python data, so they are hashed as data: every entry's
+    list, signature id, category, regex source and flags, plus the weight above.
+    Taken over the WHOLE surface deliberately - a hash over the patterns alone
+    would call two runs identical while a weight change had moved each idiom's
+    contribution to the sum, which is a verdict-level difference.
+
+    Sorted, so reordering the lists (which changes nothing about what matches)
+    does not move the identity, while an edit to any single pattern does. The
+    regex is hashed as its source and flags rather than as a compiled object,
+    which has no stable bytes.
+    """
+    digest = hashlib.sha256()
+    digest.update(f"weight={JS_EVIDENCE_WEIGHT!r}".encode("utf-8"))
+    digest.update(b"\0")
+    entries = sorted(
+        (list_name, sig_id, category, pattern.pattern, pattern.flags)
+        for list_name, idioms in _JS_IDIOM_LISTS
+        for sig_id, category, pattern in idioms
+    )
+    for list_name, sig_id, category, source, flags in entries:
+        digest.update(f"{list_name}\0{sig_id}\0{category}\0{flags}\0{source}".encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
 
 # Suffixes that identify a JS bundle candidate before the binary probe.
 _BUNDLE_SUFFIXES = {".bundle", ".hbc", ".jsbundle", ".js"}

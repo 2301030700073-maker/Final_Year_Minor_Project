@@ -140,6 +140,13 @@ def test_the_report_states_the_corpus_it_ran_against(tmp_path):
     # was taken over the files alone, so two reports either side of it can differ by
     # scheme with identical rules.
     assert "not comparable with one from after" in content
+    # And the boundary, which is NOT in this hash and must not look as though it
+    # were: two runs can share a corpus and differ in the threshold they were
+    # classified at, and a reader comparing hashes would otherwise read that as "the
+    # rules are the same". The threshold is recorded per run and rendered on the
+    # Decision line, so this line points at it rather than absorbing it.
+    assert "The decision thresholds are deliberately not folded in" in content
+    assert "the Decision line below renders it" in content
     assert "the JS idioms compiled into" not in content
     # The methodology paragraph must name the second surface as part of the same
     # recorded corpus too - it used to say that second corpus "is covered by the

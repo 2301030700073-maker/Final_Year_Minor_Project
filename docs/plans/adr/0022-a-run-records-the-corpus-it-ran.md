@@ -163,3 +163,31 @@ Two surfaces remain outside this value, and both are code covered by
   is certified or reads `Inconclusive` according to content this hash does not
   cover. Editing one of those lists changes what the platform will certify while
   the recorded corpus stays still - the same asymmetry, one surface over.
+
+**The thresholds: measured, and deliberately not folded in (2026-09-24).** The
+other rule parameter a verdict depends on is the decision boundary -
+`config/settings.yaml`'s `thresholds` (root/ssl), read by `cli._load_thresholds`
+and applied where DETECTED is separated from NEITHER. It is not in this hash, and
+that is a decision rather than an oversight:
+
+* The boundary is already recorded per run and disclosed where the verdict is read:
+  `runs.threshold` / `runs.ssl_threshold` (`storage/db.py`), read per run by
+  calibration to place its curve edges ("Finding D", `calibration/report.py`), and
+  rendered in every report's Decision line (`report/generator.py`). Nothing about it
+  lives only in code, which is the condition that made the JS idioms worth folding.
+* Folding it in would be the defect this project has just written an ADR about: one
+  value with two producers cannot say which one moved (ADR-0026). A reader could no
+  longer tell "the patterns changed" from "the boundary moved", and the hash would
+  stop answering the question it exists for - did the *rules* change - because every
+  threshold edit would move it, including edits made for calibration of an unrelated
+  category.
+* What was actually missing was one sentence: a reader comparing two corpus hashes
+  could conclude "same rules" while the boundary differed. The report's corpus line
+  now says the thresholds are recorded per run and rendered on the Decision line,
+  which closes that misreading without blending the two facts into one value.
+
+The general rule this leaves behind: a value belongs in the corpus identity when its
+content *is* a rule, and beside it - recorded and rendered in its own right - when it
+*scales* the rules. Weights are summed into a score the patterns determine, so they
+are part of the surface (the JS idioms above); a threshold is a line drawn across
+scores, so it is recorded as its own fact.

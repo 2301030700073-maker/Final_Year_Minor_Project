@@ -98,7 +98,7 @@ TEMPLATE = _env.from_string("""\
 **Generated:** {{ timestamp }}
 **Analysis code:** {{ git_commit or "unknown" }}
 {% if signature_corpus -%}
-**Signature corpus:** `{{ signature_corpus }}` (both detection surfaces: the four YAML files under `config/signatures/`, plus the JS idiom lists and the weight scaling them in `src/static/hermes.py`. Fingerprints recorded before 2026-09-24 cover the YAML files only, so a stored value from before then is not comparable with one from after)
+**Signature corpus:** `{{ signature_corpus }}` (both detection surfaces: the four YAML files under `config/signatures/`, plus the JS idiom lists and the weight scaling them in `src/static/hermes.py`. Fingerprints recorded before 2026-09-24 cover the YAML files only, so a stored value from before then is not comparable with one from after. The decision thresholds are deliberately not folded in: each run records the boundary it was classified at, and the Decision line below renders it - so a boundary change reads as a boundary change, not as a rules change)
 {% else -%}
 **Signature corpus:** not recorded for this run - it predates ADR-0022, which is the only way a stored run can lack one: every run saved since records a fingerprint of the corpus it loaded, so this absence is a date, not a derivation that failed. It is deliberately not backfilled: 183 of the stored runs were analysed from a dirty working tree, whose rule set is not recoverable from its commit, and a number derived from one would be a plausible value standing in for an unobserved one.
 {% endif %}

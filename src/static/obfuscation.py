@@ -249,9 +249,19 @@ def _any_string_encryption(java_files: list[Path], app_package: str | None = Non
     encrypted strings - including an app whose package shares a recognized vendor
     prefix (Bug-B) - still fire and still force `heavy`; only recognized
     third-party files are skipped. The class-name-ratio signal is deliberately
-    left corpus-wide (a separate, broader question with an unverified calibration
-    impact), so a vendor-minified bundle still reads heavy via that path - this
-    filter only ever relaxes the string-encryption signal, never the ratio one."""
+    left corpus-wide, so a vendor-minified bundle still reads heavy via that
+    path - this filter only ever relaxes the string-encryption signal, never the
+    ratio one. That asymmetry was recorded here as "a separate, broader question
+    with an unverified calibration impact", and it has since been measured
+    (2026-09-24): over every one of the 10 analysed corpora, the corpus-wide and
+    app-scoped ratios return the SAME level - 0 disagreements - so corpus-wide
+    mislabels nothing on the available evidence. Measuring it also produced a
+    better reason to leave it than "unmeasured": app-owned name sets are tiny
+    (UnCrackable-2 has 4, UnCrackable-3 has 5), and at n=4 a single class moves
+    the ratio 0.50 -> 0.25, i.e. heavy -> light. An app-scoped ratio would decide
+    a coverage bound - and so whether a NEITHER certifies - on a four-sample
+    estimator, while this one is taken over hundreds of names. The vendor names
+    do dominate the INPUT (460 of UC2's 514); they do not decide the verdict."""
     for p in java_files:
         if is_third_party_decompiled_file(str(p), app_package):
             continue

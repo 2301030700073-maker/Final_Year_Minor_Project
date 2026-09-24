@@ -461,12 +461,12 @@ def _native_ssl_pin_bypass() -> str:
         "];\n"
         "var mods = Process.enumerateModules();\n"
         "var seen = {};\n"
-        "// One address is replaced once per process, however many copies of this arm\n"
-        "// the composition emits: a second Interceptor.replace on a live address is\n"
-        "// refused by Frida ('already replaced this function'), and this arm's catch\n"
-        "// then reports a hook it could not install - naming a bound that does not\n"
-        "// exist on the one line whose whole job is stating the real ones. The flag is\n"
-        "// set only once a replace has returned, so a genuine failure still reports.\n"
+        "// One address is replaced once per process, so two copies of this arm cannot\n"
+        "// both replace it: Frida refuses the second Interceptor.replace on a live\n"
+        "// address ('already replaced this function'), and this arm's catch would then\n"
+        "// report a hook it could not install - naming a bound that does not exist on\n"
+        "// the one line whose whole job is stating the real ones. The flag is set only\n"
+        "// once a replace has returned, so a genuine failure still reports.\n"
         "var replaced = globalThis.__synth_native_ssl_replaced ||\n"
         "               (globalThis.__synth_native_ssl_replaced = {});\n"
         "for (var i = 0; i < mods.length; i++) {\n"
@@ -509,10 +509,12 @@ def _dedupe_shared_fragment(hooks: list[str], fragment: str) -> list[str]:
     matters - five ssl ids route to a body containing it, and UNIVERSAL_SSL also
     contains it - so an app matching one of those ids AND any ssl id with no
     dedicated recipe (the supplement rule) was handed the arm twice and replaced
-    every symbol it resolved a second time. Measured as four '[synth] <sym> found
-    in libssl.so but the hook could not be installed: Error: already replaced this
-    function' lines, on AndroGoat 2026-09-19 and again in the PropertyGuru capture
-    window of 2026-09-20. The Java neutralizers tolerate a second install (the last
+    every symbol it resolved a second time. The '[synth] <sym> found in libssl.so
+    but the hook could not be installed: Error: already replaced this function'
+    lines logged on 2026-09-18/19 were the whole-body case, fixed by 898c4ba66.
+    This overlap has not been observed in any run: every run in results.db
+    composes one arm before and after this fix. It is closed because the overlap
+    is real in the recipe table, not because a run showed it. The Java neutralizers tolerate a second install (the last
     identical implementation wins); the native arm does not, which is why only it
     ever reported.
 

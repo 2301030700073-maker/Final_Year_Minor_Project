@@ -3853,6 +3853,28 @@ def re_attribute_cmd(
         )
 
 
+# REGEN-FIELDLOSS2: the coverage-cause sections a report renders out of the
+# persisted `coverage_causes` column. These are a loss DETECTOR, not a source -
+# generator.py emits each as a literal heading, so this list has to track that
+# file. It exists because an empty column and an empty cause list are not the
+# same thing, and the difference is only visible in the file on disk.
+_CAUSE_SECTION_HEADINGS: tuple[str, ...] = (
+    "JNI native-method binding map (boundary #3, static half)",
+    "Packer / protector identified (Gap-2)",
+    "Packer scan did not complete - packing un-ruled-out (coverage-limited)",
+    "Native libraries detected as packed (Gap-4)",
+    "Native libraries the APK ships but this run could not extract (coverage-limited)",
+    "Native libraries a tool could not read (coverage-limited)",
+    "Unaccounted native loads (boundary #4)",
+    "Platform libraries exempted from the unaccounted list (boundary #4)",
+    "Dynamic code loading (coverage-limited)",
+    "WebView JS bridge (coverage-limited)",
+    "JavaScript / Hermes bundle (coverage-limited)",
+    "Dart AOT snapshot (Flutter) (coverage-limited)",
+    "DEX string attribution degraded (coverage-limited)",
+)
+
+
 def _regenerate_report(run, apk, rendering_commit: str) -> None:
     # `run` is intentionally un-annotated: RunRecord is imported function-locally
     # inside the re-attribute command (~line 1027), so it is not in module scope
@@ -3888,6 +3910,28 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
     # unpacking (a JSON list unpacks identically) - there is no Python-side attribute
     # access on them, so plain dicts/lists render exactly as the live objects did.
     causes = run.coverage_causes or {}
+    # REGEN-FIELDLOSS2: an empty `causes` does NOT mean the run had no causes. For
+    # rows written before this column existed it means the causes were never
+    # persisted - and the report on disk is then the only surviving copy of them.
+    # Regenerating such a row silently drops every cause section it carries
+    # (measured 2026-09-24: 3 stored rows, ~5 sections each, whose reports are the
+    # last copy anywhere). An empty column cannot be a correction that removes a
+    # specific section, so this refuses rather than converging the file onto a
+    # lossier render. The caller records the failure per row and carries on
+    # (NFR-1: loud, never silent). Backfilling coverage_causes is the real fix for
+    # such a row; until then its stored report is left exactly as it is.
+    _regen_target = REPORTS_ROOT / run.apk_sha256 / f"{run.run_id}.md"
+    if not causes and _regen_target.exists():
+        _existing = _regen_target.read_text(encoding="utf-8", errors="replace")
+        _lost = [h for h in _CAUSE_SECTION_HEADINGS if f"### {h}" in _existing]
+        if _lost:
+            raise RuntimeError(
+                f"refusing to regenerate {run.run_id}: its coverage_causes column is "
+                f"empty, but the stored report carries {len(_lost)} cause section(s) "
+                f"nothing can reproduce ({'; '.join(_lost[:3])}"
+                f"{', ...' if len(_lost) > 3 else ''}). That report is the only copy "
+                "of them - backfill coverage_causes first, or leave it as it is."
+            )
     # ADR-0005: a run's authorization (operator + justification) is not a column on
     # the mutable RunRecord - its authoritative, tamper-evident home is the audit
     # log. Recover it by run_id so the regenerated report's "Authorized by" line is

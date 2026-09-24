@@ -24,6 +24,8 @@ The two cases are the two columns the flag gates on:
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import cli
 
 COVERAGE = {
@@ -129,3 +131,49 @@ def test_the_regenerated_report_names_its_own_provenance(monkeypatch, tmp_path):
     assert "unavailable on regeneration" in content, (
         "an unrecoverable authorization is disclosed, never rendered as absent"
     )
+
+
+def test_regeneration_refuses_to_drop_cause_sections_it_cannot_reproduce(monkeypatch, tmp_path):
+    """The rows whose stored report is the only surviving copy of its own causes.
+
+    A run written before `coverage_causes` existed carries NULL in it, so a
+    regenerated render has no cause section to emit - while the report already on
+    disk has several, because the live run that wrote it held those causes in
+    memory. Converging that file onto the lossier render deletes the last copy
+    (measured 2026-09-24: 3 stored rows, ~5 sections each), so the write is refused
+    rather than performed.
+
+    Asserted on the file's CONTENTS after the fact, not only on the raise: a guard
+    that overwrote the report and then raised would satisfy a raise-only test while
+    destroying exactly what it claims to protect.
+    """
+    path = tmp_path / "reports" / APK_HASH / f"{RUN_ID}.md"
+    path.parent.mkdir(parents=True)
+    original = "# run\n\n### Dynamic code loading (coverage-limited)\n\npayload\n"
+    path.write_text(original, encoding="utf-8")
+    with pytest.raises(RuntimeError, match="refusing to regenerate"):
+        _regenerate(monkeypatch, tmp_path, None)
+    assert path.read_text(encoding="utf-8") == original, (
+        "a refused regeneration must leave the stored report byte-identical"
+    )
+
+
+def test_the_refusal_is_conditional_on_the_empty_column_not_the_section(monkeypatch, tmp_path):
+    """The guard's positive control, and the reason it reads the COLUMN.
+
+    A report carrying a cause section together with a row that recorded its causes
+    is an ordinary regeneration - re-attribute rewriting a changed attribution
+    produces exactly that file - so refusing here would block the backfill this
+    path exists for. An empty column is the only thing treated as unreproducible.
+
+    The section's body is not asserted: the render's wording is generator.py's
+    business and is covered there, so this pins only that the write proceeded.
+    """
+    path = tmp_path / "reports" / APK_HASH / f"{RUN_ID}.md"
+    path.parent.mkdir(parents=True)
+    stale = "# run\n\n### Dynamic code loading (coverage-limited)\n\nstale\n"
+    path.write_text(stale, encoding="utf-8")
+    _regenerate(monkeypatch, tmp_path, {"dynamic_loads": ["com.example.Loader"]})
+    content = path.read_text(encoding="utf-8")
+    assert content != stale, "a recorded cause must still be able to rewrite the report"
+    assert "### Dynamic code loading (coverage-limited)" in content

@@ -151,8 +151,9 @@ today's rule set to a run that never loaded it - the misattribution this
 fingerprint exists to prevent.
 
 **What is still not covered, named so that "closed" is not read as "complete".**
-Two surfaces remain outside this value, and both are code covered by
-`Analysis code`:
+Two surfaces stood outside this value when this was written, both code covered by
+`Analysis code`; the second of them was closed the same day - see "Closed: the indicator
+surface" at the end. Left standing here as what was measured then:
 
 * The Python that *runs* the rules - the dirty-tree problem above, unchanged.
 * `src/static/indicators.py`: `ROOT_INDICATORS`, `SSL_INDICATORS`,
@@ -163,6 +164,9 @@ Two surfaces remain outside this value, and both are code covered by
   is certified or reads `Inconclusive` according to content this hash does not
   cover. Editing one of those lists changes what the platform will certify while
   the recorded corpus stays still - the same asymmetry, one surface over.
+
+  *Closed 2026-09-24. That last sentence was the whole of the argument, and it
+  described a hash that did not cover this surface. It does now.*
 
 **The thresholds: measured, and deliberately not folded in (2026-09-24).** The
 other rule parameter a verdict depends on is the decision boundary -
@@ -191,3 +195,49 @@ content *is* a rule, and beside it - recorded and rendered in its own right - wh
 *scales* the rules. Weights are summed into a score the patterns determine, so they
 are part of the surface (the JS idioms above); a threshold is a line drawn across
 scores, so it is recorded as its own fact.
+
+## Closed: the indicator surface (2026-09-24)
+
+The bullet above was the last surface this ADR named as outside the hash, and it
+was the one with the sharpest consequence. An indicator match is never scored -
+but it is what stops a NEITHER being *certified*. So the asymmetry was not only
+"the identity misses some rules"; it was "the identity misses the rules that
+decide whether a clean verdict may be called confident", which is the claim this
+platform is read for. A NEITHER certified over an edited indicator list is a
+verdict no recorded value describes.
+
+**Why no weight is folded in here.** The JS closure above had to move
+`JS_EVIDENCE_WEIGHT` beside its lists, because a weight is summed into a score and
+so changes a verdict while every pattern stays byte-identical. Indicators are not
+like that: they are never added to any confidence. `indicator_fingerprint`
+therefore hashes the pattern source, its category, and the table it is read under,
+and nothing else - because nothing else affects what it does.
+
+**Why the table name is in the hash.** The same su path read in Java text and read
+out of a .so bound different verdicts on two different surfaces, so moving a
+pattern between the tables changes the rules even though every pattern string is
+unchanged. Hashing the table name is what makes those two rule sets
+distinguishable at all.
+
+**Why there is no registry, unlike `_JS_IDIOM_LISTS`.** The JS idiom lists are
+independent module-level names, so a third list could be added that fires rules the
+hash never described; a declared registry plus a structural test closed that. Here
+the two category tables already enumerate themselves, so the identity is taken over
+the tables: `_INDICATOR_TABLES` names the two dicts and the fingerprint iterates
+their own items. A category cannot reach a scan without reaching the identity, so
+the hole is impossible rather than guarded - and the test that holds it is
+behavioural (add a category to a table, the hash must move) rather than structural.
+
+**What it costs.** The same non-comparability as the JS closure, for the same
+reason: a value recorded before this change was taken over two surfaces, so it
+cannot be compared with one taken over three even when the rules are identical. No
+stored fingerprint is rewritten, and the four scheme eras now on record - YAML
+alone, YAML plus JS, YAML plus JS plus indicators, and whatever comes next - are
+told apart by what they covered rather than by a date, because two of those changes
+landed on 2026-09-24 and a date can no longer identify a scheme.
+
+**What is still not covered, once more and for the last time on this front.** One
+surface remains outside this value: the Python that *runs* the rules - the
+dirty-tree problem this ADR opens with, unchanged and unaddressed. Hashing the
+source tree remains the larger change the first section rules out, and nothing done
+here makes it smaller.

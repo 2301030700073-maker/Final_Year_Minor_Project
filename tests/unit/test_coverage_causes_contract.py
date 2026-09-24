@@ -88,7 +88,7 @@ KEYS = coverage_causes_keys()
 def test_the_parser_found_the_real_contract():
     """A vacuous parse would make every other test here pass for free."""
     assert len(KEYS) >= 15, KEYS
-    assert "manifest_resources_complete" in KEYS and "js_asset_surface_extracted" in KEYS
+    assert "manifest_resources_complete" in KEYS and "js_asset_surface_extracted" in KEYS and "js_asset_entries_in_apk" in KEYS
     assert len(generate_report_params()) >= 30
     assert len(regenerate_replay_names()) >= 15
     assert len(jinja_read_names()) >= 100

@@ -2369,6 +2369,11 @@ def run(
     _asset_surface_extracted = bool(
         decompile_result.evidence.get("asset_surface_extracted", False)
     )
+    # ASSET-TRI1: how many `assets/` entries the APK itself lists, or None when the
+    # archive could not be listed. `asset_surface_extracted` is False both for an
+    # app that ships no asset surface and for one whose surface was dropped, and
+    # the report named the second cause for the first case.
+    _asset_entries_in_apk = decompile_result.evidence.get("asset_entries_in_apk")
     coverage_map["js"] = js_surface_coverage(has_binary_bundle, _asset_surface_extracted)
     # Flutter/Dart-AOT: a release Flutter app compiles its Dart logic (the real
     # root/SSL detection surface) into a native snapshot blob - libapp.so /
@@ -3276,6 +3281,10 @@ def run(
         # computed here; they just never reached the report.
         js_binary_bundle=bool(has_binary_bundle),
         js_asset_surface_extracted=bool(_asset_surface_extracted),
+        # ASSET-TRI1: the APK's own `assets/` entry count, or None when the
+        # archive could not be listed - the fact that tells "this app ships no
+        # asset surface" apart from "this run dropped the one it ships".
+        js_asset_entries_in_apk=_asset_entries_in_apk,
         # COV-MANIFEST-NOTE1: the manifest surface governs ssl and can be bounded
         # two ways - the manifest did not parse (unscannable) or resource
         # resolution was incomplete (partial, H3: a declared NSC that is missing or
@@ -3805,6 +3814,7 @@ def _regenerate_report(run, apk, rendering_commit: str) -> None:
         # the template reads as "not recorded", never as "no".
         js_binary_bundle=causes.get("js_binary_bundle"),
         js_asset_surface_extracted=causes.get("js_asset_surface_extracted"),
+        js_asset_entries_in_apk=causes.get("js_asset_entries_in_apk"),
         manifest_parsed=causes.get("manifest_parsed"),
         manifest_resources_complete=causes.get("manifest_resources_complete"),
         # The annotation-loss disclosure now fires ONLY for runs written before

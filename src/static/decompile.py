@@ -223,7 +223,7 @@ def _tail_file(log_path: Path, max_chars: int = 4000) -> str:
 ASSETS_DIRNAME = "assets"
 
 
-def extract_assets(apk_path: Path, target_dir: Path) -> int:
+def extract_assets(apk_path: Path, target_dir: Path) -> tuple[int, int | None]:
     """Extract the APK's `assets/` entries into target_dir/assets (ASSET-DROP1).
 
     Why this exists: on the LAZY per-DEX path, jadx is invoked once per
@@ -252,22 +252,43 @@ def extract_assets(apk_path: Path, target_dir: Path) -> int:
     refused rather than written - see the guard at the copy below - and is not
     counted, so the returned count describes only what is really on disk.
 
-    Returns the number of files written. A failure is non-fatal and reported as
-    0: the asset surface then stays un-extracted, and `_scan_binary_bundles`
-    simply finds nothing - the pre-existing (wrong) behavior, never a crash that
-    would discard an otherwise-good decompile. `asset_surface_extracted` in the
-    sidecar records which of the two it was, so the gap is visible rather than
-    silent (principle 3).
+    Returns `(files_written, entries_in_apk)`. `entries_in_apk` is how many
+    `assets/` entries the APK itself lists, or None when the archive could not
+    be listed at all (missing path, not a zip).
+
+    That second value exists because a count of 0 files written is THREE states,
+    not two, and `asset_surface_extracted = written > 0` collapsed them:
+    (a) the APK genuinely carries no `assets/` entries - nothing is hidden, and a
+    `js` surface held at `partial` for it is bounded by a rule, not by a loss;
+    (b) the APK carries a surface and none of it reached disk - a real coverage
+    loss, the case ASSET-DROP1 exists for;
+    (c) the archive could not be listed - unknown.
+    Measured 2026-09-24: every `asset_surface_extracted: false` on disk (AndroGoat
+    x2, UnCrackable-Level1, InsecureBankv2, RS_CertPinning) was state (a), while
+    every APK that does ship assets (PropertyGuru 25, jerboa 3) recorded True with
+    its real count - so the report's ASSET-DROP1 clause, which fired on the bare
+    `false`, was naming a run failure for apps that have no asset surface at all.
+
+    A failure stays non-fatal and is reported as 0 written: the asset surface then
+    stays un-extracted, and `_scan_binary_bundles` simply finds nothing - the
+    pre-existing (wrong) behavior, never a crash that would discard an
+    otherwise-good decompile. `asset_surface_extracted` in the sidecar records
+    that, so the gap is visible rather than silent (principle 3).
     """
     if not apk_path.is_file():
-        return 0
+        return 0, None
     assets_dir = target_dir / ASSETS_DIRNAME
     written = 0
+    entries_in_apk = 0
     try:
         with zipfile.ZipFile(apk_path) as z:
             for name in z.namelist():
                 if not name.startswith("assets/") or name.endswith("/"):
                     continue
+                # Counted before the traversal refusal below: this is what the
+                # APK CLAIMS to ship, which is what tells a real loss from an app
+                # that has no asset surface.
+                entries_in_apk += 1
                 # The member name is attacker-controlled, and this is the ONE
                 # extractor in the tree that hand-rolls the copy instead of
                 # calling ZipFile.extract - the per-DEX read above and
@@ -287,8 +308,9 @@ def extract_assets(apk_path: Path, target_dir: Path) -> int:
                     shutil.copyfileobj(src, out)
                 written += 1
     except (OSError, zipfile.BadZipFile, KeyError):
-        return written
-    return written
+        # The archive could not be listed: the entry count is unknown, NOT zero.
+        return written, None
+    return written, entries_in_apk
 
 
 def _count_java_files(jadx_dir: Path) -> int:
@@ -1251,7 +1273,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         # reported `fully_analyzed` - a confident negative over an unread bundle
         # (see extract_assets). Counted so the sidecar can show whether the
         # surface was actually recovered.
-        asset_file_count = extract_assets(apk_path, target_dir)
+        asset_file_count, asset_entries_in_apk = extract_assets(apk_path, target_dir)
 
         # A failure on either side degrades the whole run to partial (D2);
         # only when both exit 0 is the decompile complete. jadx coverage is
@@ -1299,6 +1321,11 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
                 # `js: fully_analyzed` over a bundle nobody extracted.
                 "asset_surface_extracted": asset_file_count > 0,
                 "asset_file_count": asset_file_count,
+                # ASSET-TRI1: how many `assets/` entries the APK itself lists
+                # (None = the archive could not be listed). Distinguishes an app
+                # that ships no asset surface from one whose surface was dropped,
+                # which `asset_surface_extracted` alone reports identically.
+                "asset_entries_in_apk": asset_entries_in_apk,
                 # APKTOOL-TIMEOUT1: distinguish "our timeout killed a healthy but
                 # slow decode" from "the tool genuinely crashed". Without this a
                 # partial degrade is unattributable (both read as a bare exit
@@ -1322,6 +1349,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         )
         result.evidence["asset_surface_extracted"] = asset_file_count > 0
         result.evidence["asset_file_count"] = asset_file_count
+        result.evidence["asset_entries_in_apk"] = asset_entries_in_apk
         result.evidence["apktool_timed_out"] = _runs_timed_out(apktool_returncode)
         result.evidence["jadx_timed_out"] = jadx_timed_out
         result.evidence["apktool_timeout_s"] = apktool_timeout_for_size(apk_size)
@@ -1400,6 +1428,7 @@ def _cached_result(start: float, jadx_dir: Path, apktool_dir: Path, status_sidec
                         # forward too. A field dropped here reads at its consumer as
                         # absent - the same failure a missing sidecar field caused.
                         "asset_surface_extracted", "asset_file_count",
+                        "asset_entries_in_apk",
                         "apktool_timed_out", "jadx_timed_out", "apktool_timeout_s"):
                 if key in data:
                     result.evidence[key] = data[key]

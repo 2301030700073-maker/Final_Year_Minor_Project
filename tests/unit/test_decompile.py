@@ -1297,7 +1297,7 @@ def test_extract_assets_recovers_bundles_from_the_apk(tmp_path):
         z.writestr("res/values/strings.xml", b"<resources/>")
 
     target = tmp_path / "analysis"
-    written = extract_assets(apk, target)
+    written, entries = extract_assets(apk, target)
 
     # Both real asset files (the directory entry is skipped), and the bundle is
     # byte-identical to the APK member - not re-encoded.
@@ -1319,16 +1319,21 @@ def test_extract_assets_is_non_fatal_on_a_non_zip(tmp_path):
 
     fake = tmp_path / "not-an-apk.apk"
     fake.write_bytes(b"this is not a zip")
-    assert extract_assets(fake, tmp_path / "out") == 0
-    # An absent path is likewise 0, not an exception.
-    assert extract_assets(tmp_path / "missing.apk", tmp_path / "out") == 0
+    assert extract_assets(fake, tmp_path / "out") == (0, None)
+    # An absent path is likewise 0, not an exception - and None entries, because
+    # an archive that cannot be listed has an UNKNOWN surface, not an empty one.
+    assert extract_assets(tmp_path / "missing.apk", tmp_path / "out") == (0, None)
 
 
 def test_extract_assets_returns_zero_when_apk_has_no_assets(tmp_path):
-    """An APK genuinely without assets/ yields 0 - so the sidecar's
-    `asset_surface_extracted` reads False for a real absence too. That is the
-    honest behavior: the caller degrades `js` to partial (unknown, not absent)
-    rather than claiming the surface was cleared."""
+    """An APK genuinely without assets/ yields (0, 0) - 0 written AND 0 listed.
+
+    `asset_surface_extracted` still reads False for this real absence (the caller
+    degrades `js` to partial - unknown, not absent - rather than claiming the
+    surface was cleared), but the second value records that the absence is the
+    APP's. Without it the report named a run failure for every such app; measured
+    2026-09-24, that was every false on disk (AndroGoat x2, UnCrackable-Level1,
+    InsecureBankv2, RS_CertPinning)."""
     import zipfile
 
     from static.decompile import extract_assets
@@ -1336,7 +1341,9 @@ def test_extract_assets_returns_zero_when_apk_has_no_assets(tmp_path):
     apk = tmp_path / "noassets.apk"
     with zipfile.ZipFile(apk, "w") as z:
         z.writestr("classes.dex", b"dex\n035\x00")
-    assert extract_assets(apk, tmp_path / "out") == 0
+    # (0 written, 0 entries in the APK) - the absence is the APP's, and the
+    # second value is what lets the report say so instead of naming a run failure.
+    assert extract_assets(apk, tmp_path / "out") == (0, 0)
 
 
 def test_extract_assets_refuses_a_member_that_escapes_the_target(tmp_path):
@@ -1357,12 +1364,14 @@ def test_extract_assets_refuses_a_member_that_escapes_the_target(tmp_path):
         z.writestr("assets/real.js", b"var a = 1;")
 
     target = tmp_path / "analysis" / "apktool"  # two levels deep, like the real one
-    written = extract_assets(apk, target)
+    written, entries = extract_assets(apk, target)
 
     assert not (tmp_path / "analysis" / "escaped.txt").exists()
     assert not (tmp_path / "escaped.txt").exists()
     # The honest member still lands, and the count describes only what is on disk.
     assert written == 1
+    # the APK listed 2 assets/ entries and one was refused: a real loss
+    assert entries == 2
     assert (target / "assets" / "real.js").is_file()
 
 

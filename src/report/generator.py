@@ -206,7 +206,21 @@ read as a NO and manufacture the very clause this is fixing. #}
 {% if js_binary_bundle -%}
 {% set _ = _jsc.append("a binary Hermes/bytecode bundle whose control flow cannot be read (React Native release bundle) - only its string constants are recovered") -%}
 {% endif -%}
-{% if js_asset_surface_extracted == false -%}
+{# ASSET-TRI1: `js_asset_surface_extracted == false` is THREE states - the APK
+ships no `assets/` entries at all (nothing is hidden), it ships a surface that
+did not reach disk (the real loss ASSET-DROP1 exists for), or the archive could
+not be listed. The clause below asserted the second for all three, and every
+false on disk measured 2026-09-24 was the first: AndroGoat x2, UnCrackable-Level1,
+InsecureBankv2 and RS_CertPinning all ship zero `assets/` entries, so the report
+told a reader its `js` bound came from an asset surface the run failed to put on
+disk, for apps that have no asset surface to lose. `js_asset_entries_in_apk` is
+the APK's own listing (None = unlistable), and each clause now fires on its own
+recorded fact. None, not 0, is left as the unknown case: a run predating the
+field keeps the older wording rather than being told the app ships no assets. #}
+{% if js_asset_entries_in_apk == 0 -%}
+{% set _ = _jsc.append("no asset surface at all - the APK lists no `assets/` entries, so an un-extracted tree hides nothing here; the `partial` is this rule's conservative reading of an absent surface, not a bundle this run failed to look at (ASSET-DROP1)") -%}
+{% endif -%}
+{% if js_asset_surface_extracted == false and js_asset_entries_in_apk != 0 -%}
 {% set _ = _jsc.append("an asset surface this run never put on disk, so a JS bundle the APK does carry would be invisible to every scan root (ASSET-DROP1)") -%}
 {% endif -%}
 > **JS:** `partial` is a lower bound, not a confident negative - a js root/SSL NEITHER is not proof that a root/SSL check in a bundle is absent. Bound by{% if _jsc %} {{ _jsc | join('; ') }}{% else %} a coverage rule this report does not name{% endif %}.{% if coverage.get("native") == "unscannable" %} Mirrors the native callout above.{% endif %}
@@ -833,6 +847,7 @@ def generate_report(
     # regenerated) - NOT "no".
     js_binary_bundle: bool | None = None,
     js_asset_surface_extracted: bool | None = None,
+    js_asset_entries_in_apk: int | None = None,
     # COV-MANIFEST-NOTE1: the two recorded causes of a bounded manifest surface
     # (unscannable = the manifest did not parse; partial = resource resolution was
     # incomplete). None is "not recorded" - a pre-field run - never "no".
@@ -901,6 +916,7 @@ def generate_report(
         packed_native_libs=packed_native_libs,
         js_binary_bundle=js_binary_bundle,
         js_asset_surface_extracted=js_asset_surface_extracted,
+        js_asset_entries_in_apk=js_asset_entries_in_apk,
         manifest_parsed=manifest_parsed,
         manifest_resources_complete=manifest_resources_complete,
         regenerated_with_annotation_loss=regenerated_with_annotation_loss,

@@ -559,8 +559,15 @@ string in this APK; only its *ownership* is unverified.
 | Stage | Status | Duration (ms) | Error |
 |---|---|---|---|
 {% for s in stage_results -%}
-| {{ s.stage }} | {{ s.status }}{% if s.stage == "dynamic" and s.status == "success" and (verification is none or (verification.root_bypassed is none and verification.ssl_bypassed is none)) %} (machinery ran; bypass not confirmed){% endif %} | {{ s.duration_ms }} | {{ s.error or "" }} |
+| {{ s.stage }} | {{ s.status }}{% if s.stage == "dynamic" and s.status == "success" and (verification is none or (verification.root_bypassed is none and verification.ssl_bypassed is none)) %} (machinery ran; bypass not confirmed){% endif %}{% if s.stage.startswith("success-check") and s.status == "success" and s.evidence and not s.evidence.get("root_bypassed") and not s.evidence.get("ssl_bypassed") %} (ran; nothing confirmed here{% if s.evidence.get("note") %}, see the note below{% endif %}){% endif %} | {{ s.duration_ms }} | {{ s.error or "" }} |
 {% endfor %}
+{% if stage_notes -%}
+Stages whose own recorded result carries a note (the status says the stage ran; the note says what that run of it returned):
+
+{% for n in stage_notes -%}
+- **{{ n.stage }}** ({{ n.status }}) - {{ n.note }}
+{% endfor %}
+{% endif -%}
 {% if capture_present -%}
 ## Captured Traffic
 
@@ -757,6 +764,33 @@ def _dynamic_stage_status(stage_results: list[StageResult]) -> str | None:
     return None
 
 
+def _stage_notes(stage_results) -> list[dict]:
+    """Stages whose own recorded result carries a note.
+
+    A check stage's status says the check RAN; the note says what that run of
+    it returned. The capture window's check records "the dynamic window had
+    already confirmed the SSL bypass, so this window's evaluation could not
+    upgrade anything" beside a `success` status, and the technology-level check
+    records that it reports hooks-engaged rather than a target-specific
+    verdict. Both notes were written to stage evidence and rendered by nothing,
+    so the report's Stage Results table showed `success` for a check that
+    confirmed nothing, with the sentence that qualifies it absent from the page
+    a reader sees. Read from the record, never re-derived here.
+    """
+    notes = []
+    for s in stage_results or []:
+        ev = s.get("evidence") if isinstance(s, dict) else getattr(s, "evidence", None)
+        note = (ev or {}).get("note") if isinstance(ev, dict) else None
+        if not note:
+            continue
+        notes.append({
+            "stage": s.get("stage") if isinstance(s, dict) else getattr(s, "stage", ""),
+            "status": s.get("status") if isinstance(s, dict) else getattr(s, "status", ""),
+            "note": note,
+        })
+    return notes
+
+
 def generate_report(
     run_id: str,
     apk_hash: str,
@@ -837,6 +871,7 @@ def generate_report(
         correlation_skip_reason=correlation_skip_reason,
         correlation=correlation,
         stage_results=stage_results,
+        stage_notes=_stage_notes(stage_results),
         root_attribution=_category_attribution(metadata, classification, "root"),
         ssl_attribution=_category_attribution(metadata, classification, "ssl"),
         **_decompile_summary(stage_results),

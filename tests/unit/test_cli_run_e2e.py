@@ -757,6 +757,97 @@ def test_unknown_app_with_no_confirmation_still_declines_to_correlate(
     assert "Not evaluated (dynamic used the technology-level hooks-engaged check" in text
 
 
+def test_a_no_internet_app_never_opens_a_capture_window(run_setup, monkeypatch):
+    """ADR-0024 end to end: the guard short-circuits the launch itself.
+
+    Measured 2026-09-24 before the guard: UC1 run 51d0f0c0 opened this window for
+    an app declaring no `android.permission.INTERNET`, spent 28096 ms in it, and
+    recorded `success` over the three flows its own attribution assigns to uids 0
+    and 10121 (the emulator's Google services) while recording that the app's own
+    uid held no socket in any of 7 samples. The stub below raises if the window is
+    opened at all, so this pins D2 (no launch) as well as D1 (the record, and the
+    two surfaces that read it).
+    """
+    from dynamic import device as device_mod
+
+    # run_setup declares INTERNET for the capture-mechanics tests; this app does not.
+    monkeypatch.setattr(
+        cli,
+        "parse_manifest",
+        lambda *a, **kw: ManifestInfo(
+            debuggable=False, network_security_config=None, permissions=[]
+        ),
+    )
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
+    monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
+    monkeypatch.setattr(device_mod, "clear_logcat", lambda serial: None)
+    monkeypatch.setattr(device_mod, "capture_logcat", lambda serial: "")
+    monkeypatch.setattr(
+        "dynamic.frida_runner.run_dynamic_stage",
+        lambda *a, **kw: _ok("dynamic", frida_messages=[]),
+    )
+
+    launched = []
+
+    def _would_have_captured(*a, **kw):
+        # Exactly what UC1's window returned on 2026-09-24: a `success` carrying
+        # the emulator's own flows.
+        launched.append(kw)
+        return StageResult(
+            stage="capture-traffic",
+            status="success",
+            duration_ms=28096,
+            evidence={
+                "flow_summary": [
+                    {
+                        "host": "android.clients.google.com",
+                        "method": "POST",
+                        "path": "/c2dm/register3",
+                        "status": 400,
+                        "scheme": "https",
+                    }
+                ],
+                "proxy": "127.0.0.1:8081",
+                "bypass_applied": False,
+            },
+        )
+
+    monkeypatch.setattr(cli.mitmproxy_capture, "run_capture_stage", _would_have_captured)
+
+    captured = []
+    original_print = cli.console.print
+    cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
+    try:
+        cli.run(
+            apk=run_setup / "fixture.apk",
+            justification="ACADEMIC_TRAINING_TARGET",
+            skip_dynamic=False,
+            capture_traffic=True,
+            device_serial=None,
+            # a target no success check is registered for: this test is about the
+            # capture window, and an unregistered target keeps the success check
+            # off the device (cli.run is a Typer command, so the option must be
+            # passed explicitly - its default is an OptionInfo object).
+            target="com.example.app",
+        )
+    finally:
+        cli.console.print = original_print
+
+    console_text = "\n".join(captured)
+    assert launched == [], "the capture window was opened for a no-INTERNET app"
+    assert "SKIPPED" in console_text and "capture-traffic" in console_text
+    assert "no INTERNET permission" in console_text
+
+    report = sorted((run_setup / "reports").rglob("*.md"))[0].read_text(encoding="utf-8")
+    assert "| capture-traffic | skipped |" in report
+    assert "**the capture stage was not attempted**" in report
+    assert "reclassified from a bare failure to _skipped" not in report
+    # nothing was captured, so the page must present neither flows nor a bound
+    assert "decrypted the HTTPS flows below" not in report
+    assert "android.clients.google.com" not in report
+
+
 def test_capture_window_runs_under_a_pinning_only_bypass(run_setup, monkeypatch):
     # The capture window must measure the SAME bypass attempt the dynamic stage was
     # directed to make. Without this it cold-starts an un-hooked app, so its

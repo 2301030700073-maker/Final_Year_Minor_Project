@@ -895,10 +895,79 @@ def _ssl_path_exercised(messages) -> int:
     return sum(ssl_path_effects(messages).values())
 
 
-def _upgrade_verification_from_capture_window(
+def _adopt_capture_window_hook_lines(
+    capture_verification: VerificationResult,
+    verification: VerificationResult,
+) -> VerificationResult:
+    """Fold the capture launch's windowed native-hook statement(s) into the run's
+    verification, and nothing else (ADR-0023).
+
+    Data, and windowed keys only: `_capture_window_hook_lines` is the whole
+    selector, so a rename of the constant cannot silently stop this matching.
+    """
+    merged_lines = dict(verification.evidence_lines)
+    merged_lines.update(_capture_window_hook_lines(capture_verification))
+    return replace(verification, evidence_lines=merged_lines)
+
+
+def _capture_window_hook_lines(
+    capture_verification: VerificationResult,
+) -> dict[str, str]:
+    """The windowed native-hook statement(s) a capture-window evaluation filed.
+
+    ADR-0023 files that statement under a key carrying the window, so the capture
+    launch's answer sits beside the dynamic launch's rather than replacing it. The
+    bare key - the dynamic launch's own - is deliberately not selected: it belongs
+    to the other launch.
+    """
+    return {
+        key: value
+        for key, value in capture_verification.evidence_lines.items()
+        if key.startswith(WINDOWED_NATIVE_HOOK_INSTALLATION_PREFIX)
+    }
+
+
+def _merge_capture_window_evaluation(
     capture_verification: VerificationResult,
     verification: VerificationResult | None,
-) -> VerificationResult:
+    *,
+    upgraded: bool,
+) -> VerificationResult | None:
+    """Fold a capture-window evaluation into the run's verification (ADR-0016,
+    ADR-0023). Returns the verification the run should carry, or None when there is
+    still nothing to carry.
+
+    Two questions, two predicates, and they are NOT the same predicate:
+
+    - The SSL pair moves only on `upgraded` (ADR-0016): that window's observer
+      carried BOTH the app's pin-check and a completed handshake, so its better
+      observation of the app supersedes. An inconclusive window never retracts a
+      confirmation from another, so nothing else moves either.
+    - The native-hook statement moves on EVERY evaluation that filed one
+      (ADR-0023). It answers a question about a LAUNCH - "did the script injected
+      into this process install its hooks" - not about the app, so it does not wait
+      on a verdict. Gating it on `upgraded` (the first implementation) computed it
+      and then discarded it on every run whose window stayed inconclusive, which is
+      the common case and exactly the run whose two launches can disagree.
+      Measured 2026-09-24 on AndroGoat run 0a69e8b8: the window's check filed "the
+      injected script reported no failed hook installation this run" with
+      ssl_bypassed None, and no such line reached the report.
+
+    A capture window with no dynamic verification to merge into becomes the run's
+    verification only on an upgrade; its inconclusive self is not adopted, because
+    its root and liveness lines describe a different launch than the run's.
+    """
+    if verification is None:
+        return capture_verification if upgraded else None
+    with_hooks = _adopt_capture_window_hook_lines(capture_verification, verification)
+    if not upgraded:
+        return with_hooks
+    merged_lines = {
+        **with_hooks.evidence_lines,
+        SSL_HANDSHAKE_LINE: capture_verification.evidence_lines[SSL_HANDSHAKE_LINE],
+        SSL_CONFIRMATION_LINE: capture_verification.evidence_lines[SSL_CONFIRMATION_LINE],
+    }
+    return replace(with_hooks, ssl_bypassed=True, evidence_lines=merged_lines)
     """Fold a confirming capture-window evaluation into the run's verification
     (ADR-0016). Called only when that window's own observer carried BOTH the app's
     pin-check and a completed handshake AND the run had not already confirmed, so
@@ -938,7 +1007,6 @@ def _upgrade_verification_from_capture_window(
     for key, value in capture_verification.evidence_lines.items():
         if key.startswith(WINDOWED_NATIVE_HOOK_INSTALLATION_PREFIX):
             merged_lines[key] = value
-    return replace(verification, ssl_bypassed=True, evidence_lines=merged_lines)
 
 
 def _reclassify_empty_capture(
@@ -2934,10 +3002,16 @@ def run(
                     window=capture_window,
                 )
                 upgraded = capture_verification.ssl_bypassed is True and not already_confirmed
-                if upgraded:
-                    verification = _upgrade_verification_from_capture_window(
-                        capture_verification, verification
+                if upgraded or _capture_window_hook_lines(capture_verification):
+                    # The merge runs whenever the window filed a hook statement, not
+                    # only when it upgrades: that statement is a fact about a launch
+                    # and does not wait on a verdict, and gating it on the upgrade
+                    # discarded it on every inconclusive window - the run whose two
+                    # launches can actually disagree (ADR-0023).
+                    verification = _merge_capture_window_evaluation(
+                        capture_verification, verification, upgraded=upgraded
                     )
+                if upgraded:
                     # correlate() is a pure function of (classification, verification) and
                     # reads ssl_bypassed in five places, so a verdict upgraded after the
                     # first correlation ran would otherwise sit beside a correlation

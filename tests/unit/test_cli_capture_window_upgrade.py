@@ -1,6 +1,6 @@
 """ADR-0016: the capture window's own observer can upgrade the run's SSL verdict.
 
-`cli._upgrade_verification_from_capture_window` is the merge half of that decision,
+`cli._merge_capture_window_evaluation` is the merge half of that decision,
 and it is the half that can silently produce a report whose verdict and evidence
 contradict each other by moving the wrong lines - so it is tested against a
 `VerificationResult` the real check produced, not against hand-written line keys.
@@ -93,7 +93,7 @@ def test_upgrade_keeps_both_launches_hook_installation_statements():
     the key that names its launch."""
     capture = _capture_window_verification()
     dynamic = _dynamic_window_verification()
-    merged = cli._upgrade_verification_from_capture_window(capture, dynamic)
+    merged = cli._merge_capture_window_evaluation(capture, dynamic, upgraded=True)
 
     windowed = [
         k for k in capture.evidence_lines
@@ -121,7 +121,7 @@ def test_upgrade_does_not_adopt_an_unattributed_hook_statement():
             NATIVE_HOOK_INSTALLATION_LINE: "no failed hook installation",
         },
     )
-    merged = cli._upgrade_verification_from_capture_window(capture, dynamic)
+    merged = cli._merge_capture_window_evaluation(capture, dynamic, upgraded=True)
     assert merged.evidence_lines[NATIVE_HOOK_INSTALLATION_LINE] == (
         dynamic.evidence_lines[NATIVE_HOOK_INSTALLATION_LINE]
     )
@@ -130,9 +130,9 @@ def test_upgrade_does_not_adopt_an_unattributed_hook_statement():
 def test_upgrade_takes_only_the_two_ssl_lines():
     dynamic = _dynamic_window_verification()
 
-    merged = cli._upgrade_verification_from_capture_window(
+    merged = cli._merge_capture_window_evaluation(
         _capture_window_verification(), dynamic
-    )
+    , upgraded=True)
 
     assert merged.ssl_bypassed is True
     # Root and liveness stay exactly as the dynamic window measured them: the
@@ -151,9 +151,9 @@ def test_upgrade_takes_only_the_two_ssl_lines():
 
 
 def test_upgrade_names_the_window_it_confirmed_in():
-    merged = cli._upgrade_verification_from_capture_window(
+    merged = cli._merge_capture_window_evaluation(
         _capture_window_verification(), _dynamic_window_verification()
-    )
+    , upgraded=True)
 
     # The label run() builds from the capture stage's own app_launch reaches both
     # lines, so a confirmation can never be read as belonging to the other launch.
@@ -164,7 +164,7 @@ def test_upgrade_names_the_window_it_confirmed_in():
 def test_upgrade_does_not_mutate_the_verification_it_upgrades_from():
     dynamic = _dynamic_window_verification()
 
-    cli._upgrade_verification_from_capture_window(_capture_window_verification(), dynamic)
+    cli._merge_capture_window_evaluation(_capture_window_verification(), dynamic, upgraded=True)
 
     assert dynamic.ssl_bypassed is None
     assert dynamic.evidence_lines[SSL_HANDSHAKE_LINE] == (
@@ -175,10 +175,43 @@ def test_upgrade_does_not_mutate_the_verification_it_upgrades_from():
 def test_upgrade_with_no_dynamic_verification_adopts_the_capture_evaluation():
     capture = _capture_window_verification()
 
-    merged = cli._upgrade_verification_from_capture_window(capture, None)
+    merged = cli._merge_capture_window_evaluation(capture, None, upgraded=True)
 
     assert merged is capture
     assert merged.ssl_bypassed is True
     # Root is NOT promoted out of a pinning-only bypass: no root hook ran in that
     # window, so there is no root evidence to import and none is manufactured.
     assert merged.root_bypassed is None
+
+
+def test_a_window_that_does_not_upgrade_still_contributes_its_hook_statement():
+    """ADR-0023: the hook statement answers a question about a LAUNCH, so it is
+    adopted whether or not this window's observer confirmed the bypass. Gating it
+    on the upgrade (the first implementation) computed it and threw it away on
+    every inconclusive window - the common case, and the one run whose two
+    launches can actually disagree.
+    """
+    from dynamic.success_checks.technology import (
+        NATIVE_HOOK_INSTALLATION_LINE as BARE,
+        WINDOWED_NATIVE_HOOK_INSTALLATION_PREFIX as WINDOWED,
+    )
+
+    dynamic = _dynamic_window_verification()
+    merged = cli._merge_capture_window_evaluation(
+        _capture_window_verification(), dynamic, upgraded=False
+    )
+    windowed = [k for k in merged.evidence_lines if k.startswith(WINDOWED)]
+    assert windowed, "the capture launch's hook statement was discarded"
+    assert merged.ssl_bypassed is not True, "an inconclusive window promoted the verdict"
+    assert merged.evidence_lines[BARE] == dynamic.evidence_lines[BARE], (
+        "the dynamic launch's own hook statement was overwritten"
+    )
+
+
+def test_with_no_dynamic_verification_an_inconclusive_window_is_not_adopted():
+    """The window's root and liveness lines describe a different launch than the
+    run's, so an inconclusive window has nothing to become the run's verification
+    with - only an upgrade carries it across (ADR-0016)."""
+    assert cli._merge_capture_window_evaluation(
+        _capture_window_verification(), None, upgraded=False
+    ) is None

@@ -138,11 +138,21 @@ for rows 2 and 5, which are the cases it exists for.
 - Nothing new is stored. The record already carries `asset_entries_in_apk` and
   the timed-out flags; this ADR makes the decider read facts the run already
   wrote.
-- In the three measured UnCrackable runs no label moves: their `java` surface is
-  `partial`, which governs root and SSL too, so the verdict stays `Inconclusive`.
-  The visible change is the coverage line reading `js=fully_analyzed` and the
-  ASSET-TRI1/ASSET-DROP1 qualifier no longer being printed for a surface that
-  isn't there.
+- Measured on the three UnCrackable runs re-run after the change (2026-09-24):
+  UC1 and UC2 do not move - their `java` surface is `partial`, which governs root
+  and SSL too, so both verdicts stay `Inconclusive` - and **UC3 does move**. Its
+  `java`, `native` and `manifest` surfaces all read `fully_analyzed`, so once `js`
+  stops being bounded its SSL negative certifies: `SSL: 0.00 -> NOT DETECTED
+  (confident negative)`. The move is not an upgrade of an unverified reading:
+  `config/ground_truth.yaml` records `6827f776…` (UnCrackable3) as `ssl: false`
+  with its source, so this is a certified true negative, and the same hash's own
+  report history carries that label under the same four `fully_analyzed` rows on
+  2026-09-03/04/05 (`de04d022`, `be693dd0`, `14fae29f`, `d60c4008`). The two runs
+  at 16:04 and 16:25 that day (`a3f3f2fa`, `51858b51`) are the ones reading
+  `js=partial` and `Inconclusive`, so this restores an earlier reading rather than
+  inventing one. The other visible change is the coverage line reading
+  `js=fully_analyzed` and the ASSET-TRI1/ASSET-DROP1 qualifier no longer being
+  printed for a surface that isn't there.
 - Calibration's certified-true-negative count can grow for asset-less targets in
   the corpus. The Tier-2 exclusion for a partial/unknown decompile is unaffected
   and remains the guard for decision 2's case.

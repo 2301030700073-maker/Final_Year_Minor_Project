@@ -98,7 +98,7 @@ file - the same rule `_regenerate_report` already follows.
 
 ## What is still not covered
 
-**Backfilling `coverage_causes` for those 3 rows.** The only surviving copy of
+**Backfilling `coverage_causes` for those 6 rows.** The only surviving copy of
 their cause sections is the prose in their own reports. Reading facts back out of
 rendered markdown would put a guess in a column the whole coverage-bound
 machinery trusts, so it is deliberately not attempted here. Until someone decides

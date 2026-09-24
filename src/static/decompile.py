@@ -68,7 +68,31 @@ STATUS_SIDECAR_NAME = "decompile_status.json"
 # which means it predates the field - is re-decompiled for real instead of read
 # blind. Same discipline as _DEX_STRING_CACHE_VERSION in androguard_scanner.py
 # and _ANALYZE_CACHE_VERSION in native.py.
-_SIDECAR_SCHEMA_VERSION = 2
+_SIDECAR_SCHEMA_VERSION = 3
+
+# The evidence fields a reader must carry forward from a sidecar, in one place so
+# the version above and the list below move together: adding a field here WITHOUT
+# bumping the version leaves every already-cached sidecar read as "field absent",
+# which is the failure this constant's version exists to prevent. Measured
+# 2026-09-24: asset_entries_in_apk was added to this list and to the writer, the
+# version was left at 2, and the very next run (085a8c10) reused the v2 sidecar and
+# rendered the pre-fix wording - the fix was correct and unreachable. The test at
+# tests/unit/test_decompile_sidecar_schema.py pins the pair.
+_SIDECAR_EVIDENCE_FIELDS: tuple[str, ...] = (
+    "fallback_engine", "fallback_unavailable", "fallback_recovered",
+    "fallback_output", "fallback_error_tail", "fallback_file_count",
+    "lazy_decompile", "dex_units", "smali_fallback",
+    # Written by the same branch, into the same sidecar, as smali_fallback -
+    # carrying one and dropping the other made a cache hit describe that run
+    # differently from the cold run that wrote the identical file.
+    "apktool_error_tail",
+    # ASSET-DROP1 and APKTOOL-TIMEOUT1 evidence: the writer puts these in the
+    # sidecar, so a cache hit has to carry them forward too. A field dropped here
+    # reads at its consumer as absent - the same failure ASSET-TRI1 caused by
+    # adding one to this list at an unchanged version.
+    "asset_surface_extracted", "asset_file_count", "asset_entries_in_apk",
+    "apktool_timed_out", "jadx_timed_out", "apktool_timeout_s",
+)
 
 # D1: hard ceilings so a hung tool fails loudly instead of hanging forever.
 # jadx gets more headroom - it is the slower, more memory-hungry of the two,
@@ -1415,21 +1439,7 @@ def _cached_result(start: float, jadx_dir: Path, apktool_dir: Path, status_sidec
                 jadx_file_count=data.get("jadx_file_count"),
                 jadx_error_tail=data.get("jadx_error_tail"),
             )
-            for key in ("fallback_engine", "fallback_unavailable", "fallback_recovered",
-                        "fallback_output", "fallback_error_tail", "fallback_file_count",
-                        "lazy_decompile", "dex_units", "smali_fallback",
-                        # Written by the same branch, into the same sidecar, as
-                        # smali_fallback - carrying one and dropping the other
-                        # made a cache hit describe that run differently from the
-                        # cold run that wrote the identical file.
-                        "apktool_error_tail",
-                        # ASSET-DROP1 and APKTOOL-TIMEOUT1 evidence: the writer puts
-                        # these in the sidecar, so a cache hit has to carry them
-                        # forward too. A field dropped here reads at its consumer as
-                        # absent - the same failure a missing sidecar field caused.
-                        "asset_surface_extracted", "asset_file_count",
-                        "asset_entries_in_apk",
-                        "apktool_timed_out", "jadx_timed_out", "apktool_timeout_s"):
+            for key in _SIDECAR_EVIDENCE_FIELDS:
                 if key in data:
                     result.evidence[key] = data[key]
             return result

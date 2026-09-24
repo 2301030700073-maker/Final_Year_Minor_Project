@@ -107,3 +107,46 @@ def test_cache_hit_carries_the_smali_fallback_apktool_tail(tmp_path):
     assert result.evidence["smali_fallback"] is True
     assert result.evidence["apktool_error_tail"] == (
         "apktool --no-res fallback produced nothing")
+
+
+# --- the version and the carry-forward field list move together -------------
+
+# One entry per schema version: the exact fields a reader of that version carries
+# forward. A field ADDED to _SIDECAR_EVIDENCE_FIELDS at an unchanged version makes
+# every cached sidecar read as "field absent" - the fix renders nothing on the next
+# run. Measured 2026-09-24 on run 085a8c10: asset_entries_in_apk was written and
+# read, the version stayed 2, the cache was reused, and the report printed the
+# pre-fix clause. Adding a field therefore forces a bump here AND in the module.
+_FIELDS_AT_VERSION = {
+    2: (
+        "fallback_engine", "fallback_unavailable", "fallback_recovered",
+        "fallback_output", "fallback_error_tail", "fallback_file_count",
+        "lazy_decompile", "dex_units", "smali_fallback", "apktool_error_tail",
+        "asset_surface_extracted", "asset_file_count",
+        "apktool_timed_out", "jadx_timed_out", "apktool_timeout_s",
+    ),
+    3: (
+        "fallback_engine", "fallback_unavailable", "fallback_recovered",
+        "fallback_output", "fallback_error_tail", "fallback_file_count",
+        "lazy_decompile", "dex_units", "smali_fallback", "apktool_error_tail",
+        "asset_surface_extracted", "asset_file_count", "asset_entries_in_apk",
+        "apktool_timed_out", "jadx_timed_out", "apktool_timeout_s",
+    ),
+}
+
+
+def test_a_new_carried_field_forces_a_schema_version_bump():
+    from static.decompile import _SIDECAR_EVIDENCE_FIELDS, _SIDECAR_SCHEMA_VERSION
+
+    assert _SIDECAR_SCHEMA_VERSION == max(_FIELDS_AT_VERSION), (
+        "the module's schema version is not the latest one recorded here - a bump "
+        "must add its field list to _FIELDS_AT_VERSION in the same commit"
+    )
+    assert tuple(_SIDECAR_EVIDENCE_FIELDS) == _FIELDS_AT_VERSION[_SIDECAR_SCHEMA_VERSION], (
+        "the carry-forward field list changed without a version bump: every cached "
+        "sidecar would be read with the new field absent (ASSET-TRI1)"
+    )
+    for version, fields in _FIELDS_AT_VERSION.items():
+        assert len(set(fields)) == len(fields), version
+    # fields are added across versions, never quietly dropped from the carry-forward
+    assert set(_FIELDS_AT_VERSION[2]) < set(_FIELDS_AT_VERSION[3])

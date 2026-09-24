@@ -3941,7 +3941,7 @@ def _regenerate_report(
     # rows written before this column existed it means the causes were never
     # persisted - and the report on disk is then the only surviving copy of them.
     # Regenerating such a row silently drops every cause section it carries
-    # (measured 2026-09-24: 3 stored rows, ~5 sections each, whose reports are the
+    # (measured 2026-09-24: 6 stored rows, 1-2 sections each, whose reports are the
     # last copy anywhere). An empty column cannot be a correction that removes a
     # specific section, so this refuses rather than converging the file onto a
     # lossier render. The caller records the failure per row and carries on

@@ -140,7 +140,7 @@ def test_regeneration_refuses_to_drop_cause_sections_it_cannot_reproduce(monkeyp
     regenerated render has no cause section to emit - while the report already on
     disk has several, because the live run that wrote it held those causes in
     memory. Converging that file onto the lossier render deletes the last copy
-    (measured 2026-09-24: 3 stored rows, ~5 sections each), so the write is refused
+    (measured 2026-09-24: 6 stored rows, 1-2 sections each), so the write is refused
     rather than performed.
 
     Asserted on the file's CONTENTS after the fact, not only on the raise: a guard

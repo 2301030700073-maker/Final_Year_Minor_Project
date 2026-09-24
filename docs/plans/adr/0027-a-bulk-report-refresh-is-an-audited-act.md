@@ -14,7 +14,7 @@ stage that never ran). The direction of repair is always the same: the record is
 authoritative, the report is re-rendered from it.
 
 The corpus has reached the point where that repair is needed at scale, and the
-measurement is unambiguous: of **289 stored runs, 289 have a report on disk**
+measurement is unambiguous: of **293 stored runs, 293 have a report on disk**
 (verified 2026-09-24 - zero missing), and **264 of them were rendered before
 ADR-0022** and therefore say nothing at all about the rule corpus they ran
 against. Not "not recorded" - no line, because the renderer of their day had no
@@ -29,8 +29,8 @@ must be a command and not a script is that it is exactly the class of act the
 audit trail is for.
 
 It is also **not information-neutral**, which the spec has to face rather than
-assume. Preparing this ADR found **3 stored rows whose `coverage_causes` column
-is NULL while their reports still carry ~5 cause sections each** - sections the
+assume. Preparing this ADR found **6 stored rows whose `coverage_causes` column
+is NULL while their reports still carry 1-2 cause sections each** - sections the
 live run rendered from memory, before that column was persisted. Regenerating
 them cannot reproduce those sections, and the DB holds no copy to restore from.
 That is now refused loudly (REGEN-FIELDLOSS2, commit `872c20c2e`), which is why
@@ -83,7 +83,7 @@ file - the same rule `_regenerate_report` already follows.
 
 ## Consequences
 
-- After a refresh, the 264 reports state the corpus field explicitly, in the
+- After a refresh, the 258 regenerable reports state the corpus field explicitly, in the
   same "not recorded for this run - it predates ADR-0022" form every other
   corpus-less surface uses.
 - **The trade, stated plainly:** a regenerated report is no longer the artefact
@@ -93,7 +93,7 @@ file - the same rule `_regenerate_report` already follows.
   What it gains is agreement with its own row and a legible corpus field. An
   operator who wants the original artefacts preserved should not run this, and
   that is a legitimate choice, not a mistake.
-- The 3 unreproducible rows stay exactly as they are, and the command says so by
+- The 6 unreproducible rows stay exactly as they are, and the command says so by
   name rather than skipping them.
 
 ## What is still not covered

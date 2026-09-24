@@ -52,6 +52,68 @@ def test_class_simple_names_skips_resource_class_and_its_flattened_inner(tmp_pat
     assert names == ["MainActivity", "a"]   # R.java contributes nothing, incl. id/layout
 
 
+def test_class_names_are_not_harvested_from_comments_strings_or_code(tmp_path):
+    """OBF-HARVEST1: only a declaration introduces a class name.
+
+    The walk used to take the token after the first `class `/`interface `/`enum `
+    ANYWHERE in a line. In a decompiled corpus that is mostly not a declaration:
+    a JADX INFO comment and an exception message each yielded an English word
+    (`name`, `has`), which inflates the denominator, and a word of one or two
+    chars yields a name that `_is_minified_name` counts as minified. Measured
+    2026-09-24 over real corpora: the harvest drops by 28 names for UC2
+    (542 -> 514) and 17 for UC3 (1,013 -> 996).
+    """
+    from static.obfuscation import _class_simple_names
+
+    f = tmp_path / "MainActivity.java"
+    f.write_text(
+        "package com.app;\n"
+        "/* JADX INFO: renamed from: android.arch.lifecycle.a$a, reason: collision with other inner class name */\n"
+        "public class MainActivity {\n"
+        "    void check() {\n"
+        "        Class superclass = cls.getSuperclass();\n"
+        "        if (superclass != null && (info = getInfo(superclass)) != null) {\n"
+        '            throw new IllegalArgumentException("The observer class has some methods");\n'
+        "        }\n"
+        "    }\n"
+        "}\n"
+        "// public class Commented {}\n"
+    )
+    assert _class_simple_names([f]) == ["MainActivity"]
+
+
+def test_a_comment_cannot_make_a_clear_app_read_heavy(tmp_path):
+    """The ratio feeds a coverage bound (>0.4 -> java partial), so a name read
+    out of a comment must not be able to move it. The two lines below mention
+    `class` inside a comment and a string literal; the tokens that follow are
+    `is` and `to`, which are <=2 chars, so the old walk counted them as minified
+    names - two of four - and this app read `heavy`."""
+    from static.obfuscation import _class_simple_names
+
+    (tmp_path / "MainActivity.java").write_text("public class MainActivity {}\n")
+    (tmp_path / "HttpClient.java").write_text(
+        "public class HttpClient {\n"
+        "    // a class is a type, and this comment declares nothing\n"
+        "    void check() { log(\"class to check\"); }\n"
+        "}\n"
+    )
+    files = sorted(tmp_path.glob("*.java"))
+    assert _class_simple_names(files) == ["HttpClient", "MainActivity"]
+    assert detect_obfuscation_level(files) == "clear"
+
+
+def test_annotation_types_and_modifiers_still_count_as_declarations(tmp_path):
+    """The anchor must not lose real declarations: `@interface` is a type, and
+    annotations/modifiers on the same line precede `class`."""
+    from static.obfuscation import _class_simple_names
+
+    (tmp_path / "Anno.java").write_text("public @interface Anno {}\n")
+    (tmp_path / "a.java").write_text("@Deprecated\npublic final class a {}\n")
+    (tmp_path / "b.java").write_text("/** doc */ public class b {}\n")
+    files = sorted(tmp_path.glob("*.java"))
+    assert _class_simple_names(files) == ["Anno", "a", "b"]
+
+
 def test_heavy_when_mostly_single_char():
     names = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "MainActivity"]
     assert obfuscation_from_names(names) == "heavy"

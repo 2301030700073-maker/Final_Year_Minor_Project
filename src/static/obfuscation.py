@@ -29,43 +29,69 @@ HEAVY_RATIO = 0.40
 LIGHT_RATIO = 0.10
 
 
+# A type declaration: annotations and modifiers first, then the keyword that
+# introduces the name. Anchored, because only a declaration introduces a class
+# name - see _class_simple_names (OBF-HARVEST1).
+_DECL = re.compile(
+    r"^(?:(?:@[\w$.]+(?:\([^)]*\))?"
+    r"|public|protected|private|static|final|abstract|sealed|non-sealed|strictfp)\s+)*"
+    r"(?:class|interface|enum)\s+([\w$]+)"
+)
+_BLOCK_COMMENT = re.compile(r"/\*.*?\*/")
+
+
 def _class_simple_names(java_files: list[Path]) -> list[str]:
-    """Extract the simple class names from decompiled .java files - the final
-    identifier before the opening brace, which is what minifiers shorten. Empty
-    corpus => [] (the caller decides how an empty corpus reads, not here)."""
+    """Extract the simple class names from decompiled .java files - the
+    identifier a declaration introduces, which is what a minifier shortens. Empty
+    corpus => [] (the caller decides how an empty corpus reads, not here).
+
+    OBF-HARVEST1: the walk matches a DECLARATION, anchored at the start of the
+    line past any annotations and modifiers. It used to take the token after the
+    first occurrence of `class `/`interface `/`enum ` anywhere in the line, which
+    in a decompiled corpus is mostly not a declaration at all. Measured
+    2026-09-24, the harvest drops by 28 names for UC2 (542 -> 514) and 17 for UC3
+    (1,013 -> 996), spanning JADX INFO comments, string literals and ordinary
+    statements: a comment and an exception message yielded the words `name` and
+    `has`, which inflate the denominator, while a one- or two-char word yielded a
+    "class name" that `_is_minified_name` counts as minified. The tokens are
+    unpredictable in both directions - the alnum guard below rejects punctuation
+    like the `=` in `Class superclass = ...`, so what gets through is words - and
+    the ratio they feed decides a coverage bound (`heavy` -> java partial), so a
+    clear app could be bounded by a comment. `@interface` is normalized so
+    annotation types keep counting as declarations."""
     names: list[str] = []
     for p in java_files:
         text = read_text_ignore(p)
         if text is None:
             continue
-        # Match a top-level `public/class|interface|enum <Name>` - take the
-        # identifier that follows the class keyword on the same line. This is a
-        # deterministic heuristic; it does not need a full Java parser.
         in_resource_class = False
         for line in text.splitlines():
-            stripped = line.strip()
-            for kw in ("class ", "interface ", "enum "):
-                idx = stripped.find(kw)
-                if idx == -1:
-                    continue
-                after = stripped[idx + len(kw):].strip()
-                name = after.split(" ")[0].split("{")[0].split("<")[0]
-                name = name.strip()
-                if in_resource_class:
-                    # jadx flattens R's nested resource classes into declarations
-                    # like `public static final class id {` inside R.java. These
-                    # (id, layout, string, dimen, ...) are standard Android
-                    # generated resource inner classes, never obfuscation - skip
-                    # them so they can't inflate the minified ratio (C1/G7).
-                    break
-                if name == "R":
-                    in_resource_class = True
-                    break
-                # R8 emits `a$b` inner-class names; isidentifier() rejects the
-                # `$`, so allow alnum plus `_` and `$` (H6).
-                if name and all(c.isalnum() or c in ("_", "$") for c in name):
-                    names.append(name)
-                break
+            # An inline block comment can precede a declaration on the same line;
+            # re-strip after removing it, since the removal leaves a space where
+            # the anchor has to be.
+            stripped = (
+                _BLOCK_COMMENT.sub(" ", line.strip())
+                .replace("@interface", "interface")
+                .strip()
+            )
+            m = _DECL.match(stripped)
+            if m is None:
+                continue
+            if in_resource_class:
+                # jadx flattens R's nested resource classes into declarations
+                # like `public static final class id {` inside R.java. These
+                # (id, layout, string, dimen, ...) are standard Android
+                # generated resource inner classes, never obfuscation - skip
+                # them so they can't inflate the minified ratio (C1/G7).
+                continue
+            name = m.group(1)
+            if name == "R":
+                in_resource_class = True
+                continue
+            # R8 emits `a$b` inner-class names; isidentifier() rejects the
+            # `$`, so allow alnum plus `_` and `$` (H6).
+            if name and all(c.isalnum() or c in ("_", "$") for c in name):
+                names.append(name)
     return names
 
 

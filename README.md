@@ -4,9 +4,21 @@ Automated detection and empirically-verified bypass of Android root-detection an
 
 **Status.** The deterministic core — Phases 1–4: ingest → static detection → decision engine → dynamic Frida bypass (+ optional live traffic capture) → report → calibration — is **built and validated end-to-end**, against OWASP UnCrackable Level 1–3 and a wider, independently-ground-truthed calibration corpus (`config/ground_truth.yaml`). The AI capability layer (Phases 5–7) is intentionally deferred (ADR-0003), so nothing in the steps below depends on a model being present.
 
-## Quick start — from a cold laptop boot to a finished analysis
+## Quick start — from a cold boot to a finished analysis
 
-Everything runs from the **WSL2 Ubuntu** terminal (the repo, `uv`, `adb`, `frida` all live there); **Windows** is used only to boot the emulator. If this is a fresh checkout, do the one-time install in sections 1–4 first (uv, the Android toolchain, jadx/CFR/Ghidra). After that, this is the exact per-boot sequence — each command prints an expected line so you know it worked. Static-only analysis (`--skip-dynamic`, recipe A below) needs **none** of steps 1–4 here — skip straight to it.
+Everything runs from the **WSL2 Ubuntu** terminal (the repo, `uv`, `adb`, `frida` all live there); **Windows** is used for exactly two things: booting the emulator, and hosting the two proxies the device reaches through `adb reverse`. If this is a fresh checkout, do the one-time install in sections 1–4 first (uv, the Android toolchain, jadx/CFR/Ghidra) **plus mitmproxy on the Windows host** — see the table below and section 3. After that, this is the exact per-boot sequence; each step names what must already be running and what it should print.
+
+### What has to be open / active / running before a dynamic run
+
+| Where | What | Needed by | Started by |
+|---|---|---|---|
+| **Windows** | the rooted AVD booted — **Google APIs** (not Play), userdebug, x86_64 | every dynamic scan | you — step 1 |
+| **Windows** | a plain `python.exe` hosting the pass-through internet proxy on `:8080` (no MITM) | every dynamic scan — on WSL2 this `adb reverse` path is the emulator's *only* outbound route | `bash scripts/emulator_up.sh` — step 2 |
+| **Windows** | **mitmproxy** (`mitmdump`, **8.1.1** on this reference host) hosting the capture proxy on `:8081` | only `--capture-traffic` | the capture stage itself: it auto-detects WSL2 and launches `mitmdump.exe` **on the Windows host** — the device reaches the Windows host's localhost, never WSL2's namespace |
+| **device** | version-matched `frida-server` (**16.7.19**) | every dynamic scan | `verify-device` auto-provisions it — step 4 |
+| **WSL2** | `.venv` synced from `uv.lock`, plus jadx/apktool/CFR/Ghidra | everything | step 0 (Ghidra only for the native depth in section 3) |
+
+Nothing else has to be open — no model server, no daemon, no `mitmproxy` in WSL2 (the one that matters is the Windows-host binary). A **static-only** run (`--skip-dynamic`, recipe A) needs only the WSL2 row plus jadx/apktool — no emulator, no root, no frida-server: skip straight to it.
 
 **Where the configuration lives** (`config/`): `settings.yaml` (decision thresholds `root: 0.7` / `ssl: 0.7`, output paths), `signatures/*.yaml` (120 versioned detection rules: 49 root, 51 ssl, 12 native, 8 packers), `ground_truth.yaml` (the independent calibration truth used by `calibration-report`).
 
@@ -27,7 +39,13 @@ Wait for the home screen. (A rooted physical device over USB works too — then 
 ```bash
 bash scripts/emulator_up.sh
 ```
-Expected when the emulator is up: `[emulator-up] OK: emulator-5554 internet is up (device proxy -> 127.0.0.1:8080; Windows-host pass-through, no MITM, pinning apps work).` If no emulator is running it prints one line and exits 0 — safe to run any time. (The WSL2-hosted emulator has no NAT; its only outbound path is an `adb reverse` to a Windows-host pass-through proxy, which a fresh boot loses.)
+Expected when the emulator is booted:
+```
+[emulator-up] OK: emulator-5554 proxy path restored - device proxy -> 127.0.0.1:8080, Windows-host pass-through listening, adb reverse in place (no MITM; pinning apps work).
+```
+If no emulator is online it prints one line (`[emulator-up] no online emulator-5554 ... - skipping (nothing to do).`) and exits 0 — safe to run any time, including as a shell-open hook. If instead it prints `internet setup FAILED`, the Windows host has no usable `python.exe`: **nothing on the device will reach the network** until that is fixed, so fix that before step 5. (The WSL2-hosted emulator has no NAT; its only outbound path is this `adb reverse` to a Windows-host proxy, which a fresh boot loses.)
+
+**If a capture run fails, re-run this step before the next one.** The capture stage restores the pass-through proxy at the end of a *successful* capture; after a failed one it deliberately does not claim the restore, and a device left pointed at `:8081` has no internet at all.
 
 ### 3. (WSL2) Check the configuration + auto-start services
 ```bash
@@ -48,7 +66,37 @@ Expected: the device is reported online and a process count is enumerated over t
 
 > **One-command shortcut for the OWASP targets:** `bash run.sh --check-only` does the whole emulator/frida-server/relay setup above; `bash run.sh` (or `--target uncrackable2`/`uncrackable3`) then installs the APK, runs the pipeline end-to-end via the verification-bundle collector, and prints `Root bypassed: True` / `Correlation: True`.
 
-### 5. Run an analysis — pick a recipe below.
+### 5. Run an analysis
+
+The command, with the OWASP AndroGoat target (full run: static + dynamic bypass + live capture). `--justification` is **required** and is audited (ADR-0005) — it accepts exactly one of the four forms `OWN_APP` | `CTF` | `AUTHORIZED_ENGAGEMENT:<id>` | `ACADEMIC_TRAINING_TARGET`; **free text is rejected** and the run aborts before any analysis:
+
+```bash
+.venv/bin/python src/cli.py run \
+  --apk APK_Test/AndroGoat.apk \
+  --justification ACADEMIC_TRAINING_TARGET \
+  --capture-traffic
+```
+
+(`uv run` works identically: `PYTHONPATH=src uv run python -m cli run …` — adjust the `--apk` path to wherever you put the file.)
+
+Expected, abridged from a real 2026-09-24 run on this reference box (exact timings and the capture outcome vary run to run):
+
+```
+...per-stage table through decision_engine...
+Decision: BOTH
+Root: 1.00 … DETECTED
+SSL : 1.00 … DETECTED
+OK  dynamic  (20861ms)
+[synth] okhttp3.CertificatePinner absent
+FAILED  capture-traffic  (28073ms)
+OK  success-check (capture window)  (0ms)
+
+Report: outputs/reports/<apk_sha256>/<run_id>.md
+```
+
+Read it as: the deterministic stage decided `BOTH` on its own; the dynamic stage ran and reported the synthesizer's one honest *absence* (the app ships no OkHttp pinner); the capture stage **failed loudly with its measured reason** rather than inventing flows (see recipe C — AndroGoat needs taps during the capture window); and the run ends with a summary line naming the failed stage and `correlation=not_attempted`. A failed stage never gets swallowed (principle 3), and a run that could not confirm a bypass says so instead of promoting it.
+
+Then pick the recipe that matches what you are demonstrating — `## Command recipes` immediately below.
 
 ## Command recipes — real values + expected outcome
 
@@ -70,7 +118,9 @@ Expected: `Decision: ROOT_ONLY`, then `OK dynamic (…ms)`; all three UnCrackabl
 ```bash
 PYTHONPATH=src uv run python -m cli run --apk APK_Test/AndroGoat.apk --target owasp.sat.agoat --justification ACADEMIC_TRAINING_TARGET --capture-traffic
 ```
-Expected: `Decision: BOTH` (AndroGoat has both a 14-path root check and a real `CertificatePinner`); the capture stage routes the app through `mitmdump`, decrypts, and records the flows in the report as SSL-bypass evidence. Requires `mitmdump` reachable from the adb-server host.
+Expected: `Decision: BOTH` (AndroGoat has both a 14-path root check and a real `CertificatePinner`); the capture stage routes the app through `mitmdump`, decrypts, and records the flows in the report as SSL-bypass evidence. `mitmproxy` must be installed on the **Windows host** (the stage launches `mitmdump.exe` there; see the table at the top), and the stage probes route reachability before it captures.
+
+**This app is interactive, so an empty capture here is expected, not a bug.** AndroGoat makes no network request until a screen is tapped, and the capture stage does not drive the UI. A measured 2026-09-24 run recorded exactly that, naming each leg rather than guessing: the pre-flight route probe was **UP**, `0` client connections arrived at the proxy, no client-certificate refusal was recorded, and the in-process TLS observer saw the app's own pinned request run (`TrustManagerImpl.verifyChain` = 2) — so the report reads *"the app made no network requests during the capture window (interactive capture needed)"* and renders no flow list. Tap through the app while the window is open (or use an app that fetches on launch) to get flows; an empty capture is always reported with its recorded reason, never a fabricated one.
 
 **D. Forced bypass on a coverage-limited NEITHER (PropertyGuru root + SSL):**
 ```bash
@@ -149,13 +199,14 @@ uv run pytest tests/unit
 
 This exercises the signature matcher and decision engine against fixtures only — if this passes, the deterministic core's logic is sound independent of whether the rest of this setup is done yet.
 
-Expected result on WSL2/Linux — **1654 tests, all 1654 passing** in ~29 s (a machine missing an optional tool may report 1 of them skipped instead) (on Windows, expect the handful of POSIX-only failures noted above instead of a fully clean run):
+Expected result on WSL2/Linux — **2,172 tests collected, all passing** (a machine missing an optional tool may report one or two skipped instead) (on Windows, expect the handful of POSIX-only failures noted above instead of a fully clean run):
 
 ```
-$ uv run pytest tests/unit -q
-........................................................................
-1654 passed in 28.70s
+$ uv run pytest tests/unit --collect-only -q | tail -1
+2172 tests collected in 0.55s
 ```
+
+The count moves whenever a gap is closed; the exact collected number is recorded in `docs/plans/audit/full-project-audit-ledger.md`, which is updated with each change.
 
 > Pulled new commits and now this reports `ModuleNotFoundError` for a package that's in `uv.lock` (e.g. `androguard`)? Your `.venv` predates a dependency that was added to the lockfile — re-run `uv sync` to install the newly-locked packages, then re-run the suite. A stale `.venv` is the usual cause of a locked package appearing "missing," and is distinct from the platform failures noted above.
 
@@ -172,7 +223,7 @@ Versions are pinned here deliberately (NFR-5) — if you install something diffe
   **The `apksigner` release is load-bearing for what the tool can see.** It verifies the scheme its own release implements, and **build-tools 33** is where APK Signature Scheme v3.1 and the signer-rotation attribute family landed. An older release meeting a v3.1-signed APK does not report "I cannot read this block" — it reports the APK as **not signed**, which is a false statement about the app. ADR-0019 makes the platform render that as a measured toolchain bound (`Signature verification: NOT EVALUATED`, naming the schemes the file demonstrably carries) rather than as a finding, and ingest no longer halts on it; the bound itself stays real, so install build-tools 33+ if you need authoritative v3.1 verdicts. Note `apksigner --version` prints `0.9` on **every** release and does not name the build-tools version — the release is read from the install instead (`Pkg.Revision` from the build-tools `source.properties`, or the versioned launcher jar) and is what appears as the `apksigner` entry in a report's Toolchain line.
 - dex2jar (`d2j-dex2jar.sh`) and **CFR** (a `cfr` on PATH, or `CFR_JAR` pointing at `cfr-X.Y.jar`) — the L-M1 secondary-recovery engine. On this reference box CFR is vendored at `tools/cfr/cfr-0.152.jar` (download from https://www.benf.org/other/cfr/); export `CFR_JAR="$PWD/tools/cfr/cfr-0.152.jar"` for the fallback to find it. The fallback is *loud* when either is missing — it records `fallback_unavailable`, it never silently skips recovery (principle 3).
 - **frida** (16.7.19) and **objection** (1.12.5) are already project Python dependencies — `uv sync` installed them (see the table above), so there is nothing extra to `pip install` for them. You do still need the **`frida-tools`** CLI helpers (`frida-ps`, `frida-trace`, …), which are not a project dependency: `pip install frida-tools`. A version-matched device **`frida-server`** (16.7.19) is vendored at `tools/frida-server-16.7.19-x86_64`, and `verify-device` (step 4) auto-provisions it onto the device.
-- [mitmproxy](https://mitmproxy.org/)
+- [mitmproxy](https://mitmproxy.org/) — **on the Windows host, not in WSL2.** The device reaches the adb-server host's localhost through `adb reverse`, so `--capture-traffic` auto-detects WSL2 and launches `mitmdump.exe` there (pinned **8.1.1** on this reference box, the release whose addon hook the capture code targets). Without it, the capture stage fails loudly with the unreachable-route reason instead of reporting an empty capture. The pass-through internet proxy on `:8080` needs only a plain `python.exe` on that host, no mitmproxy.
 
 Optional native-analysis extras — each degrades gracefully (never a silent clean, per principle 3/ADR-0006), but they deepen the native surface when present:
 - **Ghidra headless** (`analyzeHeadless`, vendored at `tools/ghidra/ghidra_12.1.2_PUBLIC` — **12.1.2**) — the *primary* native body decompiler: it decompiles stripped/obfuscated `.so` function bodies so a technique hidden inside a body (e.g. a `fork` in the ptrace/fork anti-debug combo) can be recovered. Absent ⇒ the pipeline falls back to **capstone** (the bundled Python dep — disassembly only, no full decompilation) and native stays `partial`.

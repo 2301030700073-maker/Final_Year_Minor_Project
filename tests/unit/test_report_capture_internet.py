@@ -106,18 +106,76 @@ def test_empty_capture_with_internet_and_zero_ssl_effects_is_app_silence(tmp_pat
     assert "may not have exercised the network, or a pinned endpoint refused the proxy CA" not in content
 
 
-def test_empty_capture_with_internet_and_ssl_effects_is_a_proxy_failure(tmp_path):
-    # The other branch: the in-process TLS observer DID see the app's pinned
-    # request (a bypassEffect), yet no flow reached the proxy -> the device->proxy
-    # path is broken (a real capture-path failure), not app-silence.
+def test_empty_capture_with_dynamic_only_ssl_effects_is_not_a_capture_path_failure(tmp_path):
+    # The observer's evidence belongs to the LAUNCH that produced it. The dynamic
+    # stage's stream comes from the run's other launch of the app, which runs
+    # against the pass-through internet proxy - so an effect there says the app
+    # exercises its TLS path, and says nothing about whether a request was lost
+    # between the device and THIS capture proxy. Deriving "real capture-path
+    # failure" from it asserts a fact about a window the reading did not come
+    # from (measured on the real 2026-09-24 AndroGoat run 5250e0f8: the dynamic
+    # stream carried verifyChain=2 over the pass-through route while the capture
+    # window's own stream carried 0 and the proxy recorded 0 connections).
     dynamic = _dynamic_stage([{"payload": {"bypassEffect": "ssl-pin-check"}}])
     content = _render(_internet_manifest(), tmp_path, extra_stages=[dynamic])
     assert "## Captured Traffic" in content
-    assert "real capture-path failure" in content
-    assert "the device->mitmdump traffic path did not carry the request" in content
+    # the effect is named, with whose window it came from...
     assert "ssl-pin-check" in content
-    # this is NOT the app-silence case.
-    assert "un-exercised network/SSL path this run" not in content
+    assert "in this run's **other** launch" in content
+    assert "This window's own observer recorded none" in content
+    # ...and the cross-window effect is NOT promoted into a capture-path failure.
+    assert "real capture-path failure" not in content
+
+
+def test_empty_capture_with_this_windows_own_ssl_effects_is_a_capture_path_failure(tmp_path):
+    # The case the rule was written for: THIS window's own observer recorded the
+    # app's TLS path firing, and the proxy still recorded 0 client connections
+    # with the pre-flight route UP - so the request did not traverse the proxy.
+    # Both halves of the paragraph must then agree; before the window-scoping fix
+    # the first sentence said "real capture-path failure" while the reachability
+    # sentence said "the app staying off the network path this run".
+    stage = StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={
+            "reason": "no flows captured", "flow_summary": [],
+            "frida_messages": [{"payload": {"bypassEffect": "ssl-pin-check"}}],
+            "device_reached_proxy_preflight": True, "client_connections": 0,
+        },
+        error="no flows captured",
+    )
+    content = _render_one(stage, tmp_path)
+    assert "## Captured Traffic" in content
+    assert "**this window's own** in-process TLS observer DID record" in content
+    assert "real capture-path failure" in content
+    assert "the 0 is the capture-path failure this paragraph names" in content
+    # the contradiction this test exists to prevent:
+    assert "app staying off the network path this run" not in content
+
+
+def test_empty_capture_dynamic_only_effects_with_route_up_names_this_window(tmp_path):
+    # Same shape as the real run: the app's TLS path ran in the other launch, the
+    # route was UP, and no connection arrived at the proxy. The reachability
+    # sentence must then scope its reading to THIS window instead of asserting
+    # the app's network behaviour for the run.
+    stage = StageResult(
+        stage="capture-traffic", status="failed",
+        evidence={
+            "reason": "no flows captured", "flow_summary": [],
+            "device_reached_proxy_preflight": True, "client_connections": 0,
+        },
+        error="no flows captured",
+    )
+    dynamic = _dynamic_stage([{"payload": {"bypassEffect": "ssl-pin-check"}}])
+    report_path = generate_report(
+        run_id="cap", apk_hash="cap001", timestamp="2026-08-23T12:00:00",
+        metadata={"hashes": {"sha256": "cap001"}, "package": {"package_name": "com.example.net"}},
+        classification=_neither_classification(), verification=None, correlation=None,
+        stage_results=[stage, dynamic], output_dir=tmp_path, manifest=_internet_manifest(),
+    )
+    content = report_path.read_text(encoding="utf-8")
+    assert "app staying off the network path this run" in content
+    assert "a reading of *this* window" in content
+    assert "real capture-path failure" not in content
 
 
 def test_empty_capture_without_dynamic_stage_stays_generic_coverage_limitation(tmp_path):

@@ -35,6 +35,7 @@ is not repeated here, so these add signal only for UNRECOGNIZED native idioms).
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 # Root-detection indicators: generic "is this device rooted" decision logic that
@@ -226,6 +227,53 @@ _NATIVE_CATEGORY_TO_INDICATORS: dict[str, tuple[str, ...]] = {
     "root": NATIVE_ROOT_INDICATORS,
     "ssl": NATIVE_SSL_INDICATORS,
 }
+
+# The two tables, named, so the corpus identity below can be taken over their
+# own contents rather than over a second hand-maintained list. That is the one
+# place this surface is simpler than the JS idioms: those are independent
+# module-level names, so they need `_JS_IDIOM_LISTS` to enumerate them, and a
+# third list could be added unregistered. Here a category cannot reach a scan
+# without reaching the identity - the hole is impossible rather than guarded.
+#
+# The table name is hashed along with the pattern because one idiom means
+# different things on the two surfaces: a su path read in Java text and the same
+# path read in a .so bound different verdicts, so moving a pattern between the
+# tables is a change to the rules even with every pattern string unchanged.
+_INDICATOR_TABLES: tuple[tuple[str, dict[str, tuple[str, ...]]], ...] = (
+    ("_CATEGORY_TO_INDICATORS", _CATEGORY_TO_INDICATORS),
+    ("_NATIVE_CATEGORY_TO_INDICATORS", _NATIVE_CATEGORY_TO_INDICATORS),
+)
+
+
+def indicator_fingerprint() -> str:
+    """The identity of the unattributed-indicator surface - ADR-0022's third
+    detection surface, closed 2026-09-24.
+
+    These lists carry no weight and no score: a match is never added to a
+    confidence, so unlike the JS idioms there is no constant scaling them to be
+    folded in. What they carry is a verdict-level effect of their own - a match
+    here is what stops a NEITHER being certified as a confident negative - so
+    editing one changes what the platform will certify while every signature file
+    stays byte-identical. Two rule sets that certify different verdicts cannot
+    share one identity.
+
+    Hashed as data - table, category, pattern source, sorted - because these are
+    compiled into this module rather than read from a file. Sorted, so
+    reordering a list (which changes nothing about what matches) does not move
+    the identity while a one-pattern edit does.
+    """
+    digest = hashlib.sha256()
+    entries = sorted(
+        (table_name, category, pattern)
+        for table_name, table in _INDICATOR_TABLES
+        for category, patterns in table.items()
+        for pattern in patterns
+    )
+    for table_name, category, pattern in entries:
+        digest.update(f"{table_name}\0{category}\0{pattern}".encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
 
 _CACHE: dict[str, re.Pattern] = {}
 

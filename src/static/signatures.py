@@ -25,7 +25,7 @@ from common import (
 )
 from static.deobfuscate import MappingTable, deobfuscate_source
 from static.hermes import js_idiom_fingerprint
-from static.indicators import find_indicator_categories
+from static.indicators import find_indicator_categories, indicator_fingerprint
 
 # L-M3 (S1): scan the fallback evidence layer too. jadx's .java decompile can be
 # partial on large/obfuscated APKs (PropertyGuru - jadx died on one AndroidX
@@ -223,12 +223,16 @@ def corpus_fingerprint(paths: Iterable[Path]) -> str:
     that happens to exist would name a rule set no run ever loaded, which is the
     silent-substitution failure this project forbids (Principle 3).
 
-    Covers BOTH detection surfaces (ADR-0022's deferral, closed): these files, and
-    the JS idiom lists compiled into `hermes.py` - folded in below, and hashed as
-    data because they are not files. One consequence is worth knowing before
-    comparing two reports: a fingerprint recorded before this change was taken
-    over the files alone, so a run from either side of it is not comparable to the
-    other by this value even when the rules are identical.
+    Covers all three detection surfaces (ADR-0022's scope, closed 2026-09-24):
+    these files; the JS idiom lists and the weight scaling them, compiled into
+    `hermes.py`; and the unattributed-indicator lists in `indicators.py`, whose
+    matches bound whether a NEITHER is certified. The two code-resident surfaces
+    are folded in below and hashed as data because they are not files. One
+    consequence is worth knowing before comparing two reports: the scheme a value
+    was taken under is not recorded alongside it, so a fingerprint from an
+    earlier scheme - the YAML files alone, or the YAML files plus the JS lists -
+    is not comparable with one from after this change even when the rules are
+    identical.
     """
     digest = hashlib.sha256()
     for path in sorted(paths, key=lambda p: p.name):
@@ -245,6 +249,8 @@ def corpus_fingerprint(paths: Iterable[Path]) -> str:
         digest.update(data)
         digest.update(b"\0")
     digest.update(js_idiom_fingerprint().encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(indicator_fingerprint().encode("utf-8"))
     digest.update(b"\0")
     return digest.hexdigest()
 

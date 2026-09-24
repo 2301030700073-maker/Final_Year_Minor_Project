@@ -134,12 +134,19 @@ def test_the_report_states_the_corpus_it_ran_against(tmp_path):
     # line used to say the opposite - that the JS idioms were code, covered by the
     # Analysis-code line and not by this hash. A reader of the report never sees the
     # ADR, so a stale scope sentence is the whole of what they know about the value.
-    assert "both detection surfaces" in content
+    assert "all three detection surfaces" in content
     assert "the JS idiom lists and the weight scaling them in `src/static/hermes.py`" in content
+    # The third surface, added the same day: an indicator match is what stops a
+    # NEITHER being certified, so two hashes a reader compares describe what the
+    # platform was willing to certify, not only which patterns it held.
+    assert "the unattributed-indicator lists in `src/static/indicators.py`" in content
+    assert "whose matches bound whether a NEITHER is certified" in content
     # And the comparability limit of the change itself: a fingerprint from before it
-    # was taken over the files alone, so two reports either side of it can differ by
-    # scheme with identical rules.
+    # was taken over the files alone (and, for the JS closure earlier the same day,
+    # over the files plus the JS lists), so two reports either side of either change
+    # can differ by scheme with identical rules.
     assert "not comparable with one from after" in content
+    assert "the YAML files plus the JS lists" in content
     # And the boundary, which is NOT in this hash and must not look as though it
     # were: two runs can share a corpus and differ in the threshold they were
     # classified at, and a reader comparing hashes would otherwise read that as "the
@@ -305,3 +312,62 @@ def test_every_js_idiom_list_is_registered():
         f"JS idiom lists declared but not registered, so the recorded corpus would "
         f"not cover them: {sorted(declared - registered)}"
     )
+
+
+def test_editing_an_indicator_moves_the_recorded_corpus():
+    """ADR-0022's third surface, closed the same day as the second. An indicator
+    match is never scored - it is what stops a NEITHER being certified - so editing
+    one changes what the platform will call a confident negative while every
+    signature file stays byte-identical. Two rule sets that certify different
+    verdicts cannot share one identity."""
+    from static import indicators
+
+    baseline = _live_corpus()
+    table = indicators._CATEGORY_TO_INDICATORS
+    original = table["root"]
+    table["root"] = original + (r"indicator_test_added\s*\(",)
+    try:
+        assert _live_corpus() != baseline, "a new indicator did not move the corpus identity"
+    finally:
+        table["root"] = original
+    assert _live_corpus() == baseline, "the identity is not a function of the rules alone"
+
+
+def test_a_new_indicator_category_moves_the_recorded_corpus():
+    """This is the property that replaces a registry test here, and why this surface
+    needs no `_JS_IDIOM_LISTS` equivalent: the identity is taken over the two tables
+    themselves, so a category cannot reach a scan without reaching the identity. The
+    hole is impossible rather than guarded - but only while the fingerprint reads the
+    tables, which is what this holds."""
+    from static import indicators
+
+    baseline = _live_corpus()
+    table = indicators._CATEGORY_TO_INDICATORS
+    table["packer"] = ("a_category_only_the_table_carries",)
+    try:
+        assert _live_corpus() != baseline, "a category added to a table left the identity unmoved"
+    finally:
+        del table["packer"]
+    assert _live_corpus() == baseline
+
+
+def test_moving_an_indicator_between_the_two_surfaces_moves_the_corpus():
+    """The same pattern string under a different table is a different rule: a su path
+    read in Java text and the same path read out of a .so do not bound the same
+    verdict. So the table name is part of the hash, not an implementation detail of
+    where the pattern happens to be written down."""
+    from static import indicators
+
+    baseline = _live_corpus()
+    java_table = indicators._CATEGORY_TO_INDICATORS
+    native_table = indicators._NATIVE_CATEGORY_TO_INDICATORS
+    java_before, native_before = java_table["ssl"], native_table["ssl"]
+    java_table["ssl"] = java_before + (native_before[0],)
+    native_table["ssl"] = native_before[1:]
+    try:
+        assert _live_corpus() != baseline, (
+            "the same pattern under a different table left the identity unmoved"
+        )
+    finally:
+        java_table["ssl"], native_table["ssl"] = java_before, native_before
+    assert _live_corpus() == baseline

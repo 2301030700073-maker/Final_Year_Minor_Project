@@ -17,7 +17,14 @@ def test_run_enforces_the_given_timeout_rather_than_hanging():
     assert result["stderr"] == "TIMED OUT"
 
 
-def test_frida_ps_check_uses_a_short_explicit_timeout_not_the_default(monkeypatch):
+def test_the_connectivity_probe_targets_the_pipelines_own_adb(monkeypatch):
+    """ADR-0041: measure a hop that exists, on the route the dynamic stage uses.
+
+    This test used to assert the opposite - that collect_environment() shelled out
+    to `timeout 3 frida-ps -U` with a timeout of at most 5s. That probe recorded
+    exit 124 in all 4 bundles whose report proved the handshake succeeded, and it
+    could never do better: the transport the dynamic stage uses is created by that
+    stage."""
     calls = []
 
     def fake_run(cmd, timeout=60):
@@ -25,12 +32,36 @@ def test_frida_ps_check_uses_a_short_explicit_timeout_not_the_default(monkeypatc
         return {"command": " ".join(cmd), "found": True, "exit_code": 0, "stdout": "", "stderr": ""}
 
     monkeypatch.setattr(bundle, "_run", fake_run)
+    monkeypatch.setattr(bundle, "_pipeline_adb", lambda: "/fake/.local/bin/adb")
     bundle.collect_environment()
 
-    frida_ps_calls = [(cmd, t) for cmd, t in calls if "frida-ps" in cmd]
-    assert frida_ps_calls, "expected a frida-ps -U check in collect_environment()"
-    for _, t in frida_ps_calls:
-        assert t <= 5, f"frida-ps -U must use an explicit short timeout, got {t}"
+    assert not [c for c, _ in calls if "frida-ps" in c], (
+        "no pre-run probe can see the dynamic stage's frida transport"
+    )
+    adb_calls = [(c, t) for c, t in calls if c and c[0] == "/fake/.local/bin/adb"]
+    assert adb_calls, "the probe must run the adb the pipeline itself resolves"
+    assert adb_calls[0][0][1] == "devices", adb_calls[0][0]
+    for _, limit in adb_calls:
+        assert limit >= 10, (
+            f"the window must not be shorter than the pipeline's own connect timeout, got {limit}"
+        )
+
+
+def test_the_adb_resolution_mirrors_the_pipelines_order(tmp_path, monkeypatch):
+    """device.py:_adb_wrapper_path - ~/.local/bin/adb first, then PATH."""
+    monkeypatch.setattr(bundle.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(bundle.shutil, "which", lambda name: "/usr/bin/adb")
+    assert bundle._pipeline_adb() == "/usr/bin/adb", "PATH is the fallback, as in device.py"
+
+    wrapper = tmp_path / ".local" / "bin" / "adb"
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+    assert bundle._pipeline_adb() == str(wrapper), "the wrapper wins when it exists"
+
+    monkeypatch.setattr(bundle.shutil, "which", lambda name: None)
+    monkeypatch.setattr(bundle.Path, "home", classmethod(lambda cls: tmp_path / "nowhere"))
+    assert bundle._pipeline_adb() is None, "no adb anywhere is None, not a crash"
+
 
 
 def test_export_calibration_snapshot_reads_real_db_and_parses_json_columns(tmp_path, monkeypatch):
@@ -272,7 +303,9 @@ def test_the_summary_states_the_code_dirty_state_and_never_guesses_it(tmp_path):
             "working_tree_dirty": value,
             "tool_versions": {},
             "adb_devices": {"exit_code": 0},
-            "frida_ps_dash_U": {"exit_code": 0},
+            "pipeline_adb_devices": {
+                "exit_code": 0, "stdout": "List of devices attached\nemulator-5554\tdevice\n",
+            },
         }
         bundle.write_summary(tmp_path, env, _run_shape(0), None, bundle.ShippedEvidence())
         text = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
@@ -470,7 +503,9 @@ def _summary_env():
         "working_tree_dirty": False,
         "tool_versions": {},
         "adb_devices": {"exit_code": 0},
-        "frida_ps_dash_U": {"exit_code": 0},
+        "pipeline_adb_devices": {
+            "exit_code": 0, "stdout": "List of devices attached\nemulator-5554\tdevice\n",
+        },
     }
 
 
@@ -530,3 +565,28 @@ def test_the_pipeline_line_keeps_the_same_distinction(tmp_path):
             assert fragment in line, (result, fragment, line)
         for fragment in forbidden:
             assert fragment not in line, (result, fragment, line)
+
+
+def test_the_summary_names_the_device_the_pipelines_adb_sees(tmp_path):
+    """The line must name what the probe saw, under a heading that says which route."""
+    bundle.write_summary(
+        tmp_path, _summary_env(), _run_shape(0), _run_shape(0), bundle.ShippedEvidence(),
+    )
+    text = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
+    assert "the route the dynamic stage uses" in text, "the heading names the route"
+    assert "`emulator-5554`" in text, "the device the pipeline's own adb reported"
+    assert "not** probed here" in text, "and where frida's own evidence lives instead"
+    assert "`Instrumentation:`" in text, text
+    assert "frida-ps" not in text, "the probe that never carried information is gone"
+
+
+def test_a_probe_that_saw_no_device_says_so_without_calling_it_a_failure(tmp_path):
+    env = _summary_env()
+    env["pipeline_adb_devices"] = {"exit_code": 0, "stdout": "List of devices attached\n\n"}
+    bundle.write_summary(tmp_path, env, _run_shape(0), _run_shape(0), bundle.ShippedEvidence())
+    line = [
+        ln for ln in (tmp_path / "SUMMARY.md").read_text(encoding="utf-8").splitlines()
+        if ln.startswith("- The pipeline's own adb")
+    ][0]
+    assert "no device attached" in line, line
+    assert "FAILED" not in line and "not found" not in line.lower(), line

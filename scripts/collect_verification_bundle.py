@@ -164,7 +164,34 @@ def _run(cmd: list[str], timeout: int = 60) -> dict:
         return {"command": " ".join(cmd), "found": True, "exit_code": None, "stdout": "", "stderr": "TIMED OUT"}
 
 
+def _pipeline_adb() -> str | None:
+    """The adb the dynamic stage will actually use (device.py's `_adb_wrapper_path`).
+
+    ``~/.local/bin/adb`` is a wrapper around the Windows ``adb.exe``; the pipeline
+    resolves it in this order, so this probe does too. The order is duplicated
+    deliberately rather than imported: ``src/dynamic/device.py`` imports ``frida``
+    at module level, and environment collection must keep *reporting* a missing
+    toolchain instead of crashing on one (ADR-0041)."""
+    candidate = Path.home() / ".local/bin/adb"
+    if candidate.is_file():
+        return str(candidate)
+    return shutil.which("adb")
+
+
+def _attached_devices(stdout: str) -> list[str]:
+    """Serials `adb devices` reported as attached - the header line has no
+    second field of "device", so it filters itself out."""
+    serials = []
+    for line in (stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == "device":
+            serials.append(parts[0])
+    return serials
+
+
 def collect_environment() -> dict:
+    pipeline_adb = _pipeline_adb()
+
     return {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "git_commit": _run(["git", "rev-parse", "HEAD"]),
@@ -185,7 +212,24 @@ def collect_environment() -> dict:
             "frida": _run(["frida", "--version"]),
         },
         "adb_devices": _run(["adb", "devices"]),
-        "frida_ps_dash_U": _run(["timeout", "3", "frida-ps", "-U"], timeout=5),
+        # ADR-0041: probe the FIRST HOP of the dynamic route - the adb the pipeline
+        # itself resolves - not a frida CLI transport. The adb forward and the
+        # Windows-side relay the dynamic stage connects through are created by that
+        # stage (_start_relay), so they do not exist here. Measured before this
+        # change: `frida-ps -U` timed out (exit 124) in 4 of 4 bundles whose report
+        # recorded a successful handshake, and `frida-ps -D emulator-5554` answers
+        # "Device 'emulator-5554' not found" in this namespace. The window is at
+        # least the pipeline's own connect timeout (device.py: timeout=10), because
+        # a shorter one cannot tell "no device" from "slower than the probe".
+        "pipeline_adb_devices": _run([pipeline_adb, "devices"], timeout=30)
+        if pipeline_adb
+        else {
+            "command": "~/.local/bin/adb devices (no adb on this machine)",
+            "found": False,
+            "exit_code": None,
+            "stdout": "",
+            "stderr": "",
+        },
     }
 
 
@@ -343,9 +387,22 @@ def write_summary(
     for name, info in environment["tool_versions"].items():
         lines.append(f"- {name}: {'found' if info['found'] else '**NOT FOUND**'}")
     lines.append("")
-    lines.append("## Device / Frida connectivity")
-    lines.append(f"- `adb devices`: exit {environment['adb_devices']['exit_code']}")
-    lines.append(f"- `frida-ps -U`: exit {environment['frida_ps_dash_U']['exit_code']}")
+    lines.append("## Device connectivity (the route the dynamic stage uses)")
+    lines.append(f"- `adb devices` (resolved from PATH): exit {environment['adb_devices']['exit_code']}")
+    probe = environment["pipeline_adb_devices"]
+    seen = _attached_devices(probe.get("stdout", ""))
+    lines.append(
+        f"- The pipeline's own adb (`~/.local/bin/adb`, the path the dynamic stage "
+        f"resolves - `device.py` `_adb_wrapper_path`): exit {probe['exit_code']} - "
+        + (", ".join(f"`{s}`" for s in seen) if seen else "no device attached")
+    )
+    lines.append(
+        "- Frida connectivity is deliberately **not** probed here: the adb forward and the "
+        "Windows-side relay the dynamic stage connects through are created by that stage "
+        "(`_start_relay`), so nothing before a run can observe them. The run observes it - "
+        "the protocol handshake recorded in this run's report under `Instrumentation:`, "
+        "which is the effect that proves the connection (ADR-0020)."
+    )
     lines.append("")
     lines.append("## Unit tests")
     lines.append(

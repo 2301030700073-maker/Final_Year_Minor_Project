@@ -308,15 +308,19 @@ Note the requirement split: `calibration-report` takes no `--justification` (it 
 
 ## Other commands
 
-Two maintenance commands round out the CLI (`src/cli.py`):
+Three maintenance commands round out the CLI (`src/cli.py`):
 
 - **`verify-audit-log`** — re-derives the audit log's hash chain to confirm no record was edited, deleted, or reordered (tamper-evidence for ADR-0005). Prints `Audit log OK — N record(s), M chained, K legacy`, or exits non-zero listing the break. Defaults to `outputs/audit_log.jsonl`; `--audit-log` points it elsewhere.
   ```bash
   PYTHONPATH=src uv run python -m cli verify-audit-log
   ```
-- **`re-attribute`** — backfills machine-readable root/ssl attribution caveats into stored runs that predate the attribution feature, so an automated consumer no longer reads a bundled-SDK-only `ROOT_ONLY`/`SSL_ONLY` as the app's own anti-tampering. Non-destructive: it only attaches `root_attribution`/`ssl_attribution` caveats — it never rewrites the verdict, confidence, or evidence. Requires `--justification` (it mutates consumer-visible state, so it is audited like a run); `--force` recomputes even already-attributed rows after a taxonomy fix.
+- **`re-attribute`** — backfills machine-readable root/ssl attribution caveats into stored runs that predate the attribution feature, so an automated consumer no longer reads a bundled-SDK-only `ROOT_ONLY`/`SSL_ONLY` as the app's own anti-tampering. Non-destructive: it only attaches `root_attribution`/`ssl_attribution` caveats — it never rewrites the verdict, confidence, or evidence. Requires `--justification` (it mutates consumer-visible state, so it is audited like a run); `--force` recomputes even already-attributed rows after a taxonomy fix. It regenerates **only the rows it changes**, so it is a backfill tool, not a refresh — for a refresh of every stored row, see `regen-reports` below.
   ```bash
   PYTHONPATH=src uv run python -m cli re-attribute --justification ACADEMIC_TRAINING_TARGET
+  ```
+- **`regen-reports`** — re-renders stored reports from their own rows, in bulk (ADR-0027). This is the refresh path, and it exists because a stored report can go stale relative to its own row for reasons `re-attribute` never touches (a rendering fix, a field the reconstructor did not read) — a report that is stale that way is only fixed by re-rendering it. It re-derives nothing: the signature corpus, the obfuscation level and its rule, and the classification all come from the row. Requires `--justification` (it rewrites consumer-visible reports outside the run flow, so it is audited like a run); `--dry-run` renders every selected report into a throwaway tree and writes no report file, reporting the three outcome categories exactly as a real sweep does; `--missing-corpus` restricts the sweep to rows recorded before ADR-0022 (those whose recorded corpus is `None`). **A regenerated report is not the artefact the original run produced** — its `Generated:` timestamp, `Analysis code:` line and body wording become today's — so if the originals need preserving, do not run this.
+  ```bash
+  PYTHONPATH=src uv run python -m cli regen-reports --justification ACADEMIC_TRAINING_TARGET --dry-run
   ```
 
 ## Reporting results back

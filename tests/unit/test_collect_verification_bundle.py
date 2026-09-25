@@ -219,7 +219,7 @@ def test_a_tracked_change_outside_the_code_dirs_is_dirty_and_the_line_says_so(tm
 
     env = _summary_env()
     env["working_tree_dirty"] = True
-    bundle.write_summary(tmp_path, env, _run_shape(0), None, None)
+    bundle.write_summary(tmp_path, env, _run_shape(0), None, bundle.ShippedEvidence())
     line = [
         ln for ln in (tmp_path / "SUMMARY.md").read_text(encoding="utf-8").splitlines()
         if ln.startswith("Working tree")
@@ -274,7 +274,7 @@ def test_the_summary_states_the_code_dirty_state_and_never_guesses_it(tmp_path):
             "adb_devices": {"exit_code": 0},
             "frida_ps_dash_U": {"exit_code": 0},
         }
-        bundle.write_summary(tmp_path, env, _run_shape(0), None, None)
+        bundle.write_summary(tmp_path, env, _run_shape(0), None, bundle.ShippedEvidence())
         text = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
         line = [ln for ln in text.splitlines() if ln.startswith("Working tree")][0]
         assert expected in line, (value, line)
@@ -338,12 +338,12 @@ def test_a_missing_path_line_or_file_ships_nothing_and_says_so(tmp_path, capsys)
 
 def test_the_summary_states_which_calibration_markdown_travelled(tmp_path):
     env = _summary_env()
-    bundle.write_summary(tmp_path, env, _run_shape(0), None, "calibration/20260101T000000Z.md")
+    bundle.write_summary(tmp_path, env, _run_shape(0), None, bundle.ShippedEvidence(calibration_markdown="calibration/20260101T000000Z.md"))
     line = _calibration_line(tmp_path)
     assert "calibration/20260101T000000Z.md" in line, line
     assert "written locally" not in line
 
-    bundle.write_summary(tmp_path, env, _run_shape(0), None, None)
+    bundle.write_summary(tmp_path, env, _run_shape(0), None, bundle.ShippedEvidence())
     line = _calibration_line(tmp_path)
     assert "no markdown shipped" in line, line
     assert "written locally" not in line, (
@@ -362,6 +362,39 @@ def test_main_ships_the_markdown_and_passes_it_to_the_summary():
     assert "ship_calibration_markdown" in called
     summary = [c for c in calls if isinstance(c.func, ast.Name) and c.func.id == "write_summary"][0]
     assert len(summary.args) == 5, "the shipped markdown must reach the summary it describes"
+
+
+def test_the_summary_names_the_evidence_the_bundle_holds(tmp_path):
+    """A shipped path is named; the placeholder pattern never reaches a summary."""
+    bundle.write_summary(
+        tmp_path, _summary_env(), _run_shape(0), _run_shape(0),
+        bundle.ShippedEvidence(report="reports/abc123/0f1e.md", analysis="analysis/abc123"),
+    )
+    text = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
+    assert "`reports/abc123/0f1e.md`" in text, text
+    assert "`analysis/abc123`" in text
+    assert "<apk_hash>" not in text, "a template string is not a path"
+
+
+def test_the_summary_says_none_shipped_and_points_at_the_console(tmp_path):
+    """The copies are conditional; so are the lines that describe them (ADR-0037).
+
+    Every pipeline bundle so far shipped its report, so this state has never been
+    rendered in the wild - it is the state the run that most needs reading lands
+    in, which is why it is pinned here rather than left to the first failure."""
+    bundle.write_summary(
+        tmp_path, _summary_env(), _run_shape(0), _run_shape(0), bundle.ShippedEvidence(),
+    )
+    text = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
+    assert "<apk_hash>" not in text
+    pointed = [
+        ln for ln in text.splitlines()
+        if ln.startswith("- This run's report") or ln.startswith("- Decompiled evidence")
+    ]
+    assert len(pointed) == 2, pointed
+    for ln in pointed:
+        assert "none shipped" in ln, ln
+        assert "cli_output.txt" in ln, "the reason must be reachable from the bundle"
 
 
 # --- the outcome fold -------------------------------------------------------
@@ -395,7 +428,7 @@ def _line(tmp_path, text, prefix, occurrence=0, **kwargs):
     """The Nth SUMMARY line with this prefix. Both outcome lines start "- Exit
     code:", and picking the first silently asserted the unit-test line while
     claiming to check the pipeline one."""
-    bundle.write_summary(tmp_path, _summary_env(), calibration_markdown=None, **kwargs)
+    bundle.write_summary(tmp_path, _summary_env(), shipped=bundle.ShippedEvidence(), **kwargs)
     body = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
     match = [ln for ln in body.splitlines() if ln.startswith(prefix)]
     assert len(match) > occurrence, (prefix, occurrence, body)

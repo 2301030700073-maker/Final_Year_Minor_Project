@@ -23,6 +23,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -43,6 +44,19 @@ BUNDLE_ROOT = REPO_ROOT / "docs" / "plans" / "handoff" / "bundles"
 # bundle. The raw porcelain output, junk and all, is still shipped in
 # environment.json: this narrows the CLAIM, it hides nothing.
 CODE_PATHSPEC = ("src", "config", "scripts")
+
+
+@dataclass(frozen=True)
+class ShippedEvidence:
+    """What this bundle actually carries, as bundle-relative paths (or None).
+
+    Every field is set by the code that did the copying, at the moment it copied,
+    so no SUMMARY line can describe a directory the bundle does not hold
+    (ADR-0037). Frozen because it describes a finished bundle, not a plan for one.
+    The next artefact the bundle learns to carry adds a field here."""
+    calibration_markdown: str | None = None
+    report: str | None = None
+    analysis: str | None = None
 
 
 def working_tree_dirty(repo_root: Path = REPO_ROOT) -> bool | None:
@@ -288,7 +302,7 @@ def write_summary(
     environment: dict,
     test_result: dict,
     pipeline_result: dict | None,
-    calibration_markdown: str | None,
+    shipped: ShippedEvidence,
 ) -> None:
     lines = ["# Verification Bundle Summary", "", f"Generated: {environment['timestamp_utc']}", ""]
     head = environment["git_commit"]["stdout"].strip()
@@ -339,7 +353,7 @@ def write_summary(
     # also written locally" - described a file under a gitignored outputs/, i.e.
     # one the reader of a pushed bundle can never open, and the curve lives only
     # there. When nothing shipped, say that rather than pointing at it.
-    if calibration_markdown is None:
+    if shipped.calibration_markdown is None:
         lines.append(
             "- Report: `calibration_report_output.txt` (console summary); **no markdown "
             "shipped in this bundle** - the collector printed the reason it shipped none. "
@@ -349,7 +363,7 @@ def write_summary(
     else:
         lines.append(
             f"- Report: `calibration_report_output.txt` (console summary); full markdown "
-            f"**shipped as `{calibration_markdown}`** - the curve, its sample definition and "
+            f"**shipped as `{shipped.calibration_markdown}`** - the curve, its sample definition and "
             f"its threshold markers are in that file and nowhere else."
         )
     lines.append("- Durable row snapshot for backup: `calibration_runs_snapshot.json`")
@@ -363,8 +377,26 @@ def write_summary(
             f"({outcome_label(pipeline_result, ok='succeeded', failed='FAILED', artifact='cli_output.txt')})"
         )
         lines.append("- Full console output: `cli_output.txt`")
-        lines.append("- Copied reports (if any): `reports/<apk_hash>/`")
-        lines.append("- Full decompiled evidence + metadata + run results (if the run got that far): `analysis/<apk_hash>/`")
+        # ADR-0037: name what this bundle holds, never a pattern. The copies
+        # above are conditional (no run id / no fresh report / no analysis dir),
+        # so these lines render the three states as three - a shipped path, or a
+        # plain statement that nothing was shipped with a pointer to the
+        # pipeline's own console output, which IS in this bundle and says why.
+        if shipped.report:
+            lines.append(f"- This run's report: `{shipped.report}`")
+        else:
+            lines.append(
+                "- This run's report: **none shipped** - `cli_output.txt` carries the "
+                "pipeline's own account of why. A run that produced no report ships no "
+                "history, deliberately: a stale report would read as this run's."
+            )
+        if shipped.analysis:
+            lines.append(f"- Decompiled evidence + metadata + run results: `{shipped.analysis}`")
+        else:
+            lines.append(
+                "- Decompiled evidence + metadata + run results: **none shipped** - "
+                "`cli_output.txt` shows where the run stopped before producing them."
+            )
     (bundle_dir / "SUMMARY.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -389,6 +421,8 @@ def main() -> int:
     (bundle_dir / "pytest_output.txt").write_text(test_result["stdout"] + "\n" + test_result["stderr"], encoding="utf-8")
 
     pipeline_result = None
+    report_shipped: str | None = None
+    analysis_shipped: str | None = None
     if args.apk:
         print(f"Running the real pipeline against {args.apk} ...")
         pipeline_result = run_real_pipeline(args.apk, args.justification, args.skip_dynamic, args.target)
@@ -426,6 +460,7 @@ def main() -> int:
                 dest_dir = bundle_dir / "reports" / apk_hash
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(fresh_report, dest_dir / f"{fresh_run_id}.md")
+                report_shipped = f"reports/{apk_hash}/{fresh_run_id}.md"
             else:
                 print(f"  (note: report for run {fresh_run_id} expected from this run but not found under {reports_root} - not shipping any reports)")
         else:
@@ -444,6 +479,7 @@ def main() -> int:
         analysis_dir = REPO_ROOT / "outputs" / "analysis" / apk_hash
         if analysis_dir.exists():
             shutil.copytree(analysis_dir, bundle_dir / "analysis" / apk_hash, dirs_exist_ok=True)
+            analysis_shipped = f"analysis/{apk_hash}"
         else:
             print(f"  (note: expected {analysis_dir} from this run but it doesn't exist - ingest may have failed before producing it)")
     else:
@@ -464,7 +500,14 @@ def main() -> int:
     calibration_markdown = ship_calibration_markdown(bundle_dir, calibration_result["stdout"] or "")
     export_calibration_snapshot(bundle_dir)
 
-    write_summary(bundle_dir, environment, test_result, pipeline_result, calibration_markdown)
+    write_summary(
+        bundle_dir, environment, test_result, pipeline_result,
+        ShippedEvidence(
+            calibration_markdown=calibration_markdown,
+            report=report_shipped,
+            analysis=analysis_shipped,
+        ),
+    )
 
     print(f"\nBundle written to: {bundle_dir}")
     print("git add, commit, and push this directory (and docs/plans/research/ findings, if written).")

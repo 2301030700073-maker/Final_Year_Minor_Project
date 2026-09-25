@@ -63,7 +63,16 @@ def test_generate_report_operator_forced_banner_keeps_static_verdict_neither(tmp
     content = report_path.read_text(encoding="utf-8")
     assert "Operator-forced dynamic stage" in content
     assert "The static verdict is **NEITHER** and is **unchanged**" in content
-    assert "**coverage-limited** — a lower bound over surfaces" in content
+    # ADR-0030: the sentence summarizes a list that TWO mechanisms populate, so it
+    # names both. This assertion used to match only the clause's first four words,
+    # which is how a sentence naming one cause stayed green while the other cause -
+    # a fully-analyzed surface whose detection-shaped code matched no signature -
+    # could produce the very list the sentence was describing.
+    assert "a lower bound over a surface the engine could not fully analyze" in content
+    # Anchored past the Decision line's identical phrase, which ends the same way:
+    # "code that matched no signature" alone is satisfied by the Decision line, so a
+    # loose assertion here would pass for the wrong reason.
+    assert "or over detection-shaped code that matched no signature, so a NEITHER here" in content
     assert "gated on **real observed behaviour**" in content
     assert "- Verdict: COVERAGE-CONFIRMED" in content
 

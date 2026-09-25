@@ -1,4 +1,5 @@
 import json
+import ast
 import re
 import subprocess
 import sys
@@ -218,7 +219,7 @@ def test_a_tracked_change_outside_the_code_dirs_is_dirty_and_the_line_says_so(tm
 
     env = _summary_env()
     env["working_tree_dirty"] = True
-    bundle.write_summary(tmp_path, env, _run_shape(0), None)
+    bundle.write_summary(tmp_path, env, _run_shape(0), None, None)
     line = [
         ln for ln in (tmp_path / "SUMMARY.md").read_text(encoding="utf-8").splitlines()
         if ln.startswith("Working tree")
@@ -273,12 +274,94 @@ def test_the_summary_states_the_code_dirty_state_and_never_guesses_it(tmp_path):
             "adb_devices": {"exit_code": 0},
             "frida_ps_dash_U": {"exit_code": 0},
         }
-        bundle.write_summary(tmp_path, env, _run_shape(0), None)
+        bundle.write_summary(tmp_path, env, _run_shape(0), None, None)
         text = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
         line = [ln for ln in text.splitlines() if ln.startswith("Working tree")][0]
         assert expected in line, (value, line)
         lines[value] = line
     assert "src" in lines[False], "the claim must name what it measured"
+
+
+# --- the shipped calibration markdown (ADR-0036) ----------------------------
+#
+# The bundle's only calibration evidence was the console summary, while the curve -
+# its sample, its threshold markers, its exclusions - exists only in the markdown,
+# under a gitignored outputs/ that has never once been committed. These pin the
+# parse, the copy, and what the SUMMARY says about what actually travelled.
+
+def _calibration_line(bundle_dir: Path) -> str:
+    text = (bundle_dir / "SUMMARY.md").read_text(encoding="utf-8")
+    return [
+        ln for ln in text.splitlines()
+        if ln.startswith("- Report: `calibration_report_output")
+    ][0]
+
+
+def test_the_shipped_markdown_is_the_named_one_not_the_newest(tmp_path):
+    """A "newest in the directory" implementation would ship a PRIOR run's file."""
+    src = tmp_path / "reports"
+    src.mkdir()
+    named = src / "20260101T000000Z.md"
+    named.write_text("this invocation", encoding="utf-8")
+    newer = src / "20260102T000000Z.md"
+    newer.write_text("a prior run", encoding="utf-8")  # written later, so newer mtime
+    bdir = tmp_path / "bundle"
+    shipped = bundle.ship_calibration_markdown(bdir, f"Calibration report: {named}\n")
+    assert shipped == "calibration/20260101T000000Z.md"
+    assert (bdir / shipped).read_text(encoding="utf-8") == "this invocation"
+    assert not (bdir / "calibration" / newer.name).exists(), (
+        "the file that was NOT named must not travel - that is the Finding H trap"
+    )
+
+
+def test_a_relative_reported_path_is_resolved_against_the_repo_root(tmp_path, monkeypatch):
+    """The command prints `outputs/reports/calibration/...` - relative, never absolute."""
+    (tmp_path / "outputs" / "reports" / "calibration").mkdir(parents=True)
+    md = tmp_path / "outputs" / "reports" / "calibration" / "20260101T000000Z.md"
+    md.write_text("rel", encoding="utf-8")
+    monkeypatch.setattr(bundle, "REPO_ROOT", tmp_path)
+    shipped = bundle.ship_calibration_markdown(
+        tmp_path / "bundle", "Calibration report: outputs/reports/calibration/20260101T000000Z.md\n"
+    )
+    assert shipped == "calibration/20260101T000000Z.md"
+
+
+def test_a_missing_path_line_or_file_ships_nothing_and_says_so(tmp_path, capsys):
+    bdir = tmp_path / "bundle"
+    assert bundle.ship_calibration_markdown(bdir, "no report line here\n") is None
+    assert bundle.ship_calibration_markdown(bdir, "Calibration report: /nope/gone.md\n") is None
+    assert not (bdir / "calibration").exists(), "an absent markdown ships nothing, not a placeholder"
+    assert capsys.readouterr().out.count("not shipping any markdown") == 2, (
+        "both failure modes must be visible where the operator is looking"
+    )
+
+
+def test_the_summary_states_which_calibration_markdown_travelled(tmp_path):
+    env = _summary_env()
+    bundle.write_summary(tmp_path, env, _run_shape(0), None, "calibration/20260101T000000Z.md")
+    line = _calibration_line(tmp_path)
+    assert "calibration/20260101T000000Z.md" in line, line
+    assert "written locally" not in line
+
+    bundle.write_summary(tmp_path, env, _run_shape(0), None, None)
+    line = _calibration_line(tmp_path)
+    assert "no markdown shipped" in line, line
+    assert "written locally" not in line, (
+        "the local-only phrasing pointed at a gitignored file the reader cannot open"
+    )
+
+
+def test_main_ships_the_markdown_and_passes_it_to_the_summary():
+    """A helper nothing calls is the unit-tested-parser trap in reverse."""
+    src = (Path(__file__).resolve().parents[2] / "scripts"
+           / "collect_verification_bundle.py").read_text(encoding="utf-8")
+    main = [n for n in ast.parse(src).body
+            if isinstance(n, ast.FunctionDef) and n.name == "main"][0]
+    calls = [n for n in ast.walk(main) if isinstance(n, ast.Call)]
+    called = {c.func.id for c in calls if isinstance(c.func, ast.Name)}
+    assert "ship_calibration_markdown" in called
+    summary = [c for c in calls if isinstance(c.func, ast.Name) and c.func.id == "write_summary"][0]
+    assert len(summary.args) == 5, "the shipped markdown must reach the summary it describes"
 
 
 # --- the outcome fold -------------------------------------------------------
@@ -312,7 +395,7 @@ def _line(tmp_path, text, prefix, occurrence=0, **kwargs):
     """The Nth SUMMARY line with this prefix. Both outcome lines start "- Exit
     code:", and picking the first silently asserted the unit-test line while
     claiming to check the pipeline one."""
-    bundle.write_summary(tmp_path, _summary_env(), **kwargs)
+    bundle.write_summary(tmp_path, _summary_env(), calibration_markdown=None, **kwargs)
     body = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
     match = [ln for ln in body.splitlines() if ln.startswith(prefix)]
     assert len(match) > occurrence, (prefix, occurrence, body)

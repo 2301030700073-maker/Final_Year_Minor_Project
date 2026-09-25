@@ -199,6 +199,37 @@ def run_calibration_report() -> dict:
     return result
 
 
+def ship_calibration_markdown(bundle_dir: Path, stdout: str) -> str | None:
+    """Copy the calibration markdown THIS invocation wrote into the bundle.
+
+    The path is parsed from the command's own console line - the calibration
+    analogue of _extract_run_id - and never guessed as "the newest file in the
+    directory": that heuristic ships a prior run's markdown under this run's
+    timestamp whenever this invocation fails to produce one, which is the
+    Finding H trap one artefact over. An absent markdown is honest; a stale one
+    is not.
+
+    It matters because the curve - its sample definition, its threshold-edge
+    markers, its exclusion accounting - exists ONLY in this markdown (ADR-0033
+    #5, ADR-0034 #4). Without it, the bundle's calibration evidence is a console
+    summary of a section the reviewer cannot open (ADR-0036). Returns the
+    bundle-relative path shipped, or None when nothing was shipped."""
+    match = re.search(r"^\s*Calibration report:\s*(\S+)\s*$", stdout, re.M)
+    if match is None:
+        print("  (note: no calibration report path in the command's output - not shipping any markdown)")
+        return None
+    source = Path(match.group(1))
+    if not source.is_absolute():
+        source = REPO_ROOT / source  # the command prints outputs/reports/... relative
+    if not source.is_file():
+        print(f"  (note: the command reported {source} but no such file exists - not shipping any markdown)")
+        return None
+    dest = bundle_dir / "calibration" / source.name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, dest)
+    return f"calibration/{source.name}"
+
+
 def export_calibration_snapshot(bundle_dir: Path) -> None:
     """Durability snapshot of the calibration-relevant `runs` table rows -
     outputs/ and every *.db file are both gitignored, so without this the
@@ -252,7 +283,13 @@ def outcome_label(result: dict, *, ok: str, failed: str, artifact: str) -> str:
     return f"{failed} - see {artifact}"
 
 
-def write_summary(bundle_dir: Path, environment: dict, test_result: dict, pipeline_result: dict | None) -> None:
+def write_summary(
+    bundle_dir: Path,
+    environment: dict,
+    test_result: dict,
+    pipeline_result: dict | None,
+    calibration_markdown: str | None,
+) -> None:
     lines = ["# Verification Bundle Summary", "", f"Generated: {environment['timestamp_utc']}", ""]
     head = environment["git_commit"]["stdout"].strip()
     lines.append(
@@ -298,7 +335,23 @@ def write_summary(bundle_dir: Path, environment: dict, test_result: dict, pipeli
     )
     lines.append("")
     lines.append("## Calibration snapshot (FR-9.2)")
-    lines.append("- Report: `calibration_report_output.txt` (console summary) - full markdown also written locally under outputs/reports/calibration/")
+    # ADR-0036: state what actually travelled. The old wording - "full markdown
+    # also written locally" - described a file under a gitignored outputs/, i.e.
+    # one the reader of a pushed bundle can never open, and the curve lives only
+    # there. When nothing shipped, say that rather than pointing at it.
+    if calibration_markdown is None:
+        lines.append(
+            "- Report: `calibration_report_output.txt` (console summary); **no markdown "
+            "shipped in this bundle** - the collector printed the reason it shipped none. "
+            "The curve, its sample definition and its threshold markers are markdown-only "
+            "(ADR-0033/0034), so they are absent from this bundle."
+        )
+    else:
+        lines.append(
+            f"- Report: `calibration_report_output.txt` (console summary); full markdown "
+            f"**shipped as `{calibration_markdown}`** - the curve, its sample definition and "
+            f"its threshold markers are in that file and nowhere else."
+        )
     lines.append("- Durable row snapshot for backup: `calibration_runs_snapshot.json`")
     lines.append("")
     lines.append("## Real pipeline run")
@@ -405,9 +458,13 @@ def main() -> int:
     (bundle_dir / "calibration_report_output.txt").write_text(
         calibration_result["stdout"] + "\n" + calibration_result["stderr"], encoding="utf-8"
     )
+    # ADR-0036: the text above is the console's SUMMARY of a report whose
+    # substance - the curve, its sample, its threshold markers - is markdown-only,
+    # so this invocation's own markdown travels with the bundle too.
+    calibration_markdown = ship_calibration_markdown(bundle_dir, calibration_result["stdout"] or "")
     export_calibration_snapshot(bundle_dir)
 
-    write_summary(bundle_dir, environment, test_result, pipeline_result)
+    write_summary(bundle_dir, environment, test_result, pipeline_result, calibration_markdown)
 
     print(f"\nBundle written to: {bundle_dir}")
     print("git add, commit, and push this directory (and docs/plans/research/ findings, if written).")

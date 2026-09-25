@@ -408,3 +408,54 @@ def test_known_miss_caveat_names_the_apk_and_qualifies_recall():
     # ssl has no known miss -> exactly one caveat, never a blanket one per category.
     assert len([ln for ln in content.splitlines() if "KNOWN MISS" in ln]) == 1
     assert "ssl-detection IS present" not in content
+
+
+def test_rendered_curve_names_the_boundary_and_marks_exactly_its_edge(tmp_path):
+    # ADR-0033 render parity: the curve's own prose told the reader the decision
+    # boundary "always" appears explicitly, and on a 0.1-multiple threshold the
+    # artefact gave no way to find it. The header names the value; the marked row
+    # is the bucket STARTING at it, and nothing else is marked.
+    runs = [RunRow(
+        apk_hash="uc1_hash", run_id="r1", action="ROOT_ONLY",
+        root_confidence=0.80, root_detected=True, root_bypassed=True,
+        ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+        decompile_completeness="complete",
+    )]
+    ground_truth = {"uc1_hash": GroundTruthEntry("uc1_hash", root=True, ssl=False, source="manual review")}
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123", threshold=0.7,
+    )
+
+    content = generate_calibration_report(report, tmp_path).read_text(encoding="utf-8")
+
+    assert "**Decision threshold:** root 0.7, ssl 0.7" in content
+    # Count the ROW marker (`... threshold |`), not the phrase: the header and the
+    # curve prose both explain the marker, so the bare phrase appears there too.
+    assert content.count("\u2190 threshold |") == 2      # one marked edge per category
+    assert "| [0.7, 0.8) \u2190 threshold |" in content  # the range START at the boundary
+    assert "[0.6, 0.7) \u2190 threshold" not in content  # the edge that ENDS there is ordinary
+
+
+def test_rendered_curve_omits_the_threshold_line_when_the_report_carries_none():
+    # The header line is gated on the field being present, so a report built
+    # without thresholds (hand-built, or from before this field existed) still
+    # renders - it must not print a boundary VALUE it does not have, and must not
+    # raise on an empty mapping. The row markers are deliberately driven by the
+    # BUCKET's own flag instead, so clearing this report-level field leaves each
+    # bucket's provenance visible: a bucket that came from a threshold is still
+    # marked even when the current boundary goes unnamed. The two directions are
+    # separate on purpose - never print a value the report lacks, never hide a
+    # provenance a bucket has.
+    from dataclasses import replace
+    from report.generator import CALIBRATION_TEMPLATE
+
+    report = compute_calibration_report(
+        runs=[], ground_truth={}, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+    assert any(b.is_threshold_edge for b in report.calibration_curve["root"])  # precondition
+
+    content = CALIBRATION_TEMPLATE.render(report=replace(report, thresholds={}))
+
+    assert "**Decision threshold:**" not in content      # no value claimed
+    assert "\u2190 threshold |" in content               # provenance still shown
+    assert "## Confidence-Calibration Curve" in content  # the section itself still renders

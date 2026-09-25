@@ -302,6 +302,64 @@ def test_calibration_curve_empty_bucket_reports_no_data_not_zero_percent():
     assert all(b.observed_positive_rate is None for b in empty_buckets)
 
 
+def test_calibration_curve_marks_the_threshold_edge_and_names_the_boundary():
+    # ADR-0033: the curve INSERTS the decision threshold as an explicit edge
+    # (Finding D) but never recorded WHICH edge that was, so on a 0.1-multiple
+    # threshold the boundary the curve exists to surface was indistinguishable
+    # from the grid edges around it. The bucket starting at the threshold is now
+    # flagged, and the boundary value travels on the report.
+    runs = [_run("uc1_hash", "r1", "ROOT_ONLY", 0.80, True, True)]
+    ground_truth = {"uc1_hash": GroundTruthEntry("uc1_hash", root=True, ssl=False, source="manual review")}
+
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123", threshold=0.7,
+    )
+
+    assert report.thresholds == {"root": 0.7, "ssl": 0.7}
+    flagged = [b.range_low for b in report.calibration_curve["root"] if b.is_threshold_edge]
+    assert flagged == [0.7]  # the range START at the boundary, exactly one edge
+    assert sum(b.is_threshold_edge for b in report.calibration_curve["ssl"]) == 1
+
+
+def test_calibration_curve_marks_a_historical_run_threshold_beside_the_current_one():
+    # Finding D merges every run's OWN threshold into the edges, so a corpus
+    # spanning two boundaries has two threshold edges. Both must be marked - and
+    # the report must still name the boundary IN FORCE: a historical 0.84 is not
+    # the current threshold and must not be reported as one.
+    runs = [RunRow(
+        apk_hash="uc1_hash", run_id="r1", action="ROOT_ONLY",
+        root_confidence=0.80, root_detected=True, root_bypassed=True,
+        ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+        decompile_completeness="complete", root_threshold=0.84,
+    )]
+    ground_truth = {"uc1_hash": GroundTruthEntry("uc1_hash", root=True, ssl=False, source="manual review")}
+
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123", threshold=0.7,
+    )
+
+    assert sorted(b.range_low for b in report.calibration_curve["root"] if b.is_threshold_edge) == [0.7, 0.84]
+    assert report.thresholds["root"] == 0.7  # the boundary in force, not the run's own
+
+
+def test_calibration_curve_threshold_at_the_top_edge_marks_no_bucket_but_is_still_named():
+    # A threshold of 1.0 is inserted into `edges` only as the final close, so no
+    # bucket STARTS there and the marker structurally cannot appear. The named
+    # boundary is the backstop that keeps the fact from being lost (ADR-0033 #3),
+    # and the marker being absent here must not leak into the other category.
+    runs = [_run("uc1_hash", "r1", "ROOT_ONLY", 0.80, True, True)]
+    ground_truth = {"uc1_hash": GroundTruthEntry("uc1_hash", root=True, ssl=False, source="manual review")}
+
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+        threshold={"root": 1.0, "ssl": 0.7},
+    )
+
+    assert not any(b.is_threshold_edge for b in report.calibration_curve["root"])
+    assert report.thresholds["root"] == 1.0
+    assert [b.range_low for b in report.calibration_curve["ssl"] if b.is_threshold_edge] == [0.7]
+
+
 def test_skeleton_warning_present_below_sample_floor():
     runs = [_run("uc1_hash", "r1", "ROOT_ONLY", 0.80, True, True)]
     ground_truth = {"uc1_hash": GroundTruthEntry("uc1_hash", root=True, ssl=False, source="manual review")}

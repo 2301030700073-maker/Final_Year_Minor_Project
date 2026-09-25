@@ -1824,7 +1824,10 @@ CALIBRATION_TEMPLATE = _env.from_string("""\
 **Generated:** {{ report.generated_at }}
 **Analysis code:** {{ report.analysis_code_commit or "unknown" }}
 **Ground-truth registry commit:** {{ report.ground_truth_commit }}
+{% if report.thresholds -%}
+**Decision threshold:** {% for category, threshold in report.thresholds.items() %}{{ category }} {{ threshold|edge }}{% if not loop.last %}, {% endif %}{% endfor %} - the curve bucket starting at that value is marked `← threshold` below, and a run classified at a different recorded threshold marks its own edge.
 
+{% endif -%}
 {% if report.skeleton_warning -%}
 **{{ report.skeleton_warning }}**
 
@@ -1859,7 +1862,7 @@ Excluded from Tier 2 (partial/unknown decompile OR under-covered governing surfa
 {% endif %}{% endfor %}
 ## Confidence-Calibration Curve
 
-Bucket edges always include the real decision threshold explicitly - the one boundary that matters for future threshold re-scoring.
+Bucket edges always include the real decision threshold explicitly - the one boundary that matters for future threshold re-scoring. A boundary inserted as an edge is marked `← threshold`, and its value is named in the header; a run classified at some other recorded threshold marks its own edge.
 
 {% for category, buckets in report.calibration_curve.items() -%}
 ### {{ category }}
@@ -1867,7 +1870,7 @@ Bucket edges always include the real decision threshold explicitly - the one bou
 | Range | Count | Observed Positive Rate |
 |---|---|---|
 {% for b in buckets -%}
-| [{{ b.range_low|edge }}, {{ b.range_high|edge }}) | {{ b.count }} | {{ "%.2f"|format(b.observed_positive_rate) if b.observed_positive_rate is not none else "no data" }} |
+| [{{ b.range_low|edge }}, {{ b.range_high|edge }}){% if b.is_threshold_edge %} ← threshold{% endif %} | {{ b.count }} | {{ "%.2f"|format(b.observed_positive_rate) if b.observed_positive_rate is not none else "no data" }} |
 {% endfor %}
 {% endfor %}
 ## Notes

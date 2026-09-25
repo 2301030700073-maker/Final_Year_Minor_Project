@@ -92,6 +92,16 @@ class CalibrationCurveBucket:
     range_high: float
     count: int
     observed_positive_rate: float | None  # fraction where ground truth is True, among this bucket's ground-truthed observations
+    # ADR-0033: this bucket's LOWER edge came from a decision threshold - either
+    # the boundary this report was computed with, or one a run in the corpus was
+    # actually classified at (Finding D, the edge merge below). The curve's own
+    # prose claims the boundary always appears explicitly, and on a 0.1-multiple
+    # threshold it is otherwise indistinguishable from the ordinary grid edges
+    # around it. Set from the same expression that fed `edges`, so a marked
+    # bucket and an inserted edge cannot disagree. A threshold equal to the TOP
+    # edge marks no bucket (none starts there); the report's named threshold
+    # covers that case.
+    is_threshold_edge: bool = False
 
 
 @dataclass(frozen=True)
@@ -102,6 +112,11 @@ class CalibrationReport:
     tier1: dict[Category, CategoryTier1Report]
     tier2: dict[Category, CategoryTier2Report]
     calibration_curve: dict[Category, list[CalibrationCurveBucket]]
+    # ADR-0033: the decision boundary this report was computed with, per category
+    # (root and ssl tune independently, 4-3). Named in the rendered header so a
+    # marked curve edge can be matched to its value even when it lands on the
+    # 0.1 grid, and so a corpus classified at more than one boundary says so.
+    thresholds: dict[Category, float] = field(default_factory=dict)
     excluded_no_ground_truth: dict[Category, int] = field(default_factory=dict)
     # Despite the "decompile" in the name, this counts a NEITHER excluded from
     # Tier 2 for EITHER reason a negative isn't proof of absence: a partial/
@@ -240,7 +255,11 @@ def compute_calibration_report(
             getattr(run, threshold_field) for run in tier2_runs
             if getattr(run, threshold_field) is not None
         }
-        edges = sorted(set(base_edges) | {thresholds[category]} | per_run_thresholds)
+        # ADR-0033: the SAME two sets feed the edge list and the bucket
+        # provenance flag below - a threshold inserted as an edge is a threshold
+        # the curve marks, and neither can drift from the other.
+        threshold_edges = {thresholds[category]} | per_run_thresholds
+        edges = sorted(set(base_edges) | threshold_edges)
         bucket_hits: list[list[bool]] = [[] for _ in range(len(edges) - 1)]  # per-bucket list of ground_truth booleans
 
         for run in runs:
@@ -319,6 +338,7 @@ def compute_calibration_report(
             CalibrationCurveBucket(
                 range_low=edges[i], range_high=edges[i + 1], count=len(hits),
                 observed_positive_rate=(sum(hits) / len(hits)) if hits else None,
+                is_threshold_edge=edges[i] in threshold_edges,
             )
             for i, hits in enumerate(bucket_hits)
         ]
@@ -338,6 +358,7 @@ def compute_calibration_report(
         tier1=tier1,
         tier2=tier2,
         calibration_curve=curve,
+        thresholds=dict(thresholds),
         excluded_no_ground_truth=excluded_no_gt,
         excluded_partial_decompile=excluded_partial,
         excluded_missed_positives=excluded_missed,

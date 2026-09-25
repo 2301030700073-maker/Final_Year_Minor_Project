@@ -3597,6 +3597,44 @@ def _calibration_table(report) -> tuple[list[str], list[list[str]]]:
     return columns, rows
 
 
+def _tier1_denominator_notes(report) -> list[str]:
+    """ADR-0032 console parity for the generated report's Tier-1 table. The
+    console cell printed a bare "1.00 (77/77)" whose denominator drops the
+    unverified and not-predicted states, while the markdown publishes all four
+    (Confirmed / Not Confirmed / Unverified / N/A). The fraction is honest
+    arithmetic over the denominator it shows, so this adds the missing
+    definition rather than reshaping a correct number - because "1.00" over
+    conclusive attempts and "1.00" over every predicted run are different
+    findings, and on the 2026-09-25 corpus 118 of 195 root and 87 of 97 ssl
+    predicted runs reached no verdict at all.
+
+    The states stay named rather than folded into one "excluded" figure:
+    NOT_APPLICABLE was never an opportunity for the dynamic stage, UNVERIFIED
+    was an opportunity that produced no verdict, and collapsing them would hide
+    the count that changes what the rate means (ADR-0032 #5). Returned as data,
+    like _calibration_table, so the gate is a unit-testable fact. Gated on the
+    note's own claim - that a mass sits outside the denominator - so a skeleton
+    corpus prints no note instead of asserting an exclusion of zero."""
+    lines: list[str] = []
+    for category in CATEGORIES:
+        t1 = report.tier1[category]
+        if not (t1.unverified or t1.not_applicable):
+            continue
+        lines.append(
+            f"{category} Tier 1 confirmation is measured over conclusive attempts "
+            f"only: {t1.confirmed} confirmed and {t1.not_confirmed} not confirmed "
+            f"out of {t1.confirmed + t1.not_confirmed} run(s) where "
+            f"{category}-detection was predicted AND dynamic verification ran and "
+            f"reached a verdict. Outside that denominator: {t1.unverified} "
+            f"unverified run(s) - predicted detected, verification inconclusive, so "
+            f"an opportunity that produced no verdict - and {t1.not_applicable} "
+            f"run(s) where {category}-detection was not predicted at all and the "
+            f"dynamic stage had no opportunity. This rate is a lower bound on "
+            f"precision, not precision itself (ADR-0006)."
+        )
+    return lines
+
+
 def _tn0_tautology_caveats(report) -> list[str]:
     """Console parity for the generated report's CALIB-TN0-LABEL caveat
     (report/generator.py): the lines qualifying any Tier-2 precision that reads
@@ -3662,6 +3700,13 @@ def calibration_report(
     console.print(table)
     if report.skeleton_warning:
         console.print(f"[yellow]{report.skeleton_warning}[/yellow]")
+
+    # ADR-0032: the Tier-1 cell renders two of the four states classify_tier1
+    # returns, and this table already gives Tier-2's exclusions three columns
+    # while Tier-1's get none. Printed directly under the table (Tier 1 is the
+    # first column) so the definition is read with the number it defines.
+    for line in _tier1_denominator_notes(report):
+        console.print(f"[yellow]Note: {line}[/yellow]")
 
     # CALIB-EXCL-MISS1: name the known misses, don't just count them. The
     # "Excl known-miss" column says how many, but a reader of this table's

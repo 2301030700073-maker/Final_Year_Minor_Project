@@ -656,6 +656,112 @@ def test_tn0_tautology_caveat_suppressed_when_a_negative_control_exists():
     assert _tn0_tautology_caveats(report) == []        # exact gate: no false caveat
 
 
+def test_tier1_denominator_note_names_the_unverified_mass_and_keeps_states_separate():
+    # ADR-0032: the console Tier-1 cell prints confirmed/(confirmed+not_confirmed),
+    # which on the 2026-09-25 corpus dropped 118 of 195 root and 87 of 97 ssl
+    # predicted runs - the markdown publishes all four states. The note restores
+    # the denominator AND keeps UNVERIFIED (an opportunity that produced no
+    # verdict) distinct from NOT_APPLICABLE (never an opportunity), because
+    # collapsing them into one "excluded" count would hide the number that
+    # changes what "1.00" means.
+    from calibration.report import compute_calibration_report
+    from calibration.types import GroundTruthEntry, RunRow
+    from cli import _tier1_denominator_notes
+
+    runs = [
+        # root predicted + bypass confirmed; ssl not predicted at all
+        RunRow(apk_hash="h1", run_id="r1", action="ROOT_ONLY",
+               root_confidence=0.9, root_detected=True, root_bypassed=True,
+               ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+               decompile_completeness="complete"),
+        # root predicted, verification inconclusive; ssl not predicted
+        RunRow(apk_hash="h2", run_id="r2", action="ROOT_ONLY",
+               root_confidence=0.9, root_detected=True, root_bypassed=None,
+               ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+               decompile_completeness="complete"),
+    ]
+    report = compute_calibration_report(
+        runs,
+        ground_truth={
+            "h1": GroundTruthEntry("h1", root=True, ssl=False, source="manual"),
+            "h2": GroundTruthEntry("h2", root=True, ssl=False, source="manual"),
+        },
+        generated_at="t", ground_truth_commit="c",
+    )
+    # preconditions: pin the fixture's shape so a classify_tier1 change fails HERE
+    # loudly instead of silently re-wording the note
+    assert (report.tier1["root"].confirmed, report.tier1["root"].not_confirmed,
+            report.tier1["root"].unverified, report.tier1["root"].not_applicable) == (1, 0, 1, 0)
+    assert (report.tier1["ssl"].confirmed, report.tier1["ssl"].not_confirmed,
+            report.tier1["ssl"].unverified, report.tier1["ssl"].not_applicable) == (0, 0, 0, 2)
+
+    lines = _tier1_denominator_notes(report)
+    assert len(lines) == 2
+    root_line = next(line for line in lines if line.startswith("root "))
+    ssl_line = next(line for line in lines if line.startswith("ssl "))
+
+    # the denominator the cell shows, now stated
+    assert "1 confirmed and 0 not confirmed out of 1 run(s)" in root_line
+    # the mass outside it, named as two different states
+    assert "1 unverified run(s)" in root_line
+    assert "0 run(s) where root-detection was not predicted" in root_line
+    # an UNVERIFIED-only category still names the N/A state (counted, not omitted)
+    assert "1 unverified run(s)" in root_line
+    # the N/A-only category names a real zero unverified count rather than staying silent
+    assert "0 unverified run(s)" in ssl_line
+    assert "2 run(s) where ssl-detection was not predicted" in ssl_line
+    # the other half of what that rate is: the markdown's own lower-bound caveat
+    assert all("lower bound on precision, not precision itself" in line for line in lines)
+    # never the Tier-2 tautology caveat's wording, which answers a different question
+    assert not any("TN=0" in line for line in lines)
+
+
+def test_tier1_denominator_note_is_silent_when_every_prediction_reached_a_verdict():
+    # The gate is the note's own claim - a mass sits outside the denominator - so a
+    # corpus where every predicted run reached a verdict prints NOTHING. A note
+    # asserting "0 unverified" there would be noise under a cell that needs no
+    # qualification (caveat-gate-matches-its-text).
+    from calibration.report import compute_calibration_report
+    from calibration.types import GroundTruthEntry, RunRow
+    from cli import _tier1_denominator_notes
+
+    runs = [RunRow(
+        apk_hash="h1", run_id="r1", action="FULL",
+        root_confidence=0.9, root_detected=True, root_bypassed=True,
+        ssl_confidence=0.9, ssl_detected=True, ssl_bypassed=True,
+        decompile_completeness="complete",
+    )]
+    report = compute_calibration_report(
+        runs,
+        ground_truth={"h1": GroundTruthEntry("h1", root=True, ssl=True, source="manual")},
+        generated_at="t", ground_truth_commit="c",
+    )
+    assert report.tier1["root"].unverified == 0 and report.tier1["root"].not_applicable == 0
+    assert report.tier1["ssl"].unverified == 0 and report.tier1["ssl"].not_applicable == 0
+    assert _tier1_denominator_notes(report) == []
+
+
+def test_tier1_denominator_note_is_wired_into_the_calibration_console_command():
+    # A note the command never prints is the defect this change exists to fix, so
+    # the consumer is pinned too, not just the helper's text (unit-tested-parser-
+    # neq-consumed-signal): parse the source rather than importing it, so this
+    # cannot be satisfied by a stale .pyc.
+    import ast
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[2] / "src" / "cli.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    command = next(
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "calibration_report"
+    )
+    called = {
+        node.func.id for node in ast.walk(command)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "_tier1_denominator_notes" in called
+
+
 def test_calibration_table_surfaces_known_miss_count_separately_from_partial():
     # CALIB-EXCL-MISS1 console parity: the markdown report names the excluded
     # known misses, and _calibration_table's docstring promises parity with its

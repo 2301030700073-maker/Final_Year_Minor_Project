@@ -492,10 +492,19 @@ def apply_coverage_bound(
     reason unknown_uncovered is: this function derives its answer from the coverage
     map alone, so a stale cause from an earlier call must not survive a coverage
     map that no longer supports it.
+
+    ADR-0029: a DETECTED category is never flagged. An incomplete surface can
+    HIDE a detection, never invent one - a signature match is a fact about code
+    that was read - so this bound describes a negative, and a positive has none.
     """
+    # The coverage predicate alone cannot see the verdict, so java=partial flagged
+    # a category detected at 1.00 exactly as it flagged one with no evidence:
+    # RS_CertPinning rendered "Decision: SSL_ONLY" over a "Coverage-limited
+    # (unknown, not absent): ...; ssl" on the very next line (ADR-0029).
     limited = [
         cat for cat in GOVERNING_SURFACES
-        if not category_is_confident_negative(cat, coverage)
+        if not getattr(classification, cat).detected
+        and not category_is_confident_negative(cat, coverage)
     ]
     return replace(
         classification,
@@ -538,6 +547,16 @@ def apply_unattributed_indicators(
         # a {cat: False} entry - manufacturing an "unknown" from an absent indicator
         # is exactly the confident-negative-vs-unknown confusion ADR-0006 forbids.
         if not present:
+            continue
+        # ADR-0029: the same gate, by the other cause. Unattributed detection-shaped
+        # code in a category that IS detected is a note about what the signature set
+        # missed, not a bound on a positive that already exists - and rendered under
+        # the one banner header both arms share, it reproduces the contradiction the
+        # gate above removes. Tests the ORIGINAL verdict: detection is not something
+        # this function can change. getattr-with-default rather than indexing, so a
+        # non-category key keeps the old behaviour instead of raising.
+        bounded_verdict = getattr(classification, cat, None)
+        if bounded_verdict is not None and bounded_verdict.detected:
             continue
         if cat == "root":
             root = replace(root, coverage_limited=True)

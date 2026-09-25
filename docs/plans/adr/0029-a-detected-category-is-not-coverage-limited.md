@@ -50,11 +50,21 @@ weakens a negative and leaves a positive untouched. A bound that applies to a
 positive is not conservatism - it is a false statement about the run, printed
 above the verdict it contradicts.
 
-Why 2,257 passing tests did not catch it: every fixture in
-`tests/unit/test_lm4_lm3_unknown.py` builds its verdicts with `detected=False`
-(`_cls()`, line 25). The function is well covered over the input shape its
-author had in mind, and the detected branch has never been exercised. This is
-the class of gap that only a real run closes.
+Why 2,257 passing tests did not catch it - the more uncomfortable half of this
+record, because the detected case WAS reached, once.
+`test_bound_is_additive_preserves_existing_fields` builds
+`CategoryVerdict(confidence=0.4, detected=True, evidence=[])` and asserts
+`out.root.coverage_limited is True` (line 74). That assertion was consistent
+with the defect, so the suite did not merely fail to ask the question: it
+**pinned** the wrong answer, inside a test whose stated purpose - the comment
+two lines above it - is that no pre-existing *field* is dropped. Nobody reads an
+assertion in a field-preservation test as a claim about detected categories,
+which is how an incidental assertion outlives the thing it was written beside.
+
+Every other fixture in that file uses `detected=False` (`_cls()`, line 25), so
+the case that actually renders - a detection under partial coverage - had one
+unwitting witness and no test. That fixture is changed to a negative here, and
+it is the only edit this ADR makes to an existing test.
 
 ## Decision
 

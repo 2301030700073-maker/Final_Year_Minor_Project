@@ -71,7 +71,13 @@ def test_bound_flows_into_persisted_json(tmp_path):
 def test_bound_is_additive_preserves_existing_fields():
     # apply_coverage_bound returns a new ClassificationResult and must not drop
     # any pre-existing fields (e.g. attribution, thresholds, counts).
-    v = CategoryVerdict(confidence=0.4, detected=True, evidence=[])
+    # ADR-0029: root is a NEGATIVE here, because the last two assertions are the
+    # "the bound was applied" checks and a bound describes a negative. This fixture
+    # used to carry detected=True, which made `coverage_limited is True` true while
+    # the gate had no verdict to read - the assertion pinned the defect rather than
+    # the contract. The field-preservation assertions are what this test is for and
+    # are indifferent to the verdict.
+    v = CategoryVerdict(confidence=0.4, detected=False, evidence=[])
     cls = ClassificationResult(
         action=Action.ROOT_ONLY, root=v, ssl=CategoryVerdict(0.0, False, []),
         root_attribution={"vendor": "androidx", "all_third_party": True},
@@ -292,3 +298,68 @@ def test_uncov_cause1_round_trips_through_regeneration():
     legacy = asdict(original)
     legacy.pop("unknown_uncovered_causes")
     assert _classification_from_json(legacy).unknown_uncovered_causes == {}
+
+# ── ADR-0029: a DETECTED category is never coverage-limited ──
+
+
+def _cls_ssl_detected():
+    """The RS_CertPinning shape, 2026-09-25: ssl detected at 1.00 under java=partial.
+
+    The live run rendered "Decision: SSL_ONLY" and, on the next line, listed ssl
+    among the categories whose result is "unknown, not absent" - both strings come
+    from unknown_uncovered, which no fixture in this file had ever populated for a
+    DETECTED category, because every one of them builds its verdicts with
+    detected=False.
+    """
+    return ClassificationResult(
+        action=Action.SSL_ONLY,
+        root=CategoryVerdict(confidence=0.0, detected=False, evidence=[]),
+        ssl=CategoryVerdict(confidence=1.0, detected=True, evidence=[]),
+    )
+
+
+def test_a_detected_category_is_not_bounded_by_a_partial_surface():
+    # java=partial is a real bound on root's absence and no bound at all on ssl's
+    # presence: an incomplete surface can HIDE a detection, never invent one - a
+    # signature match is a fact about code that was read.
+    out = apply_coverage_bound(_cls_ssl_detected(), {**_FULL, "java": "partial"})
+    assert out.ssl.coverage_limited is False
+    assert out.ssl.confidence == 1.0, "the gate binds the label, never the verdict"
+    # The control, in the same call: the negative sibling is still bounded, so this
+    # cannot pass by emptying the list.
+    assert out.root.coverage_limited is True
+    assert out.unknown_uncovered == ["root"]
+    assert out.unknown_uncovered_causes == {"root": ["incomplete_coverage"]}
+
+
+def test_the_gate_is_about_detection_not_about_a_bound_that_found_nothing():
+    # Fixture control: with every surface complete nothing is flagged either way, so
+    # the assertions above are about the verdict, not about a coverage map that
+    # happened to bound nothing.
+    out = apply_coverage_bound(_cls_ssl_detected(), _FULL)
+    assert out.unknown_uncovered == []
+    assert out.ssl.coverage_limited is False
+
+
+def test_unattributed_indicators_do_not_bound_a_detected_category():
+    # The second arm writes the same list under the same banner header, so the gate
+    # has to hold there too: detection-shaped code the corpus did not encode is a
+    # signature-set gap (ADR-0001), not a bound on a positive that already exists.
+    bounded = apply_coverage_bound(_cls_ssl_detected(), {**_FULL, "java": "partial"})
+    out = apply_unattributed_indicators(bounded, {"root": True, "ssl": True})
+    assert out.ssl.coverage_limited is False
+    assert out.unknown_uncovered == ["root"]
+    # Coverage first, then indicators - the documented order, and root carries both.
+    assert out.unknown_uncovered_causes == {
+        "root": ["incomplete_coverage", "unattributed_indicator"]
+    }
+
+
+def test_a_lone_unattributed_indicator_on_a_detected_category_marks_nothing():
+    # No sibling to hide behind: ssl detected over complete coverage, and the only
+    # unattributed indicator is in ssl. The list stays empty rather than entering a
+    # category whose result is already established.
+    out = apply_unattributed_indicators(_cls_ssl_detected(), {"ssl": True})
+    assert out.unknown_uncovered == []
+    assert out.unknown_uncovered_causes == {}
+    assert out.ssl.coverage_limited is False

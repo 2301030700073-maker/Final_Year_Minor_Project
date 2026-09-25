@@ -2723,6 +2723,16 @@ def run(
     synth = synthesize(classification, dynamic_action)
     # The dynamic stage is the longest in the pipeline (install, launch, hook, run),
     # so a death inside it must not be recorded as the classification it followed.
+    # ADR-0028: the device this run executes against, read from the device itself
+    # as soon as its serial resolves (below, and again on the --skip-dynamic
+    # capture path). Initialised HERE, outside the branch, because it is a
+    # run-level fact and every path writes a report that asks for it: a
+    # --skip-dynamic run takes the `if` above, and binding this beside `serial`
+    # inside the `else` left it unbound there (live-caught by the unit suite).
+    # None therefore means "not recorded" - both a run predating the column and
+    # one that never resolved a device - which is why the report names both
+    # rather than asserting the one the row cannot prove.
+    device_environment = None
     _begin_stage("dynamic")
     if skip_dynamic:
         dynamic_stage = StageResult(
@@ -2757,6 +2767,10 @@ def run(
         dynamic_setup_error = ""
         try:
             serial = device.discover_device(device_serial)
+            # Read before any stage touches the device, so a read that fails is
+            # caught by the handler directly below and recorded as a failed
+            # dynamic stage rather than surfacing later as a mystery.
+            device_environment = device.read_device_environment(serial)
             # FR-4.2: install_apk's check=True only confirms adb accepted the
             # install command - not that the package actually registered. A silent
             # install failure (signature mismatch, insufficient storage, device
@@ -3115,6 +3129,11 @@ def run(
             # resolves its own serial since dynamic never ran.
             if skip_dynamic:
                 capture_serial = device.discover_device(device_serial)
+                # ADR-0028: dynamic never ran, but capture still uses a device, so
+                # the environment is this one. Read at both resolution points for
+                # exactly this case - otherwise a --skip-dynamic run would record
+                # an environment of None while plainly having used one.
+                device_environment = device.read_device_environment(capture_serial)
             elif serial is not None:
                 capture_serial = serial
             else:
@@ -3443,6 +3462,9 @@ def run(
         manifest=manifest_info if manifest_stage.status == "success" else None,
         git_commit=git_commit,
         signature_corpus=signature_corpus,
+        # ADR-0028: what this run actually executed against. Read from the device
+        # during this run, so it is a recorded value, not a re-derivation.
+        device_environment=device_environment,
         coverage=coverage_map,
         obfuscation_level=obfuscation_level,
         obfuscation_reason=obfuscation_reason,
@@ -3470,6 +3492,9 @@ def run(
             "stage_results": stage_results,
             "git_commit": git_commit,
             "signature_corpus": signature_corpus,
+            # ADR-0028: persisted as read. None is a real value (a run that used no
+            # device), so storage writes NULL rather than reconstructing one.
+            "device_environment": device_environment,
             "target": target,
             "package_name": package_name,
             "coverage": coverage_map,
@@ -4000,6 +4025,12 @@ def _regenerate_report(
         # record is the only place it survives. None is the honest "not recorded
         # for this run", which the template renders as such rather than as blank.
         signature_corpus=run.signature_corpus,
+        # ADR-0028: read from the record, like the corpus above - the device a
+        # stored run executed against survives only on its row. None here is two
+        # possible facts (the run predates the column, or it used no device), and
+        # the template separates them using the stored dynamic stage's status
+        # rather than picking one.
+        device_environment=run.device_environment,
         coverage=run.coverage,
         obfuscation_level=run.obfuscation_level,
         # ADR-0026: the rule comes from the record like the level does. A run that

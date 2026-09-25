@@ -102,6 +102,11 @@ TEMPLATE = _env.from_string("""\
 {% else -%}
 **Signature corpus:** not recorded for this run - it predates ADR-0022, which is the only way a stored run can lack one: every run saved since records a fingerprint of the corpus it loaded, so this absence is a date, not a derivation that failed. It is deliberately not backfilled: 183 of the stored runs were analysed from a dirty working tree, whose rule set is not recoverable from its commit, and a number derived from one would be a plausible value standing in for an unobserved one.
 {% endif %}
+{% if device_environment -%}
+**Device:** `{{ device_environment.get("serial") }}` - Android {{ device_environment.get("ro.build.version.release") or "release not reported" }} (API {{ device_environment.get("ro.build.version.sdk") or "not reported" }}), build `{{ device_environment.get("ro.build.type") or "not reported" }}`, debuggable={{ device_environment.get("ro.debuggable") or "not reported" }}, abi `{{ device_environment.get("ro.product.cpu.abi") or "not reported" }}`, hardware `{{ device_environment.get("ro.hardware") or "not reported" }}`, fingerprint `{{ device_environment.get("ro.build.fingerprint") or "not reported" }}`. Recorded from the device itself at run time (ADR-0028), because a verdict is a function of the code, the rules and the environment, and only the environment was unrecorded - two rooted AVDs sharing a serial, API 33 and API 34, otherwise produce runs no stored field can tell apart. A property reading "not reported" above is a statement about that device, not about this run.
+{% else -%}
+**Device:** not recorded (ADR-0028). Two causes, and the stored row does not distinguish them: this run predates the field, or it used no device - a `--skip-dynamic` run whose stages never resolved one. Neither is asserted here, because neither is provable from the row; a run that reached a device records what `getprop` answered for it.
+{% endif %}
 {% if operator or justification -%}
 **Authorized by:** {{ operator or "unknown" }} (justification: {{ justification or "not stated" }})
 {% endif %}
@@ -850,6 +855,10 @@ def generate_report(
     # to the rendering commit), this is always read from the run's own record: it is
     # the fact that is unrecoverable if the report does not carry it.
     signature_corpus: str | None = None,
+    # ADR-0028: the device the run executed against, read from the device itself
+    # (device.read_device_environment). None is two facts the template does not
+    # collapse - a run predating the field, or one that never resolved a device.
+    device_environment: dict | None = None,
     coverage: dict | None = None,
     obfuscation_level: str | None = None,
     # ADR-0026: which rule produced a `heavy` level ("string_encryption" /
@@ -908,6 +917,7 @@ def generate_report(
         timestamp=timestamp,
         git_commit=git_commit,
         signature_corpus=signature_corpus,
+        device_environment=device_environment,
         metadata=_as_attrdict(metadata),
         classification=classification,
         verification=verification,

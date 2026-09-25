@@ -59,6 +59,10 @@ def _run(coverage_causes):
         manifest_json=None,
         coverage=dict(COVERAGE),
         signature_corpus=None,
+        # ADR-0028: the device environment, read off the row by the regen path.
+        # None is this fixture's legacy run, and the template names both possible
+        # causes for it rather than asserting the one the row cannot prove.
+        device_environment=None,
     )
 
 

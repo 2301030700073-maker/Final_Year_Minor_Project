@@ -571,6 +571,80 @@ def discover_device(serial: str | None = None) -> str:
     return lines[0].split("\t")[0]
 
 
+# ADR-0028: the device properties a run records. Each one is here because this
+# pipeline's own behaviour depends on it, not to make a complete build dump:
+#   ro.build.version.sdk     - the API level (java-bridge behaviour; the system
+#                              CA store moved into the conscrypt APEX at 34)
+#   ro.build.version.release - the human-facing "14", so a reader is not left
+#                              converting an API level by hand
+#   ro.build.type            - userdebug/user/eng: what makes `adb root` possible
+#   ro.debuggable            - the flag the dynamic stage is gated on
+#   ro.product.cpu.abi       - decides which frida-server binary is correct
+#   ro.hardware              - an anti-emulator marker the synthesizer rewrites
+#   ro.build.fingerprint     - the full build identity the same scrub patches
+_DEVICE_ENV_PROPERTIES = (
+    "ro.build.version.sdk",
+    "ro.build.version.release",
+    "ro.build.type",
+    "ro.debuggable",
+    "ro.product.cpu.abi",
+    "ro.hardware",
+    "ro.build.fingerprint",
+)
+
+
+def _parse_getprop(output: str) -> dict:
+    """`getprop`'s one-property-per-line output as a mapping.
+
+    The format is `[key]: [value]`. A split on `[`/`]` would truncate the few
+    properties whose value genuinely contains a bracket, so the split is on the
+    first `]: [` and the trailing bracket is stripped only if present.
+    """
+    props: dict = {}
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("["):
+            continue
+        key, sep, rest = line[1:].partition("]: [")
+        if not sep:
+            continue
+        props[key] = rest[:-1] if rest.endswith("]") else rest
+    return props
+
+
+def read_device_environment(serial: str) -> dict:
+    """Read the recorded device environment (ADR-0028) from `serial` itself.
+
+    One `getprop` call, parsed for the properties this pipeline's behaviour
+    depends on. A property the device does not report is recorded as None - a
+    statement about the device, and a different one from the whole dict being
+    absent (which is how a run that used no device is stored).
+
+    Raises if the device cannot be queried at all. That is deliberate rather than
+    a silent None: a device whose shell cannot answer `getprop` is one whose
+    `pm list packages` - the install verification that runs seconds later - also
+    cannot, so this belongs in the caller's existing device-failure handler,
+    which records a failed stage loudly instead of letting the run proceed with
+    an unrecorded environment.
+    """
+    adb = _require_adb()
+    result = subprocess.run(
+        [adb, "-s", serial, "shell", "getprop"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"could not read the device environment from {serial}: "
+            f"`adb -s {serial} shell getprop` exited {result.returncode}: "
+            f"{(result.stderr or '').strip() or 'no stderr'}"
+        )
+    props = _parse_getprop(result.stdout or "")
+    environment = {"serial": serial}
+    for name in _DEVICE_ENV_PROPERTIES:
+        environment[name] = props.get(name)
+    return environment
+
+
 def _stream_diagnostic(stdout, stderr) -> str:
     """Both captured streams of a failed adb call, labelled, or a stated absence."""
     parts = []

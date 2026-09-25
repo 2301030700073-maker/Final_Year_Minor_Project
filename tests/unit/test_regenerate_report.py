@@ -70,6 +70,11 @@ def _run(coverage_causes):
         # and it must be the real column name, so a rename breaks this loudly here
         # rather than silently rendering "not recorded" for a run that recorded one.
         signature_corpus=None,
+        # ADR-0028: the device the run executed against, read off the row by the
+        # regen path exactly as the corpus is. None here is this fixture's legacy
+        # run; the template names both possible causes rather than asserting one,
+        # because a row cannot tell a pre-column run from a device-less one.
+        device_environment=None,
     )
 
 
@@ -177,3 +182,65 @@ def test_the_refusal_is_conditional_on_the_empty_column_not_the_section(monkeypa
     content = path.read_text(encoding="utf-8")
     assert content != stale, "a recorded cause must still be able to rewrite the report"
     assert "### Dynamic code loading (coverage-limited)" in content
+
+
+# ── ADR-0028: the device line, rendered from the row ──
+
+
+def _regenerate_run(monkeypatch, tmp_path, device_environment):
+    monkeypatch.setattr(cli, "REPORTS_ROOT", tmp_path / "reports")
+    monkeypatch.setattr(cli, "AUDIT_LOG_PATH", tmp_path / "absent_audit_log.jsonl")
+    run = _run({"dynamic_loads": ["com.example.Loader"]})
+    run.device_environment = device_environment
+    cli._regenerate_report(run, _apk(), "c0ffee")
+    return (tmp_path / "reports" / APK_HASH / f"{RUN_ID}.md").read_text(encoding="utf-8")
+
+
+def test_a_recorded_device_renders_the_values_that_were_read(monkeypatch, tmp_path):
+    body = _regenerate_run(monkeypatch, tmp_path, {
+        "serial": "emulator-5554",
+        "ro.build.version.sdk": "34",
+        "ro.build.version.release": "14",
+        "ro.build.type": "userdebug",
+        "ro.debuggable": "1",
+        "ro.product.cpu.abi": "x86_64",
+        "ro.hardware": "ranchu",
+        "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys",
+    })
+    assert "**Device:** `emulator-5554`" in body
+    assert "API 34" in body
+    assert "hardware `ranchu`" in body
+    # No property placeholder fired. The assertion names the PLACEHOLDER text and
+    # not the bare phrase, because the bare phrase is also in the line's own
+    # explanation of what a missing property would mean.
+    assert "release not reported" not in body
+    assert "API not reported" not in body
+
+
+def test_a_run_with_no_recorded_device_names_both_causes_and_asserts_neither(monkeypatch, tmp_path):
+    # The row cannot tell a run that predates the column from one that never
+    # resolved a device, so the report must not pick one - asserting "used no
+    # device" here would be a guess about a stored run, which is the class of
+    # statement this project's reports do not make.
+    body = _regenerate_run(monkeypatch, tmp_path, None)
+    assert "**Device:** not recorded (ADR-0028)" in body
+    assert "predates the field" in body
+    assert "used no device" in body
+    assert "**Device:** `" not in body
+
+
+def test_a_property_the_device_left_empty_renders_as_not_reported(monkeypatch, tmp_path):
+    # The blank is inside the line, not a blank line: the run had a device, and
+    # the report still says what that device answered (nothing, for this one).
+    body = _regenerate_run(monkeypatch, tmp_path, {
+        "serial": "emulator-5554",
+        "ro.build.version.sdk": None,
+        "ro.build.version.release": "14",
+        "ro.build.type": "userdebug",
+        "ro.debuggable": "1",
+        "ro.product.cpu.abi": "x86_64",
+        "ro.hardware": "ranchu",
+        "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys",
+    })
+    assert "**Device:** `emulator-5554`" in body
+    assert "API not reported" in body

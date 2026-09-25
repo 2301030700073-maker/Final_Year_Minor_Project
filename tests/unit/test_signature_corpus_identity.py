@@ -247,6 +247,9 @@ def test_a_regenerated_report_carries_the_stored_corpus_not_the_live_one(monkeyp
         coverage_causes={}, verification_json=None, correlation_json=None,
         stage_results_json=None, dynamic_skip_reason=None, correlation_skip_reason=None,
         manifest_json=None, coverage={}, signature_corpus=stored,
+        # ADR-0028: carried by the double for the same reason signature_corpus is -
+        # _regenerate_report reads the real column name directly.
+        device_environment=None,
     )
     cli._regenerate_report(run, SimpleNamespace(raw_metadata=None), "c0ffee")
     content = (tmp_path / "reports" / "abc123" / "corpus3.md").read_text(encoding="utf-8")

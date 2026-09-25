@@ -52,6 +52,9 @@ def test_capture_window_confirmation_reaches_the_written_report(run_setup, monke
     cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
 
     monkeypatch.setattr(cli.device, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(cli.device, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(cli.mitmproxy_capture, "run_capture_stage",
                         lambda *a, **kw: _hooked_capture_stage())
     try:
@@ -90,6 +93,9 @@ def test_capture_window_without_both_effects_leaves_the_verdict_alone(run_setup,
         return stage
 
     monkeypatch.setattr(cli.device, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(cli.device, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(cli.mitmproxy_capture, "run_capture_stage",
                         lambda *a, **kw: silent_window())
     cli.run(
@@ -123,6 +129,9 @@ def test_unhooked_capture_window_is_not_evaluated_at_all(run_setup, monkeypatch)
     cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
 
     monkeypatch.setattr(cli.device, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(cli.device, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(cli.mitmproxy_capture, "run_capture_stage",
                         lambda *a, **kw: unhooked_window())
     try:

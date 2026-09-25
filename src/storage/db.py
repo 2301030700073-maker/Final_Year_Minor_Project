@@ -121,6 +121,18 @@ class RunRecord(Base):
     # from a dirty working tree whose YAML is not recoverable from the commit, and a
     # derived value would be a plausible number standing in for an unobserved one.
     signature_corpus: Mapped[str | None] = mapped_column(String)
+    # ADR-0028: the device this run actually executed against, read once from the
+    # device itself (device.read_device_environment) - serial, API level, release,
+    # build type, debuggable flag, ABI, hardware and build fingerprint. A verdict
+    # is a function of the code, the rules (ADR-0022) and the environment; only
+    # the first two were recorded, so two rooted AVDs sharing a serial - API 33
+    # and API 34 both answer to emulator-5554 - produced runs that no stored field
+    # could tell apart. JSON rather than scalar columns by this table's rule of
+    # promoting only what a calibration query filters on; nothing filters on API
+    # level today. NULL on the runs that predate it and on any run that never
+    # touched a device - deliberately never backfilled, because the only copy of
+    # what a past run executed against was on a device since reconfigured.
+    device_environment: Mapped[dict | None] = mapped_column(JSON)
     target: Mapped[str | None] = mapped_column(String)
     # Authoritative app identity, denormalized from apks.package_name so a run
     # row carries it without the join. `target` above is an operator-supplied

@@ -204,6 +204,11 @@ def save_run(analysis_root: Path, apk_hash: str, run_id: str, run_data: dict) ->
             # value here (a run that predates the field), so it is stored as NULL
             # rather than re-derived - there is nothing to re-derive it from.
             signature_corpus=run_data.get("signature_corpus"),
+            # ADR-0028: the device environment the run executed against, written
+            # as read. None is a real value here (a run that predates the field,
+            # or one that never touched a device), so it is stored as NULL rather
+            # than reconstructed - there is nothing to reconstruct it from.
+            device_environment=run_data.get("device_environment"),
             target=run_data.get("target"),
             package_name=run_data.get("package_name"),
             # Item 1: surface the bundled-SDK qualifier on the denormalized row

@@ -336,6 +336,9 @@ def test_install_failure_preserves_static_report_and_exits_nonzero(run_setup, mo
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(device_mod, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: False)
     # synthetic bypass is computed before the device gate - keep it real/simple
@@ -385,6 +388,9 @@ def test_capture_names_the_real_setup_failure_instead_of_a_missing_device(run_se
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(device_mod, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
 
     def _refused(serial, apk, package_name=None):
         raise RuntimeError(
@@ -440,6 +446,9 @@ def test_no_device_setup_failure_preserves_static_report_and_exits_nonzero(run_s
         raise subprocess.CalledProcessError(1, ["adb", "devices"])
 
     monkeypatch.setattr(device_mod, "discover_device", _adb_daemon_unreachable)
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(device_mod, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(
         cli, "synthesize",
         lambda classification, action: SimpleNamespace(source="root", applied_hooks=[]),
@@ -486,6 +495,9 @@ def test_unexpected_dynamic_exception_preserves_static_report_and_exits_nonzero(
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(device_mod, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(
@@ -537,6 +549,9 @@ def test_logcat_capture_failure_preserves_static_report_and_exits_nonzero(run_se
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(device_mod, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(
@@ -593,6 +608,9 @@ def test_unknown_app_root_probe_confirms_in_report(run_setup, monkeypatch):
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(device_mod, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(
@@ -653,6 +671,9 @@ def test_unknown_app_confirmed_root_correlates_rather_than_being_skipped(
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(device_mod, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(
@@ -714,6 +735,9 @@ def test_unknown_app_with_no_confirmation_still_declines_to_correlate(
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(device_mod, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(
@@ -779,6 +803,9 @@ def test_a_no_internet_app_never_opens_a_capture_window(run_setup, monkeypatch):
         ),
     )
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(device_mod, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(device_mod, "clear_logcat", lambda serial: None)
@@ -859,6 +886,9 @@ def test_capture_window_runs_under_a_pinning_only_bypass(run_setup, monkeypatch)
     from common import StageResult
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(device_mod, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(device_mod, "clear_logcat", lambda serial: None)
@@ -922,6 +952,9 @@ def test_capture_window_stays_unhooked_when_no_ssl_bypass_was_attempted(run_setu
     from common import StageResult
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(device_mod, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(
         cli, "synthesize",
         lambda classification, action: SimpleNamespace(
@@ -969,6 +1002,9 @@ def test_capture_failure_footer_does_not_claim_dynamic_was_not_attempted(run_set
     from common import StageResult
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(device_mod, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(
@@ -1267,6 +1303,9 @@ def test_technology_check_raise_preserves_static_report_and_exits_nonzero(run_se
     from dynamic import device as device_mod
 
     monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    # ADR-0028: the run now reads the device environment from the same
+    # device it just resolved, so a faked device must fake this seam too.
+    monkeypatch.setattr(device_mod, "read_device_environment", lambda serial: {"serial": serial, "ro.build.version.sdk": "34", "ro.build.version.release": "14", "ro.build.type": "userdebug", "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64", "ro.hardware": "ranchu", "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64x:14/UE1A:userdebug/test-keys"})
     monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
     monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
     monkeypatch.setattr(

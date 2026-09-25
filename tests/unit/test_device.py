@@ -1200,3 +1200,87 @@ def test_ensure_frida_server_reprovisions_on_version_mismatch(monkeypatch, tmp_p
     assert any("nohup" in c for c in calls)
     # ...even though the binary is already present (present.returncode == 0).
     assert any("ls" in c for c in calls)
+
+
+# ── ADR-0028: reading the device environment a run records ──
+
+# `getprop`'s real shape, including one property this pipeline does not record -
+# the parse must not care which lines it keeps, and the reader must not carry
+# anything it did not ask for.
+_GETPROP = (
+    "[ro.build.version.sdk]: [34]\n"
+    "[ro.build.version.release]: [14]\n"
+    "[ro.build.type]: [userdebug]\n"
+    "[ro.debuggable]: [1]\n"
+    "[ro.product.cpu.abi]: [x86_64]\n"
+    "[ro.hardware]: [ranchu]\n"
+    "[ro.build.fingerprint]: [google/sdk_gphone64_x86_64/emu64x:14/UE1A.230829.036/1234567:userdebug/test-keys]\n"
+    "[persist.sys.timezone]: [UTC]\n"
+)
+
+
+def test_parse_getprop_reads_key_value_pairs(monkeypatch):
+    props = device._parse_getprop(_GETPROP)
+    assert props["ro.build.version.sdk"] == "34"
+    assert props["ro.build.type"] == "userdebug"
+    assert props["persist.sys.timezone"] == "UTC"
+
+
+def test_parse_getprop_keeps_a_value_that_contains_a_bracket(monkeypatch):
+    # Why the split is on the first `]: [` rather than on `[`/`]`: a value may
+    # contain a bracket, and a naive split truncates it into a plausible wrong
+    # answer rather than failing.
+    assert device._parse_getprop("[ro.foo]: [a]b]\n")["ro.foo"] == "a]b"
+
+
+def test_parse_getprop_ignores_lines_that_are_not_properties():
+    assert device._parse_getprop("getprop: not a property line\n\n") == {}
+
+
+def _fake_getprop(monkeypatch, stdout, returncode=0, stderr=""):
+    monkeypatch.setattr(device, "_require_adb", lambda: "adb")
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(
+            args=cmd, returncode=returncode, stdout=stdout, stderr=stderr,
+        ),
+    )
+
+
+def test_read_device_environment_records_the_serial_and_every_declared_property(monkeypatch):
+    # Pinned as a WHOLE dict, not per key: adding a property to
+    # _DEVICE_ENV_PROPERTIES without recording it here makes the recorded set and
+    # the guarded set disagree, which is the drift this test exists to catch.
+    _fake_getprop(monkeypatch, _GETPROP)
+    assert device.read_device_environment("emulator-5554") == {
+        "serial": "emulator-5554",
+        "ro.build.version.sdk": "34",
+        "ro.build.version.release": "14",
+        "ro.build.type": "userdebug",
+        "ro.debuggable": "1",
+        "ro.product.cpu.abi": "x86_64",
+        "ro.hardware": "ranchu",
+        "ro.build.fingerprint": (
+            "google/sdk_gphone64_x86_64/emu64x:14/UE1A.230829.036/1234567:userdebug/test-keys"
+        ),
+    }
+
+
+def test_read_device_environment_records_an_unreported_property_as_none(monkeypatch):
+    # A device that answers `getprop` but omits a property is recorded as not
+    # having reported it - a fact about that device, distinct from the whole
+    # environment being absent (which is how a run that used no device is stored).
+    _fake_getprop(monkeypatch, "[ro.build.type]: [user]\n")
+    env = device.read_device_environment("emulator-5554")
+    assert env["ro.build.type"] == "user"
+    assert env["ro.build.version.sdk"] is None
+
+
+def test_read_device_environment_raises_when_the_device_cannot_be_queried(monkeypatch):
+    # Deliberately not a silent None. A device whose shell cannot answer `getprop`
+    # is one whose `pm list packages` - the install verification seconds later -
+    # also cannot, so this belongs in the caller's device-failure handler, which
+    # records a failed stage loudly instead of an unrecorded environment.
+    _fake_getprop(monkeypatch, "", returncode=1, stderr="error: device offline")
+    with pytest.raises(RuntimeError, match="could not read the device environment"):
+        device.read_device_environment("emulator-5554")

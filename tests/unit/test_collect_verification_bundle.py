@@ -376,6 +376,25 @@ def test_the_summary_names_the_evidence_the_bundle_holds(tmp_path):
     assert "<apk_hash>" not in text, "a template string is not a path"
 
 
+def test_the_analysis_line_says_the_tree_does_not_travel(tmp_path):
+    """A1 excludes every bundle's analysis/ subtree; the line must not imply otherwise.
+
+    ADR-0037 named the path and stopped there, which reads as evidence the
+    reviewer can open. The deciding rule is .gitignore's, not the collector's."""
+    bundle.write_summary(
+        tmp_path, _summary_env(), _run_shape(0), _run_shape(0),
+        bundle.ShippedEvidence(analysis="analysis/abc123"),
+    )
+    line = [
+        ln for ln in (tmp_path / "SUMMARY.md").read_text(encoding="utf-8").splitlines()
+        if ln.startswith("- Decompiled evidence")
+    ][0]
+    assert "`analysis/abc123`" in line
+    assert "not committed" in line and "A1" in line, line
+    assert "git add -f" in line, "a reviewer needs the remedy, not just the exclusion"
+    assert "`cli_output.txt`" in line, "the committed set must be named"
+
+
 def test_the_summary_says_none_shipped_and_points_at_the_console(tmp_path):
     """The copies are conditional; so are the lines that describe them (ADR-0037).
 
@@ -387,13 +406,14 @@ def test_the_summary_says_none_shipped_and_points_at_the_console(tmp_path):
     )
     text = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
     assert "<apk_hash>" not in text
-    pointed = [
-        ln for ln in text.splitlines()
-        if ln.startswith("- This run's report") or ln.startswith("- Decompiled evidence")
-    ]
-    assert len(pointed) == 2, pointed
-    for ln in pointed:
-        assert "none shipped" in ln, ln
+    report_lines = [ln for ln in text.splitlines() if ln.startswith("- This run's report")]
+    analysis_lines = [ln for ln in text.splitlines() if ln.startswith("- Decompiled evidence")]
+    assert len(report_lines) == 1 and len(analysis_lines) == 1, (report_lines, analysis_lines)
+    # Two different words, because the two things differ: a report does travel with
+    # a pushed bundle, a decompiled tree does not (ADR-0038).
+    assert "none shipped" in report_lines[0], report_lines[0]
+    assert "none copied into this bundle" in analysis_lines[0], analysis_lines[0]
+    for ln in report_lines + analysis_lines:
         assert "cli_output.txt" in ln, "the reason must be reachable from the bundle"
 
 

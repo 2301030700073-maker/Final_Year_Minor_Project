@@ -391,10 +391,18 @@ def write_summary(
                 "history, deliberately: a stale report would read as this run's."
             )
         if shipped.analysis:
-            lines.append(f"- Decompiled evidence + metadata + run results: `{shipped.analysis}`")
+            lines.append(
+                f"- Decompiled evidence + metadata + run results: `{shipped.analysis}` - copied "
+                "into this bundle directory, and deliberately **not committed**: `.gitignore` "
+                "excludes every bundle's `analysis/` subtree (policy A1 - regenerable decompiler "
+                "output, duplicated once per bundle of the same APK). A pushed bundle therefore "
+                "carries `reports/`, this SUMMARY, `environment.json`, `pytest_output.txt`, "
+                "`cli_output.txt` and `calibration/*.md`; a reviewer who needs a file from here "
+                "should ask for it (`git add -f <path>`) rather than look for it."
+            )
         else:
             lines.append(
-                "- Decompiled evidence + metadata + run results: **none shipped** - "
+                "- Decompiled evidence + metadata + run results: **none copied into this bundle** - "
                 "`cli_output.txt` shows where the run stopped before producing them."
             )
     (bundle_dir / "SUMMARY.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -467,10 +475,14 @@ def main() -> int:
             print("  (note: no report path found in this run's output - not shipping stale prior reports)")
 
         # Pull in the full decompiled evidence (jadx sources, apktool output,
-        # metadata.json, run_*.json) so a mismatch between what a signature
-        # expects and what the real app contains can be diagnosed directly
-        # from the pushed bundle - no separate "please paste the code" round
-        # trip needed. Prefer the authoritative apk_hash read from the report
+        # metadata.json, run_*.json) BESIDE the report, for the run's local
+        # record: a mismatch between what a signature expects and what the real
+        # app contains can then be read from one directory. This tree does NOT
+        # travel - .gitignore excludes every bundle's analysis/ subtree (policy
+        # A1: regenerable output, duplicated once per bundle of the same APK), so
+        # a pushed bundle carries the report without it, and a reviewer who needs
+        # a file from here asks for it to be force-added. Prefer the
+        # authoritative apk_hash read from the report
         # above; fall back to hashing the input only when no report was produced
         # (correct for a plain .apk, which normalize passes through unchanged;
         # best-effort for a normalized input whose run failed before reporting).

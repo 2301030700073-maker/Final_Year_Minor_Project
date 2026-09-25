@@ -1,0 +1,19 @@
+                                                  Calibration Summary                                                   
+┏━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃          ┃ Tier 1        ┃ Tier 2        ┃               ┃           ┃   ┃            ┃              ┃ Excl          ┃
+┃ Category ┃ confirmation  ┃ precision     ┃ Tier 2 recall ┃ Tier 2 F1 ┃ n ┃ Excl no-GT ┃ Excl partial ┃ known-miss    ┃
+┡━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ root     │ 1.00 (75/75)  │ 1.00          │ 1.00          │ 1.00      │ 6 │ 4          │ 9            │ 2             │
+│ ssl      │ 1.00 (10/10)  │ 1.00          │ 1.00          │ 1.00      │ 4 │ 3          │ 12           │ 0             │
+└──────────┴───────────────┴───────────────┴───────────────┴───────────┴───┴────────────┴──────────────┴───────────────┘
+Calibration curve is a skeleton, not a statistically robust result - only 10 ground-truthed category-observations exist 
+across all known targets. Read bucket rates as directional at best, not as a reliable estimate of 
+confidence-vs-accuracy.
+Known miss: 2 excluded root negative(s) is/are NOT merely uncertifiable - ground truth says root-detection IS present in
+1c747b27b3547a8a8798a03128a7edd903a88e02dbcc5b1b2dbf14db69d7e212, 
+08e94c06794791f7cf40e50b26dac4c4c8dd561b10c7dd4ce5c1dd8ae93acb7d, the prediction was NEITHER, and the exclusion means it
+is not counted as a false negative. The root recall above is therefore measured over the certifiable subset only, not 
+over every known root-positive target.
+
+Calibration report: outputs/reports/calibration/20260925T124216Z.md
+

@@ -150,7 +150,7 @@ Expected: same behaviour as recipe D, additionally pinned to the `emulator-5554`
 | `AndroGoat.apk` | `owasp.sat.agoat` | true / true | `BOTH` |
 | `RS_CertPinning.apk` | `com.redshift.rs_certpinning_bypass` | null / true | `SSL_ONLY` |
 | `InsecureBankv2.apk` | `com.android.insecurebankv2` | true / null | `ROOT_ONLY` |
-| `RS_Vapour.apk` | `com.redshift.rs_vapourtraining` | true / false | `ROOT_ONLY` |
+| `RS_Vapour.apk` | `com.redshift.rs_vapourtraining` | true / false | `NEITHER` (root 0.30 — the other named known miss, excluded from recall; see `config/ground_truth.yaml`) |
 | `propertyguru-2026-5-4.apk` | `com.allproperty.android.consumer.my` | true / null | `NEITHER` (root 0.20 — coverage-limited FN; use `--force-dynamic`) |
 
 Only **UnCrackable Level 1–3** are committed to the repo; the rest are supplied separately (see section 5) — drop them into `APK_Test/` to reproduce their runs. A `null` ground-truth side is a *documented lower bound* (that APK's decompile was partial), **not** a confident negative — see `config/ground_truth.yaml`. `--target` is optional (auto-derived from the APK's manifest package); pass it to pin the success-check/bypass module explicitly.

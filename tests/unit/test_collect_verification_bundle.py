@@ -413,8 +413,44 @@ def test_the_summary_says_none_shipped_and_points_at_the_console(tmp_path):
     # a pushed bundle, a decompiled tree does not (ADR-0038).
     assert "none shipped" in report_lines[0], report_lines[0]
     assert "none copied into this bundle" in analysis_lines[0], analysis_lines[0]
+    # No notes were passed, so each arm names that as a collector defect rather than
+    # pointing at an explanation that is not there (ADR-0039).
     for ln in report_lines + analysis_lines:
-        assert "cli_output.txt" in ln, "the reason must be reachable from the bundle"
+        assert "no reason" in ln and "defect in the collector" in ln, ln
+
+
+def test_the_absent_arms_point_at_notes_the_same_document_carries(tmp_path):
+    """ADR-0039: the pointer's target is in the artefact being read.
+
+    cli_output.txt is the *pipeline's* console. When the collector is the reason
+    nothing was copied, that file records a successful run and no reason at all,
+    so the arm must not send the reviewer there for one."""
+    bundle.write_summary(
+        tmp_path, _summary_env(), _run_shape(0), _run_shape(0),
+        bundle.ShippedEvidence(notes=(
+            "report for run deadbeef was expected from this run but is not under "
+            "outputs/reports - not copying any report",
+            "expected outputs/analysis/abc123 from this run but it does not exist "
+            "(sha256 of x.apk - no report was found to key it) - not copying any decompiled evidence",
+        )),
+    )
+    text = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
+    assert "## Collector notes" in text, text
+    assert "not copying any report" in text
+    assert "no report was found to key it" in text, "the hash basis is the point of this note"
+    for start in ("- This run's report", "- Decompiled evidence"):
+        ln = [l for l in text.splitlines() if l.startswith(start)][0]
+        assert "*Collector notes* below" in ln, ln
+    assert text.index("## Collector notes") > text.index("- Decompiled evidence"), "below means below"
+
+
+def test_a_bundle_with_no_notes_renders_no_notes_section(tmp_path):
+    """An empty header would assert a record that does not exist."""
+    bundle.write_summary(
+        tmp_path, _summary_env(), _run_shape(0), _run_shape(0),
+        bundle.ShippedEvidence(report="reports/h/r.md"),
+    )
+    assert "## Collector notes" not in (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
 
 
 # --- the outcome fold -------------------------------------------------------

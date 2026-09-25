@@ -57,6 +57,11 @@ class ShippedEvidence:
     calibration_markdown: str | None = None
     report: str | None = None
     analysis: str | None = None
+    # The collector's own record of the branches it took (ADR-0039). Rendered as a
+    # section of the summary, so the absent-evidence arms can point at something the
+    # reader is already holding - instead of at cli_output.txt, which holds the
+    # pipeline's console and says nothing about the collector's decision.
+    notes: tuple[str, ...] = ()
 
 
 def working_tree_dirty(repo_root: Path = REPO_ROOT) -> bool | None:
@@ -380,15 +385,26 @@ def write_summary(
         # ADR-0037: name what this bundle holds, never a pattern. The copies
         # above are conditional (no run id / no fresh report / no analysis dir),
         # so these lines render the three states as three - a shipped path, or a
-        # plain statement that nothing was shipped with a pointer to the
-        # pipeline's own console output, which IS in this bundle and says why.
+        # plain statement that nothing was copied.
+        #
+        # ADR-0039: an absent arm points at `shipped.notes`, which this same
+        # document carries below. It used to point at cli_output.txt - but that
+        # file is the PIPELINE's console, and when the collector is the reason
+        # nothing was copied it records a successful run and no reason at all.
         if shipped.report:
             lines.append(f"- This run's report: `{shipped.report}`")
+        elif shipped.notes:
+            lines.append(
+                "- This run's report: **none shipped** - the collector's reason for copying "
+                "nothing is in *Collector notes* below. A run that produced no report ships "
+                "no history, deliberately: a stale report would read as this run's."
+            )
         else:
             lines.append(
-                "- This run's report: **none shipped** - `cli_output.txt` carries the "
-                "pipeline's own account of why. A run that produced no report ships no "
-                "history, deliberately: a stale report would read as this run's."
+                "- This run's report: **none shipped**, and the collector recorded no reason "
+                "- that is a defect in the collector, not a fact about the run. Every branch "
+                "that copies nothing is meant to note why; the console that ran this printed "
+                "it, and `cli_output.txt` here holds the pipeline's own output."
             )
         if shipped.analysis:
             lines.append(
@@ -400,11 +416,23 @@ def write_summary(
                 "`cli_output.txt` and `calibration/*.md`; a reviewer who needs a file from here "
                 "should ask for it (`git add -f <path>`) rather than look for it."
             )
+        elif shipped.notes:
+            lines.append(
+                "- Decompiled evidence + metadata + run results: **none copied into this "
+                "bundle** - the collector's reason is in *Collector notes* below; `cli_output.txt` "
+                "here holds the pipeline's own console output for this run."
+            )
         else:
             lines.append(
-                "- Decompiled evidence + metadata + run results: **none copied into this bundle** - "
-                "`cli_output.txt` shows where the run stopped before producing them."
+                "- Decompiled evidence + metadata + run results: **none copied into this bundle**, "
+                "and the collector recorded no reason - that is a defect in the collector, not a "
+                "fact about the run."
             )
+    if shipped.notes:
+        lines.append("")
+        lines.append("## Collector notes")
+        lines.append("")
+        lines.extend(f"- {n}" for n in shipped.notes)
     (bundle_dir / "SUMMARY.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -431,6 +459,15 @@ def main() -> int:
     pipeline_result = None
     report_shipped: str | None = None
     analysis_shipped: str | None = None
+    # ADR-0039: every branch that copies nothing records why. Printed here, and
+    # carried by the summary - the console is not in the bundle, so a reason only
+    # the console sees is a reason the reviewer does not have.
+    collector_notes: list[str] = []
+
+    def note(msg: str) -> None:
+        collector_notes.append(msg)
+        print(f"  (note: {msg})")
+
     if args.apk:
         print(f"Running the real pipeline against {args.apk} ...")
         pipeline_result = run_real_pipeline(args.apk, args.justification, args.skip_dynamic, args.target)
@@ -465,14 +502,17 @@ def main() -> int:
             fresh_report = _find_fresh_report(fresh_run_id, reports_root)
             if fresh_report is not None:
                 apk_hash = fresh_report.parent.name  # authoritative: the dir the pipeline wrote
+                hash_basis = "the hash this run's report was written under"
                 dest_dir = bundle_dir / "reports" / apk_hash
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(fresh_report, dest_dir / f"{fresh_run_id}.md")
                 report_shipped = f"reports/{apk_hash}/{fresh_run_id}.md"
             else:
-                print(f"  (note: report for run {fresh_run_id} expected from this run but not found under {reports_root} - not shipping any reports)")
+                note(f"report for run {fresh_run_id} was expected from this run but is not under "
+                     f"{reports_root.relative_to(REPO_ROOT)} - not copying any report")
         else:
-            print("  (note: no report path found in this run's output - not shipping stale prior reports)")
+            note("no report path was found in this run's output - not copying any prior report, "
+                 "which would read as this run's")
 
         # Pull in the full decompiled evidence (jadx sources, apktool output,
         # metadata.json, run_*.json) BESIDE the report, for the run's local
@@ -488,12 +528,16 @@ def main() -> int:
         # best-effort for a normalized input whose run failed before reporting).
         if apk_hash is None:
             apk_hash = _sha256_of(Path(args.apk))
+            hash_basis = f"sha256 of {args.apk} - no report was found to key it"
         analysis_dir = REPO_ROOT / "outputs" / "analysis" / apk_hash
         if analysis_dir.exists():
             shutil.copytree(analysis_dir, bundle_dir / "analysis" / apk_hash, dirs_exist_ok=True)
             analysis_shipped = f"analysis/{apk_hash}"
         else:
-            print(f"  (note: expected {analysis_dir} from this run but it doesn't exist - ingest may have failed before producing it)")
+            # The cause is NOT asserted: for a normalized input the raw hash above is the
+            # wrong key, so this path can be missing on a run that succeeded end to end.
+            note(f"expected outputs/analysis/{apk_hash} from this run but it does not exist ({hash_basis}) "
+                 "- not copying any decompiled evidence")
     else:
         print("No --apk given - skipping the real pipeline run (environment + tests only).")
 
@@ -515,10 +559,9 @@ def main() -> int:
     write_summary(
         bundle_dir, environment, test_result, pipeline_result,
         ShippedEvidence(
-            calibration_markdown=calibration_markdown,
-            report=report_shipped,
-            analysis=analysis_shipped,
-        ),
+                calibration_markdown=calibration_markdown, report=report_shipped,
+                analysis=analysis_shipped, notes=tuple(collector_notes),
+            ),
     )
 
     print(f"\nBundle written to: {bundle_dir}")

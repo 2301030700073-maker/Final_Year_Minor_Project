@@ -67,7 +67,7 @@ This procedure is **the same for both sides** — whoever hits the rejection run
 
 1. **Reference-machine collaborator** does the current phase's handoff doc (`docs/plans/handoff/phase-N-handoff.md`): pulls, does any manual verification it calls for, runs `scripts/collect_verification_bundle.py`, reviews the bundle's `SUMMARY.md`, pushes the bundle (and any findings doc) back.
 2. **Collaborator → primary developer side**: says the bundle is pushed (however you two actually communicate — call, message, whatever's already working). This is the *only* status update that means anything — see Ground Rules below.
-3. **Primary developer side**: pulls, analyzes the actual pushed evidence (reports, run JSON, decompiled source, logs — not a summary of a summary), makes evidence-backed fixes if needed, verifies those fixes locally where possible before pushing, commits, pushes.
+3. **Primary developer side**: pulls, analyzes the actual pushed evidence (the `reports/` markdown, `cli_output.txt`, `pytest_output.txt`, `environment.json` and the calibration markdown — not a summary of a summary), makes evidence-backed fixes if needed, verifies those fixes locally where possible before pushing, commits, pushes. The decompiled tree and the run JSON do **not** travel: `.gitignore` excludes every bundle's `analysis/` subtree (policy A1), so a file that is needed from it must be asked for and force-added (`git add -f <path>`) — the bundle's own `SUMMARY.md` states the same split.
 4. **Primary developer side → collaborator**: says what changed and gives the exact next command to run — not "try it again," an actual copy-pasteable command.
 5. Back to step 1.
 

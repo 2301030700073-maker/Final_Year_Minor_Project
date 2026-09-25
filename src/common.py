@@ -789,6 +789,15 @@ class CorrelationResult:
     # ADR-0006 forbids. It keeps matches=False (static never predicted the
     # positive, so it is not agreement) but stays out of the mismatch tally.
     coverage_confirmed: list[str] = field(default_factory=list)
+    # ADR-0031: a category that AGREED, recorded rather than implied. The three
+    # lists above are the disagreement / filled-gap / inconclusive states, so
+    # agreement had no representation except their emptiness - and an empty list
+    # is indistinguishable from a category the section never looked at. One
+    # sentence per agreeing category, covering both agreement cells: static
+    # predicted and dynamic confirmed the bypass, and the non-claim agreement
+    # where neither engine asserted the category is present. Additive: the other
+    # lists keep their meaning, so no existing reader interpretation changes.
+    matched: list[str] = field(default_factory=list)
 
 
 class SuccessCheck(Protocol):

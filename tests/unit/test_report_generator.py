@@ -3354,3 +3354,63 @@ def test_a_capture_with_no_attribution_key_renders_the_weaker_wording(tmp_path):
     body = _render_liveness(tmp_path, _flows_stage(_drive_record(True)), "attr-absent")
     assert "not by itself proof that this app produced it" in body
     assert "did NOT reach the proxy" not in body
+
+
+def test_generate_report_renders_matched_bullets_and_scopes_the_verdict(tmp_path):
+    # ADR-0031, render side, on the UnCrackable Level 1 shape: root agreed, ssl
+    # was inconclusive. Two things must hold together - the headline scopes its
+    # claim to the categories it is about ("dynamic verification was inconclusive"
+    # was false run-wide, dynamic having concluded on root), and the agreement is
+    # stated rather than left to the emptiness of the other lists.
+    correlation = CorrelationResult(
+        matches=False,
+        mismatches=[],
+        unverified=[
+            "static analysis was coverage-limited on SSL-pinning (unknown, not "
+            "absent) and dynamic verification could not confirm a bypass either - "
+            "neither engine could certify this category, so it is inconclusive, "
+            "not an agreement"
+        ],
+        matched=[
+            "static analysis predicted root-detection present and the dynamic "
+            "bypass confirmed it - the two engines agree"
+        ],
+    )
+    report_path = generate_report(
+        run_id="matched", apk_hash="mtc002", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "mtc002"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=correlation,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+
+    assert "- Verdict: UNVERIFIED (dynamic verification was inconclusive for the categories listed below" in content
+    # The unscoped claim is gone, and the agreement is rendered.
+    assert "- Verdict: UNVERIFIED (dynamic verification was inconclusive - not a disagreement)" not in content
+    assert "- MATCH: static analysis predicted root-detection present and the dynamic bypass confirmed it" in content
+    # ...without upgrading the run: one settled category is not a run-level MATCH.
+    assert "- Verdict: MATCH" not in content
+
+
+def test_generate_report_renders_why_a_match_matched(tmp_path):
+    # A MATCH verdict previously rendered with no bullets at all: agreement
+    # represented by absence, the same defect seen from the other side.
+    correlation = CorrelationResult(
+        matches=True, mismatches=[], unverified=[],
+        matched=[
+            "static analysis found no root-detection and dynamic verification made "
+            "no contrary finding - agreement by non-claim, not a confirmed absence",
+            "static analysis found no SSL-pinning and dynamic verification made no "
+            "contrary finding - agreement by non-claim, not a confirmed absence",
+        ],
+    )
+    report_path = generate_report(
+        run_id="matchexplained", apk_hash="mtc003", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "mtc003"}, "package": {"package_name": "com.example.app"}},
+        classification=_classification(), verification=None, correlation=correlation,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+
+    assert "- Verdict: MATCH (static and dynamic agree)" in content
+    assert content.count("- MATCH: ") == 2

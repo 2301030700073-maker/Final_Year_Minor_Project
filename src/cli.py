@@ -4146,6 +4146,7 @@ def _correlation_from_json(c) -> CorrelationResult | None:
         mismatches=c.get("mismatches") or [],
         unverified=c.get("unverified") or [],
         coverage_confirmed=c.get("coverage_confirmed") or [],
+        matched=c.get("matched") or [],
     )
 
 

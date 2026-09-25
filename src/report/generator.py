@@ -579,7 +579,7 @@ string in this APK; only its *ownership* is unverified.
 {% elif correlation.coverage_confirmed -%}
 - Verdict: COVERAGE-CONFIRMED (dynamic confirmed a bypass in a category static was coverage-limited on - a filled gap, not a disagreement)
 {% elif correlation.unverified -%}
-- Verdict: UNVERIFIED (dynamic verification was inconclusive - not a disagreement)
+- Verdict: UNVERIFIED (dynamic verification was inconclusive for the categories listed below - not a disagreement)
 {% else -%}
 - Verdict: MATCH (static and dynamic agree)
 {% endif %}
@@ -591,6 +591,9 @@ string in this APK; only its *ownership* is unverified.
 {% endfor %}
 {% for u in correlation.unverified -%}
 - UNVERIFIED: {{ u }}
+{% endfor %}
+{% for a in correlation.matched -%}
+- MATCH: {{ a }}
 {% endfor %}
 {% elif correlation_skip_reason -%}
 - Not evaluated ({{ correlation_skip_reason }}).

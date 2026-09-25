@@ -317,3 +317,136 @@ def test_correlate_both_predicted_and_confirmed_is_a_match():
     assert result.mismatches == []
     assert result.unverified == []
     assert result.coverage_confirmed == []
+
+
+# -- ADR-0031: agreement is recorded per category, never left as an empty list --
+
+
+def test_a_confirmed_bypass_is_recorded_as_a_per_category_match():
+    # UnCrackable Level 1, 2026-09-25: root predicted and confirmed, ssl
+    # coverage-limited and untested. The section rendered UNVERIFIED - the ssl
+    # state - and said nothing at all about root, which had agreed on the
+    # strongest evidence the pipeline produces.
+    classification = ClassificationResult(
+        action=Action.ROOT_ONLY, root=DETECTED, ssl=COVERAGE_LIMITED
+    )
+    verification = VerificationResult(root_bypassed=True, ssl_bypassed=None, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert len(result.matched) == 1
+    assert "root-detection" in result.matched[0]
+    assert "confirmed it" in result.matched[0]
+    # The rest of the record is unmoved: ssl is still the inconclusive category,
+    # and no run-level agreement is fabricated.
+    assert len(result.unverified) == 1 and "SSL-pinning" in result.unverified[0]
+    assert result.mismatches == [] and result.coverage_confirmed == []
+    assert result.matches is False
+
+
+def test_agreement_by_non_claim_is_recorded_but_never_as_a_confirmed_absence():
+    # Neither category predicted, coverage complete, dynamic no contrary finding.
+    # `bypassed is None` is ALSO the state of a category the dynamic stage never
+    # attempted (a bypass runs only for a predicted category) or ran without
+    # reaching (RESID-6F), so the sentence must not claim dynamic confirmed
+    # anything - that would be a fresh instance of the class this ADR fixes.
+    classification = _classification(root_detected=False, ssl_detected=False)
+    verification = VerificationResult(root_bypassed=None, ssl_bypassed=None, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert len(result.matched) == 2
+    for entry in result.matched:
+        assert "no contrary finding" in entry
+        assert "non-claim" in entry
+        assert "not a confirmed absence" in entry
+    assert result.matches is True
+    assert result.mismatches == [] and result.unverified == []
+
+
+def test_a_coverage_limited_negative_is_never_recorded_as_agreement():
+    # The sibling cell: same (False, None) shape, but coverage was incomplete, so
+    # static declined to certify the negative. The gate is the coverage flag, not
+    # the bypass value - this must land in unverified, never in matched.
+    classification = ClassificationResult(
+        action=Action.NEITHER, root=COVERAGE_LIMITED, ssl=COVERAGE_LIMITED
+    )
+    verification = VerificationResult(root_bypassed=None, ssl_bypassed=None, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert result.matched == []
+    assert len(result.unverified) == 2
+    assert result.matches is False
+
+
+def test_a_mismatch_leaves_the_agreeing_category_in_matched():
+    # Per-category, not per-run: root agreed and ssl disagreed, so the record
+    # carries both rather than the run-level MISMATCH verdict hiding the
+    # agreement - the same defect from the other side.
+    classification = _classification(root_detected=True, ssl_detected=True)
+    verification = VerificationResult(root_bypassed=True, ssl_bypassed=False, evidence_lines={})
+
+    result = correlate(classification, verification)
+
+    assert len(result.matched) == 1 and "root-detection" in result.matched[0]
+    assert len(result.mismatches) == 1 and "SSL-pinning" in result.mismatches[0]
+    assert result.matches is False
+
+
+def test_every_category_lands_in_exactly_one_list_across_the_whole_table():
+    # The ADR-0031 completeness property, swept over all 81 cells of the table
+    # (3 verdict shapes x 3 verdict shapes x 3 root bypass values x 3 ssl bypass
+    # values): each category is named by EXACTLY ONE of the four lists. Before
+    # this ADR the two agreement cells wrote nothing, which is what made "agreed"
+    # and "never looked at" the same bytes; the sweep is what keeps a future arm
+    # from silently double-writing or dropping a category.
+    verdicts = [NOT_DETECTED, COVERAGE_LIMITED, DETECTED]
+    for root_v in verdicts:
+        for ssl_v in verdicts:
+            for rb in (True, False, None):
+                for sb in (True, False, None):
+                    cls = ClassificationResult(
+                        action=Action.NEITHER, root=root_v, ssl=ssl_v
+                    )
+                    ver = VerificationResult(
+                        root_bypassed=rb, ssl_bypassed=sb, evidence_lines={}
+                    )
+                    result = correlate(cls, ver)
+                    lists = {
+                        "mismatches": result.mismatches,
+                        "unverified": result.unverified,
+                        "coverage_confirmed": result.coverage_confirmed,
+                        "matched": result.matched,
+                    }
+                    where = {}
+                    for name, entries in lists.items():
+                        for entry in entries:
+                            for cat, token in (("root", "root-detection"), ("ssl", "SSL-pinning")):
+                                if token in entry:
+                                    where.setdefault(cat, []).append(name)
+                    cell = (root_v.detected, root_v.coverage_limited, rb,
+                            ssl_v.detected, ssl_v.coverage_limited, sb)
+                    assert sorted(where) == ["root", "ssl"], (cell, where)
+                    for cat, names in where.items():
+                        assert len(names) == 1, (cell, cat, names)
+
+
+def test_regenerated_correlation_carries_the_agreement_and_never_guesses_one():
+    # REGEN-FIELDLOSS1: a field the reconstructor does not read is a field a
+    # regenerated report silently loses - and a row stored before the field
+    # existed reports [] rather than a fabricated agreement.
+    from cli import _correlation_from_json
+
+    stored = {
+        "matches": False,
+        "mismatches": [],
+        "unverified": ["static analysis was coverage-limited on SSL-pinning"],
+        "coverage_confirmed": [],
+        "matched": ["static analysis predicted root-detection present and the dynamic bypass confirmed it"],
+    }
+    rebuilt = _correlation_from_json(stored)
+    assert rebuilt.matched == stored["matched"]
+    assert rebuilt.unverified == stored["unverified"]
+    legacy = {k: v for k, v in stored.items() if k != "matched"}
+    assert _correlation_from_json(legacy).matched == []

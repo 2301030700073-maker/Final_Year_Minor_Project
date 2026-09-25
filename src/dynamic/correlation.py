@@ -9,6 +9,7 @@ def correlate(classification: ClassificationResult, verification: VerificationRe
     mismatches = []
     unverified = []
     coverage_confirmed = []
+    matched = []
 
     root_predicted = classification.root.detected
     if root_predicted and verification.root_bypassed is False:
@@ -69,9 +70,30 @@ def correlate(classification: ClassificationResult, verification: VerificationRe
             "dynamic verification could not confirm a bypass either - neither engine could certify "
             "this category, so it is inconclusive, not an agreement"
         )
-    # not predicted + CONFIDENT negative + bypass None: static confidently said
-    # absent and dynamic never confirmed anything - genuine agreement by non-claim
-    # (both point to "not present"), so no arm fires and matches stays True.
+    # ADR-0031: the two agreement cells, which before this ADR were represented
+    # only by the ABSENCE of entries - and an empty list is indistinguishable
+    # from a category nothing looked at.
+    if root_predicted and verification.root_bypassed:
+        # The confirmation case: static predicted root and the dynamic bypass
+        # confirmed it. No arm in this block tests this cell (every one tests
+        # False or None), so a run whose root agreed wrote nothing about it. On
+        # UnCrackable Level 1 (2026-09-25) the section rendered UNVERIFIED - the
+        # ssl state - with no mention of root, which had agreed on the strongest
+        # evidence the pipeline produces.
+        matched.append(
+            "static analysis predicted root-detection present and the dynamic bypass confirmed it - the two engines agree"
+        )
+    if (not root_predicted and verification.root_bypassed is None
+            and not classification.root.coverage_limited):
+        # Not predicted + CONFIDENT negative + bypass None: static certified the
+        # absence and dynamic made no contrary finding - agreement by non-claim
+        # (both point to "not present"). It is NOT a confirmed absence: `bypassed
+        # is None` covers a category the dynamic stage never attempted (a bypass
+        # runs only for a predicted one) as well as one it ran without reaching
+        # (RESID-6F), so this sentence must never say dynamic confirmed anything.
+        matched.append(
+            "static analysis found no root-detection and dynamic verification made no contrary finding - agreement by non-claim, not a confirmed absence"
+        )
 
     ssl_predicted = classification.ssl.detected
     if ssl_predicted and verification.ssl_bypassed is False:
@@ -123,8 +145,19 @@ def correlate(classification: ClassificationResult, verification: VerificationRe
             "dynamic verification could not confirm a bypass either - neither engine could certify "
             "this category, so it is inconclusive, not an agreement"
         )
-    # not predicted + CONFIDENT negative + SSL bypass None: genuine agreement by
-    # non-claim (both point to "not present"), so no arm fires and matches stays True.
+    # ADR-0031: the SSL mirror of the two agreement cells above.
+    if ssl_predicted and verification.ssl_bypassed:
+        matched.append(
+            "static analysis predicted SSL-pinning present and the dynamic bypass confirmed it - the two engines agree"
+        )
+    if (not ssl_predicted and verification.ssl_bypassed is None
+            and not classification.ssl.coverage_limited):
+        # Same non-claim cell as root: see the note there - the wording must not
+        # claim a confirmed absence, because `bypassed is None` is also the state
+        # of a category dynamic never attempted.
+        matched.append(
+            "static analysis found no SSL-pinning and dynamic verification made no contrary finding - agreement by non-claim, not a confirmed absence"
+        )
 
     # matches is True ONLY on full agreement. Neither an unverified prediction
     # (RESID-6F - static predicted, dynamic could not test) nor a coverage-
@@ -136,5 +169,5 @@ def correlate(classification: ClassificationResult, verification: VerificationRe
     return CorrelationResult(
         matches=len(mismatches) == 0 and len(unverified) == 0 and len(coverage_confirmed) == 0,
         mismatches=mismatches, unverified=unverified,
-        coverage_confirmed=coverage_confirmed,
+        coverage_confirmed=coverage_confirmed, matched=matched,
     )

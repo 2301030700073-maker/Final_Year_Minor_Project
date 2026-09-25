@@ -100,10 +100,15 @@ the same trigger ADR-0008's coverage map would have to pass.
 ## Consequences
 
 - A report gains a device line. Where the field is present it names the serial,
-  the release and API level, the build type and debuggable flag, the ABI, and the
-  hardware; where it is absent it states which of the two absences it is - the run
-  predates this ADR, or the run never used a device (`--skip-dynamic` with no
-  capture). Those are two different facts and the line never collapses them.
+  the release and API level, the build type and debuggable flag, the ABI, the
+  hardware and the build fingerprint. Where it is absent the line names **both**
+  possible causes - the run predates this ADR, or it never resolved a device -
+  and asserts neither, because the stored row cannot tell them apart: a run that
+  skipped dynamic and a run from before the column both carry NULL, and only the
+  second of those is a date. Claiming "used no device" would be a guess about a
+  stored run, which is the class of statement this project's reports do not make.
+  A property the device reported as empty is rendered "not reported" inside the
+  line rather than dropped - a fact about that device, not about the run.
 - Regeneration reads it from the row, like the corpus and the obfuscation rule, so
   a refreshed report keeps the environment its row holds.
 - **`environment.json` is deliberately left alone.** The row is the record; a

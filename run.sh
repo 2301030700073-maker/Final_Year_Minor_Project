@@ -86,26 +86,41 @@ else
 fi
 
 # ── Step 4: Frida-server on emulator ──
+# Both paths belong to the pipeline, not to this script: src/dynamic/device.py defines
+# _FRIDA_SERVER_DEVICE (/data/local/tmp/frida-server) and _FRIDA_SERVER_LOCAL
+# (tools/frida-server-16.7.19-x86_64). This step used to carry its own copies of each
+# and had drifted from both. It probed the device at /data/local/tmp/frida-server-16 -
+# a path nothing in the project writes - so it never saw a server verify-device had
+# already provisioned; and it read the downloader's /tmp/frida-server-16.7.19-android-x86_64,
+# which tools/download_frida_server.sh deletes immediately after copying the binary into
+# tools/. Under `set -e` the resulting base64 failure aborted the script - but not before
+# the remote `base64 -d >` had created a 0-byte /data/local/tmp/frida-server-16 on the
+# device, and the `echo` at the end of that branch would have reported that empty file
+# as a successful push (measured 2026-09-25 on emulator-5554/API 34: the 0-byte file was
+# left behind with the real 114 MB binary sitting at the canonical path beside it).
+# Push the vendored copy with `adb push` - the same binary to the same destination
+# device.py uses - and gate the PASS on the push having actually succeeded.
 echo ""
 echo "─── 4. Frida-server on emulator ───"
-SERVER_VER=$(adb shell "/data/local/tmp/frida-server-16 --version" 2>/dev/null | tr -d '\r' || echo "not found")
+FRIDA_SERVER_LOCAL="tools/frida-server-16.7.19-x86_64"
+FRIDA_SERVER_DEVICE="/data/local/tmp/frida-server"
+SERVER_VER=$(adb shell "$FRIDA_SERVER_DEVICE --version" 2>/dev/null | tr -d '\r' || echo "not found")
 if [ "$SERVER_VER" = "$FRIDA_VER" ]; then
     echo "  $PASS  frida-server-$SERVER_VER on emulator"
-elif [ -f "/tmp/frida-server-16.7.19-android-x86_64" ]; then
-    echo "  $FIX  frida-server version mismatch or missing — pushing..."
-    base64 /tmp/frida-server-16.7.19-android-x86_64 | adb shell "base64 -d > /data/local/tmp/frida-server-16" 2>/dev/null
-    adb shell "chmod 755 /data/local/tmp/frida-server-16" 2>/dev/null
-    echo "  $PASS  Pushed frida-server-16"
-elif [ -f "tools/download_frida_server.sh" ]; then
-    echo "  $FIX  Downloading frida-server..."
-    bash tools/download_frida_server.sh
-    base64 /tmp/frida-server-16.7.19-android-x86_64 | adb shell "base64 -d > /data/local/tmp/frida-server-16" 2>/dev/null
-    adb shell "chmod 755 /data/local/tmp/frida-server-16" 2>/dev/null
-    echo "  $PASS  Pushed frida-server-16"
 else
-    echo "  $FAIL  No frida-server binary found"
-    echo "         Run: bash tools/download_frida_server.sh"
-    ALL_OK=false
+    if [ ! -f "$FRIDA_SERVER_LOCAL" ]; then
+        echo "  $FIX  frida-server binary not vendored — downloading..."
+        bash tools/download_frida_server.sh
+    fi
+    echo "  $FIX  frida-server version mismatch or missing — pushing..."
+    if adb push "$FRIDA_SERVER_LOCAL" "$FRIDA_SERVER_DEVICE" >/dev/null 2>&1 \
+       && adb shell "chmod 755 $FRIDA_SERVER_DEVICE" 2>/dev/null; then
+        echo "  $PASS  Pushed frida-server"
+    else
+        echo "  $FAIL  Push failed"
+        echo "         Run: bash tools/download_frida_server.sh"
+        ALL_OK=false
+    fi
 fi
 
 # ── Step 5: Start frida-server ──
@@ -113,7 +128,7 @@ if $ALL_OK; then
     echo ""
     echo "─── 5. Start frida-server ───"
     adb root 2>/dev/null
-    adb exec-out '/data/local/tmp/frida-server-16 -l 0.0.0.0:27042 > /dev/null 2>&1 &' </dev/null 2>/dev/null
+    adb exec-out "$FRIDA_SERVER_DEVICE -l 0.0.0.0:27042 > /dev/null 2>&1 &" </dev/null 2>/dev/null
     sleep 2
     if adb shell "netstat -tlnp 2>/dev/null | grep -q 27042" 2>/dev/null; then
         echo "  $PASS  frida-server listening on 0.0.0.0:27042"

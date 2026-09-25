@@ -200,6 +200,52 @@ def test_an_edit_to_a_tracked_file_is_dirty(tmp_path):
     assert bundle.working_tree_dirty(repo) is True
 
 
+def test_a_tracked_change_outside_the_code_dirs_is_dirty_and_the_line_says_so(tmp_path):
+    """The tracked half is repo-wide (ADR-0035); the line must not name a scope it lacks.
+
+    The sibling test above edits a file INSIDE CODE_PATHSPEC, so it is satisfied by
+    either reading. This one edits only tests/, which is tracked but outside the
+    pathspec: the verdict must still be dirty (a modified test file changes what
+    "all tests passed" means), and the rendered line must not tell the reader the
+    change is under src/, config/ or scripts/ - the falsified claim."""
+    repo = _committed_repo(tmp_path)
+    (repo / "tests").mkdir(exist_ok=True)
+    (repo / "tests" / "b.py").write_text("x = 1\n", encoding="utf-8")
+    _git(repo, "add", "tests/b.py")
+    _git(repo, "commit", "-qm", "a tracked test file")
+    (repo / "tests" / "b.py").write_text("x = 2\n", encoding="utf-8")
+    assert bundle.working_tree_dirty(repo) is True
+
+    env = _summary_env()
+    env["working_tree_dirty"] = True
+    bundle.write_summary(tmp_path, env, _run_shape(0), None)
+    line = [
+        ln for ln in (tmp_path / "SUMMARY.md").read_text(encoding="utf-8").splitlines()
+        if ln.startswith("Working tree")
+    ][0]
+    assert "uncommitted changes under src/, config/ or scripts/" not in line, (
+        f"the change is under tests/; the line claims a location: {line}"
+    )
+    assert not line.startswith("Working tree clean (code under"), (
+        f"the label asserts a scope the tracked check does not have: {line}"
+    )
+    assert "anywhere" in line, f"the tracked half must be stated as repo-wide: {line}"
+
+
+def test_the_summary_reads_the_key_the_environment_writes():
+    """A renamed provenance key must move in both places or the summary reads None.
+
+    `write_summary` uses `environment.get(...)`, so a producer/consumer drift does
+    not raise - it silently renders "unknown". Pin the two literals together."""
+    src = (Path(__file__).resolve().parents[2] / "scripts"
+           / "collect_verification_bundle.py").read_text(encoding="utf-8")
+    written = re.search(r'"working_tree_dirty[a-z_]*":\s*working_tree_dirty\(\)', src)
+    assert written, "collect_environment no longer writes the tree-state key"
+    read = re.search(r'environment\.get\("(working_tree_dirty[a-z_]*)"\)', src)
+    assert read, "write_summary no longer reads the tree-state key"
+    assert written.group(0).split('"')[1] == read.group(1)
+
+
 def test_a_directory_that_is_not_a_repo_reads_as_unknown_not_clean(tmp_path):
     assert bundle.working_tree_dirty(tmp_path) is None, (
         "git failing to answer is not evidence that the tree is clean"
@@ -222,7 +268,7 @@ def test_the_summary_states_the_code_dirty_state_and_never_guesses_it(tmp_path):
             "timestamp_utc": "2026-01-01T00:00:00+00:00",
             "git_commit": {"found": True, "stdout": "abc123\n", "exit_code": 0},
             "git_status_porcelain": {"found": True, "stdout": "?? junk\n", "exit_code": 0},
-            "working_tree_dirty_code": value,
+            "working_tree_dirty": value,
             "tool_versions": {},
             "adb_devices": {"exit_code": 0},
             "frida_ps_dash_U": {"exit_code": 0},
@@ -249,7 +295,7 @@ def _summary_env():
         "timestamp_utc": "2026-01-01T00:00:00+00:00",
         "git_commit": {"found": True, "stdout": "abc123\n", "exit_code": 0},
         "git_status_porcelain": {"found": True, "stdout": "", "exit_code": 0},
-        "working_tree_dirty_code": False,
+        "working_tree_dirty": False,
         "tool_versions": {},
         "adb_devices": {"exit_code": 0},
         "frida_ps_dash_U": {"exit_code": 0},

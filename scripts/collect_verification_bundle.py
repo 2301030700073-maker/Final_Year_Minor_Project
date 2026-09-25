@@ -33,7 +33,9 @@ BUNDLE_ROOT = REPO_ROOT / "docs" / "plans" / "handoff" / "bundles"
 # code committed?" with a path-limited check for exactly this reason (see cli.py's
 # dirty stamp): a new module in src/, a signature YAML in config/ or an edit under
 # scripts/ runs while `git diff HEAD` reports a clean tree, so the untracked half
-# is checked - but ONLY there. This bundle ships the report whose provenance stamp
+# is checked - but ONLY there. The tracked half is not path-limited at all: a file
+# differing from HEAD counts wherever it sits (see working_tree_dirty below).
+# This bundle ships the report whose provenance stamp
 # that is, so the two must judge the same tree the same way; a blunt
 # `git status --porcelain` counted every artifact this repo always carries
 # (outputs/, bundles, run_logs/, editor dirs) and printed "uncommitted changes
@@ -44,7 +46,14 @@ CODE_PATHSPEC = ("src", "config", "scripts")
 
 
 def working_tree_dirty(repo_root: Path = REPO_ROOT) -> bool | None:
-    """Whether the code under test differs from HEAD. None when git cannot say.
+    """Whether the tree this bundle measures differs from HEAD. None when git cannot say.
+
+    Two branches, deliberately different in scope: a tracked file differing from
+    HEAD counts wherever it sits (`git diff HEAD --quiet`, no pathspec - a modified
+    test file or design document changes what this bundle's results mean), while an
+    untracked file counts only under CODE_PATHSPEC, because the artifacts this repo
+    always carries (outputs/, bundles, run_logs/) are not the code under test. The
+    summary states both scopes rather than calling the whole thing "code".
 
     Returns None rather than False for a directory that is not a repo (or a
     missing git binary): "I could not measure this" is not "the tree is clean",
@@ -141,10 +150,11 @@ def collect_environment() -> dict:
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "git_commit": _run(["git", "rev-parse", "HEAD"]),
         "git_status_porcelain": _run(["git", "status", "--porcelain"]),
-        # The path-limited judgement (see CODE_PATHSPEC) that the SUMMARY states,
-        # kept beside the raw porcelain above so the narrow claim never replaces
-        # the full picture - the reader can always see the artifacts it excludes.
-        "working_tree_dirty_code": working_tree_dirty(),
+        # The judgement the SUMMARY states (see working_tree_dirty): tracked
+        # changes anywhere in the tree, untracked only under CODE_PATHSPEC. Kept
+        # beside the raw porcelain above so the narrower claim never replaces the
+        # full picture - the reader can always see the artifacts it excludes.
+        "working_tree_dirty": working_tree_dirty(),
         "python_version": _run([sys.executable, "--version"]),
         "uv_version": _run(["uv", "--version"]),
         "tool_versions": {
@@ -250,16 +260,27 @@ def write_summary(bundle_dir: Path, environment: dict, test_result: dict, pipeli
         else "- Git commit tested: **unavailable** (git not found, or not a repository) - "
              "the run below is therefore not bound to a commit"
     )
-    dirty = environment.get("working_tree_dirty_code")
+    dirty = environment.get("working_tree_dirty")
     state = {
         False: "yes",
-        True: "no - uncommitted changes under src/, config/ or scripts/",
+        True: "no - a tracked file differs from HEAD, or an untracked file sits "
+              "under src/, config/ or scripts/",
         None: "unknown - git could not answer (see environment.json)",
     }[dirty]
-    lines.append(f"Working tree clean (code under src/, config/, scripts/): {state}")
+    # The scope is stated on the line rather than left to the reader's inference,
+    # and it is the PREDICATE's scope, not the pathspec's name (ADR-0035): the
+    # tracked half counts anywhere, so a clean verdict must not read as "the whole
+    # tree is clean" (the untracked artifacts this repo always carries are not
+    # counted). Both halves are named for that reason.
+    lines.append(
+        "Working tree clean (tracked changes counted anywhere in the tree; "
+        f"untracked only under src/, config/, scripts/): {state}"
+    )
     lines.append(
         "- Untracked artifacts elsewhere in the tree are listed in environment.json "
-        "and are not counted here - they are not the code under test."
+        "and are not counted here - they are not the code under test. Tracked "
+        "changes are counted wherever they sit: a modified test file, or a changed "
+        "design document, alters what the results below mean."
     )
     lines.append("")
     lines.append("## Tool versions")

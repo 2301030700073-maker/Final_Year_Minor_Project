@@ -1864,10 +1864,12 @@ Excluded from Tier 2 (partial/unknown decompile OR under-covered governing surfa
 
 Bucket edges always include the real decision threshold explicitly - the one boundary that matters for future threshold re-scoring. A boundary inserted as an edge is marked `← threshold`, and its value is named in the header; a run classified at some other recorded threshold marks its own edge.
 
+Counts and rates below cover the ground-truthed observations only, one datapoint per APK (CALIB-WEIGHT1) - not runs at that confidence. A run with no ground-truth entry, or a negative excluded because it is not proof of absence, appears in neither column. That definition does not depend on the sample-size warning above, which the engine stops emitting once the corpus outgrows it (ADR-0034).
+
 {% for category, buckets in report.calibration_curve.items() -%}
 ### {{ category }}
 
-| Range | Count | Observed Positive Rate |
+| Range | Count (ground-truthed) | Observed Positive Rate |
 |---|---|---|
 {% for b in buckets -%}
 | [{{ b.range_low|edge }}, {{ b.range_high|edge }}){% if b.is_threshold_edge %} ← threshold{% endif %} | {{ b.count }} | {{ "%.2f"|format(b.observed_positive_rate) if b.observed_positive_rate is not none else "no data" }} |

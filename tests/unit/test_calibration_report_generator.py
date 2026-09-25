@@ -459,3 +459,37 @@ def test_rendered_curve_omits_the_threshold_line_when_the_report_carries_none():
     assert "**Decision threshold:**" not in content      # no value claimed
     assert "\u2190 threshold |" in content               # provenance still shown
     assert "## Confidence-Calibration Curve" in content  # the section itself still renders
+
+
+def test_curve_states_its_sample_even_when_the_sample_size_warning_is_gone():
+    # ADR-0034: the curve's Count column is the ground-truthed Tier-2 subset - one
+    # datapoint per APK - not runs at that confidence (169 runs sit at
+    # root_confidence >= 0.9 while the top bucket counts 4; 66 sit below 0.1 while
+    # that bucket counts 1). The only place that population was named was the
+    # skeleton warning, which report.py emits ONLY while total_n < 30 - so the
+    # definition expired exactly as the curve became large enough to read as a
+    # measurement. This renders the report WITHOUT the warning: a change that let
+    # the definition ride on the warning again would still pass a test that only
+    # checked the default, warned corpus.
+    from dataclasses import replace
+    from report.generator import CALIBRATION_TEMPLATE
+
+    runs = [RunRow(
+        apk_hash="uc1_hash", run_id="r1", action="ROOT_ONLY",
+        root_confidence=0.80, root_detected=True, root_bypassed=True,
+        ssl_confidence=0.0, ssl_detected=False, ssl_bypassed=None,
+        decompile_completeness="complete",
+    )]
+    ground_truth = {"uc1_hash": GroundTruthEntry("uc1_hash", root=True, ssl=False, source="manual review")}
+    report = compute_calibration_report(
+        runs, ground_truth, generated_at="2026-07-30T00:00:00", ground_truth_commit="abc123",
+    )
+    assert report.skeleton_warning  # precondition: this corpus IS the warned case
+
+    content = CALIBRATION_TEMPLATE.render(report=replace(report, skeleton_warning=""))
+
+    assert "Calibration curve is a skeleton" not in content  # the caution is gone
+    # ...and the definition is still there, in the label and in ungated prose.
+    assert content.count("| Range | Count (ground-truthed) | Observed Positive Rate |") == 2
+    assert "one datapoint per APK (CALIB-WEIGHT1) - not runs at that confidence" in content
+    assert "not proof of absence, appears in neither column" in content

@@ -259,6 +259,7 @@ The `run` command's full option set (from `src/cli.py`):
 | `--justification` | authorization reason for this run — **required**, written to the immutable audit log (ADR-0005) |
 | `--skip-dynamic` | static-only: no device, root, or frida-server needed |
 | `--capture-traffic` | additionally capture live TLS traffic through the bypass (mitmproxy) |
+| `--drive-ui` / `--no-drive-ui` | with `--capture-traffic` only: let the capture stage drive the UI during the capture window (**on** by default) so an app that fetches only after a tap still produces flows; pass `--no-drive-ui` to tap through the app yourself instead. Ignored without `--capture-traffic`. |
 | `--force-dynamic` | operator override (ADR-0005): deploy the universal root+SSL bypass on a **NEITHER** target that would otherwise skip the dynamic stage — for coverage-limited misses (e.g. RN/Hermes root checks the signature engine can't attribute). Does **not** change the static verdict/confidence/calibration; the result stays gated on real behaviour (`dynamically_confirmed` only on a real probe-hit / pin-check+handshake, else `UNVERIFIED`). No-op with `--skip-dynamic` or when a category was already detected. |
 | `--device` | target a specific device/emulator serial |
 | `--target` | package id selecting the success-check module; auto-derived from the manifest when omitted |
@@ -289,6 +290,8 @@ Computes precision/recall/F1 and a confidence-calibration curve against every ac
 ```bash
 PYTHONPATH=src uv run python -m cli calibration-report
 ```
+
+The registry it scores against defaults to `config/ground_truth.yaml`; `--ground-truth` points it at a different registry if you keep one elsewhere.
 
 A real report over the accumulated corpus looks like this (transcribed from `outputs/reports/calibration/20260913T085346Z.md` — measured, not fabricated; the honesty caveats are part of the generated output):
 

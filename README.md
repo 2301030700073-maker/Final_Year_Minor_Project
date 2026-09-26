@@ -29,9 +29,9 @@ uv sync
 Expected: resolves and installs the exact locked versions from `uv.lock` into `.venv/`. A "missing" locked package (e.g. `androguard`) almost always means a stale `.venv` — re-running this fixes it.
 
 ### 1. (Windows) Boot the rooted emulator
-In a **Windows** PowerShell/terminal — not WSL — start a **Google APIs** (not Google Play), **userdebug**, x86_64 AVD (Frida needs root):
+In a **Windows** PowerShell/terminal — not WSL — start a **Google APIs** (not Google Play), **userdebug**, x86_64 AVD (Frida needs root). The SDK's `emulator\` directory is **not on PATH**, so `emulator` alone fails with `CommandNotFoundException` — call it by full path:
 ```
-emulator -avd Frida_Test_API34 -no-snapshot
+& "C:\Users\Divyang\AppData\Local\Android\Sdk\emulator\emulator.exe" -avd Frida_Test_API34 -no-snapshot
 ```
 Wait for the home screen. `Frida_Test_API34` is the **API 34 (Android 14)** image — the newest version this project targets, and the one the 1st-review requirement ("supports till at least android 14") was validated on: 6 recorded runs carry `ro.build.version.sdk` 34, each with `dynamic_status = success`. An older `Frida_Test` AVD (API 30) still exists on this box; if you boot that one instead, it appears in a report's Toolchain line as API 30, so check which serial you actually started. (A rooted physical device over USB works too — then `adb root` must succeed.)
 

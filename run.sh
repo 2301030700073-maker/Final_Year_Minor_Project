@@ -53,7 +53,7 @@ echo "─── 2. Emulator (must be userdebug) ───"
 EMU=$(adb devices 2>/dev/null | grep -m1 "emulator.*device" | awk '{print $1}' || true)
 if [ -z "$EMU" ]; then
     echo "  $FAIL  No emulator found. Start one:"
-    echo "         PowerShell: emulator -avd Frida_Test -no-snapshot"
+    echo "         PowerShell: C:\Users\Divyang\AppData\Local\Android\Sdk\emulator\emulator.exe -avd Frida_Test_API34 -no-snapshot"
     ALL_OK=false
 else
     echo "  $PASS  Device: $EMU"
@@ -64,8 +64,8 @@ else
     else
         echo "  $FAIL  Build: $BUILD_TYPE, debuggable: $DEBUGGABLE"
         echo "         Must be userdebug with ro.debuggable=1."
-        echo "         Create: avdmanager create avd -n Frida_Test"
-        echo "                 -k 'system-images;android-30;google_apis;x86_64'"
+        echo "         Create: avdmanager create avd -n Frida_Test_API34"
+        echo "                 -k 'system-images;android-34;google_apis;x86_64'"
         ALL_OK=false
     fi
 fi

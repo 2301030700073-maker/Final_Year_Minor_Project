@@ -88,6 +88,25 @@ A window pops up and the phone boot animation plays. Keep this window open for
 the whole session — closing it shuts the emulator down. Wait until the home
 screen appears (first boot after a fresh install can take a couple of minutes).
 
+**If it fails with `FATAL | Running multiple emulators with the same AVD is an
+experimental feature`**, the AVD is locked: either an emulator is already
+running it, or one that was killed left the lock behind. Decide with one
+command from WSL2:
+
+```bash
+adb devices        # emulator-5554 listed -> already up, skip to the section below
+                   # nothing listed        -> the lock is stale; clear it, boot again
+```
+
+```powershell
+# >>>>> run in WINDOWS (PowerShell) <<<<<
+Remove-Item "C:\Users\Divyang\.android\avd\Frida_Test_API34.avd\multiinstance.lock"
+```
+
+Do not reach for `-read-only`, which is what the message suggests: that flag is
+for running two instances off one image on purpose, and a read-only AVD
+discards writes — the APK installs the dynamic stage performs would not stick.
+
 **Way B — Android Studio (manual).** Open Android Studio → "More Actions" →
 "AVD Manager" → in the list, click the ▶ (play) triangle on `Frida_Test_API34`. Same
 result as Way A; close the device window to shut it down.

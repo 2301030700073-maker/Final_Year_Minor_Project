@@ -54,6 +54,9 @@ EMU=$(adb devices 2>/dev/null | grep -m1 "emulator.*device" | awk '{print $1}' |
 if [ -z "$EMU" ]; then
     echo "  $FAIL  No emulator found. Start one:"
     echo "         PowerShell: C:\Users\Divyang\AppData\Local\Android\Sdk\emulator\emulator.exe -avd Frida_Test_API34 -no-snapshot"
+    echo "         Boot says 'multiple emulators with the same AVD'? One is already running, or a"
+    echo "         killed one left its lock. Clear the lock in PowerShell and boot again:"
+    echo "         Remove-Item C:\Users\Divyang\.android\avd\Frida_Test_API34.avd\multiinstance.lock"
     ALL_OK=false
 else
     echo "  $PASS  Device: $EMU"

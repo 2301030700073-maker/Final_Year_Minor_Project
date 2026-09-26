@@ -33,6 +33,19 @@ In a **Windows** PowerShell/terminal — not WSL — start a **Google APIs** (no
 ```
 & "C:\Users\Divyang\AppData\Local\Android\Sdk\emulator\emulator.exe" -avd Frida_Test_API34 -no-snapshot
 ```
+If the boot instead prints `FATAL | Running multiple emulators with the same AVD is an experimental feature`, that is not a boot failure — an emulator using that AVD is already up, or a dead one left its lock behind. Decide with one command from WSL2:
+
+```bash
+adb devices        # emulator-5554 listed -> already running, skip to step 2
+                   # nothing listed        -> the lock is stale; clear it and boot again
+```
+
+```powershell
+Remove-Item "C:\Users\Divyang\.android\avd\Frida_Test_API34.avd\multiinstance.lock"
+```
+
+**Do not use `-read-only` here**, which is what the message itself suggests: that flag exists for deliberately running two instances off one image, and a read-only AVD discards writes — the APK installs the dynamic stage performs would not persist.
+
 Wait for the home screen. `Frida_Test_API34` is the **API 34 (Android 14)** image — the newest version this project targets, and the one the 1st-review requirement ("supports till at least android 14") was validated on: 7 recorded runs carry `ro.build.version.sdk` 34, each with `dynamic_status = success`. An older `Frida_Test` AVD (API 30) still exists on this box; if you boot that one instead, it appears in a report's Toolchain line as API 30, so check which serial you actually started. (A rooted physical device over USB works too — then `adb root` must succeed.)
 
 ### 2. (WSL2) Restore the emulator's internet path

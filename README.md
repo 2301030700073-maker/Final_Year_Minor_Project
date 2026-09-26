@@ -12,7 +12,7 @@ Everything runs from the **WSL2 Ubuntu** terminal (the repo, `uv`, `adb`, `frida
 
 | Where | What | Needed by | Started by |
 |---|---|---|---|
-| **Windows** | the rooted AVD booted — **Google APIs** (not Play), userdebug, x86_64 | every dynamic scan | you — step 1 |
+| **Windows** | the rooted AVD booted — **Google APIs** (not Play), userdebug, x86_64, **API 34 / Android 14** (`Frida_Test_API34`) | every dynamic scan | you — step 1 |
 | **Windows** | a plain `python.exe` hosting the pass-through internet proxy on `:8080` (no MITM) | every dynamic scan — on WSL2 this `adb reverse` path is the emulator's *only* outbound route | `bash scripts/emulator_up.sh` — step 2 |
 | **Windows** | **mitmproxy** (`mitmdump`, **8.1.1** on this reference host) hosting the capture proxy on `:8081` | only `--capture-traffic` | the capture stage itself: it auto-detects WSL2 and launches `mitmdump.exe` **on the Windows host** — the device reaches the Windows host's localhost, never WSL2's namespace |
 | **device** | version-matched `frida-server` (**16.7.19**) | every dynamic scan | `verify-device` auto-provisions it — step 4 |
@@ -31,9 +31,9 @@ Expected: resolves and installs the exact locked versions from `uv.lock` into `.
 ### 1. (Windows) Boot the rooted emulator
 In a **Windows** PowerShell/terminal — not WSL — start a **Google APIs** (not Google Play), **userdebug**, x86_64 AVD (Frida needs root):
 ```
-emulator -avd Frida_Test -no-snapshot
+emulator -avd Frida_Test_API34 -no-snapshot
 ```
-Wait for the home screen. (A rooted physical device over USB works too — then `adb root` must succeed.)
+Wait for the home screen. `Frida_Test_API34` is the **API 34 (Android 14)** image — the newest version this project targets, and the one the 1st-review requirement ("supports till at least android 14") was validated on: 6 recorded runs carry `ro.build.version.sdk` 34, each with `dynamic_status = success`. An older `Frida_Test` AVD (API 30) still exists on this box; if you boot that one instead, it appears in a report's Toolchain line as API 30, so check which serial you actually started. (A rooted physical device over USB works too — then `adb root` must succeed.)
 
 ### 2. (WSL2) Restore the emulator's internet path
 ```bash

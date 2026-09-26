@@ -354,6 +354,7 @@ git push
 | Tests fail on WSL2 | `test_find_windows_user` | Test name | Pre-existing — expected on WSL2. Ignore. |
 | Bundle script hangs | `frida-ps -U` blocks on WSL2 | No output after 10s | Already fixed — `timeout 3` wrapper in bundle script |
 | `adb: more than one device` | Two emulators running | `adb devices` | Kill old emulator: `adb -s <serial> emu kill` |
+| Boot: `FATAL \| Running multiple emulators with the same AVD` | The AVD is locked — one is already running it, or a killed one left the lock behind | `adb devices` (from WSL2) | Listed → it is already up, use it. Empty → stale lock: `Remove-Item "C:\Users\Divyang\.android\avd\Frida_Test_API34.avd\multiinstance.lock"`, then boot again. **Not** `-read-only`, which the message suggests: it discards writes, so APK installs would not persist. |
 
 ---
 

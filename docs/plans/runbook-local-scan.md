@@ -76,7 +76,7 @@ adb bridge. There are two ways to start it; pick whichever you have.
 **The AVDs on this machine** (from `C:\Users\Divyang\.android\avd\`):
 | AVD | Use for |
 |---|---|
-| `Frida_Test_API34` | **API 34 (Android 14)** — the main dynamic-analysis device (serial `emulator-5554`); a rooted x86_64 image. **This is the one the runbook's commands assume**, and the only AVD any stored run has used: all 6 runs that carry a device report `ro.build.version.sdk` 34. |
+| `Frida_Test_API34` | **API 34 (Android 14)** — the main dynamic-analysis device (serial `emulator-5554`); a rooted x86_64 image. **This is the one the runbook's commands assume**, and the only AVD any stored run has used: all 7 runs that carry a device report `ro.build.version.sdk` 34. |
 | `Frida_Test` | The older **API 30 (Android 11)** image. Still bootable, but no stored run carries API 30, and a report's Toolchain line will show API 30 if you use it — so prefer `Frida_Test_API34`. |
 
 **Way A — command line (PowerShell on Windows).** In a Windows terminal run:

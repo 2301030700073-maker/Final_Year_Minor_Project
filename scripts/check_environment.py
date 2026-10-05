@@ -149,7 +149,23 @@ if jadx:
     if r: print(f"       version: {r.stdout.strip() or r.stderr.strip()}")
 
 check("apktool", shutil.which("apktool") is not None)
-check("frida CLI", shutil.which("frida") is not None)
+
+# The pipeline runs under the uv-locked frida client, NOT whatever `frida` is on
+# PATH - run.sh checks exactly this and warns that a system 17.x shadows it.
+# Measured 2026-10-05 on the reference box: PATH `frida` was 17.16.4 while the
+# uv-locked client AND the device's frida-server were both 16.7.19, so a bare
+# existence check reported this green while naming the one binary the pipeline
+# does not use. Report the version that is USED, and name the shadowed one.
+r = run(["uv", "run", "python", "-c", "import frida; print(frida.__version__)"])
+frida_ver = (r.stdout.strip() if r and r.returncode == 0 else "")
+frida_note = f"{frida_ver} (uv-locked)" if frida_ver else "uv add 'frida<17'"
+_path_frida = shutil.which("frida")
+if _path_frida:
+    _pr = run([_path_frida, "--version"])
+    _pv = (_pr.stdout.strip() if _pr and _pr.returncode == 0 else "?")
+    if _pv and not _pv.startswith("16."):
+        frida_note += f"; PATH frida is {_pv} - shadowed, NOT used"
+check("frida client (uv-locked, needs 16.x)", frida_ver.startswith("16."), frida_note)
 
 r = run(["uv", "run", "python", "-c", "import objection; print(objection.__version__)"])
 if r and r.returncode == 0:

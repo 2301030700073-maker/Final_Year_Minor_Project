@@ -326,6 +326,7 @@ class TechnologyHooksEngagedCheck:
         root_probe_hits: list[str] = []
         effects: list[str] = []
         not_installed: list[str] = []
+        hook_failures: list[str] = []
         for m in messages:
             if isinstance(m, str):
                 # The capture stage stores a payload that was ITSELF a string (a
@@ -344,7 +345,30 @@ class TechnologyHooksEngagedCheck:
                 continue
             if isinstance(payload, dict):
                 hook = payload.get("hook")
-                if hook and str(hook) not in engaged:
+                # JAVABRIDGE1. A hook message whose OWN payload reports a failure is
+                # not an engaged hook, and `engaged` feeds the rendered "bypass hooks
+                # engaged" line - so counting `java_bridge` (whose payload says the
+                # Java bridge never became available) as engagement told the operator
+                # the opposite of what the script reported. Failures are named
+                # separately and never join `engaged`.
+                #
+                # The script's own comment claims this "surfaces as a real failure,
+                # not a silent hang"; until this, it did not - nothing read `status`,
+                # so the reason was discarded and the failing hook was listed as
+                # though it had installed.
+                if str(payload.get("status", "")).lower() == "failed":
+                    if hook:
+                        # Carry the REASON with the name. The "frida messages observed"
+                        # line summarizes each message to `send:hook:<name>` and drops
+                        # the error, so naming the hook alone would send the operator
+                        # looking for a reason that is not rendered anywhere.
+                        detail = str(
+                            payload.get("error") or payload.get("reason") or ""
+                        ).strip()
+                        entry = f"{hook} ({detail})" if detail else str(hook)
+                        if entry not in hook_failures:
+                            hook_failures.append(entry)
+                elif hook and str(hook) not in engaged:
                     engaged.append(str(hook))
                 ph = payload.get("probeHit")
                 # Only a root-VALUED probeHit confirms a ROOT bypass. The
@@ -416,6 +440,20 @@ class TechnologyHooksEngagedCheck:
                 ", ".join(engaged) if engaged
                 else "none (no hook checkpoint observed)"
             ),
+            # JAVABRIDGE1. A hook that reported its OWN failure, named and kept OUT
+            # of the line above. Before this, a script that could not bring the Java
+            # bridge up had its hook listed as engaged - the report asserting
+            # engagement while the message beside it said the opposite, and the
+            # reason ("Java.available never became true within 15000ms") discarded.
+            # Rendered only when something actually failed, so a clean run is
+            # unchanged; the template iterates every evidence_line generically.
+            **({
+                "bypass hooks that reported a FAILURE": (
+                    ", ".join(hook_failures)
+                    + " - this hook did not install; the reason is in parentheses, "
+                      "as the script reported it"
+                )
+            } if hook_failures else {}),
             # Root confirmation basis, on the app's own observable behavior: its
             # root-check probed a root artifact and was answered-false, so its
             # root logic received the not-rooted result.

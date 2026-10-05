@@ -452,3 +452,66 @@ def test_native_hook_line_does_not_shadow_vendor_engagement_evidence():
     # an uninstalled hook.
     msgs = [{"type": "log", "payload": "[OK] [SSL] libssl.SSL_CTX_set_cert_cb native"}]
     assert "could NOT install" not in _install_line(msgs)
+
+
+# ---------------------------------------------------------------- JAVABRIDGE1
+# root_bypass_v1.js sends `{hook:'java_bridge', status:'failed', error:'Java.available
+# never became true within 15000ms'}` and its own comment claims it "surfaces as a
+# real failure, not a silent hang". Nothing read `status`, so the failure was
+# discarded AND the failing hook was listed under "bypass hooks engaged" - the
+# report asserting engagement while the message beside it said the opposite.
+
+_FAILURE_KEY = "bypass hooks that reported a FAILURE"
+_ENGAGED_KEY = "bypass hooks engaged"
+_JAVA_BRIDGE_FAILED = {
+    "type": "send",
+    "payload": {"hook": "java_bridge", "status": "failed",
+                "error": "Java.available never became true within 15000ms"},
+}
+
+
+def test_a_hook_that_reported_failure_is_not_counted_as_engaged():
+    """THE DEFECT. The hook name must not appear where the report claims
+    engagement - that line told the operator the opposite of what the script said."""
+    lines = TechnologyHooksEngagedCheck().check([_JAVA_BRIDGE_FAILED]).evidence_lines
+    assert "java_bridge" not in lines[_ENGAGED_KEY], (
+        f"a FAILED hook was reported as engaged: {lines[_ENGAGED_KEY]!r}"
+    )
+
+
+def test_a_hook_that_reported_failure_is_named_separately():
+    lines = TechnologyHooksEngagedCheck().check([_JAVA_BRIDGE_FAILED]).evidence_lines
+    assert _FAILURE_KEY in lines, "the failure was not surfaced at all"
+    assert "java_bridge" in lines[_FAILURE_KEY]
+
+
+def test_the_failure_reason_reaches_the_operator_lines():
+    # The REASON must be rendered, not just the hook name. The "frida messages
+    # observed" line summarizes each message to `send:hook:<name>` and drops the
+    # error, so the reason has to ride along in the failure line itself - naming
+    # the hook alone would send the reader after a reason that renders nowhere.
+    lines = TechnologyHooksEngagedCheck().check([_JAVA_BRIDGE_FAILED]).evidence_lines
+    assert "Java.available never became true" in lines[_FAILURE_KEY]
+    assert "send:hook:java_bridge" in lines["frida messages observed"]
+
+
+def test_a_successful_checkpoint_still_counts_as_engaged():
+    # Regression guard: the fix must not stop ordinary checkpoints from counting.
+    ok = [{"type": "send", "payload": {"hook": "c.a", "forced_result": False}},
+          {"type": "send", "payload": {"hook": "sg.vantagepoint.a.c",
+                                       "status": "all three hooked"}}]
+    lines = TechnologyHooksEngagedCheck().check(ok).evidence_lines
+    assert "c.a" in lines[_ENGAGED_KEY]
+    assert "sg.vantagepoint.a.c" in lines[_ENGAGED_KEY]
+    assert _FAILURE_KEY not in lines, "a clean run gained a failure line"
+
+
+def test_a_non_failed_status_is_still_engagement():
+    # Only `status:"failed"` is a failure. Other status values are checkpoints -
+    # "all three hooked" is exactly that, and it must keep counting.
+    for status in ("all three hooked", "ok", "installed", "done"):
+        lines = TechnologyHooksEngagedCheck().check(
+            [{"type": "send", "payload": {"hook": "h", "status": status}}]
+        ).evidence_lines
+        assert "h" in lines[_ENGAGED_KEY], status
+        assert _FAILURE_KEY not in lines, status

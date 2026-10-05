@@ -987,6 +987,34 @@ def _capture_window_hook_lines(
     }
 
 
+def _capture_window_observer_ran(capture_evidence: dict) -> bool:
+    """True when this capture window ran WITH a Frida observer in it, which is
+    when the window's own evaluation is worth running at all.
+
+    ADR-0016 evaluates the capture window so its observer can upgrade the run's
+    SSL verdict. An un-hooked window has no observer in it, so its empty stream is
+    a fact about the window rather than about the app
+    ([[observer-silence-is-a-fact-about-observers]]) - and a hooked window that
+    legitimately stayed silent is the same. Neither may retract a confirmation
+    from the dynamic window, so that arm is not evaluated rather than evaluated
+    and then ignored.
+
+    BYPASSAPPLIED1: this predicate used to read `bypass_applied`, which now means
+    "the script REPORTED installing hooks" rather than "a script was loaded".
+    Those differ on exactly the runs where the answer matters - a crashed or
+    partial install reports no `bypassed` message - and gating on the OUTCOME
+    would drop the capture window's evaluation out of the record, where ADR-0020
+    keeps both named evaluations of both named launches. `bypass_arm` names the
+    script that was loaded and is None on the plain cold-start arm, so it answers
+    the question this gate is actually asking: was there an observer in here?
+
+    Extracted from `run()` so the predicate can be tested. It was inline, and the
+    semantic change above slipped through the entire suite because no test could
+    reach it."""
+    return bool(capture_evidence.get("bypass_arm")
+                and capture_evidence.get("frida_messages"))
+
+
 def _merge_capture_window_evaluation(
     capture_verification: VerificationResult,
     verification: VerificationResult | None,
@@ -3231,14 +3259,18 @@ def run(
         # reject), and a pin-check from one launch plus a handshake from another is a
         # connection neither launch observed (ADR-0016).
         #
-        # Upgrade-only, and gated on `bypass_applied` - an un-hooked window has no
-        # observer in it, so its empty stream is a fact about the window rather than
-        # about the app ([[observer-silence-is-a-fact-about-observers]]), exactly as a
-        # hooked window that legitimately stayed silent is. Neither may retract a
-        # confirmation from the dynamic window, so that arm is not evaluated at all
-        # rather than evaluated and then ignored.
+        # Upgrade-only, and gated on whether an OBSERVER RAN in this window - an
+        # un-hooked window has no observer in it, so its empty stream is a fact about
+        # the window rather than about the app
+        # ([[observer-silence-is-a-fact-about-observers]]), exactly as a hooked window
+        # that legitimately stayed silent is. Neither may retract a confirmation from
+        # the dynamic window, so that arm is not evaluated at all rather than
+        # evaluated and then ignored. The predicate is `_capture_window_observer_ran`
+        # (BYPASSAPPLIED1): it reads the ARM, not `bypass_applied`, because the latter
+        # now means "hooks were reported installed" and would skip this evaluation on
+        # a crashed script - dropping a record ADR-0020 requires.
         capture_evidence = capture_stage.evidence or {}
-        if capture_evidence.get("bypass_applied") and capture_evidence.get("frida_messages"):
+        if _capture_window_observer_ran(capture_evidence):
             # Name the launch, not just the stage: the confirmation lines this
             # evaluation produces say which window they are about, so a confirmation
             # can never be read as belonging to the other one.

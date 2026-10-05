@@ -31,6 +31,12 @@ def _hooked_capture_stage() -> StageResult:
     return StageResult(
         stage="capture-traffic", status="success",
         evidence={
+            # BYPASSAPPLIED1: the observer gate reads the ARM, not the outcome - a
+            # crashed script reports no `bypassed`, so gating on the outcome would
+            # skip this window's evaluation entirely. Real evidence carries both
+            # keys; this fixture must too, or it tests a shape the producer cannot
+            # emit.
+            "bypass_arm": "script file: ssl_pinning_bypass_universal.js",
             "bypass_applied": True,
             "app_launch": {"component": "com.example.app/.MainActivity",
                            "launched_by": "am start", "pid": 4242},
@@ -120,6 +126,10 @@ def test_unhooked_capture_window_is_not_evaluated_at_all(run_setup, monkeypatch)
     negative, so no second evaluation stage is recorded."""
     def unhooked_window() -> StageResult:
         stage = _hooked_capture_stage()
+        # Un-hooked means NO script was loaded. `bypass_arm` is the gate's key
+        # (BYPASSAPPLIED1); clearing only `bypass_applied` would no longer express
+        # "no observer", now that the arm and the outcome are separate facts.
+        stage.evidence["bypass_arm"] = None
         stage.evidence["bypass_applied"] = False
         stage.evidence["frida_messages"] = []
         return stage

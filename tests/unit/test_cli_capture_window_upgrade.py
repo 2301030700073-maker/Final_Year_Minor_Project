@@ -215,3 +215,48 @@ def test_with_no_dynamic_verification_an_inconclusive_window_is_not_adopted():
     assert cli._merge_capture_window_evaluation(
         _capture_window_verification(), None, upgraded=False
     ) is None
+
+
+# ------------------------------------------------- the gate that decides WHEN
+# The predicate below was inline in run(), where no test could reach it - and a
+# semantic change to `bypass_applied` (BYPASSAPPLIED1) silently altered what it
+# gated without failing a single test. It is a pure helper now so that the
+# question "was there an observer in this window?" is answerable.
+
+
+def test_observer_ran_for_a_hooked_window():
+    assert cli._capture_window_observer_ran(
+        {"bypass_arm": "script file: ssl_pinning_bypass_universal.js",
+         "frida_messages": [{"bypassEffect": "ssl-pin-check"}]}
+    ) is True
+
+
+def test_no_observer_on_the_plain_cold_start_arm():
+    # bypass_arm is None when no script was loaded - the un-hooked arm, whose empty
+    # stream is a fact about the window rather than about the app.
+    assert cli._capture_window_observer_ran({"bypass_arm": None}) is False
+    assert cli._capture_window_observer_ran({}) is False
+
+
+def test_observer_ran_even_when_the_script_reported_no_bypass():
+    """THE DEFECT THIS EXISTS FOR. A crashed or partial install reports no
+    `bypassed` message, so `bypass_applied` is False - but Frida WAS attached and
+    did record messages, so there was an observer in the window. Gating on the
+    outcome instead of the arm skipped this evaluation, dropping a record ADR-0020
+    requires (both named evaluations of both named launches)."""
+    crashed = {
+        "bypass_arm": "script file: ssl_pinning_bypass_universal.js",
+        "bypass_applied": False,          # the honest outcome value
+        "frida_messages": [{"type": "error", "description": "ReferenceError"}],
+    }
+    assert cli._capture_window_observer_ran(crashed) is True
+
+
+def test_observer_gate_needs_messages_not_just_an_arm():
+    # An arm with no recorded stream has nothing to evaluate.
+    assert cli._capture_window_observer_ran(
+        {"bypass_arm": "script file: x.js", "frida_messages": []}
+    ) is False
+    assert cli._capture_window_observer_ran(
+        {"bypass_arm": "script file: x.js"}
+    ) is False

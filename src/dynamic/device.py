@@ -535,15 +535,59 @@ def _require_adb() -> str:
     return _adb_wrapper_path()
 
 
+# How long an `adb devices` result may keep reporting a present-but-offline
+# device before we conclude it is not coming back. See _read_device_lines.
+_DEVICE_SETTLE_TIMEOUT_SECONDS = 20.0
+_DEVICE_SETTLE_POLL_SECONDS = 1.5
+
+
+def _read_device_lines(adb: str, timeout: float | None = None) -> tuple[list[str], list[str]]:
+    """Return (online_device_lines, offline_device_lines) from `adb devices`.
+
+    WSL2 race (root-caused 2026-10-04): the ``~/.local/bin/adb`` wrapper execs
+    Windows ``adb.exe``, which starts an adb *server* on first use. The first
+    query after any server start races the device reconnection and reports a
+    connected device as ``offline``; the immediately following query reports it
+    correctly as ``device``. A single-shot read therefore misreads a healthy
+    device as 'no connected device/emulator found'.
+
+    This polls until the device list settles out of that transient ``offline``
+    state, bounded by ``timeout``. A device that is genuinely absent returns
+    immediately with no lines at all (it never appears), so the absent case pays
+    no retry cost -- only a present-but-reconnecting device is waited for.
+
+    Returns two lists of raw ``adb devices`` lines: the online ones (state
+    ``device``) and the offline ones. Keeping them apart lets the caller tell
+    'nothing is connected' from 'something is connected but not ready yet'.
+    """
+    if timeout is None:
+        timeout = _DEVICE_SETTLE_TIMEOUT_SECONDS
+
+    deadline = time.monotonic() + timeout
+    online: list[str] = []
+    offline: list[str] = []
+    while True:
+        result = subprocess.run([adb, "devices"], capture_output=True, text=True,
+                                check=True, timeout=30)
+        online = []
+        offline = []
+        for line in result.stdout.splitlines()[1:]:
+            if not line.strip() or "\t" not in line:
+                continue
+            state = line.split("\t", 1)[1].strip()
+            if state == "device":
+                online.append(line)
+            elif state:
+                offline.append(line)
+        if online or not offline or time.monotonic() >= deadline:
+            return online, offline
+        time.sleep(_DEVICE_SETTLE_POLL_SECONDS)
+
+
 def discover_device(serial: str | None = None) -> str:
     """Return the serial of a connected device/emulator, or raise loudly if none found."""
     adb = _require_adb()
-    result = subprocess.run([adb, "devices"], capture_output=True, text=True,
-                            check=True, timeout=30)
-    lines = [
-        line for line in result.stdout.splitlines()[1:]
-        if line.strip() and "\tdevice" in line
-    ]
+    lines, offline_lines = _read_device_lines(adb)
     if serial:
         # Match the serial as the exact first tab-separated field of an
         # `adb devices` line (the same extraction used below at the multi-device
@@ -555,6 +599,18 @@ def discover_device(serial: str | None = None) -> str:
             raise RuntimeError(f"requested device serial '{serial}' not found among connected devices")
         return serial
     if not lines:
+        if offline_lines:
+            # A device IS attached but never left the transient offline state
+            # within the settle window. Name that condition explicitly: the old
+            # single-shot read reported it as a missing device, which sent the
+            # operator looking for a device that was in fact already there.
+            present = ", ".join(line.split("\t")[0] for line in offline_lines)
+            raise RuntimeError(
+                f"device/emulator ({present}) is attached but stayed 'offline' for "
+                f"{_DEVICE_SETTLE_TIMEOUT_SECONDS:.0f}s - it never became ready for adb. "
+                "Usually a stale adb server: run 'adb kill-server && adb start-server', "
+                "or reconnect the device. (This is NOT a missing device.)"
+            )
         raise RuntimeError(
             "no connected device/emulator found via 'adb devices' - "
             "pass --skip-dynamic to skip this stage, or connect a rooted device/emulator"

@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -213,9 +214,52 @@ def test_windows_python_skips_store_stub(monkeypatch):
 
 
 def test_windows_python_none_when_no_python(monkeypatch):
+    # BOTH routes must answer nothing. Stubbing only `subprocess.run` made this
+    # test environment-dependent once the known-dirs fallback landed: the stub
+    # fails `where.exe`, the fallback then ignores the stub and finds whatever
+    # Python the RUNNING HOST has, so the assertion held in CI and failed on a
+    # machine with a real install. The fallback seam is stubbed too, which is what
+    # the test's name always claimed to be testing.
     monkeypatch.setattr(ptp.subprocess, "run",
                         lambda *a, **k: subprocess.CompletedProcess(a[0], 1))
+    monkeypatch.setattr(ptp, "windows_known_dir_candidates", lambda suffix: [])
     assert ptp._windows_python() is None
+
+
+def test_windows_python_falls_back_to_known_dirs_when_path_lookup_fails(monkeypatch):
+    # WINRESOLVE1, the defect this exists for. Measured 2026-10-04 on the
+    # reference box from an agent shell: `where.exe` (through the powershell
+    # wrapper) returned rc=0 with EMPTY stdout, so the resolver answered None and
+    # the pipeline reported "no plain python.exe on the Windows host" - while
+    # C:\\Python314\\python.exe was present and ran. Both spellings of "the
+    # lookup failed" must reach the fallback: rc != 0, and rc == 0 with no lines.
+    seen = {"calls": 0}
+
+    def empty_success(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="")
+
+    def fallback(suffix):
+        seen["calls"] += 1
+        return ["/mnt/c/Python314/python.exe"] if suffix == "python.exe" else []
+
+    monkeypatch.setattr(ptp.subprocess, "run", empty_success)
+    monkeypatch.setattr(ptp, "windows_known_dir_candidates", fallback)
+    assert ptp._windows_python() == "C:\\Python314\\python.exe"
+    assert seen["calls"] >= 1, "the fallback must actually be consulted"
+
+
+def test_windows_python_path_lookup_still_wins_over_the_fallback(monkeypatch):
+    # The fallback must not change behaviour on a host whose PATH works: the
+    # probe stays first, and a fallback listing a DIFFERENT interpreter must not
+    # displace the one PATH reported.
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="D:\\real\\python.exe\n")
+
+    monkeypatch.setattr(ptp.subprocess, "run", fake_run)
+    monkeypatch.setattr(ptp, "windows_known_dir_candidates",
+                        lambda suffix: ["/mnt/c/Python314/python.exe"])
+    assert ptp._windows_python() == "D:\\real\\python.exe"
 
 
 def test_windows_python_falls_back_to_py_launcher(monkeypatch):
@@ -362,3 +406,58 @@ def test_ensure_internet_raises_when_no_windows_python(monkeypatch):
     monkeypatch.setattr(ptp, "_windows_python", lambda: None)
     with pytest.raises(RuntimeError, match="python.exe"):
         ptp.ensure_internet("emulator-5554", 8080)
+
+
+# --------------------------------------------------------------- PASSBYSITE1
+# The defect: WINRESOLVE1 fixed the LOOKUP, but the resolved mitmdump.exe shim
+# then died with `ModuleNotFoundError: No module named 'mitmproxy'`. Measured
+# 2026-10-04 from an agent shell on the reference box: the WSL-interop env block
+# handed to the Windows process is REPLACED, not merged - APPDATA / PYTHONPATH /
+# USERPROFILE all arrived UNSET no matter what the parent set - so Python 3.14
+# computed USER_BASE = C:\Users\<user>\Python (no site-packages there) and could
+# never see %APPDATA%\Python\Python314\site-packages. Verified fix: inject the
+# directory INSIDE the interpreter, after which mitmproxy 12.2.3 imported and the
+# proxy bound (`HTTP(S) proxy listening at *:8081.`).
+
+
+def test_user_site_only_returns_dirs_that_contain_the_module():
+    # The contract that matters and is machine-independent: whatever this
+    # returns, every entry MUST actually contain the module. A site dir without
+    # it cannot help, and returning one would trade a loud ModuleNotFoundError
+    # for a SILENT wrong-environment import - strictly worse.
+    for module in ("mitmproxy", "definitely_not_a_module_xyz"):
+        for d in ptp.windows_user_site_candidates(module):
+            assert (Path(d) / module).is_dir(), d
+
+
+def test_user_site_seam_returns_empty_for_unknown_module():
+    # The named seam the resolvers call; unknown module -> [] not a raise.
+    assert ptp.windows_user_site_candidates("definitely_not_a_module_xyz") == []
+
+
+def test_python_launcher_injects_the_site_dir(tmp_path):
+    # The whole point: the injected dir must appear as a sys.path.insert of the
+    # EXACT Windows path, before the target runs. Verified by inspection of the
+    # generated file, which is what the interpreter will execute.
+    out = ptp.write_python_launcher(
+        r"C:\Python314\python.exe",
+        r"C:\Users\x\AppData\Roaming\Python\Python314\site-packages",
+        r"C:\Users\Public\abc-addon.py",
+        tmp_path / "launch.py")
+    txt = out.read_text()
+    assert "sys.path.insert(0, r'C:\\Users\\x\\AppData\\Roaming\\Python\\Python314\\site-packages')" in txt
+    assert "runpy.run_path(r'C:\\Users\\Public\\abc-addon.py', run_name='__main__')" in txt
+    assert txt.index("sys.path.insert") < txt.index("runpy.run_path")  # inject FIRST
+
+
+def test_python_launcher_without_site_dir_still_runs_the_target(tmp_path):
+    # When no site dir is found we must NOT pretend to have fixed anything: the
+    # launcher is a plain hand-off, so the interpreter's own ModuleNotFoundError
+    # is what surfaces.
+    out = ptp.write_python_launcher(
+        r"C:\Python314\python.exe", None,
+        r"C:\Users\Public\abc-addon.py", tmp_path / "launch.py")
+    txt = out.read_text()
+    assert "sys.path.insert" not in txt
+    assert "runpy.run_path(r'C:\\Users\\Public\\abc-addon.py', run_name='__main__')" in txt
+

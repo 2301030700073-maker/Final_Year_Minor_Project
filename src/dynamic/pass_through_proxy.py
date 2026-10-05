@@ -129,12 +129,143 @@ if __name__ == "__main__":
 '''
 
 
+def windows_known_dir_candidates(suffix: str) -> list[str]:
+    """Named seam over `_windows_known_dir_candidates`.
+
+    The resolvers call THIS name; tests replace THIS name. The implementation
+    reads the filesystem, which is what makes it environment-proof and also what
+    makes it unstubbable through `subprocess.run` - so a test that wants to say
+    "no interpreter anywhere" needs a seam that is not the filesystem itself.
+    Callers see a list; the seam returns [] for an unknown suffix rather than
+    raising, because a resolver returning None is already the loud failure its
+    callers handle."""
+    try:
+        return _windows_known_dir_candidates(suffix)
+    except OSError:
+        return []
+
+
+def _windows_known_dir_candidates(suffix: str) -> list[str]:
+    """Documented install locations for a Windows binary, as UNIX /mnt/c paths.
+
+    The fallback for when `where.exe` cannot answer. `where.exe` searches the
+    PATH OF THE PROCESS IT RUNS IN, and that is not always the user's PATH - an
+    agent/sandbox shell, a service, a scheduled task or an IDE-spawned terminal
+    can all carry a different one. Measured 2026-10-04 from such a shell on the
+    reference box: WSLENV='', APPDATA/LOCALAPPDATA/USERPROFILE stripped, PATH a
+    shim - `where.exe mitmdump` returned rc=1 "Could not find files", while
+    mitmdump.exe, python.exe and py.exe were all present and runnable by absolute
+    path. A resolver that only trusts a PATH lookup reports a working install as
+    "not found" and names the tool rather than the lookup.
+
+    This probes the FILESYSTEM instead, which cannot fail for environment reasons.
+    `suffix` is the executable's basename ("mitmdump.exe", "python.exe",
+    "py.exe"). Returned newest-version-first, because a user with two Python
+    installs wants the one their `pip install --user` targeted (the newest), which
+    is also the order the project's own environment prefers.
+
+    Windows-side globs are done with `Path.glob` over the /mnt/c mount rather than
+    by shelling out, so this costs no subprocess and cannot itself be broken by the
+    environment it exists to work around."""
+    bases: list[Path] = []
+    home = Path("/mnt/c/Users")
+    profiles = sorted(home.glob("*")) if home.is_dir() else []
+    for profile in profiles:
+        # Per-user script dirs, i.e. %APPDATA%/Roaming/Python/Python3XX/Scripts/
+        # NOTE the layout: the VERSION directory contains Scripts, so the glob for
+        # the version has to be the second-to-last segment. A first attempt globbed
+        # "Python3*/Scripts" as one name and silently returned nothing for
+        # mitmdump while python.exe (a different layout) still resolved - the
+        # fallback would then have fixed one resolver and not the other.
+        bases.extend(sorted(
+            (profile / "AppData" / "Roaming" / "Python").glob("Python3*/Scripts")))
+        # Machine per-user py dirs, i.e. %LOCALAPPDATA%/Programs/Python/Python3XX
+        bases.extend(sorted(
+            (profile / "AppData" / "Local" / "Programs" / "Python").glob("Python3*")))
+    # Machine-wide installs, i.e. a top-level Python3XX directory on C:
+    bases.extend(sorted(Path("/mnt/c").glob("Python3*")))
+    # Newest-version-first, because a user with two installs wants the one their
+    # `pip install --user` targeted (the newest) - the same order the project's
+    # own environment preference uses.
+    bases.sort(key=lambda p: p.name, reverse=True)
+    out: list[str] = []
+    for d in bases:
+        cand = d / suffix
+        if cand.is_file() and "WindowsApps" not in str(cand):
+            out.append(str(cand))
+    # py.exe is a single file under WINDIR, not a Python dir.
+    launcher = Path("/mnt/c/Windows") / suffix
+    if suffix == "py.exe" and launcher.is_file():
+        out.append(str(launcher))
+    # The Microsoft Store stub is deliberately NOT probed: it is not a real
+    # interpreter, and the where.exe path above already excludes it by name.
+    return out
+
+
+def windows_user_site_candidates(module: str) -> list[str]:
+    """Named seam over `_windows_user_site_candidates`.
+
+    The launcher writers call THIS name; tests replace THIS name. The
+    implementation reads the filesystem, which is what makes it environment-proof
+    and also unstubbable through `subprocess.run`."""
+    try:
+        return _windows_user_site_candidates(module)
+    except OSError:
+        return []
+
+
+def _windows_user_site_candidates(module: str) -> list[str]:
+    """Windows `site-packages` directories that actually CONTAIN `module`, as
+    UNIX /mnt/c paths, newest Python version first.
+
+    PASSBYSITE1. `windows_known_dir_candidates` fixes the *lookup* of a Windows
+    binary; this fixes what the looked-up interpreter can then SEE. Measured
+    2026-10-04 on the reference box: a `mitmdump.exe` resolved by absolute path
+    died with `ModuleNotFoundError: No module named 'mitmproxy'` because the
+    WSL-interop env block handed to the Windows process is REPLACED, not merged -
+    APPDATA / PYTHONPATH / USERPROFILE all arrived UNSET no matter what the parent
+    set, so Python 3.14 computed USER_BASE = C:/Users/<user>/Python (which has
+    no site-packages) and could never reach the real user-site at
+    %APPDATA%/Python/Python3XX/site-packages. Verified working alternative:
+    inject that directory inside the interpreter (`sys.path.insert`), after which
+    mitmproxy 12.2.3 imports and the proxy binds normally.
+
+    Only directories that CONTAIN `module` are returned: a site dir without it
+    cannot help, and offering one would trade a loud ModuleNotFoundError for a
+    silent wrong-environment import. `module` is a top-level package name
+    ("mitmproxy"). Newest-version-first for the same reason as
+    `windows_known_dir_candidates`: a user with several installs wants the one
+    their `pip install --user` targeted (the newest)."""
+    bases: list[Path] = []
+    home = Path("/mnt/c/Users")
+    profiles = sorted(home.glob("*")) if home.is_dir() else []
+    for profile in profiles:
+        # pip --user target: %APPDATA%/Roaming/Python/Python3XX/site-packages
+        bases.extend(sorted(
+            (profile / "AppData" / "Roaming" / "Python").glob("Python3*/site-packages")))
+        # Machine per-user install: %LOCALAPPDATA%/Programs/Python/Python3XX/Lib/site-packages
+        bases.extend(sorted(
+            (profile / "AppData" / "Local" / "Programs" / "Python").glob(
+                "Python3*/Lib/site-packages")))
+    # Machine-wide install: C:/Python3XX/Lib/site-packages
+    bases.extend(sorted(Path("/mnt/c").glob("Python3*/Lib/site-packages")))
+    bases.sort(key=lambda p: p.name, reverse=True)
+    return [str(b) for b in bases if (b / module).is_dir()]
+
+
 def _windows_python() -> str | None:
     """Locate a real Python interpreter on the Windows host to run the
     pass-through proxy (no mitmproxy needed there): a plain `python.exe`, or the
     `py` launcher (`py.exe`) as a fallback when `python.exe` is not directly on
     PATH. Returns the Windows path or None."""
+    # WINRESOLVE1: the PATH lookup is tried first, so a user whose PATH works
+    # gets exactly the interpreter they had before - this only ever ADDS an
+    # answer. See windows_known_dir_candidates for the measured failure it
+    # repairs (where.exe returns nothing when the process lacks the user PATH,
+    # while the binaries are present and runnable).
+    fallback: list[str] = []
     for probe, suffix in (("python", "python.exe"), ("py", "py.exe")):
+        fallback.extend(windows_known_dir_candidates(suffix))
         try:
             res = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-Command", f"where.exe {probe}"],
@@ -156,6 +287,12 @@ def _windows_python() -> str | None:
         for ln in lines:
             if "WindowsApps" not in ln and ln.lower().endswith(suffix):
                 return ln
+    # PATH could not answer. Fall back to the known install locations, in the
+    # order collected above (python.exe locations before py.exe locations, each
+    # newest-version-first).
+    for cand in fallback:
+        if "WindowsApps" not in cand and Path(cand).is_file():
+            return str(Path(cand).resolve()).replace("/mnt/c/", "C:\\").replace("/", "\\")
     return None
 
 
@@ -165,6 +302,42 @@ def _write_windows_passthrough(script_path: Path) -> Path:
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(_PASSTHROUGH_SCRIPT)
     return script_path
+
+
+def write_python_launcher(python_win: str, site_win: str | None,
+                         target_win: str, out_wsl: Path) -> Path:
+    """Write a tiny Windows-Python launcher that injects `site_win` onto
+    `sys.path` and then runs `target_win` as a script (whose own arguments come
+    from argv, as usual). Returns the WSL path of the launcher.
+
+    PASSBYSITE1. Why a FILE and not an inline `-c` string: measured 2026-10-04,
+    an inline program containing quotes collides with the quoting of
+    `Start-Process -ArgumentList`, which is a single-quoted PowerShell string -
+    the launch failed with "A positional parameter cannot be found that accepts
+    argument". A file sidesteps every layer of quoting, which is also why the
+    project already writes its addons and pass-through scripts to disk.
+
+    Why inject at all: the WSL-interop environment block is REPLACED, not merged,
+    so `APPDATA`/`PYTHONPATH` cannot carry the user-site to the child and the
+    interpreter computes a USER_BASE that does not exist. Injecting inside the
+    process is the only route that survives that ([[passbysite1]]).
+
+    `site_win` may be None (no site dir found for the module): the launcher is
+    then a plain runpy hand-off, so the failure stays the interpreter's own
+    ModuleNotFoundError rather than a launcher that pretends to have fixed it."""
+    lines = [
+        "# Auto-generated launcher (PASSBYSITE1) - do not edit.",
+        "import runpy, sys",
+    ]
+    if site_win:
+        lines.append("sys.path.insert(0, r'%s')" % site_win)
+    lines += [
+        "sys.argv = [r'%s'] + sys.argv[1:]" % target_win,
+        "runpy.run_path(r'%s', run_name='__main__')" % target_win,
+    ]
+    out_wsl.parent.mkdir(parents=True, exist_ok=True)
+    out_wsl.write_text("\n".join(lines) + "\n")
+    return out_wsl
 
 
 def start_windows_passthrough(python_win: str, script_win: str, port: int) -> None:

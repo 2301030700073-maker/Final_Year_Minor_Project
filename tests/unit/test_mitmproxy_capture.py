@@ -454,7 +454,7 @@ def test_the_internet_baseline_is_re_established_after_the_adbd_restart(monkeypa
                         lambda path, log_win: path)
     monkeypatch.setattr(mitmproxy_capture, "_start_windows_mitmdump", lambda *a, **k: None)
     monkeypatch.setattr(mitmproxy_capture, "_wait_windows_listening", lambda *a, **k: None)
-    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda port=None: None)
     monkeypatch.setattr(mitmproxy_capture, "_read_windows_text",
                         lambda path: FIXTURE_DETAIL)
     monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy",
@@ -849,7 +849,14 @@ def test_start_windows_mitmdump_builds_detached_start_process(monkeypatch):
     # (14.9 s for a 15 s child, against 320 ms without) and mitmdump runs for the
     # entire capture window, so the stage would hang. The proxy's own output is
     # still needed, so cmd.exe does the redirecting inside the child - measured
-    # at 279 ms, and mitmdump stays findable by name for _stop_windows_mitmdump.
+    # at 279 ms.
+    #
+    # PASSBYSITE1: the launch goes through a generated launcher (`python.exe
+    # <launcher>`) when a user-site was found, because the pristine shim cannot
+    # see its own packages from an env-scrubbed shell. The site resolver is
+    # STUBBED here: leaving it live made this test read the real filesystem, so
+    # it would pass or fail depending on what Python the RUNNING host has - the
+    # same environment-dependence `test_windows_python_none_when_no_python` had.
     captured = {}
 
     def fake_run(cmd, **kwargs):
@@ -857,6 +864,7 @@ def test_start_windows_mitmdump_builds_detached_start_process(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr(mitmproxy_capture.subprocess, "run", fake_run)
+    monkeypatch.setattr(mitmproxy_capture, "_windows_mitmdump_site", lambda: None)
     mitmproxy_capture._start_windows_mitmdump(
         "C:\\x\\mitmdump.exe", "C:\\Users\\Public\\1-conf",
         "C:\\Users\\Public\\1-addon.py", "C:\\Users\\Public\\1.mitm", 8080,
@@ -874,6 +882,99 @@ def test_start_windows_mitmdump_builds_detached_start_process(monkeypatch):
     # Without the unbuffered prefix this file stays 0 bytes for the whole capture
     # (measured), which is indistinguishable from a working redirect.
     assert 'set "PYTHONUNBUFFERED=1" &&' in ps
+    # No site found -> the pristine shim is launched directly, so a real
+    # ModuleNotFoundError still surfaces from the interpreter.
+    assert "mitmdump.exe" in ps
+    assert "_mitmdump_launch.py" not in ps
+
+
+def test_start_windows_mitmdump_uses_the_launcher_when_a_site_dir_exists(monkeypatch):
+    # PASSBYSITE1, the defect this exists for. The resolver finds mitmdump.exe but
+    # the shim dies with `ModuleNotFoundError: No module named 'mitmproxy'`,
+    # because the WSL-interop env block is REPLACED (not merged) so APPDATA never
+    # reaches the child and it computes a USER_BASE that does not exist. Measured
+    # fix: launch via a generated launcher that does sys.path.insert, after which
+    # the proxy binds. This test pins that the launch SHAPE changes - the
+    # interpreter drives the launcher, and the launcher is written to the confdir.
+    captured = {}
+    written = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0)
+
+    def fake_launcher(python_win, site_win, target_win, out_wsl):
+        written.update(python=python_win, site=site_win, target=target_win,
+                       out=str(out_wsl))
+        return out_wsl
+
+    monkeypatch.setattr(mitmproxy_capture.subprocess, "run", fake_run)
+    monkeypatch.setattr(mitmproxy_capture, "_windows_mitmdump_site",
+                        lambda: "C:\\Users\\u\\AppData\\Roaming\\Python\\Python314\\site-packages")
+    monkeypatch.setattr(mitmproxy_capture.pass_through_proxy, "write_python_launcher",
+                        fake_launcher)
+    monkeypatch.setattr(mitmproxy_capture.pass_through_proxy, "_windows_python",
+                        lambda: "C:\\Python314\\python.exe")
+    mitmproxy_capture._start_windows_mitmdump(
+        "C:\\x\\mitmdump.exe", "C:\\Users\\Public\\1-conf",
+        "C:\\Users\\Public\\1-addon.py", "C:\\Users\\Public\\1.mitm", 8080,
+        "C:\\Users\\Public\\1-mitmdump.log")
+
+    # the launcher was written into the confdir, and it targets the shim
+    assert written["out"].endswith("1-conf/_mitmdump_launch.py"
+                                   .replace("/", "\\")) or "1-conf" in written["out"]
+    assert written["target"] == "C:\\x\\mitmdump.exe"
+    assert written["site"].startswith("C:\\")
+    ps = captured["cmd"][-1]
+    # the interpreter runs the launcher; the shim is the launcher's TARGET, not
+    # the process image - which is exactly WHY the stop had to move to by-port
+    assert "python.exe" in ps
+    assert "1-conf\\_mitmdump_launch.py" in ps or "_mitmdump_launch.py" in ps
+    assert "-p 8080" in ps
+
+
+
+def test_stop_windows_mitmdump_stops_by_port_then_by_name(monkeypatch):
+    # PASSBYSITE1 follow-up, and a regression this suite would have missed.
+    # Stopping the Windows proxy by IMAGE NAME (`Get-Process mitmdump`) silently
+    # stopped working the moment the launch changed to `python.exe <launcher>` -
+    # so the process image is `python.exe` and the sweep matches nothing.
+    # Measured cost: Arm 1's proxy survived into Arm 2; Arm 2's mitmdump then
+    # exited on `[Errno 10048] only one usage of each socket address` and the app
+    # under test got a clean 200 straight to the origin, which the stage honestly
+    # reported as "the app made no network requests" - a wrong reading produced by
+    # a leaked process. The port is what the stage owns and is stable across any
+    # way of launching, so it must be the primary key. This asserts BOTH commands
+    # run, port first, and that the port actually appears.
+    seen = []
+
+    def fake_best_effort(cmd):
+        seen.append(cmd)
+        return None
+
+    monkeypatch.setattr(mitmproxy_capture.pass_through_proxy,
+                        "_windows_best_effort", fake_best_effort)
+    assert mitmproxy_capture._stop_windows_mitmdump(8081) is None
+    assert len(seen) == 2, seen
+    assert "8081" in seen[0], seen[0]
+    assert "Listen" in seen[0] or "Listen" in seen[0].title() or "8081" in seen[0]
+    assert "mitmdump" in seen[1]
+    # no port -> the by-name sweep still runs (a caller with no port is not an error)
+    seen.clear()
+    mitmproxy_capture._stop_windows_mitmdump()
+    assert len(seen) == 1 and "mitmdump" in seen[0]
+
+
+def test_stop_windows_mitmdump_reports_the_first_launch_failure(monkeypatch):
+    # A stop that could not even be RUN is the reason a stray may remain; it must
+    # be returned, not swallowed (principle 3), so _cleanup can warn.
+    def fake_best_effort(cmd):
+        return "TimeoutExpired: powershell.exe"
+
+    monkeypatch.setattr(mitmproxy_capture.pass_through_proxy,
+                        "_windows_best_effort", fake_best_effort)
+    reason = mitmproxy_capture._stop_windows_mitmdump(8081)
+    assert reason is not None and "TimeoutExpired" in reason
 
 
 def test_cmd_quote_only_quotes_where_it_is_needed():
@@ -1029,7 +1130,7 @@ def test_run_capture_stage_wsl2_records_real_flows(monkeypatch, tmp_path):
                         lambda path, log_win: path)
     monkeypatch.setattr(mitmproxy_capture, "_start_windows_mitmdump", lambda *a: None)
     monkeypatch.setattr(mitmproxy_capture, "_wait_windows_listening", lambda *a, **k: None)
-    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda port=None: None)
     monkeypatch.setattr(mitmproxy_capture.time, "sleep", lambda s: None)
     monkeypatch.setattr(mitmproxy_capture.time, "time_ns", lambda: 12345)
     monkeypatch.setattr(mitmproxy_capture, "_read_flow_detail_log",
@@ -1117,16 +1218,364 @@ def _mock_native_run(monkeypatch, tmp_path, frida_mocks=None):
             hooks["attach"] += 1
             return fake_device, fake_session, 42, {"client": "16.7", "server": "16.7"}
         monkeypatch.setattr(mitmproxy_capture.frida_runner, "attach", fake_attach)
-        monkeypatch.setattr(
-            mitmproxy_capture.frida_runner, "load_script",
-            lambda session, name, on_message=None: hooks.__setitem__("load_script", hooks["load_script"] + 1))
+        def _report_hooks_installed(on_message):
+            # A real bypass script reports its own hook-install through
+            # on_message: ssl_pinning_bypass_universal.js:197 sends
+            # {hook:'universal-ssl-pinning', bypassed:true}. The fixture must emit
+            # it, because `bypass_applied` is read from that report
+            # (BYPASSAPPLIED1) - a fixture that stays silent models a script that
+            # never installed a hook, which is a DIFFERENT run from the one these
+            # tests are about.
+            if on_message is not None:
+                on_message({"type": "send",
+                            "payload": {"hook": "universal-ssl-pinning",
+                                        "bypassed": True}}, None)
+
+        def fake_load_script(session, name, on_message=None):
+            hooks["load_script"] += 1
+            _report_hooks_installed(on_message)
+
+        monkeypatch.setattr(mitmproxy_capture.frida_runner, "load_script",
+                            fake_load_script)
         # Counted separately from load_script: which loader a bypass reaches is the
         # whole question (a filename is resolved under SCRIPT_DIR, source is not).
-        monkeypatch.setattr(
-            mitmproxy_capture.frida_runner, "load_script_source",
-            lambda session, source, on_message=None: hooks.__setitem__(
-                "load_script_source", hooks["load_script_source"] + 1))
+        def fake_load_script_source(session, source, on_message=None):
+            hooks["load_script_source"] += 1
+            _report_hooks_installed(on_message)
+
+        monkeypatch.setattr(mitmproxy_capture.frida_runner, "load_script_source",
+                            fake_load_script_source)
     return hooks
+
+
+def test_windows_mitmdump_falls_back_to_known_dirs(monkeypatch):
+    # WINRESOLVE1. The PATH lookup is tried first; when it answers nothing - in
+    # EITHER spelling of nothing - the known-dirs probe runs. Measured
+    # 2026-10-04 from an agent shell on the reference box: the powershell-wrapped
+    # `where.exe mitmdump` returned rc=0 with EMPTY stdout, so the resolver said
+    # None and the stage reported "Windows-host mitmdump not found" while
+    # mitmdump.exe was present and runnable.
+    import subprocess as _sp
+    from dynamic import pass_through_proxy as _ptp
+
+    def empty_success(cmd, **kwargs):
+        return _sp.CompletedProcess(cmd, 0, stdout="")
+
+    monkeypatch.setattr(mitmproxy_capture.subprocess, "run", empty_success)
+    monkeypatch.setattr(_ptp, "windows_known_dir_candidates",
+                        lambda suffix: ["/mnt/c/Utils/mitmdump.exe"]
+                        if suffix == "mitmdump.exe" else [])
+    got = mitmproxy_capture._windows_mitmdump()
+    assert got == "C:\\Utils\\mitmdump.exe", got
+
+
+def test_windows_mitmdump_falls_back_when_where_exits_nonzero(monkeypatch):
+    # The other spelling: a real non-zero exit (the form `where.exe` takes when
+    # it genuinely searched and missed).
+    import subprocess as _sp
+    from dynamic import pass_through_proxy as _ptp
+
+    monkeypatch.setattr(mitmproxy_capture.subprocess, "run",
+                        lambda *a, **k: _sp.CompletedProcess(a[0], 1, stdout=""))
+    monkeypatch.setattr(_ptp, "windows_known_dir_candidates",
+                        lambda suffix: ["/mnt/c/Utils/mitmdump.exe"]
+                        if suffix == "mitmdump.exe" else [])
+    assert mitmproxy_capture._windows_mitmdump() == "C:\\Utils\\mitmdump.exe"
+
+
+def test_windows_mitmdump_path_lookup_still_wins(monkeypatch):
+    # No behaviour change on a host whose PATH works: the probe's answer is
+    # returned and the fallback is never consulted for the result.
+    import subprocess as _sp
+    from dynamic import pass_through_proxy as _ptp
+
+    monkeypatch.setattr(mitmproxy_capture.subprocess, "run",
+                        lambda cmd, **k: _sp.CompletedProcess(
+                            cmd, 0, stdout="D:\\tools\\mitmdump.exe\n"))
+    monkeypatch.setattr(_ptp, "windows_known_dir_candidates",
+                        lambda suffix: ["/mnt/c/Utils/mitmdump.exe"])
+    assert mitmproxy_capture._windows_mitmdump() == "D:\\tools\\mitmdump.exe"
+
+
+def test_windows_mitmdump_none_when_neither_route_finds_it(monkeypatch):
+    # A host with no mitmproxy anywhere must still return None, and the callers
+    # must still fail LOUD on it - the fallback can only convert a false "not
+    # found" into a real attempt, never fabricate a tool.
+    import subprocess as _sp
+    from dynamic import pass_through_proxy as _ptp
+
+    monkeypatch.setattr(mitmproxy_capture.subprocess, "run",
+                        lambda *a, **k: _sp.CompletedProcess(a[0], 1, stdout=""))
+    monkeypatch.setattr(_ptp, "windows_known_dir_candidates", lambda suffix: [])
+    assert mitmproxy_capture._windows_mitmdump() is None
+
+
+def test_play_services_refusals_are_not_evidence_the_app_ran(monkeypatch, tmp_path):
+    # FIX A. `app_seen_running` used to be `bool(tls_failed) or client_connections
+    # > 0`, and `tls_failed` is UNATTRIBUTED - `_count_tls_failed_clients` returns
+    # [{host, error}] with no uid. So a refusal by ANY process on the device counted
+    # as "the proxy watched the app survive", which suppressed `never_ran` and let
+    # a launch failure be reported as the app choosing not to use the network.
+    #
+    # Measured 2026-10-04 (A/B Arm 1): 7 refusals, 6 of them
+    # `youtubei.googleapis.com` - Google Play services, not the target.
+    #
+    # Here the app is measurably NOT running (pid 0 at both samples), the ONLY
+    # recorded refusal is Play services, and the device socket attribution could
+    # not be measured. TWO things must hold, and they fail for different reasons:
+    #   (a) the liveness verdict fires - an unattributed refusal is not evidence
+    #       the app survived its own launch;
+    #   (b) the refusal is NOT resurrected next to it as pinning evidence - the
+    #       liveness override replaces the cause wholesale, so the pinning
+    #       sentence must not survive anywhere in `error`.
+    #
+    # The proxy's read-back: ONE client connected - the pre-flight probe's - and
+    # nothing else. `_device_reaches_proxy` is stubbed to True, so
+    # `_app_client_connections(1, True) == 0`: the probe's connection is the only
+    # one, and it is subtracted. That is the state FIX A is for, where nothing in
+    # this log is the app's. A second counted line would make
+    # `client_connections > 0` true and the test would pass for the wrong reason
+    # (measured - that is exactly how the first version of this test passed on the
+    # arm FIX A touches), so the count is the load-bearing part of the fixture.
+    refused = (
+        "client connect 127.0.0.1:38908\n"
+        f"{mitmproxy_capture._TLS_FAILED_CLIENT_MARKER}"
+        " youtubei.googleapis.com|unknown ca\n"
+    )
+    result, _ = _empty_capture_run(monkeypatch, tmp_path, 0, stdout=refused)
+
+    assert result.status == "failed"
+    assert result.evidence["app_pid_after_launch"] == 0
+    assert result.evidence["client_connections"] == 0, (
+        "fixture must leave the app ZERO attributable connections, or the "
+        "client_connections arm of the predicate answers for it"
+    )
+    # (a) The unattributed refusal must not stand in for the app's survival.
+    assert "was NOT running" in result.error, (
+        "a Play-services refusal must not be read as the app surviving its own "
+        f"launch; error was: {result.error!r}"
+    )
+    # NOT asserted here: that the pinning sentence is absent from result.error.
+    # It cannot be, on this path, and asserting it would be false coverage - the
+    # never_ran override REPLACES device_or_app_cause wholesale:
+    #     device_or_app_cause = f"{liveness_note}. Read that FIRST: ..."
+    # so the refusal narration is discarded before `error` is assembled and no
+    # grep of result.error can observe the FIX A gate at all. Falsified: forcing
+    # the gate ON left this test green. The gate is pinned where it is observable
+    # - test_an_attributed_refusal_is_still_named_as_the_apps_pinning below, and
+    # the both-arms test after it.
+
+
+def _credited_attribution(monkeypatch):
+    """Make `attribute_proxy_clients` return reached=True for com.example.app.
+
+    All four of its preconditions, because missing any one silently yields None
+    and the test then asserts nothing:
+      * sampled["measured"] truthy  - else "the table could not be read";
+      * package_uid_map() maps the package - else "no uid in the package list";
+      * the target uid is in sampled["uids"] - that IS the hit;
+      * the probe uid is on the table too, and must be subtracted WITHOUT taking
+        the target's socket with it (probe 0, app 10123 - distinct, so `seen -
+        {0}` still contains 10123).
+    """
+    from dynamic import proxy_attribution as pa
+    monkeypatch.setattr(pa, "package_uid_map",
+                        lambda serial: {10123: ["com.example.app"]})
+    monkeypatch.setattr(pa, "sample_proxy_clients_during",
+                        lambda *a, **k: {"measured": True, "uids": {0, 10123},
+                                         "samples": 3, "samples_measured": 3})
+
+
+def test_an_attributed_refusal_is_still_named_as_the_apps_pinning(monkeypatch, tmp_path):
+    # The control for FIX A, and the reason the gate is a gate rather than a
+    # deletion. When attribution DOES credit the app - its uid held a socket to
+    # the proxy, so `reached` is True - the refusal is the app's and the original
+    # strong narration is correct and MUST be kept. A fix that silenced this arm
+    # too would have deleted the finding instead of qualifying it.
+    #
+    # This is the arm where the gate is observable: the app is running (pid 4711),
+    # so `never_ran` is False and device_or_app_cause survives to `error`.
+    # Falsified both ways.
+    refused = (
+        "client connect 127.0.0.1:38908\n"
+        f"{mitmproxy_capture._TLS_FAILED_CLIENT_MARKER}"
+        " redshift.co.za|unknown ca\n"
+    )
+    _credited_attribution(monkeypatch)
+    result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711, stdout=refused)
+
+    assert result.status == "failed"
+    assert result.evidence["proxy_attribution"]["reached"] is True, (
+        "the fixture must actually credit the app, or this test proves nothing: "
+        f"{result.evidence.get('proxy_attribution')!r}"
+    )
+    assert "certificate pinning" in result.error, (
+        "an ATTRIBUTED refusal is the app's own and must keep the pinning "
+        f"reading; error was: {result.error!r}"
+    )
+
+
+def test_an_unattributed_refusal_is_not_named_as_the_apps_pinning(monkeypatch, tmp_path):
+    # The other half of the gate, on the arm where it is observable: the app is
+    # RUNNING (so the liveness override does not fire and the narration survives),
+    # but attribution could not credit it. The refusal must still be reported -
+    # the count and hosts are real observations - while the CONCLUSION clause
+    # ("the app rejected the capture CA" / "certificate pinning") must not be
+    # claimed about the target. This is the sentence the A/B Arm 1 log produced
+    # from 6 Play-services refusals.
+    refused = (
+        "client connect 127.0.0.1:38908\n"
+        f"{mitmproxy_capture._TLS_FAILED_CLIENT_MARKER}"
+        " youtubei.googleapis.com|unknown ca\n"
+    )
+    from dynamic import proxy_attribution as pa
+    monkeypatch.setattr(pa, "sample_proxy_clients_during",
+                        lambda *a, **k: {"measured": False, "uids": set(),
+                                         "samples": 0, "samples_measured": 0})
+    result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711, stdout=refused)
+
+    assert result.status == "failed"
+    assert result.evidence["proxy_attribution"]["reached"] is None, (
+        f"premise: attribution must be unmeasured here, got "
+        f"{result.evidence.get('proxy_attribution')!r}")
+    # The refusal is still reported - it happened, and dropping it would hide a
+    # completed handshake.
+    assert "REFUSED its certificate" in result.error
+    assert "youtubei.googleapis.com" in result.error
+    # ...but not as a claim about this app.
+    assert "certificate pinning" not in result.error, (
+        "an UNATTRIBUTED refusal must not be labelled app-side pinning evidence; "
+        f"error was: {result.error!r}"
+    )
+    assert "the app rejected the capture CA" not in result.error, (
+        f"error was: {result.error!r}"
+    )
+
+def test_tls_failed_note_is_recorded_on_the_empty_flows_branch(monkeypatch, tmp_path):
+    # FIX B. The note must reach evidence even when nothing decrypted - that is
+    # exactly the arm where a reader is most likely to miscount the refusals.
+    monkeypatch.setattr(mitmproxy_capture, "_count_tls_failed_clients",
+                        lambda text: [{"host": "redshift.co.za", "error": "x"},
+                                      {"host": "youtubei.googleapis.com", "error": "x"}])
+    _mock_native_run(monkeypatch, tmp_path)
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path,
+        mitmdump_path="mitmdump", capture_window=0.1)
+
+    note = result.evidence["tls_failed_clients_note"]
+    assert note["count"] == 2
+    assert note["distinct_hosts"] == ["redshift.co.za", "youtubei.googleapis.com"]
+    # The caveat must travel WITH the data, not live only in a comment.
+    assert note["attribution"] == "unattributed"
+    assert "NOT proof the target app made it" in note["note"]
+
+
+def test_tls_failed_note_is_recorded_on_the_success_branch_too(monkeypatch, tmp_path):
+    # Same key on the flow-carrying branch, so a reader comparing two arms never
+    # finds it present on one and absent on the other.
+    _mock_native_run(monkeypatch, tmp_path)          # FIXTURE_DETAIL yields flows
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path,
+        mitmdump_path="mitmdump", capture_window=0.1)
+
+    assert result.status == "success"
+    assert "tls_failed_clients_note" in result.evidence
+    assert result.evidence["tls_failed_clients_note"]["count"] == 0
+    assert result.evidence["tls_failed_clients_note"]["note"] == (
+        "no client certificate refusals were recorded")
+
+
+def test_tls_failed_note_keeps_the_raw_list_unfiltered():
+    # The note is a LABEL, not a filter: nothing observed may be dropped. Pinned
+    # because "drop the non-target refusals" is the tempting wrong fix.
+    refusals = [{"host": "a.example", "error": "e"},
+                {"host": "b.example", "error": "e"}]
+    note = mitmproxy_capture._tls_failed_note(refusals)
+    assert note["count"] == 2, "the note must count every recorded refusal"
+
+
+def test_bypass_arm_reasserts_the_capture_reverse_after_the_frida_root(
+        monkeypatch, tmp_path):
+    # FRIDAROUTE1: frida_runner.attach -> setup_frida_connection ->
+    # _ensure_frida_server runs `adb root`, and `adb root` restarts adbd whenever
+    # the shell was not already root. An adb reverse is a listener ON THE DEVICE,
+    # created through adbd, so the restart takes it with it - while the
+    # device-proxy setting SURVIVES and still reads as pointing at the capture
+    # port. The bypass arm therefore spawned an app with no route to the proxy,
+    # its HTTPS went direct to the origin, and an empty capture was reported as
+    # the app not making requests.
+    #
+    # Measured on emulator-5554 rather than inferred: `adb root` took
+    # `reverse --list` from `host-21 tcp:8081 tcp:8081` (id -u 2000) to EMPTY
+    # (id -u 0); re-placing tcp:8081 made the device's `nc 127.0.0.1 8081`
+    # exit 0 again.
+    #
+    # The assertion is on ORDER, not on a count: a re-assert placed BEFORE the
+    # root would be destroyed by it and would still satisfy a call count, so a
+    # count is the weaker test and is not enough here.
+    seq = []
+
+    def record_reverse(serial, dp, hp, add=True):
+        # Only the ADDs matter here: `_cleanup` also calls adb_reverse(add=False)
+        # to tear the route down, and that trailing removal would otherwise blur
+        # the ordering this test exists to pin. (Observed on the first run:
+        # ['reverse', 'attach', 'reverse', 'resume', 'reverse'] - the last one is
+        # cleanup, and counting it is what made the naive assertion fail.)
+        if add:
+            seq.append("reverse-add")
+
+    def record_attach(serial, pkg):
+        seq.append("attach")          # stands in for the `adb root` inside it
+
+        class _D:
+            def resume(self, pid):
+                seq.append("resume")
+        return _D(), object(), 42, {"client": "16.7", "server": "16.7"}
+
+    hooks = _mock_native_run(monkeypatch, tmp_path, frida_mocks=True)
+    monkeypatch.setattr(device, "adb_reverse", record_reverse)
+    monkeypatch.setattr(mitmproxy_capture.frida_runner, "attach", record_attach)
+
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path,
+        mitmdump_path="mitmdump", capture_window=0.1,
+        bypass_script="ssl_pinning_bypass_universal.js")
+
+    assert result.status == "success"
+    # attach (which roots and severs) must be FOLLOWED by a reverse ADD, and that
+    # re-assert must land BEFORE resume (before the app can send).
+    assert seq == ["reverse-add", "attach", "reverse-add", "resume"], (
+        "the capture reverse must be re-asserted AFTER the Frida attach's "
+        f"`adb root` and BEFORE resume; observed order: {seq}")
+
+
+def test_plain_arm_places_the_reverse_exactly_once(monkeypatch, tmp_path):
+    # The plain am-start arm runs no `adb root` after the reverse is placed, so
+    # the single reverse the stage opens is sufficient and a second would be
+    # noise. Pinned so the FRIDAROUTE1 heal cannot be applied unconditionally
+    # (it belongs to the arm that roots, not to both).
+    adds = {"n": 0}
+    removes = {"n": 0}
+
+    def count_reverse(serial, dp, hp, add=True):
+        if add:
+            adds["n"] += 1
+        else:
+            removes["n"] += 1
+
+    hooks = _mock_native_run(monkeypatch, tmp_path)
+    monkeypatch.setattr(device, "adb_reverse", count_reverse)
+
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path,
+        mitmdump_path="mitmdump", capture_window=0.1)
+
+    assert result.status == "success"
+    assert hooks["attach"] == 0        # no Frida on this arm
+    # One ADD (the stage opening the route) and one REMOVE (cleanup tearing it
+    # down). Only the add is the stage's routing decision.
+    assert adds["n"] == 1, "the plain arm opens the capture reverse exactly once"
+    assert removes["n"] == 1, "cleanup removes it exactly once"
 
 
 def test_run_capture_stage_without_bypass_uses_plain_launch(monkeypatch, tmp_path):
@@ -1260,7 +1709,7 @@ def test_cleanup_restores_pass_through_internet_on_wsl2(monkeypatch):
     # device's traffic. This stub is the healthy route - the probe's own behaviour
     # is covered by its own tests, and _cleanup must not shell out to real adb.
     monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy", lambda *a, **k: True)
-    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda port=None: None)
     monkeypatch.setattr(device, "set_http_proxy",
                         lambda s, host, port: calls.__setitem__("set", calls["set"] + 1))
     monkeypatch.setattr(device, "clear_http_proxy",
@@ -1282,7 +1731,7 @@ def test_cleanup_warns_when_wsl2_pass_through_down_leaves_no_internet(monkeypatc
     calls = {"set": 0, "clear": 0}
     monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: True)
     monkeypatch.setattr(pass_through_proxy, "is_listening", lambda *a, **k: False)
-    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda port=None: None)
     monkeypatch.setattr(device, "set_http_proxy",
                         lambda s, host, port: calls.__setitem__("set", calls["set"] + 1))
     monkeypatch.setattr(device, "clear_http_proxy",
@@ -1311,7 +1760,7 @@ def test_cleanup_warns_when_the_device_cannot_reach_a_listening_pass_through(mon
     monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: True)
     monkeypatch.setattr(pass_through_proxy, "is_listening", lambda *a, **k: True)
     monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy", lambda *a, **k: False)
-    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda port=None: None)
     monkeypatch.setattr(device, "set_http_proxy",
                         lambda s, host, port: calls.__setitem__("set", calls["set"] + 1))
     monkeypatch.setattr(device, "clear_http_proxy",
@@ -1341,7 +1790,7 @@ def test_cleanup_records_an_unprobeable_route_as_unconfirmed_not_as_down(monkeyp
     monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: True)
     monkeypatch.setattr(pass_through_proxy, "is_listening", lambda *a, **k: True)
     monkeypatch.setattr(mitmproxy_capture, "_device_reaches_proxy", lambda *a, **k: None)
-    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda port=None: None)
     monkeypatch.setattr(device, "set_http_proxy",
                         lambda s, host, port: calls.__setitem__("set", calls["set"] + 1))
     monkeypatch.setattr(device, "clear_http_proxy",
@@ -1531,12 +1980,12 @@ def test_run_capture_stage_no_flows_names_crashed_bypass_script(monkeypatch, tmp
                         lambda serial, pkg: (FakeDevice(), object(), 42,
                                              {"client": "16.7", "server": "16.7"}))
 
-    def fake_load_script(session, name, on_message=None):
-        # frida delivers an uncaught script exception as a {type:error} envelope
+    def load_with_error(session, name, on_message=None):
+        # a genuine uncaught hook exception, delivered as a top-level {type:error}
         on_message({"type": "error", "description": "ReferenceError: Java is not defined",
                     "fileName": "pin.js", "lineNumber": 12}, None)
 
-    monkeypatch.setattr(mitmproxy_capture.frida_runner, "load_script", fake_load_script)
+    monkeypatch.setattr(mitmproxy_capture.frida_runner, "load_script", load_with_error)
 
     result = mitmproxy_capture.run_capture_stage(
         "emulator-5554", "com.example.app", tmp_path, capture_window=0.1,
@@ -1544,13 +1993,16 @@ def test_run_capture_stage_no_flows_names_crashed_bypass_script(monkeypatch, tmp
 
     assert result.status == "failed"
     assert result.evidence["reason"] == "no flows captured"
-    assert result.evidence["bypass_applied"] is True
+    # BYPASSAPPLIED1: the script crashed, so it never reported installing hooks -
+    # the honest value is False. The crash itself is still named (below and in
+    # `error`), which is the run this test is about.
+    assert result.evidence["bypass_applied"] is False
     # recorded structurally...
     assert result.evidence["bypass_script_errors"] == [
         "ReferenceError: Java is not defined (pin.js:12)"]
     # ...and named as the prominent cause in the surfaced error, without dropping
     # the device/app explanation (the crash is likely, not certain).
-    assert "pinning-bypass script raised" in result.error
+    assert "injected script raised" in result.error
     assert "pin.js:12" in result.error
     assert "no traffic captured through the proxy" in result.error
 
@@ -1600,8 +2052,18 @@ def test_run_capture_stage_no_flows_clean_bypass_keeps_plain_reason(monkeypatch,
     monkeypatch.setattr(mitmproxy_capture.frida_runner, "attach",
                         lambda serial, pkg: (FakeDevice(), object(), 42,
                                              {"client": "16.7", "server": "16.7"}))
-    monkeypatch.setattr(mitmproxy_capture.frida_runner, "load_script",
-                        lambda session, name, on_message=None: None)  # loads clean, no error
+    def load_clean(session, name, on_message=None):
+        # "loads clean" means the script ran to COMPLETION - and a completed bypass
+        # script reports its own install (ssl_pinning_bypass_universal.js:197 sends
+        # {hook:'universal-ssl-pinning', bypassed:true}). The fixture must emit it,
+        # because `bypass_applied` is read from that report (BYPASSAPPLIED1); a
+        # fixture that stays silent models a script that never installed a hook.
+        if on_message is not None:
+            on_message({"type": "send",
+                        "payload": {"hook": "universal-ssl-pinning",
+                                    "bypassed": True}}, None)
+
+    monkeypatch.setattr(mitmproxy_capture.frida_runner, "load_script", load_clean)
 
     result = mitmproxy_capture.run_capture_stage(
         "emulator-5554", "com.example.app", tmp_path, capture_window=0.1,
@@ -1610,7 +2072,7 @@ def test_run_capture_stage_no_flows_clean_bypass_keeps_plain_reason(monkeypatch,
     assert result.status == "failed"
     assert result.evidence["bypass_applied"] is True
     assert result.evidence["bypass_script_errors"] == []
-    assert "pinning-bypass script raised" not in result.error
+    assert "injected script raised" not in result.error
     assert "no traffic captured through the proxy" in result.error
 
 
@@ -1675,7 +2137,13 @@ def test_run_capture_stage_success_records_bypass_script_errors(monkeypatch, tmp
 
     assert result.status == "success"
     assert result.evidence["flows_count"] == 2  # other hooks still let flows through
-    assert result.evidence["bypass_applied"] is True
+    # BYPASSAPPLIED1: a hook threw, so the script never reached its
+    # `send({bypassed:true})` - the install did NOT report success, and the honest
+    # value is False. The old arm-based flag said True here, which is the
+    # over-claim direction: the report renders `bypass_applied` as "the bypass was
+    # applied to the app". The crash is still named below, so the record is not
+    # silent about what happened.
+    assert result.evidence["bypass_applied"] is False
     # the crash is recorded on the SUCCESS path, not just the empty-flows path.
     assert result.evidence["bypass_script_errors"] == ["TypeError: cannot read x (u.js:7)"]
 
@@ -1721,13 +2189,13 @@ def test_cleanup_reports_windows_mitmdump_stop_failure(monkeypatch):
 
     # stop command could not be run -> a warning naming a possible stray mitmdump
     monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump",
-                        lambda: "FileNotFoundError: powershell.exe not found")
+                        lambda port=None: "FileNotFoundError: powershell.exe not found")
     warns = mitmproxy_capture._cleanup("serial", 8081, None)
     assert any("stray" in w and "Windows host" in w and "powershell.exe" in w
                for w in warns), warns
 
     # a clean stop (None) adds no such warning - no fabricated leak claim
-    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda port=None: None)
     warns2 = mitmproxy_capture._cleanup("serial", 8081, None)
     assert not any("stray" in w for w in warns2), warns2
 
@@ -1843,7 +2311,7 @@ def _wsl2_empty_stubs(monkeypatch, log_text, reachable):
     monkeypatch.setattr(mitmproxy_capture, "_write_windows_addon", lambda path, log_win: path)
     monkeypatch.setattr(mitmproxy_capture, "_start_windows_mitmdump", lambda *a: None)
     monkeypatch.setattr(mitmproxy_capture, "_wait_windows_listening", lambda *a, **k: None)
-    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda: None)
+    monkeypatch.setattr(mitmproxy_capture, "_stop_windows_mitmdump", lambda port=None: None)
     monkeypatch.setattr(mitmproxy_capture.time, "sleep", lambda s: None)
     monkeypatch.setattr(mitmproxy_capture.time, "time_ns", lambda: 12345)
     monkeypatch.setattr(mitmproxy_capture, "_read_flow_detail_log", lambda path: log_text)
@@ -2221,3 +2689,148 @@ def test_run_capture_stage_never_records_unmeasured_attribution_as_absence(monke
     must land as None - a False would assert the app stayed off the proxy."""
     result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711, capture_window=1.0)
     assert result.evidence["proxy_attribution"]["reached"] is None
+
+
+# ------------------------------------------------------------- BYPASSAPPLIED1
+# `bypass_applied` used to mean "the Frida-spawn arm ran", which is True for ANY
+# script - including ssl_pinning_drive_only.js, the A/B's WITHOUT arm, whose
+# entire purpose is that it installs NO hooks. The report renders this key as
+# "This capture window ran under the injected pinning-bypass script" and "the
+# bypass was applied to the app", so on a drive-only arm it made a false claim in
+# the pinning section. It now records what the SCRIPT reported.
+
+
+def test_bypass_hooks_installed_true_only_on_the_scripts_own_report():
+    # The positive case: both shipped bypass scripts send this payload.
+    assert mitmproxy_capture._bypass_hooks_installed(
+        [{"type": "send", "payload": {"hook": "universal-ssl-pinning", "bypassed": True}}]
+    ) is True
+    # A bare payload (already unwrapped) counts too - frida delivers both shapes.
+    assert mitmproxy_capture._bypass_hooks_installed(
+        [{"hook": "universal-ssl-pinning", "bypassed": True}]
+    ) is True
+
+
+def test_bypass_hooks_installed_false_for_a_drive_only_arm():
+    # THE DEFECT. ssl_pinning_drive_only.js sends exactly these and no `bypassed`
+    # message. Reading the arm instead of the script reported a bypass that was
+    # never installed, on the one arm whose whole purpose is that it is not one.
+    drive_only_messages = [
+        {"type": "send", "payload": {"hook": "drive-start"}},
+        {"type": "send", "payload": {"hook": "pinned-drive",
+                                     "host": "redshift.co.za", "status": 200}},
+    ]
+    assert mitmproxy_capture._bypass_hooks_installed(drive_only_messages) is False
+
+
+def test_bypass_hooks_installed_false_when_the_script_crashed():
+    # A crash before the install completes means no `bypassed` report - and the
+    # safe direction is to under-claim: "not applied" never supports a pinning
+    # conclusion that the evidence does not.
+    crashed = [{"type": "error", "description": "ReferenceError: Java is not defined",
+                "fileName": "pin.js", "lineNumber": 12}]
+    assert mitmproxy_capture._bypass_hooks_installed(crashed) is False
+    assert mitmproxy_capture._bypass_hooks_installed([]) is False
+    assert mitmproxy_capture._bypass_hooks_installed(None) is False
+
+
+def test_drive_only_arm_records_bypass_applied_false(monkeypatch, tmp_path):
+    # End-to-end through the stage: the drive-only script loads under Frida (so
+    # the arm IS the Frida arm) but installs no hooks, so `bypass_applied` must be
+    # False while the launch still went through Frida.
+    hooks = _mock_native_run(monkeypatch, tmp_path, frida_mocks=True)
+
+    def drive_only(session, name, on_message=None):
+        hooks["load_script"] += 1
+        on_message({"type": "send", "payload": {"hook": "drive-start"}}, None)
+
+    monkeypatch.setattr(mitmproxy_capture.frida_runner, "load_script", drive_only)
+
+    result = mitmproxy_capture.run_capture_stage(
+        "emulator-5554", "com.example.app", tmp_path,
+        mitmdump_path="mitmdump", capture_window=0.1,
+        bypass_script="ssl_pinning_drive_only.js")
+
+    assert hooks["attach"] == 1 and hooks["load_script"] == 1  # it IS the Frida arm
+    assert result.evidence["bypass_arm"] == "script file: ssl_pinning_drive_only.js"
+    assert result.evidence["bypass_applied"] is False          # ...but no bypass ran
+
+
+# ---------------------------------------------------------------- APPDRIVE1
+# Both drive scripts report their in-process request result as a `pinned-drive`
+# message. Measured 2026-10-05: NO code read that message, so the strongest
+# evidence in the A/B - the app's own TLS stack refusing our CA - was recorded and
+# consumed by nothing, while the empty-flows narration asserted the opposite.
+
+_DRIVE_REFUSAL = (
+    "Error: javax.net.ssl.SSLHandshakeException: "
+    "java.security.cert.CertPathValidatorException: "
+    "Trust anchor for certification path not found."
+)
+
+
+def test_app_drive_refusals_credits_the_apps_own_certificate_error():
+    msgs = [{"type": "send", "payload": {"hook": "drive-start"}},
+            {"type": "send", "payload": {"hook": "pinned-drive",
+                                         "host": "redshift.co.za",
+                                         "error": _DRIVE_REFUSAL}}]
+    got = mitmproxy_capture._app_drive_certificate_refusals(msgs)
+    assert len(got) == 1 and got[0]["host"] == "redshift.co.za"
+
+
+def test_app_drive_refusals_excludes_non_certificate_failures():
+    # A timeout or DNS failure is NOT evidence about the app's trust decisions.
+    # Filtering by WHAT WENT WRONG is legitimate because the message states it -
+    # unlike filtering the proxy-side list by host, which FIX A rejected.
+    for err in ("Error: java.net.SocketTimeoutException: connect timed out",
+                "Error: java.net.UnknownHostException: redshift.co.za",
+                "Error: java.io.IOException: unexpected end of stream"):
+        got = mitmproxy_capture._app_drive_certificate_refusals(
+            [{"hook": "pinned-drive", "host": "h", "error": err}])
+        assert got == [], err
+
+
+def test_app_drive_refusals_ignores_other_hooks_and_shapes():
+    # Only `pinned-drive` with a string error counts.
+    assert mitmproxy_capture._app_drive_certificate_refusals([]) == []
+    assert mitmproxy_capture._app_drive_certificate_refusals(None) == []
+    assert mitmproxy_capture._app_drive_certificate_refusals(
+        [{"hook": "drive-start"}]) == []
+    # a SUCCESSFUL drive carries `status`, not `error` - not a refusal
+    assert mitmproxy_capture._app_drive_certificate_refusals(
+        [{"hook": "pinned-drive", "host": "h", "status": 200}]) == []
+    assert mitmproxy_capture._app_drive_certificate_refusals(
+        [{"hook": "pinned-drive", "host": "h", "error": 42}]) == []
+
+
+def test_empty_flows_credits_the_apps_own_drive_refusal(monkeypatch, tmp_path):
+    """THE DEFECT, end to end. Proxy-side attribution reaches no verdict, but the
+    app's own in-process request reported a certificate refusal. The narration
+    must credit the app's own report instead of saying it establishes nothing.
+
+    Same fixture shape as the FIX A test above: the app is RUNNING (pid 4711), so
+    the CAPLIVE1 liveness override does not replace the cause wholesale - on the
+    never_ran path this sentence is discarded before `error` is built, which is
+    exactly why the earlier attempt at asserting it here was unobservable."""
+    refused = (
+        "client connect 127.0.0.1:38908\n"
+        f"{mitmproxy_capture._TLS_FAILED_CLIENT_MARKER}"
+        " redshift.co.za|unknown ca\n"
+    )
+    from dynamic import proxy_attribution as pa
+    monkeypatch.setattr(pa, "sample_proxy_clients_during",
+                        lambda *a, **k: {"measured": False, "uids": set(),
+                                         "samples": 0, "samples_measured": 0})
+    monkeypatch.setattr(
+        mitmproxy_capture, "_app_drive_certificate_refusals",
+        lambda msgs: [{"host": "redshift.co.za", "error": _DRIVE_REFUSAL}])
+    result, _ = _empty_capture_run(monkeypatch, tmp_path, 4711, stdout=refused)
+
+    assert result.status == "failed"
+    assert result.evidence["proxy_attribution"]["reached"] is None, (
+        "premise: attribution must be unmeasured, or the other branch is taken"
+    )
+    assert "the app's OWN in-process request reported the same refusal" in result.error
+    assert "does not depend on that attribution" in result.error
+    # and it must NOT still claim the evidence establishes nothing
+    assert "do NOT establish that THIS app rejected the capture CA" not in result.error

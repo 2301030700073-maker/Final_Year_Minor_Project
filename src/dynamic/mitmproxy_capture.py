@@ -474,6 +474,73 @@ def _count_tls_failed_clients(text: str) -> list[dict[str, str]]:
 _describe_script_errors = describe_frida_script_errors
 
 
+def _bypass_hooks_installed(messages: list) -> bool:
+    """True only when a loaded Frida script REPORTED installing bypass hooks.
+
+    BYPASSAPPLIED1. The arm flag says a script was loaded; it does NOT say the
+    script bypasses anything. The A/B's "without" arm loads
+    `ssl_pinning_drive_only.js`, which drives the pinned-host request and installs
+    NO hooks - so an arm-based flag reports `bypass_applied: True` for it, claiming
+    a bypass that was never attempted on the one arm whose entire purpose is that
+    it does not bypass. The scripts report their own success
+    (`{hook: 'universal-ssl-pinning', bypassed: true}`), so the fact is read from
+    the script rather than inferred from a filename or from which arm ran."""
+    for m in messages or []:
+        payload = m.get("payload", m) if isinstance(m, dict) else m
+        if isinstance(payload, dict) and payload.get("bypassed") is True:
+            return True
+    return False
+
+
+# Error strings that identify a CERTIFICATE/TRUST refusal, as opposed to a
+# connect timeout or DNS failure - the drive can fail for either, and only the
+# former is evidence about the app's trust decisions. Matched case-insensitively
+# against the drive's own `error` text.
+_CERT_REFUSAL_MARKERS = (
+    "sslhandshakeexception",
+    "sslpeerunverifiedexception",
+    "certpathvalidatorexception",
+    "trust anchor",
+    "pin verification failed",
+    "certificate pinning",
+    "certificate_unknown",
+)
+
+
+def _app_drive_certificate_refusals(messages: list) -> list[dict]:
+    """The app's OWN in-process request results that name a certificate refusal.
+
+    APPDRIVE1. Both drive scripts run a request inside the app process and report
+    its outcome as `{hook: 'pinned-drive', host, status|error}`. A certificate
+    error there is direct evidence about THIS app - the connection was made by
+    code running in the app's own process under its own network security config -
+    which is stronger than the proxy-side refusals, and unlike them it needs no
+    per-uid attribution to be credited to the app.
+
+    Only certificate/trust failures are returned. A drive that failed with a
+    timeout or a DNS error is NOT evidence about the app's trust decisions, so it
+    is excluded rather than reported as one - the same reason the refusal list is
+    not filtered by host: this filters by WHAT WENT WRONG, which the message
+    states, not by a guess about what the app talks to.
+
+    Measured 2026-10-05: before this, no code read `pinned-drive` at all, so the
+    strongest evidence in the A/B reached no reader while the narration asserted
+    the opposite of what it said."""
+    out: list[dict] = []
+    for m in messages or []:
+        payload = m.get("payload", m) if isinstance(m, dict) else m
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("hook") != "pinned-drive":
+            continue
+        err = payload.get("error")
+        if not isinstance(err, str):
+            continue
+        if any(marker in err.lower() for marker in _CERT_REFUSAL_MARKERS):
+            out.append({"host": payload.get("host"), "error": err})
+    return out
+
+
 def _parse_pidof(stdout: str, stderr: str, returncode: int) -> int | None:
     """The app process's pid from a `pidof <package>` run.
 
@@ -739,6 +806,42 @@ def _parse_flow_detail(text: str) -> list[FlowSummary]:
     return flows
 
 
+def _tls_failed_note(tls_failed: list[dict[str, str]]) -> dict:
+    """A self-describing summary of the certificate refusals, for the reader.
+
+    The proxy records a refusal per client handshake with NO uid - see
+    `_count_tls_failed_clients` - so the list mixes the target app's refusals
+    with any other process's. Measured 2026-10-04 (A/B Arm 1): seven refusals,
+    six of them `youtubei.googleapis.com` (Google Play services). A bare count
+    therefore overstates what is known about the TARGET, and this note says so
+    in the artifact rather than only in a code comment.
+
+    Deliberately NOT a filter: the refusals are real observations and the list
+    beside this note keeps every one. Attribution is left to
+    `proxy_attribution` (uid-based, ADR-0012); this note only stops the raw
+    count from being read as a count of facts about the app.
+    """
+    hosts = sorted({f.get("host", "") for f in tls_failed if f.get("host")})
+    n = len(tls_failed)
+    if n == 0:
+        return {"count": 0, "distinct_hosts": [], "attribution": "unattributed",
+                "note": "no client certificate refusals were recorded"}
+    return {
+        "count": n,
+        "distinct_hosts": hosts,
+        "attribution": "unattributed",
+        "note": (
+            f"{n} client certificate refusal(s) were recorded, across "
+            f"{len(hosts)} distinct host(s). The proxy records these without a "
+            "uid, so a refusal here is NOT proof the target app made it - "
+            "another process on the device can refuse the CA too. The list "
+            "beside this note keeps every refusal unaltered; attribute them by "
+            "`proxy_attribution` (uid-based) before reading any of them as a "
+            "finding about the target."
+        ),
+    }
+
+
 def _resolve_launch_component(serial: str, package: str) -> str | None:
     """The `pkg/activity` component to launch, from the device's own resolver.
 
@@ -999,7 +1102,7 @@ def _cleanup(serial: str, proxy_port: int, proc: subprocess.Popen | None) -> lis
     # mitmdump may still be holding the capture port. Record it as exactly that -
     # "could not run the stop command", not a confirmed leak.
     if _on_wsl2():
-        stop_err = _stop_windows_mitmdump()
+        stop_err = _stop_windows_mitmdump(proxy_port)
         if stop_err is not None:
             warnings.append(
                 "Windows-host mitmdump stop command could not be run (a stray "
@@ -1038,17 +1141,52 @@ def _prepare_windows_confdir(confdir: Path, dest_dir: Path) -> str:
 
 def _windows_mitmdump() -> str | None:
     """Locate mitmdump.exe on the Windows host (where the device can reach it).
-    Returns the Windows path or None if mitmproxy is not installed there."""
+    Returns the Windows path or None if mitmproxy is not installed there.
+
+    WINRESOLVE1. The `where.exe` probe searches the PATH OF THE PROCESS IT RUNS
+    IN, which is not always the user's PATH - an agent/sandbox shell, a service, a
+    scheduled task or an IDE terminal can each carry a different one. Measured
+    2026-10-04 from such a shell on the reference box: WSLENV/APPDATA/USERPROFILE
+    all stripped, `where.exe` through the powershell wrapper returned rc=0 with
+    EMPTY stdout (a silent empty result, not an error), so this returned None and
+    the stage reported "Windows-host mitmdump not found" - while mitmdump.exe was
+    present and ran, and mitmproxy 12.2.3 imported, by absolute path. The PATH
+    lookup stays FIRST so a working PATH is unaffected; the known-dirs probe runs
+    only when it answers nothing, and can only turn a false "not found" into a real
+    attempt - a bad fallback path still fails at `_wait_windows_listening`, which
+    raises when mitmdump never binds, so nothing here can fabricate a proxy."""
     try:
         res = subprocess.run(
             ["powershell.exe", "-NoProfile", "-Command", "where.exe mitmdump"],
             capture_output=True, text=True, timeout=30)
     except (FileNotFoundError, subprocess.SubprocessError):
+        res = None
+    if res is not None and res.returncode == 0:
+        lines = [ln for ln in res.stdout.strip().splitlines() if ln.strip()]
+        if lines:
+            return lines[0]
+    # PATH could not answer. Probe the documented install locations instead, which
+    # cannot fail for environment reasons (they are filesystem reads, not lookups).
+    for cand in pass_through_proxy.windows_known_dir_candidates("mitmdump.exe"):
+        return str(Path(cand).resolve()).replace("/mnt/c/", "C:\\").replace("/", "\\")
+    return None
+
+
+def _windows_mitmdump_site() -> str | None:
+    """The Windows site-packages directory that contains `mitmproxy`, as a
+    Windows path (C:\\...), or None when none is found.
+
+    PASSBYSITE1. `_windows_mitmdump()` answers WHERE the binary is; this answers
+    what it will be able to IMPORT. They are different questions and only the
+    second one was wrong: measured 2026-10-04, the resolved mitmdump.exe died
+    with `ModuleNotFoundError: No module named 'mitmproxy'` because the
+    WSL-interop env block is REPLACED (not merged), so the interpreter computed a
+    USER_BASE that does not exist and never saw its own user-site. The fix is to
+    hand the directory to the child on sys.path, inside the process."""
+    cands = pass_through_proxy.windows_user_site_candidates("mitmproxy")
+    if not cands:
         return None
-    if res.returncode != 0:
-        return None
-    lines = [ln for ln in res.stdout.strip().splitlines() if ln.strip()]
-    return lines[0] if lines else None
+    return str(Path(cands[0]).resolve()).replace("/mnt/c/", "C:\\").replace("/", "\\")
 
 
 def _write_windows_addon(addon_path: Path, log_win: str) -> Path:
@@ -1092,6 +1230,31 @@ def _start_windows_mitmdump(mitmdump_win: str, confdir_win: str, addon_win: str,
 
     Values are normally space-free C:\\ paths, so single-quoting the inner
     command is enough; _cmd_quote covers the case where one is not."""
+    # PASSBYSITE1: run mitmdump through a launcher when its user-site is not on
+    # the interpreter's own sys.path. The shim alone cannot work here - the
+    # WSL-interop env block is REPLACED, not merged, so APPDATA/PYTHONPATH never
+    # reach the child and it computes a USER_BASE that does not exist. Measured
+    # 2026-10-04 in this exact shell: bare shim -> `ModuleNotFoundError: No module
+    # named 'mitmproxy'`; same shim via a launcher that does sys.path.insert ->
+    # `Mitmproxy: 12.2.3` and `HTTP(S) proxy listening at *:8081.`. When no site
+    # dir is found the original direct launch is kept, so a real
+    # ModuleNotFoundError still surfaces from the interpreter rather than being
+    # masked by a launcher that pretends to have fixed it.
+    site_win = _windows_mitmdump_site()
+    if site_win:
+        launcher_wsl = Path(confdir_win.replace("C:\\", "/mnt/c/").replace("\\", "/")) / "_mitmdump_launch.py"
+        launcher_win = confdir_win.rstrip("\\") + "\\_mitmdump_launch.py"
+        pass_through_proxy.write_python_launcher(
+            mitmdump_win, site_win, mitmdump_win, launcher_wsl)
+        launch_exe = pass_through_proxy._windows_python() or mitmdump_win
+        launch_argv = [launch_exe, launcher_win, "--set", "confdir=" + confdir_win,
+                       "--set", "flow_detail=2", "-s", addon_win,
+                       "-w", flows_win, "-p", str(port)]
+    else:
+        launch_argv = [mitmdump_win, "--set", "confdir=" + confdir_win,
+                       "--set", "flow_detail=2", "-s", addon_win,
+                       "-w", flows_win, "-p", str(port)]
+
     inner = " ".join([
         # Unbuffered, or the log stays empty for the entire capture. Measured:
         # with the plain redirect the file was 0 bytes while mitmdump ran and
@@ -1101,9 +1264,7 @@ def _start_windows_mitmdump(mitmdump_win: str, confdir_win: str, addon_win: str,
         # own error text. A redirect that captures nothing would have looked
         # exactly like a working one.
         'set "PYTHONUNBUFFERED=1" &&',
-        _cmd_quote(mitmdump_win), "--set", "confdir=" + _cmd_quote(confdir_win),
-        "--set", "flow_detail=2", "-s", _cmd_quote(addon_win),
-        "-w", _cmd_quote(flows_win), "-p", str(port),
+        " ".join(_cmd_quote(a) for a in launch_argv),
         ">", _cmd_quote(log_win), "2>&1",
     ])
     ps = ("Start-Process -FilePath 'C:\\Windows\\System32\\cmd.exe' -ArgumentList "
@@ -1149,14 +1310,38 @@ def _read_flow_detail_log(path: Path) -> str:
     return _read_windows_text(path)
 
 
-def _stop_windows_mitmdump() -> str | None:
+def _stop_windows_mitmdump(port: int | None = None) -> str | None:
     """Best-effort stop of the Windows-host mitmdump after a WSL2 capture.
     Returns a failure reason if the stop command could not be RUN (so _cleanup
     can report a possibly-stray mitmdump on the Windows host), None on a clean
-    launch. The reason is 'could not run the stop', not a confirmed leak."""
-    return pass_through_proxy._windows_best_effort(
+    launch. The reason is 'could not run the stop', not a confirmed leak.
+
+    PASSBYSITE1 follow-up: stop BY PORT first, then by name. Stopping by the
+    image name alone silently stopped working the moment the launch changed from
+    `mitmdump.exe` to `python.exe <launcher>` (which it had to, so the child
+    could see its user-site): the process image became `python.exe`, the sweep
+    matched nothing, and the proxy survived. Measured cost of that - Arm 1's
+    proxy held :8081 into Arm 2, whose mitmdump then exited on
+    `[Errno 10048] only one usage of each socket address`, leaving the
+    Frida-spawned app with no proxy and producing a clean 200 that read as "the
+    app made no network requests". The port is the thing we actually own, and it
+    is stable across any way of launching, so it is the primary key here; the
+    name sweep stays as a belt-and-braces second pass."""
+    reasons: list[str] = []
+    if port is not None:
+        r = pass_through_proxy._windows_best_effort(
+            "Get-NetTCPConnection -LocalPort " + str(port) +
+            " -State Listen -ErrorAction SilentlyContinue | "
+            "ForEach-Object { Stop-Process -Id $_.OwningProcess -Force "
+            "-ErrorAction SilentlyContinue }")
+        if r:
+            reasons.append(r)
+    r = pass_through_proxy._windows_best_effort(
         "Get-Process mitmdump -ErrorAction SilentlyContinue | Stop-Process -Force"
     )
+    if r:
+        reasons.append(r)
+    return "; ".join(reasons) if reasons else None
 
 
 def _drive_ui(serial: str, package: str) -> dict:
@@ -1269,7 +1454,11 @@ def run_capture_stage(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     confdir = out_dir / "mitm-conf"
-    bypass_applied = False  # set True only when the Frida bypass-spawn arm runs
+    frida_script_loaded = False  # True when the Frida-spawn arm runs (ANY script)
+    # `bypass_applied` is refined below from what the script itself reports; bound
+    # here so an exception before that point cannot leave it unbound - the same
+    # unbound-name hazard the ledger records for proxy_log_wsl.
+    bypass_applied = False
     # Which bypass the spawn arm loaded, as a compact descriptor for the evidence
     # (None on the plain-launch arm). A synthesized bypass is ~10 KB of generated
     # JavaScript; embedding it here would bury the very record it explains, and the
@@ -1396,6 +1585,27 @@ def run_capture_stage(
             # am-start arm. A pinning-only script is expected here.
             device2, session, pid, frida_instrument = frida_runner.attach(serial, package)
 
+            # RE-ASSERT THE ROUTE. `frida_runner.attach` -> setup_frida_connection
+            # -> _ensure_frida_server runs `adb root`, which RESTARTS adbd whenever
+            # the shell was not already root. An adb reverse is a LISTENER ON THE
+            # DEVICE, created through adbd, so a restart takes it with it - while
+            # the device-proxy setting set above SURVIVES, so the path still reads
+            # as configured and points at a device-side loopback nothing answers.
+            # The Frida-spawned app would then have no route to the proxy at all:
+            # its HTTPS goes direct to the origin, and an empty capture is
+            # recorded as "the app made no requests" - a property of the app that
+            # is really a property of this restart. This is the same hazard
+            # pass_through_proxy.ensure_internet documents for the 8080 tunnel and
+            # heals the same way. Measured on emulator-5554 2026-10-04: `adb root`
+            # emptied `reverse --list` (id -u 2000 -> 0), and re-placing tcp:8081
+            # made the device's `nc` to it return 0 again. A re-add of the same
+            # spec is idempotent, so this costs one adb call when adbd did not
+            # restart and is load-bearing when it did. Placed BEFORE resume so the
+            # route is live before the app can make its first request, and the
+            # proxy setting is re-asserted too in case a future change moves it.
+            device.adb_reverse(serial, proxy_port, proxy_port, add=True)
+            device.set_http_proxy(serial, "127.0.0.1", proxy_port)
+
             def on_message(message, data):
                 frida_messages.append(message)
 
@@ -1410,13 +1620,13 @@ def run_capture_stage(
                 bypass_arm = f"script file: {bypass_script}"
             device2.resume(pid)
             time.sleep(1.0)  # let the app start making requests under the hook
-            bypass_applied = True
+            frida_script_loaded = True
             launch = {"component": None, "launched_by": "frida spawn", "pid": pid,
                       "attempts": []}
         else:
             # "Without script" arm: plain cold-start, no hooks.
             launch = _launch_app(serial, package)
-            bypass_applied = False
+            frida_script_loaded = False
         # CAPLIVE1: sample the app's OWN liveness at both ends of the window,
         # device-side. Everything else this stage records - the flow list, the
         # connection count, the certificate refusals - is a fact about an OBSERVER.
@@ -1455,12 +1665,12 @@ def run_capture_stage(
         # an un-hooked window has no observer in it and is not evaluated at all,
         # so there would be nothing to feed. The key is recorded on both arms
         # (None on the un-hooked one) so its presence never depends on the arm.
-        ui_liveness = _capture_ui_liveness(serial, package) if bypass_applied else None
+        ui_liveness = _capture_ui_liveness(serial, package) if frida_script_loaded else None
 
         if wsl2:
             stdout_text = _read_flow_detail_log(log_wsl)
             proxy_log = _read_windows_text(proxy_log_wsl)
-            _stop_windows_mitmdump()
+            _stop_windows_mitmdump(proxy_port)
         else:
             proc.terminate()
             try:
@@ -1471,6 +1681,11 @@ def run_capture_stage(
             proc = None
 
         flows = _parse_flow_detail(stdout_text or "")
+
+        # BYPASSAPPLIED1: whether a bypass was actually INSTALLED, read from the
+        # script's own report - not whether a script was loaded. Computed once,
+        # before either evidence arm, so both record the same fact.
+        bypass_applied = _bypass_hooks_installed(frida_messages)
 
         # Certificate refusals observed in this capture, computed ONCE here so
         # both the success and empty-flow arms report the same observation - they
@@ -1571,17 +1786,84 @@ def run_capture_stage(
                     " (" + ", ".join(refused_hosts) + ")" if refused_hosts
                     else " (the client's SNI was not captured for these)"
                 )
-                device_or_app_cause = (
-                    f"no traffic was decrypted, but the capture proxy recorded "
-                    f"{len(tls_failed)} client TLS handshake(s) it REFUSED its "
-                    f"certificate for{hosts_note} - the app rejected the capture "
-                    "CA, which is the proxy-side signature of certificate pinning "
-                    "(or a custom/limited trust store). This also proves the "
-                    "device->proxy route worked: a refusal requires the "
-                    "connection. So this is NOT a wiring failure and NOT "
-                    "app-silence - the pinned host(s) above refused the proxy and "
-                    "their traffic was never decryptable by this route"
+                # FIX A (part 2). `tls_failed` is UNATTRIBUTED - the parser
+                # returns [{host, error}] with no uid, so `len(tls_failed)` counts
+                # refusals by ANY process on the device and `refused_hosts` is a
+                # mixed bag. The conclusion clause below ("the app rejected the
+                # capture CA") is a positive claim about the TARGET, so it may not
+                # be sourced from input that cannot name the target. Measured in
+                # the A/B run 2026-10-04 (Arm 1): 7 refusals, 6 of them
+                # `youtubei.googleapis.com` - Google Play services - and the
+                # sentence above printed all 7 as the app's pinning evidence.
+                #
+                # Attribution is the decider, and it already exists: the verdict
+                # computed before the log was read carries `reached`, the
+                # uid-attributed answer to "did THIS app reach the proxy"
+                # (ADR-0012). When it is True the app demonstrably connected, so
+                # the refusal that killed its handshake is the app's and the
+                # original narration stands. When it is not, the refusal is
+                # recorded and printed but NOT credited to the app.
+                #
+                # A host allowlist was rejected for the same reason FIX A rejected
+                # one: the stage does not know which hosts the app talks to, and
+                # Arm 1 shows the app's own refusal sitting in the SAME list as the
+                # Play-services ones - any host test reads a mixed bag and would
+                # drop the target's real refusal along with the noise.
+                refusal_attributed_to_app = (
+                    (proxy_attribution_verdict or {}).get("reached") is True
                 )
+                app_drive_refusals = _app_drive_certificate_refusals(frida_messages)
+                if refusal_attributed_to_app:
+                    device_or_app_cause = (
+                        f"no traffic was decrypted, but the capture proxy recorded "
+                        f"{len(tls_failed)} client TLS handshake(s) it REFUSED its "
+                        f"certificate for{hosts_note} - the app rejected the capture "
+                        "CA, which is the proxy-side signature of certificate pinning "
+                        "(or a custom/limited trust store). This also proves the "
+                        "device->proxy route worked: a refusal requires the "
+                        "connection. So this is NOT a wiring failure and NOT "
+                        "app-silence - the pinned host(s) above refused the proxy and "
+                        "their traffic was never decryptable by this route"
+                    )
+                elif app_drive_refusals:
+                    # APPDRIVE1: the app's own report, which needs no attribution.
+                    drive_hosts = sorted(
+                        {r["host"] for r in app_drive_refusals if r.get("host")})
+                    drive_note = (
+                        " (" + ", ".join(drive_hosts) + ")" if drive_hosts else ""
+                    )
+                    device_or_app_cause = (
+                        f"no traffic was decrypted, but the capture proxy recorded "
+                        f"{len(tls_failed)} client TLS handshake(s) it REFUSED its "
+                        f"certificate for{hosts_note} - AND the app's OWN in-process "
+                        f"request reported the same refusal from inside the app"
+                        f"{drive_note}. That second reading is direct evidence about "
+                        "THIS app rather than a proxy-side inference: the connection "
+                        "was made by code running in the app's own process, under the "
+                        "app's own network security config, and its TLS stack refused "
+                        "our CA - the in-app signature of certificate pinning (or a "
+                        "custom/limited trust store). The proxy-side refusals on their "
+                        "own could not be attributed to the target package; this one "
+                        "is the app's own report of its own connection, so it does not "
+                        "depend on that attribution. The device->proxy route also "
+                        "worked (a refusal requires the connection), so this is NOT a "
+                        "wiring failure and NOT app-silence"
+                    )
+                else:
+                    device_or_app_cause = (
+                        f"no traffic was decrypted, but the capture proxy recorded "
+                        f"{len(tls_failed)} client TLS handshake(s) it REFUSED its "
+                        f"certificate for{hosts_note}. The device->proxy route "
+                        "worked: a refusal requires the connection, so this is NOT a "
+                        "wiring failure. But these refusals could NOT be attributed "
+                        "to the target package (the per-uid device-side sampling "
+                        "reached no verdict this window), and a refusal by any "
+                        "process looks identical proxy-side, so they do NOT "
+                        "establish that THIS app rejected the capture CA or that it "
+                        "pins its traffic. Re-run with the app's uid attributable, "
+                        "or read the refusal hosts against the package's own "
+                        "traffic, before treating this as pinning evidence"
+                    )
             elif reachable is True:
                 device_or_app_cause = (
                     "no traffic captured through the proxy - the device COULD "
@@ -1617,9 +1899,35 @@ def run_capture_stage(
             # Applied here rather than as a new branch of that chain so it composes
             # with all of them - including the dead-recorder case, whose facts are
             # about the observer and are likewise silent on the app.
+            # What may stand as "the proxy watched the app run"? ONLY evidence
+            # that can be about no other process.
+            #
+            # This used to read `bool(tls_failed) or client_connections > 0`, and
+            # `tls_failed` is unattributed: `_count_tls_failed_clients` returns
+            # [{host, error}] with no uid, so a refusal by ANY process counts.
+            # Measured in the A/B run 2026-10-04 (Arm 1): six of the seven
+            # refusals were `youtubei.googleapis.com` - Google Play services, not
+            # the target. A target that never started would therefore still
+            # suppress `never_ran` as soon as some unrelated process refused our
+            # CA, and the empty capture would be blamed on the app's network
+            # behaviour rather than on its launch - the exact misattribution this
+            # guard exists to prevent, reintroduced through unattributed input.
+            #
+            # `client_connections` is the app's own count (the stage's pre-flight
+            # probe is already subtracted by `_app_client_connections`), and
+            # `attribution.reached is True` is the uid-attributed answer to "did
+            # THIS app reach the proxy" (ADR-0012) - both can only be the app.
+            # A host allowlist was considered and rejected: the stage does not
+            # know which hosts the app talks to, and Arm 1 shows the app's own
+            # refusal sitting in the SAME list as the Play-services ones, so any
+            # host test would still be reading a mixed bag.
+            app_evidence_reached_proxy = (
+                client_connections > 0
+                or (proxy_attribution_verdict or {}).get("reached") is True
+            )
             never_ran, liveness_note = _launch_liveness_cause(
                 pid_after_launch, pid_after_capture,
-                app_seen_running=bool(tls_failed) or client_connections > 0)
+                app_seen_running=app_evidence_reached_proxy)
             if never_ran:
                 device_or_app_cause = (
                     f"{liveness_note}. Read that FIRST: the readings above are "
@@ -1631,14 +1939,20 @@ def run_capture_stage(
                 )
             elif liveness_note:
                 device_or_app_cause = f"{device_or_app_cause} - but {liveness_note}"
-            if bypass_applied and script_errors:
+            if frida_script_loaded and script_errors:
+                # Gated on the ARM, not on `bypass_applied`: a script that crashed
+                # before installing anything reports no `bypassed` message, so
+                # `bypass_applied` is False - and that is exactly the run this
+                # sentence exists to explain. The wording is neutral about which
+                # script was loaded, because the same gate covers a drive-only arm.
                 error = (
-                    "the pinning-bypass script raised "
+                    "the injected script raised "
                     f"{len(script_errors)} uncaught error(s) "
-                    f"({'; '.join(script_errors)}) - the bypass likely did not "
-                    "take, so a pinned app's TLS handshakes fail and yield no "
-                    "decrypted flows; fix the script before treating this as a "
-                    f"device-wiring or app-silence failure. {device_or_app_cause}"
+                    f"({'; '.join(script_errors)}) - it did not complete, so a "
+                    "bypass it was installing would not have taken effect, and a "
+                    "pinned app's TLS handshakes then fail and yield no decrypted "
+                    "flows; fix the script before treating this as a device-wiring "
+                    f"or app-silence failure. {device_or_app_cause}"
                 )
             else:
                 error = device_or_app_cause
@@ -1703,6 +2017,10 @@ def run_capture_stage(
                     # Certificate refusals this capture observed, from whichever
                     # source this placement writes (see _count_tls_failed_clients).
                     "tls_failed_clients": tls_failed,
+                    # Self-describing summary so the raw count above is
+                    # not read as a count of facts about the TARGET (the
+                    # proxy records refusals with no uid). See _tls_failed_note.
+                    "tls_failed_clients_note": _tls_failed_note(tls_failed),
                     # Whether the WSL2 addon reported itself loaded (None on the
                     # native placement, which runs no addon). False means this log
                     # is empty because nothing recorded, not because nothing
@@ -1743,6 +2061,9 @@ def run_capture_stage(
                 # Certificate refusals this capture observed, from whichever
                 # source this placement writes (see _count_tls_failed_clients).
                 "tls_failed_clients": tls_failed,
+                # Same note on the success branch, so its presence never
+                # depends on whether flows were captured. See _tls_failed_note.
+                "tls_failed_clients_note": _tls_failed_note(tls_failed),
                 "flow_summary": [
                     {"host": f.host, "method": f.method, "path": f.path,
                      "status": f.status, "scheme": f.scheme} for f in flows

@@ -1,7 +1,7 @@
 # Complete File Inventory
 
 Generated: 2026-10-05
-All files tracked in git, excluding the 664 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source — listing them here added ~61k lines of noise and drowned the 306 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
+All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source — listing them here added ~61k lines of noise and drowned the 308 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
 
 ```
 .gitattributes
@@ -109,6 +109,7 @@ scripts/rs_certpinning_ab.py
 scripts/run_unexecuted_realworld_sweep.sh
 scripts/sample_run_memory.py
 scripts/universal-robust-advanced-root--ssl-pinning-bypass.js
+scripts/verify_all.py
 src/audit/__init__.py
 src/audit/attestation.py
 src/calibration/__init__.py
@@ -219,6 +220,7 @@ tests/unit/test_dynload.py
 tests/unit/test_emulator_proxy_teardown.py
 tests/unit/test_emulator_up_startup.py
 tests/unit/test_environment_check.py
+tests/unit/test_file_inventory.py
 tests/unit/test_flow_attribution.py
 tests/unit/test_frida_runner.py
 tests/unit/test_gap_hunt_progress.py

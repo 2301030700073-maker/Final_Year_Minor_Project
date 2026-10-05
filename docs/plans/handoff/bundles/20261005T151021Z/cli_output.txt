@@ -1,0 +1,31 @@
+OK  ingest  (0ms)
+OK  audit  (18ms)
+OK  decompile  (233ms)
+OK  signature_load:root  (32ms)
+OK  signature_load:ssl  (23ms)
+OK  static_scan  (48ms)
+androguard: 25 app-owned DEX string(s), no new matches
+OK  manifest_parse  (0ms)
+OK  native_scan  (2ms)
+OK  obfuscation  (0ms)
+OK  packers  (70ms)
+OK  decision_engine  (0ms)
+Decision: ROOT_ONLY
+Coverage-limited (unknown, not absent): ssl (governing surface not fully 
+analyzed) - a NEITHER here is a lower bound, not a confident negative; see 
+Limitations.
+Coverage bound: java=partial, native=fully_analyzed, manifest=fully_analyzed, 
+js=fully_analyzed; root: NEITHER is a lower bound, NOT confident (java=partial, 
+native=fully_analyzed, js=fully_analyzed); ssl: NEITHER is a lower bound, NOT 
+confident (java=partial, native=fully_analyzed, manifest=fully_analyzed, 
+js=fully_analyzed)
+  Root: 1.00 -> DETECTED
+  SSL : 0.00 (upper bound: java=partial) -> Inconclusive
+OK  audit  (1ms)
+OK  dynamic  (15759ms)
+OK  success-check  (0ms)
+
+Report: 
+outputs/reports/1da8bf57d266109f9a07c01bf7111a1975ce01f190b9d914bcd3ae3dbef96f21
+/6d40b16e814940b5a2756fe8a1ae3d91.md
+

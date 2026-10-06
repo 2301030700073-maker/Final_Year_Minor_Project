@@ -114,6 +114,10 @@ def test_the_timeout_message_does_not_assert_a_cause_it_did_not_measure():
     assert "stalled frida-server" in result.error, result.error
     assert "needs longer" in result.error, result.error
     assert "settle window" in result.error, result.error
+    # And it must name the PHASE it stuck in, not list all four as a guess. The
+    # stubbed hang is in attach(), so that is the phase the message must report.
+    assert "while in phase:" in result.error, result.error
+    assert "spawn + attach" in result.error, result.error
 
 
 def test_ui_action_loop_runs_target_actions_in_order(monkeypatch):

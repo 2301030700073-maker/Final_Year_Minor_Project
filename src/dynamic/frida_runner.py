@@ -119,13 +119,18 @@ def load_script_source(session, source: str, on_message=None):
 # reach its own check, ON TOP of spawn/attach/script-load and the two-spawn path.
 # Measured 2026-10-06:
 #   hand-authored targets (known, 5 s settle)   18.1 s of the ceiling
-#   a real app, forced (unknown, 25 s settle)   39-44 s - 65-74% of a 60 s ceiling
-#   a large commercial app (propertyguru)       EXCEEDED 60 s and failed the stage
+#   a real app, forced (unknown, 25 s settle)   39-44 s
+#   a large commercial app (propertyguru)       119.4 s - 99.5% of a 120 s ceiling
 # 60 s left ~16 s of headroom for the very path the 25 s settle exists to serve,
-# so a heavy app could fail the stage on its own designed timing rather than on a
-# fault. 120 s is 25 s settle + generous spawn/load + margin; a genuinely stalled
-# server still fails, just later.
-FRIDA_STAGE_TIMEOUT = 120.0  # seconds
+# and propertyguru EXCEEDED it. 120 s still left it at 99.5%, i.e. still marginal.
+# 180 s is 25 s settle + ~94 s of measured spawn/load + real margin.
+#
+# CAVEAT on those numbers: they were taken on a HEADLESS emulator
+# (-no-window -gpu swiftshader_indirect), which renders in software and inflates
+# spawn/load. On a GPU-backed emulator the same stages should be faster, so this
+# ceiling is generous there and load-bearing here. A genuinely stalled server still
+# fails - just later, and the message now names the phase it was in.
+FRIDA_STAGE_TIMEOUT = 180.0  # seconds
 
 # RESID-6D: how hard to poll for the bypass scripts' hook-install signal before
 # giving up and burning the remaining settle window (see _wait_for_checkpoint).
@@ -556,6 +561,7 @@ def run_dynamic_stage(
             device, session, pid, instrument = attach(device_serial, package_name)
             if script_src is not None:
                 load_script_source(session, script_src, on_message)
+            outcome["phase"] = "device.resume"
             device.resume(pid)
             time.sleep(1.0)  # let the launcher activity draw before any UI action
             for ui_action in _ui_actions_for(target, ui_kind):
@@ -636,6 +642,12 @@ def run_dynamic_stage(
                 # (mutually exclusive button-triggered checks in one navigation).
                 _run_two_spawns()
                 return
+            # FRIDA-CEILING1: record the phase, so the timeout reports WHERE it stuck
+            # instead of listing all four as a guess. Measured 2026-10-06: propertyguru
+            # (--force-dynamic) exceeded even a 120s ceiling while its process was
+            # demonstrably running, and the old message gave the operator nothing to
+            # act on. The stage is sequential, so the phase is knowable.
+            outcome["phase"] = "spawn + attach (frida-server handshake)"
             device, session, pid, instrument = attach(device_serial, package_name)
             outcome["instrument"] = instrument
 
@@ -665,6 +677,7 @@ def run_dynamic_stage(
                     load_script(session, name, on_message)
 
             ui_actions = _ui_actions_for(target, action)
+            outcome["phase"] = "device.resume"
             device.resume(pid)
             time.sleep(1.0)  # let the launcher activity draw before any UI action
             for ui_action in ui_actions:
@@ -680,6 +693,9 @@ def run_dynamic_stage(
             # must wait for that evidence, not just the readiness checkpoint, or
             # the stage captures before the check runs and honestly (but wrongly)
             # reports inconclusive.
+            outcome["phase"] = (
+                f"settle + checkpoint wait ({settle_seconds:.0f}s window)"
+            )
             _wait_for_checkpoint(
                 messages, settle_seconds,
                 require_evidence=bool(ui_actions) or _root_expected or _ssl_expected,
@@ -750,7 +766,8 @@ def run_dynamic_stage(
                 "instrument": outcome.get("instrument"),
             },
             error=(
-                f"frida stage exceeded {FRIDA_STAGE_TIMEOUT:.0f}s hard timeout. Cause is "
+                f"frida stage exceeded {FRIDA_STAGE_TIMEOUT:.0f}s hard timeout "
+                f"while in phase: {outcome.get('phase') or 'unknown'}. Cause is "
                 f"either a stalled frida-server / hung attach, or a target whose own "
                 f"spawn+load+settle genuinely needs longer - the stage's own settle "
                 f"window for an unknown app is {_UNKNOWN_TARGET_SETTLE_SECONDS:.0f}s, so "

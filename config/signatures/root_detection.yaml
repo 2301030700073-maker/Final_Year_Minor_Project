@@ -244,7 +244,31 @@
 # file.
 - id: root_su_search_directories
   category: root
-  weight: 0.3
+  # DECISIVE-BY-MEASUREMENT (2026-10-06). This is the corpus's ONE deliberate
+  # exception to the "no single signature >= 0.70" anti-FP invariant, and it is
+  # earned by a measured false-positive record rather than asserted:
+  #
+  #   - The bare-directory form occurs in exactly TWO code sites in the whole
+  #     analysed corpus (measured above, and re-measured 2026-10-06): RS_Vapour's
+  #     app-owned root check, and Telegram's org/telegram/messenger/EmuDetector.
+  #   - The pattern deliberately EXCLUDES "/system/bin/" precisely because that is
+  #     Telegram's site, so the only thing it can match is an app-owned su check.
+  #   - Measured effect of making it decisive: EXACTLY 7 reports across the whole
+  #     corpus contain this signature, and all 7 are RS_Vapour
+  #     (com.redshift.rs_vapourtraining). No other app in the corpus is affected.
+  #
+  # WHY it had to move: with the weight at 0.30 the signature FIRED and the
+  # threshold DISCARDED it, so RS_Vapour was reported NEITHER while
+  # config/ground_truth.yaml records root: true ("Login.java does real app-owned
+  # root detection") and the calibration report names it a KNOWN MISS. The old
+  # comment here claimed that NEITHER was "correctly reported" - the ground truth
+  # and the calibration report both say otherwise, so the claim was wrong.
+  #
+  # The invariant is NOT removed: it still holds for every other signature, and
+  # test_rasp_signatures.py now names this single measured exception instead of
+  # asserting an empty list. A signature earns this only with a whole-corpus FP
+  # measurement showing it can match nothing else.
+  weight: 0.7
   pattern_type: regex
   patterns:
     - '/system/xbin/(?![\w.])'

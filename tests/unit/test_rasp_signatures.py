@@ -134,8 +134,22 @@ def test_rasp_signatures_do_not_fire_on_near_miss_or_generic_lines(line, root_si
 def test_no_single_signature_can_reach_the_detection_threshold(all_sigs):
     """confidence = min(1.0, sum of distinct matched weights), DETECTED at >= 0.70.
     A single signature at >= 0.70 would make one match sufficient, removing the
-    corroboration the anti-false-positive design depends on."""
-    assert [s.id for s in all_sigs if s.weight >= 0.70] == []
+    corroboration the anti-false-positive design depends on.
+
+    ONE measured exception, added 2026-10-06: `root_su_search_directories`. It is
+    allowed to be decisive because its false-positive record is MEASURED, not
+    assumed - the bare-directory form occurs in exactly two code sites in the whole
+    corpus, and the pattern deliberately excludes the one that is not a root check
+    (Telegram's EmuDetector uses "/system/bin/"). Making it decisive changes exactly
+    7 reports corpus-wide, all of them RS_Vapour, whose ground truth is root: true.
+
+    So this is not a removal of the invariant - it is the invariant with a named,
+    evidence-backed exception. Any OTHER signature reaching 0.70 still fails here.
+    """
+    decisive = sorted(s.id for s in all_sigs if s.weight >= 0.70)
+    assert decisive == ["root_su_search_directories"], (
+        f"a signature other than the measured exception became decisive: {decisive}"
+    )
 
 
 def test_new_rasp_patterns_are_not_substrings_of_another_ids_pattern(all_sigs):

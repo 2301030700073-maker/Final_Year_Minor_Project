@@ -162,12 +162,28 @@ def test_no_single_signature_can_self_trigger_detection():
     conscious-decision gate, not a ban: if a genuinely unambiguous future
     signature ever warrants weight >= threshold, this assertion must be updated
     deliberately, with justification - never relaxed silently, which is exactly
-    the review friction an over-confident single signature should meet."""
+    the review friction an over-confident single signature should meet.
+
+    UPDATED 2026-10-06, deliberately and with justification - the case this gate
+    was written to force a decision on. `root_su_search_directories` is the corpus's
+    ONE decisive signature, and it earned it by MEASUREMENT rather than by
+    argument: the bare-directory form occurs in exactly two code sites in the whole
+    corpus, the pattern deliberately excludes the one that is NOT a root check
+    (Telegram's EmuDetector uses "/system/bin/"), and making it decisive changes
+    exactly 7 reports corpus-wide - all of them RS_Vapour, whose ground truth is
+    root: true and whose NEITHER the calibration report already names a KNOWN MISS.
+    Every other signature must still cap below the threshold; this list is the
+    exception register, so a second entry is a deliberate act, not a drift."""
     from static.decision_engine import DEFAULT_THRESHOLD
+
+    # The exception register. Adding an entry here is a deliberate design act.
+    DECISIVE_BY_MEASUREMENT = {"root_su_search_directories"}
 
     for yaml_name in ("root_detection.yaml", "ssl_pinning.yaml"):
         sigs = load_signatures(REPO_ROOT / "config/signatures" / yaml_name)
-        offenders = [(s.id, s.weight) for s in sigs if s.weight >= DEFAULT_THRESHOLD]
+        offenders = [(s.id, s.weight) for s in sigs
+                     if s.weight >= DEFAULT_THRESHOLD
+                     and s.id not in DECISIVE_BY_MEASUREMENT]
         assert not offenders, (
             f"{yaml_name}: signature(s) {offenders} carry weight >= the "
             f"{DEFAULT_THRESHOLD} detection threshold and could alone trigger a "
@@ -175,6 +191,14 @@ def test_no_single_signature_can_self_trigger_detection():
             f"positive shape. Cap at < {DEFAULT_THRESHOLD} so detection needs "
             f">= 2 independent signals, or update this gate deliberately."
         )
+        # And the register must not rot: every registered exception has to actually
+        # be decisive, or the register is hiding a signature that no longer earns it.
+        for s in sigs:
+            if s.id in DECISIVE_BY_MEASUREMENT:
+                assert s.weight >= DEFAULT_THRESHOLD, (
+                    f"{s.id} is registered as decisive-by-measurement but no longer "
+                    f"reaches the threshold ({s.weight} < {DEFAULT_THRESHOLD})"
+                )
 
 
 def test_root_corpus_includes_magisk_kernelsu_zygisk_era_signatures():
@@ -2124,9 +2148,19 @@ def test_sudir1_bare_su_search_directories_are_matched_and_non_colliding(tmp_pat
 
     root_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")}
     sig = root_sigs["root_su_search_directories"]
-    # Same weight as the three other su-path probes: this is one more variant of
-    # "look for the su binary on disk", not a stronger signal.
-    assert sig.weight == 0.3
+    # DECISIVE BY MEASUREMENT, 2026-10-06 - deliberately no longer 0.3.
+    # At 0.3 this signature FIRED and the threshold DISCARDED it, so RS_Vapour was
+    # reported NEITHER while config/ground_truth.yaml records root: true and the
+    # calibration report names it a KNOWN MISS. It is allowed to be decisive only
+    # because its false-positive record is measured: the bare-directory form occurs
+    # in exactly two code sites in the whole corpus, the pattern excludes the one
+    # that is not a root check (Telegram's EmuDetector uses "/system/bin/"), and
+    # making it decisive changes exactly 7 reports corpus-wide - all RS_Vapour.
+    from static.decision_engine import DEFAULT_THRESHOLD
+    assert sig.weight >= DEFAULT_THRESHOLD, (
+        "this signature is registered as decisive-by-measurement; if its weight "
+        "drops below the threshold the exception register must be updated too"
+    )
     assert sig.pattern_type == "regex"
     # No padding: only directories actually present in a real APK's app-owned
     # detection code are listed. These three are standard RootBeer suPaths entries
@@ -2189,20 +2223,37 @@ def test_sudir1_bare_su_search_directories_are_matched_and_non_colliding(tmp_pat
     assert all(e.verification_state == "deterministic_matched"
                for e in evidence.root_evidence)
 
-    # The honest bound, pinned so nobody "finishes" this fix by inflating it.
-    # RS_Vapour's app-owned root surface is ONE technique, and one matched
-    # signature at 0.3 cannot reach the 0.70 threshold - no single signature may
-    # ever carry >= 0.70 (the structural anti-FP invariant, asserted below). So
-    # this moves a silent 0.00 to a 0.30 backed by real evidence rows naming the
-    # app's own class, and the verdict stays NEITHER: correctly reported as
-    # coverage-limited "unknown, not absent" by the indicator layer, never as a
-    # confident negative. It remains a measured false negative against the
-    # corrected ground truth, and saying so is the point.
+    # OVERRIDDEN 2026-10-06, explicitly and at the owner's direction.
+    #
+    # What this block USED to say, kept because it is the record of what changed:
+    # "The honest bound, pinned so nobody 'finishes' this fix by inflating it. ...
+    # one matched signature at 0.3 cannot reach the 0.70 threshold - no single
+    # signature may ever carry >= 0.70 (the structural anti-FP invariant) ... the
+    # verdict stays NEITHER ... It remains a measured false negative against the
+    # corrected ground truth, and saying so is the point."
+    #
+    # That position was internally consistent but it accepted a KNOWN false
+    # negative on an app whose ground truth is root: true. The owner's call was
+    # that a measured false negative is not an acceptable output when the fix is
+    # provably collateral-free, and the measurement backs that:
+    #   - the bare-directory form occurs in exactly two code sites corpus-wide;
+    #   - the pattern excludes the non-root-check one (Telegram's EmuDetector);
+    #   - making it decisive changes exactly 7 reports, all RS_Vapour.
+    # So the signature is now decisive and RS_Vapour IS detected. The invariant
+    # survives for every other signature - see
+    # test_no_single_signature_can_self_trigger_detection's exception register.
+    #
+    # If this override is ever reversed, restore the 0.3 weight in
+    # config/signatures/root_detection.yaml and the empty-list assertions here and
+    # in the two invariant gates - the three sites move together.
     result = classify(evidence)
-    assert result.root.confidence == 0.3
-    assert result.root.detected is False
+    assert result.root.confidence >= 0.70
+    assert result.root.detected is True, (
+        "RS_Vapour's textbook app-owned su-path-walk must now be DETECTED - its "
+        "ground truth is root: true and this was a measured false negative"
+    )
+    assert result.root.coverage_limited is False
     assert result.ssl.confidence == 0.0
-    assert not [s for s in root_sigs.values() if s.weight >= 0.70]
 
 
 
@@ -2278,7 +2329,12 @@ def test_execrecv1_cached_runtime_receiver_exec_su_matched_on_the_same_signature
     result = classify(evidence)
     assert result.root.confidence == 0.3   # one id, counted once
     assert result.root.detected is False   # and one technique still cannot reach 0.70
-    assert not [s for s in root_sigs.values() if s.weight >= 0.70]
+    # Corpus invariant, with the one measured exception (see the exception register
+    # in test_no_single_signature_can_self_trigger_detection). Everything else must
+    # still cap below the threshold so a DETECTED verdict needs corroboration.
+    assert [s.id for s in root_sigs.values() if s.weight >= 0.70] == [
+        "root_su_search_directories"
+    ]
 
 
 # ---------------------------------------------------------------- MULTILINE-BUDGET1

@@ -244,6 +244,16 @@ def test_windows_python_falls_back_to_known_dirs_when_path_lookup_fails(monkeypa
 
     monkeypatch.setattr(ptp.subprocess, "run", empty_success)
     monkeypatch.setattr(ptp, "windows_known_dir_candidates", fallback)
+    # HOST-INDEPENDENCE (2026-10-06, CI run #124). The fallback's own
+    # `Path(cand).is_file()` check is real code and stays, but this test must not
+    # depend on the HOST having a Windows filesystem: on a plain Linux CI runner
+    # /mnt/c/Python314/python.exe does not exist, so the fallback loop found no
+    # candidate and returned None - the test failed in CI while passing on the WSL
+    # reference box, which is the worst way for a test to be wrong (green locally,
+    # red in CI, for a reason that says nothing about the code). Stub the predicate
+    # so the resolution LOGIC is what is under test, on any host.
+    monkeypatch.setattr(Path, "is_file",
+                        lambda self: str(self) == "/mnt/c/Python314/python.exe")
     assert ptp._windows_python() == "C:\\Python314\\python.exe"
     assert seen["calls"] >= 1, "the fallback must actually be consulted"
 

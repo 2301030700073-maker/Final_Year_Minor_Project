@@ -74,6 +74,33 @@ MAX_EVIDENCE_PER_SIGNATURE = 50
 # means a bug in a hand-authored rule, and the pipeline should halt, not burn.
 LINE_MATCH_BUDGET_SECONDS = 1.0
 
+# Whole-text (multiline) budget - deliberately NOT the per-line constant above.
+#
+# That one is documented as a budget for "matching a single line", and its premise
+# is "a legitimate source line never approaches this". The multiline pass matches
+# the WHOLE FILE, where that premise does not hold: one linear pass over a large
+# legitimate file costs more than any single line ever does.
+#
+# Measured 2026-10-06 on a real app (jerboa): jadx emitted LookAndFeelScreenKt.java
+# at 249 MB / 479,480 lines, and sslcontext_init_with_trustmanager - a signature
+# whose own comment says it is "bounded, so the regex stays linear", and which
+# matches NOTHING in that file (zero `getInstance(` occurrences) - took 1.1s,
+# tripping the 1.0s per-line budget and halting the whole scan. The regex was fine;
+# the input was 249 MB.
+#
+# Scaling by input size keeps the guard's teeth where they matter: a ReDoS on a
+# small file still trips at the floor, while a linear pass over a large one is not
+# mistaken for one. The rate is ~4x slower than a linear regex measures in practice
+# (~225 MB/s), so only a genuine blowup reaches it.
+MULTILINE_MATCH_BUDGET_FLOOR_SECONDS = 1.0
+MULTILINE_MATCH_BYTES_PER_SECOND = 50_000_000
+
+
+def multiline_match_budget(chars: int) -> float:
+    """Seconds allowed for one whole-text regex search over `chars` characters."""
+    return max(MULTILINE_MATCH_BUDGET_FLOOR_SECONDS,
+               chars / MULTILINE_MATCH_BYTES_PER_SECOND)
+
 
 @dataclass
 class Signature:
@@ -779,12 +806,32 @@ def scan(
                     flags |= re.IGNORECASE
                 for compiled in signature.compiled_patterns(flags):
                     match = compiled.search(text)
-                    if time.monotonic() - match_start > LINE_MATCH_BUDGET_SECONDS:
+                    _budget = multiline_match_budget(len(text))
+                    if time.monotonic() - match_start > _budget:
+                        # Same two-cause honesty as the per-line path above, which was
+                        # fixed while this one kept the old text. This pass times each
+                        # signature on its own, so it CAN name the signature that was
+                        # executing - but that is not the same as it being the culprit.
+                        #
+                        # Measured 2026-10-06: this fired on LookAndFeelScreenKt.java, a
+                        # 249 MB / 479,480-line jadx output from a real Kotlin app
+                        # (jerboa), for sslcontext_init_with_trustmanager - a signature
+                        # whose own comment says it is "bounded, so the regex stays
+                        # linear", and which matches NOTHING in that file (zero
+                        # occurrences of `getInstance(` at all). A linear regex simply
+                        # scanning 249 MB takes ~1.1s. The old text asserted catastrophic
+                        # backtracking as the cause, which was false here, and it halted
+                        # a real app's scan on a misdiagnosis. Report the measured facts;
+                        # the INPUT SIZE is the discriminator, as line length is above.
                         raise TimeoutError(
-                            f"static scan: multiline matching of {file_path.name} against "
-                            f"signature '{signature.id}' took > {LINE_MATCH_BUDGET_SECONDS:.1f}s - "
-                            f"the regex is catastrophically backtracking (ReDoS). The regex "
-                            f"must be linearized; see signatures.py."
+                            f"static scan: multiline matching of {file_path.name} "
+                            f"({len(text)} chars) against signature '{signature.id}' "
+                            f"took > {_budget:.1f}s (its whole-text budget for that "
+                            f"size). Cause is either a catastrophically-backtracking "
+                            f"regex or the cost of a single linear pass over an "
+                            f"unusually large file - the input size above is the "
+                            f"discriminator. Linearize the offending regex or bound "
+                            f"the input; see signatures.py."
                         )
                     if match is not None:
                         # Translate the whole-text match offset back to a 1-based line

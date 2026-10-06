@@ -2279,3 +2279,60 @@ def test_execrecv1_cached_runtime_receiver_exec_su_matched_on_the_same_signature
     assert result.root.confidence == 0.3   # one id, counted once
     assert result.root.detected is False   # and one technique still cannot reach 0.70
     assert not [s for s in root_sigs.values() if s.weight >= 0.70]
+
+
+# ---------------------------------------------------------------- MULTILINE-BUDGET1
+# The per-line budget (LINE_MATCH_BUDGET_SECONDS) was applied to the multiline pass,
+# which matches the WHOLE FILE rather than one line. Its own comment justifies the
+# value with "a legitimate source line never approaches this" - a premise that does
+# not hold for a whole file. Measured 2026-10-06 on a real app (jerboa): jadx emitted
+# LookAndFeelScreenKt.java at 249 MB / 479,480 lines, and a signature that matches
+# NOTHING in it (zero `getInstance(` occurrences) took 1.1s, tripping the 1.0s budget
+# and halting the entire scan on a misdiagnosis of "catastrophically backtracking".
+
+def test_multiline_budget_scales_with_input_size():
+    from static.signatures import (LINE_MATCH_BUDGET_SECONDS,
+                                   multiline_match_budget)
+    big = multiline_match_budget(249_434_338)   # the measured jerboa file
+    assert big > LINE_MATCH_BUDGET_SECONDS, (
+        "a whole-file match must get more than the per-line budget"
+    )
+    assert big >= 1.1, (
+        f"the budget must clear the 1.1s a LINEAR pass over 249 MB costs; got {big}"
+    )
+
+
+def test_multiline_budget_keeps_its_floor_on_small_inputs():
+    # The guard must keep its teeth: a ReDoS on a small file is still caught fast.
+    from static.signatures import (LINE_MATCH_BUDGET_SECONDS,
+                                   multiline_match_budget)
+    assert multiline_match_budget(0) == LINE_MATCH_BUDGET_SECONDS
+    assert multiline_match_budget(1_000) == LINE_MATCH_BUDGET_SECONDS
+    assert multiline_match_budget(1_000_000) == LINE_MATCH_BUDGET_SECONDS
+
+
+def test_multiline_budget_is_monotonic():
+    from static.signatures import multiline_match_budget
+    sizes = [0, 10_000, 1_000_000, 50_000_000, 100_000_000, 500_000_000]
+    budgets = [multiline_match_budget(n) for n in sizes]
+    assert budgets == sorted(budgets), budgets
+
+
+def test_a_linear_multiline_signature_over_a_large_file_does_not_halt(tmp_path):
+    """THE REGRESSION. A file big enough to blow the per-line budget, matched by a
+    bounded linear regex that finds nothing, must scan cleanly - not raise."""
+    from static.signatures import scan
+
+    # ~6 MB of code with no match, which is over the 1.0s floor's comfort zone once
+    # the pattern is applied but far under the scaled budget.
+    (tmp_path / "Big.java").write_text(
+        "public class Big {\n" + ("    int x = 0;\n" * 400_000) + "}\n",
+        encoding="utf-8",
+    )
+    sigs = load_signatures(REPO_ROOT / "config" / "signatures" / "ssl_pinning.yaml")
+    sigs = list(sigs.values()) if isinstance(sigs, dict) else list(sigs)
+    multiline = [s for s in sigs if s.multiline]
+    assert multiline, "expected at least one multiline signature to exercise"
+    # Must not raise TimeoutError.
+    evidence = scan([tmp_path], multiline, app_package="com.example.app")
+    assert evidence is not None

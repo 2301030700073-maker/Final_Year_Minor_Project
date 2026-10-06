@@ -112,7 +112,20 @@ def load_script_source(session, source: str, on_message=None):
 # stage which bounds its subprocesses with JADX_TIMEOUT/APKTOOL_TIMEOUT. The
 # stage runs its Frida interaction in a daemon thread joined under this deadline
 # so a hang fails loudly as status="failed" instead of blocking forever.
-FRIDA_STAGE_TIMEOUT = 60.0  # seconds
+#
+# The value is DERIVED from the settle window this deadline has to contain, not
+# chosen independently of it. An unknown real app (the synthesized-bypass path)
+# spends _UNKNOWN_TARGET_SETTLE_SECONDS (25 s) waiting for the app to boot and
+# reach its own check, ON TOP of spawn/attach/script-load and the two-spawn path.
+# Measured 2026-10-06:
+#   hand-authored targets (known, 5 s settle)   18.1 s of the ceiling
+#   a real app, forced (unknown, 25 s settle)   39-44 s - 65-74% of a 60 s ceiling
+#   a large commercial app (propertyguru)       EXCEEDED 60 s and failed the stage
+# 60 s left ~16 s of headroom for the very path the 25 s settle exists to serve,
+# so a heavy app could fail the stage on its own designed timing rather than on a
+# fault. 120 s is 25 s settle + generous spawn/load + margin; a genuinely stalled
+# server still fails, just later.
+FRIDA_STAGE_TIMEOUT = 120.0  # seconds
 
 # RESID-6D: how hard to poll for the bypass scripts' hook-install signal before
 # giving up and burning the remaining settle window (see _wait_for_checkpoint).
@@ -736,7 +749,15 @@ def run_dynamic_stage(
                 "frida_messages": messages,
                 "instrument": outcome.get("instrument"),
             },
-            error=f"frida stage exceeded {FRIDA_STAGE_TIMEOUT:.0f}s hard timeout - hung spawn/attach/load/resume",
+            error=(
+                f"frida stage exceeded {FRIDA_STAGE_TIMEOUT:.0f}s hard timeout. Cause is "
+                f"either a stalled frida-server / hung attach, or a target whose own "
+                f"spawn+load+settle genuinely needs longer - the stage's own settle "
+                f"window for an unknown app is {_UNKNOWN_TARGET_SETTLE_SECONDS:.0f}s, so "
+                f"a heavy app can approach this ceiling on designed timing rather than "
+                f"on a fault. Raise FRIDA_STAGE_TIMEOUT for a large target; investigate "
+                f"the server if spawn itself never returns."
+            ),
             duration_ms=elapsed_ms(start),
         )
     return outcome["result"]

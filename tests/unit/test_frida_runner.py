@@ -68,6 +68,54 @@ def test_hung_frida_attach_fails_loudly_under_deadline(monkeypatch):
     assert "hard timeout" in result.error
 
 
+def test_the_deadline_exceeds_the_settle_window_it_contains():
+    # The ceiling has to CONTAIN the stage's own settle budget. An unknown real app
+    # spends _UNKNOWN_TARGET_SETTLE_SECONDS waiting for the app to boot and reach
+    # its own check, on top of spawn/attach/script-load - so a ceiling chosen
+    # independently of that window can fail a heavy app on its own designed timing
+    # rather than on a fault.
+    #
+    # Measured 2026-10-06: with a 60 s ceiling, a real app used 39-44 s (65-74%),
+    # and a large commercial app (propertyguru) exceeded it and failed the stage.
+    assert frida_runner.FRIDA_STAGE_TIMEOUT > frida_runner._UNKNOWN_TARGET_SETTLE_SECONDS, (
+        f"the {frida_runner.FRIDA_STAGE_TIMEOUT}s ceiling does not contain the "
+        f"{frida_runner._UNKNOWN_TARGET_SETTLE_SECONDS}s settle window it wraps"
+    )
+    # The load-bearing half: the ceiling must leave a real budget for spawn +
+    # attach + script load ON TOP of the settle window, not merely exceed it.
+    # Measured 2026-10-06 - the non-settle overhead was 13 s on a hand-authored
+    # target and 19 s on a real app, so 60 s of headroom is ~3x the observed cost.
+    # (Asserting `>= 2 * settle` would NOT catch the old 60 s value: 60 >= 50.)
+    headroom = (frida_runner.FRIDA_STAGE_TIMEOUT
+                - frida_runner._UNKNOWN_TARGET_SETTLE_SECONDS)
+    assert headroom >= 60, (
+        f"only {headroom:.0f}s of the ceiling is left for spawn/attach/load once the "
+        f"settle window is accounted for - the old 60s ceiling left {60 - 25:.0f}s and "
+        f"a real app exceeded it"
+    )
+
+
+def test_the_timeout_message_does_not_assert_a_cause_it_did_not_measure():
+    # The old text asserted "hung spawn/attach/load/resume" - a specific cause the
+    # stage never measured. The stage cannot distinguish a stalled server from a
+    # target that is simply slow, so the message must name both.
+    import time
+
+    def hanging_attach(*args, **kwargs):
+        time.sleep(30)
+
+    import pytest
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("dynamic.frida_runner.attach", hanging_attach)
+        mp.setattr("dynamic.frida_runner.FRIDA_STAGE_TIMEOUT", 0.1)
+        result = frida_runner.run_dynamic_stage(
+            "emulator-5554", "com.example.app", Action.ROOT_ONLY, target="uncrackable1",
+        )
+    assert "stalled frida-server" in result.error, result.error
+    assert "needs longer" in result.error, result.error
+    assert "settle window" in result.error, result.error
+
+
 def test_ui_action_loop_runs_target_actions_in_order(monkeypatch):
     # RESID-6A: the UI-action loop must run the target's actions in order and
     # must not disturb the Action parameter (previously the loop variable

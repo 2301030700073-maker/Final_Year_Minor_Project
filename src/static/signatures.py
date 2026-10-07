@@ -74,15 +74,6 @@ MAX_EVIDENCE_PER_SIGNATURE = 50
 # means a bug in a hand-authored rule, and the pipeline should halt, not burn.
 LINE_MATCH_BUDGET_SECONDS = 1.0
 
-# PERF2 (2026-10-06): how often to sample the per-line budget. Measured on one real
-# smali_classes dir of the Spotify corpus (10,479 files, 399s wall): the clock call
-# ran after EVERY signature attempt - 431M time.monotonic calls, 36s - to enforce a
-# 1.0s budget that can only be breached by work far larger than one signature's.
-# Sampling every 16 attempts keeps both documented causes detectable (a backtracking
-# regex is always checked immediately after itself; the aggregate-over-a-long-line
-# case is caught within 16 attempts) and cuts the clock calls by ~16x.
-BUDGET_CHECK_EVERY = 16
-
 # Whole-text (multiline) budget - deliberately NOT the per-line constant above.
 #
 # That one is documented as a budget for "matching a single line", and its premise
@@ -138,20 +129,6 @@ class Signature:
     _compiled: dict[int, tuple["re.Pattern[str]", ...]] = field(
         default_factory=dict, compare=False, repr=False
     )
-    # PERF2 (2026-10-06): memoized casefolded patterns, same shape as _compiled
-    # above. Profiled on the real Spotify corpus (one smali_classes dir, 10,479
-    # files, 399s): _line_matches ran 427M times and `pattern.casefold()` ran on
-    # EVERY call - 103M calls, 11s - although the pattern is a CONSTANT of the
-    # signature. Precomputing it once per signature removes all of them.
-    _folded: tuple[str, ...] | None = field(default=None, compare=False, repr=False)
-
-    def folded_patterns(self) -> tuple[str, ...]:
-        """This signature's patterns casefolded once. Purely a cache: it returns
-        exactly `tuple(p.casefold() for p in self.patterns)`, which is what the
-        case-insensitive branch of _line_matches recomputed per call."""
-        if self._folded is None:
-            self._folded = tuple(p.casefold() for p in self.patterns)
-        return self._folded
 
     def compiled_patterns(self, flags: int) -> tuple["re.Pattern[str]", ...]:
         """This signature's patterns compiled under `flags`, memoized per flag
@@ -354,16 +331,8 @@ def _is_dotted_package_pattern(pattern: str) -> bool:
     return pattern.count(".") >= 2 and "/" not in pattern and " " not in pattern
 
 
-def _line_matches(line: str, signature: Signature,
-                  folded_line: str | None = None) -> str | None:
+def _line_matches(line: str, signature: Signature) -> str | None:
     """Return the matched text if this line matches the signature, else None.
-
-    `folded_line` is an OPTIONAL precomputed `line.casefold()`. The scan hot path
-    folds each line ONCE and passes it in, instead of every case-insensitive
-    signature folding the same line again (PERF2, 2026-10-06 - measured 103M
-    redundant casefold calls on one smali_classes dir of the Spotify corpus).
-    Omitting it is always correct and is what callers outside the hot path do, so
-    the default preserves the original behaviour exactly.
 
     L-M9 (S5/G10): honors the signature's opt-in case_sensitive flag. When
     case-insensitive, string-literal/class-reference patterns match on
@@ -382,15 +351,15 @@ def _line_matches(line: str, signature: Signature,
     if signature.pattern_type in ("string_literal", "class_reference"):
         normalized: str | None = None
         if not signature.case_sensitive:
-            folded = folded_line if folded_line is not None else line.casefold()
-            for pattern, folded_pat in zip(signature.patterns,
-                                           signature.folded_patterns()):
-                if folded_pat in folded:
+            folded_line = line.casefold()
+            for pattern in signature.patterns:
+                folded = pattern.casefold()
+                if folded in folded_line:
                     return pattern
                 if _is_dotted_package_pattern(pattern):
                     if normalized is None:
-                        normalized = folded.replace("/", ".")
-                    if folded_pat in normalized:
+                        normalized = folded_line.replace("/", ".")
+                    if folded in normalized:
                         return pattern
             return None
         for pattern in signature.patterns:
@@ -779,36 +748,16 @@ def scan(
             # skipped here - they need the whole text and run in their own pass below.
             for line_number, line in enumerate(lines, start=1):
                 line_start = time.monotonic()
-                # PERF2: fold the line ONCE, not once per case-insensitive
-                # signature. Profiled on a real smali_classes dir (10,479 files,
-                # 399s): _line_matches ran 427M times and every case-insensitive
-                # signature re-folded the SAME line - 103M redundant casefold
-                # calls, 11s. Passing the folded line in is behaviour-identical
-                # (_line_matches still folds when the argument is omitted).
-                folded_line = line.casefold()
-                for sig_index, signature in enumerate(signatures):
+                for signature in signatures:
                     if signature.multiline:
                         continue
-                    matched_text = _line_matches(line, signature, folded_line)
+                    matched_text = _line_matches(line, signature)
                     # ReDoS backstop (NFR-1 fail-loud): check the budget after every
                     # signature attempt on the line (matched or not - a catastrophic
                     # regex can return None after burning the time). A single slow
                     # line means a hand-authored rule is backtracking quadratically,
                     # so scan() raises loudly instead of hanging the whole pipeline.
-                    #
-                    # PERF2 (2026-10-06): this clock call ran after EVERY signature
-                    # attempt - 431M calls, 36s of a 399s scan on the measured
-                    # corpus. It is now SAMPLED: always right after a regex (the
-                    # only pattern type that can backtrack, which is the primary
-                    # cause the budget exists for), and every BUDGET_CHECK_EVERY
-                    # attempts otherwise, which still catches the secondary cause
-                    # named above - the aggregate cost of every signature over an
-                    # unusually long line. The raise stays prompt in wall-clock
-                    # terms: a regex that burned seconds is caught on the next
-                    # sample, not after the whole line.
-                    if (signature.pattern_type == "regex"
-                            or sig_index % BUDGET_CHECK_EVERY == 0) \
-                            and time.monotonic() - line_start > LINE_MATCH_BUDGET_SECONDS:
+                    if time.monotonic() - line_start > LINE_MATCH_BUDGET_SECONDS:
                         # The budget is cumulative across ALL signatures on this one
                         # line (line_start is per line), so two distinct causes reach
                         # this raise: a single catastrophically-backtracking regex, OR

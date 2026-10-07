@@ -943,7 +943,12 @@ def test_scan_per_line_budget_message_does_not_misattribute_to_linear_signature(
         sig_mod.time, "monotonic",
         _advancing_monotonic(sig_mod.LINE_MATCH_BUDGET_SECONDS + 1.0),
     )
-    (tmp_path / "Main.java").write_text("class A { String s = \"x\"; }\n")
+    # PERF-3 (LITPREF): the literal gate skips a string_literal signature on a line
+    # that cannot contain its pattern, so the per-line budget is only exercised for
+    # literals that could actually match. Put the pattern on the line so the gate
+    # fires and _line_matches (and therefore the budget check at signatures.py:850)
+    # still runs for this innocent linear signature - the scenario the test guards.
+    (tmp_path / "Main.java").write_text("class A { String su = \"x\"; }\n")
 
     innocent = tmp_path / "innocent.yaml"
     innocent.write_text(

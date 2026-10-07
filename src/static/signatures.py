@@ -381,6 +381,79 @@ def _line_matches(line: str, signature: Signature) -> str | None:
     raise ValueError(f"unknown pattern_type '{signature.pattern_type}' on signature '{signature.id}'")
 
 
+# LITPREF (PERF-3): a literal pattern (string_literal / class_reference) can only
+# match a line that CONTAINS it. So before the per-line x per-signature inner
+# loop, build ONE combined regex per literal family and use it as a GATE: if no
+# literal pattern can match a given line, skip every literal signature for that
+# line and run only the regex signatures. The gate is an EXACT superset of
+# "_line_matches returns non-None for some literal signature on this line" - it
+# mirrors _line_matches's own logic exactly (fold vs raw for case-insensitivity;
+# slash->dot normalization ONLY for dotted-package patterns) - so when the gate
+# does NOT fire, no literal signature can match and the skip is behaviour-
+# identical. When it fires, the full per-signature loop runs unchanged. No
+# detection behaviour changes; only how many times _line_matches is invoked.
+# (Folding is done manually, never via re.IGNORECASE, because str.casefold()
+# differs from it for German ss / Turkish I - the TRAP documented in PERF2.)
+LITERAL_TYPES = ("string_literal", "class_reference")
+
+
+def _compile_literal_alt(patterns):
+    if not patterns:
+        return None
+    return re.compile("|".join(re.escape(p) for p in patterns))
+
+
+def _build_literal_gate(signatures):
+    """One combined regex per literal family, so a line that contains none of the
+    literal patterns can skip the whole literal-signature loop.
+
+    The four families are the cross-product of (case_sensitive, is_dotted),
+    because _line_matches folds the line only for case-insensitive patterns and
+    applies the slash->dot normalization only to dotted-package patterns. Keeping
+    the families separate lets the gate reproduce that logic bit-for-bit: a line
+    matches the gate exactly when some literal signature would match it."""
+    ci_plain, ci_dotted, cs_plain, cs_dotted = [], [], [], []
+    for sig in signatures:
+        if sig.pattern_type not in LITERAL_TYPES:
+            continue
+        for pat in sig.patterns:
+            if sig.case_sensitive:
+                target = cs_dotted if _is_dotted_package_pattern(pat) else cs_plain
+            else:
+                pat = pat.casefold()
+                target = ci_dotted if _is_dotted_package_pattern(pat) else ci_plain
+            target.append(pat)
+    return (
+        _compile_literal_alt(ci_plain),
+        _compile_literal_alt(ci_dotted),
+        _compile_literal_alt(cs_plain),
+        _compile_literal_alt(cs_dotted),
+    )
+
+
+def _literal_gate_fires(line, gate):
+    ci_plain, ci_dotted, cs_plain, cs_dotted = gate
+    # Case-sensitive, raw line first - no allocation, cheapest.
+    if cs_plain is not None and cs_plain.search(line):
+        return True
+    if cs_dotted is not None:
+        if cs_dotted.search(line):
+            return True
+        if cs_dotted.search(line.replace("/", ".")):
+            return True
+    # Case-insensitive: fold once, then try plain and (for dotted) normalized.
+    if ci_plain is not None or ci_dotted is not None:
+        folded = line.casefold()
+        if ci_plain is not None and ci_plain.search(folded):
+            return True
+        if ci_dotted is not None:
+            if ci_dotted.search(folded):
+                return True
+            if ci_dotted.search(folded.replace("/", ".")):
+                return True
+    return False
+
+
 def _collect_files(roots: list[Path]) -> list[tuple[Path, Path]]:
     """Return (file_path, root_it_was_found_under) pairs, for relative-path reporting.
 
@@ -543,6 +616,13 @@ def scan(
     roots = [decompiled_roots] if isinstance(decompiled_roots, (str, Path)) else list(decompiled_roots)
     roots = [Path(r) for r in roots]
     evidence = StaticEvidence()
+    # LITPREF (PERF-3): build the literal-match gate once per scan. The
+    # signatures set is fixed for the whole scan, so compiling the four family
+    # regexes here (not per file / per line) is the only compile cost. See
+    # _build_literal_gate / _literal_gate_fires above for why the skip it enables
+    # is behaviour-identical.
+    literal_gate = _build_literal_gate(signatures)
+    has_literal_gate = any(g is not None for g in literal_gate)
     files = _collect_files(roots)
     con = None
     if sqlite_path is not None:
@@ -748,8 +828,18 @@ def scan(
             # skipped here - they need the whole text and run in their own pass below.
             for line_number, line in enumerate(lines, start=1):
                 line_start = time.monotonic()
+                # LITPREF (PERF-3): gate the literal signatures. gate_fires is True
+                # when at least one literal pattern could match this line; when
+                # False, no literal signature can match (the gate is an exact
+                # superset of the literal-match condition) so we skip all of them
+                # and run only the regex signatures. When True, the per-signature
+                # loop runs unchanged. Regex signatures always run. Behaviour of
+                # the detection path is identical either way.
+                gate_fires = _literal_gate_fires(line, literal_gate) if has_literal_gate else True
                 for signature in signatures:
                     if signature.multiline:
+                        continue
+                    if has_literal_gate and signature.pattern_type in LITERAL_TYPES and not gate_fires:
                         continue
                     matched_text = _line_matches(line, signature)
                     # ReDoS backstop (NFR-1 fail-loud): check the budget after every

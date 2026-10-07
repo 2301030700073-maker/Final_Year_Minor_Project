@@ -1,7 +1,7 @@
 # Complete File Inventory
 
 Generated: 2026-10-06
-All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 309 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
+All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 310 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
 
 ```
 .gitattributes
@@ -237,6 +237,7 @@ tests/unit/test_java_corpus_cfr.py
 tests/unit/test_jni_legend_matches_gate.py
 tests/unit/test_jnibridge.py
 tests/unit/test_ledger_suite_count.py
+tests/unit/test_literal_prefilter_gate.py
 tests/unit/test_lm1_lazy.py
 tests/unit/test_lm3_ssl_taxonomy.py
 tests/unit/test_lm4_lm3_unknown.py

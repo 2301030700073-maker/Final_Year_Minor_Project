@@ -536,6 +536,41 @@ def test_generate_report_attributes_all_third_party_bundled_sdk(tmp_path):
     assert "okhttp, adjust" in content
 
 
+def test_generate_report_does_not_claim_none_in_app_package_for_a_boundary5_string(tmp_path):
+    # Boundary-#5 honesty: a vendor FQCN string (e.g. the SafetyNet API reference)
+    # can sit in the app's OWN file while still being attributed third-party. Then
+    # all_third_party is True, but the report must NOT assert "none in the app's own
+    # package" - the match IS in the app's own file. `third_party_by_string` carries
+    # that distinction; before it, the report made a false location claim.
+    from dataclasses import replace
+
+    cls = replace(
+        _classification(),
+        root_attribution={
+            "app_package": "com.example.app",
+            "app_owned": 0,
+            "third_party": 1,
+            "vendors": ["google"],
+            "all_third_party": True,
+            "mixed": False,
+            "third_party_by_string": 1,
+        },
+    )
+    report_path = generate_report(
+        run_id="b5attr", apk_hash="b5a001", timestamp="2026-08-20T12:00:00",
+        metadata={"hashes": {"sha256": "b5a001"}, "package": {"package_name": "com.example.app"}},
+        classification=cls, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+    )
+    content = report_path.read_text(encoding="utf-8")
+    # the false location claim must be gone in BOTH the inline caveat and the block
+    assert "none of these root-detection matches are in the app's own package" not in content
+    assert "none in the app's own package" not in content
+    # ...and the honest boundary-#5 wording is used instead
+    assert "**bundled SDK API references**" in content
+    assert "appear as a vendor API reference inside the app's own code" in content
+
+
 def test_generate_report_attributes_mixed_app_and_bundled_sdk(tmp_path):
     # Boundary-4/5 honesty, the `mixed` half: when root-detection matches split
     # across the app's own package AND bundled third-party libraries, the report

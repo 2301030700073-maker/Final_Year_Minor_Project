@@ -138,7 +138,8 @@ def attribute_root_evidence(app_package: str, evidence: list) -> dict | None:
     """Classify root-detection evidence as app-owned vs bundled third-party.
     Returns None when there's no root evidence (nothing to attribute). The
     result is a plain dict the report template can branch on:
-      app_package, app_owned, third_party, vendors, all_third_party, mixed.
+      app_package, app_owned, third_party, vendors, all_third_party, mixed,
+      third_party_by_string (boundary-#5: vendor-FQCN strings in the app's own file).
     `evidence` items only need a `.file` (or `["file"]` - dict, asdict
     produces for a stored classification_json).
 
@@ -153,6 +154,11 @@ def attribute_root_evidence(app_package: str, evidence: list) -> dict | None:
         return None
     app_owned = 0
     third_party = 0
+    # Boundary-#5 matches: third-party because the matched STRING is a vendor FQCN,
+    # but the evidence FILE may sit inside the app's own package. Counted separately
+    # so the report never asserts "none in the app's own package" when one of these
+    # is present - the match IS in the app's own file (it references a vendor API).
+    third_party_by_string = 0
     vendors: set[str] = set()
     for e in evidence:
         file = (
@@ -194,6 +200,7 @@ def attribute_root_evidence(app_package: str, evidence: list) -> dict | None:
         sv = _string_vendor(matched, app_package)
         if sv:
             third_party += 1
+            third_party_by_string += 1
             vendors.add(sv)
             continue
         # 2. App's own package subtree is ALWAYS app-owned, even if it matches a
@@ -217,4 +224,5 @@ def attribute_root_evidence(app_package: str, evidence: list) -> dict | None:
         "vendors": sorted(vendors),
         "all_third_party": app_owned == 0 and third_party > 0,
         "mixed": app_owned > 0 and third_party > 0,
+        "third_party_by_string": third_party_by_string,
     }

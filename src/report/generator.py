@@ -181,12 +181,16 @@ TEMPLATE = _env.from_string("""\
 
 {% macro category_section(cat, classification, attr, coverage, heading, noun, vendor_note) -%}
 ### {{ heading }}
-- Confidence: {{ confidence_bound(cat, classification[cat], coverage) }} -> {{ verdict_label(cat, classification[cat], coverage) }}{% if not classification[cat].detected and classification[cat].evidence %} **({{ classification[cat].evidence | length }} signature hit(s) across {{ classification[cat].evidence | map(attribute='signature_id') | unique | list | length }} signature(s) WERE recorded - below the {{ classification.root_threshold if cat == "root" else classification.ssl_threshold }} threshold, so not detected. Evidence found-and-insufficient is a DIFFERENT fact from finding nothing: a single-technique app cannot clear the threshold by construction, so read the hits below before treating this as absence)**{% endif %}{% if attr and attr.all_third_party and classification[cat].detected %} (**bundled SDK only** - none of these {{ noun }} matches are in the app's own package){% endif %}
+- Confidence: {{ confidence_bound(cat, classification[cat], coverage) }} -> {{ verdict_label(cat, classification[cat], coverage) }}{% if not classification[cat].detected and classification[cat].evidence %} **({{ classification[cat].evidence | length }} signature hit(s) across {{ classification[cat].evidence | map(attribute='signature_id') | unique | list | length }} signature(s) WERE recorded - below the {{ classification.root_threshold if cat == "root" else classification.ssl_threshold }} threshold, so not detected. Evidence found-and-insufficient is a DIFFERENT fact from finding nothing: a single-technique app cannot clear the threshold by construction, so read the hits below before treating this as absence)**{% endif %}{% if attr and attr.all_third_party and classification[cat].detected %}{% if attr.third_party_by_string %} (**bundled SDK API references** - attributed to a bundled third-party API referenced from the app's own code){% else %} (**bundled SDK only** - none of these {{ noun }} matches are in the app's own package){% endif %}{% endif %}
 {% for e in classification[cat].evidence -%}
 - `{{ e.signature_id | code }}` ({{ e.evidence_type | md }}) at {{ e.file | md }}:{{ e.line_or_offset | md }} - `{{ e.matched_text | code }}`
 {% endfor %}
 {% if attr and attr.all_third_party and classification[cat].detected -%}
+{% if attr.third_party_by_string -%}
+> **Attribution:** all {{ attr.third_party }} {{ noun }} matches are attributed to bundled third-party SDK APIs ({{ attr.vendors | join(', ') }}) - {{ attr.third_party_by_string }} of them appear as a vendor API reference inside the app's own code rather than a separate bundled library, so the matches are not exclusively in third-party files - {{ vendor_note }}
+{% else -%}
 > **Attribution:** all {{ attr.third_party }} {{ noun }} matches are in bundled third-party libraries ({{ attr.vendors | join(', ') }}), none in the app's own package (`{{ attr.app_package }}`) - {{ vendor_note }}
+{% endif -%}
 {% elif attr and attr.mixed and classification[cat].detected -%}
 > **Attribution:** {{ noun }} matches split across the app's own package ({{ attr.app_owned }}) and bundled third-party libraries ({{ attr.third_party }}: {{ attr.vendors | join(', ') }}).
 {% endif %}

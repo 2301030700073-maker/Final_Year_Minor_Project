@@ -1,7 +1,7 @@
 # Complete File Inventory
 
-Generated: 2026-10-06
-All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 310 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
+Generated: 2026-10-18
+All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 312 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
 
 ```
 .gitattributes
@@ -182,12 +182,14 @@ tests/unit/test_attestation_stage_list.py
 tests/unit/test_attribution.py
 tests/unit/test_audit_attestation.py
 tests/unit/test_audit_authorization_recovery.py
+tests/unit/test_audit_integrity_anchors.py
 tests/unit/test_audit_ledger_currency.py
 tests/unit/test_base_success_check.py
 tests/unit/test_below_threshold_evidence_is_visible.py
 tests/unit/test_calibration_outcomes.py
 tests/unit/test_calibration_report.py
 tests/unit/test_calibration_report_generator.py
+tests/unit/test_capture_artifact_security.py
 tests/unit/test_capture_not_attempted.py
 tests/unit/test_cause_text_parity.py
 tests/unit/test_cli_capture_window_upgrade.py

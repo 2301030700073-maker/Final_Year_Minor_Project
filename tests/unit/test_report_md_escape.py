@@ -86,3 +86,20 @@ def test_md_escapes_html_sensitive_chars():
     out = _md("x<y>z&w")
     assert out == "x&lt;y&gt;z&amp;w"
     assert "&" in out and out.count("&") == 3  # each entity carries exactly one &
+
+
+def test_md_code_preserves_angle_brackets_inside_a_code_span():
+    # CommonMark does NOT decode entity references inside code spans, so `_md`'s
+    # `&lt;` renders literally as the six characters `&lt;`. Evidence inside a
+    # backtick span (a matched_text like `<pin-set`, a regex, a class name) must
+    # render verbatim; `_md_code` drops the entity escaping but still neutralises
+    # the table/span delimiters (pipe, backtick, newline).
+    from report.generator import _md_code
+
+    assert _md_code("<pin-set") == "<pin-set"      # NOT "&lt;pin-set"
+    assert _md_code("a<b>c&d") == "a<b>c&d"         # angle/ampersand verbatim
+    assert _md_code("x\ny") == "x y"                # newline -> space
+    assert "`" not in _md_code("a`b")               # backtick -> apostrophe
+    out = _md_code("a|b")                           # pipe still escaped
+    for m in re.finditer(r"(\\*)\|", out):
+        assert len(m.group(1)) % 2 == 1, out

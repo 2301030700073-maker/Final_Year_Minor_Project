@@ -62,6 +62,25 @@ def _md(value) -> str:
     return s
 
 
+def _md_code(value) -> str:
+    r"""Escape a value rendered INSIDE a backtick code span.
+
+    Identical to `_md` EXCEPT it does NOT entity-escape `&`, `<`, `>`: CommonMark
+    does not decode entity references inside code spans, so `_md`'s `&lt;` is
+    displayed literally as the six characters `&lt;`. A signature whose matched
+    text is `<pin-set` rendered as `&lt;pin-set`, which a reader searching the
+    report (or the APK) for `<pin-set` would never find - a silent corruption of
+    the evidence. Raw HTML cannot execute inside a code span, so the entity
+    escaping is unnecessary there and only damages fidelity. Newlines, pipes and
+    backticks are still neutralised (they still break the table / close the span),
+    exactly as in `_md`."""
+    s = "" if value is None else str(value)
+    s = s.replace("\r", " ").replace("\n", " ")
+    s = re.sub(r"(\\*)\|", lambda m: m.group(1) * 2 + r"\|", s)
+    s = s.replace("`", "'")
+    return s
+
+
 def _fmt_edge(x: float) -> str:
     """Render a confidence-calibration bucket edge faithfully.
 
@@ -91,6 +110,7 @@ def _fmt_edge(x: float) -> str:
 # structure-breaking characters in untrusted values via the `md` filter above.
 _env = Environment()
 _env.filters["md"] = _md
+_env.filters["code"] = _md_code
 _env.filters["edge"] = _fmt_edge
 
 TEMPLATE = _env.from_string("""\
@@ -139,12 +159,12 @@ TEMPLATE = _env.from_string("""\
 {% if manifest -%}
 {% if manifest.application_present -%}
 **Debuggable:** {{ "yes" if manifest.debuggable else "no" }}
-**Network security config:** {{ manifest.network_security_config | md or "none" }}{% if manifest.nsc_file_present is false %} (**MISSING** - declared `{{ manifest.network_security_config | md }}` was not found in the decoded resources){% endif %}
+**Network security config:** {{ manifest.network_security_config | md or "none" }}{% if manifest.nsc_file_present is false %} (**MISSING** - declared `{{ manifest.network_security_config | code }}` was not found in the decoded resources){% endif %}
 **Package:** {{ (manifest.package_name or "unknown") | md }}
 **Allow backup:** {{ "yes" if manifest.allow_backup else ("no" if manifest.allow_backup is false else "unset") }}
 **Cleartext permitted (effective):** {{ "yes" if manifest.cleartext_permitted else ("no" if manifest.cleartext_permitted is false else "unset (platform default)") }}
 {% if manifest.cleartext_domains -%}
-**Cleartext-permitted domains ({{ manifest.cleartext_domains | length }}):** {% for d in manifest.cleartext_domains %}`{{ d | md }}`{% if not loop.last %}, {% endif %}{% endfor %}
+**Cleartext-permitted domains ({{ manifest.cleartext_domains | length }}):** {% for d in manifest.cleartext_domains %}`{{ d | code }}`{% if not loop.last %}, {% endif %}{% endfor %}
 {% endif -%}
 {% if expired_pin_sets -%}
 **NSC pin-set EXPIRED:** the network-security-config declares certificate pinning whose expiration ({{ expired_pin_sets | join(", ") }}) is on or before this run's date - Android parses the expiration to midnight at the start of that day and stops enforcing once the clock passes it, falling back to normal CA validation, so this NSC-declared pinning is **not active at runtime** (any other pinning mechanism is unaffected; confirm dynamically). Declared pinning is still reported above - this only flags that the framework will not enforce it.
@@ -152,7 +172,7 @@ TEMPLATE = _env.from_string("""\
 **Permissions{% if manifest.permissions %} ({{ manifest.permissions | length }}){% endif %}:** {{ (manifest.permissions | join(", ")) | md if manifest.permissions else "none" }}
 {% set _exported = manifest.exported_components | selectattr("exported") | list -%}
 {% if _exported -%}
-**Exported components ({{ _exported | length }}):** {% for c in _exported %}`{{ (c.type ~ ": " ~ c.name) | md }}`{% if not loop.last %}, {% endif %}{% endfor %}
+**Exported components ({{ _exported | length }}):** {% for c in _exported %}`{{ (c.type ~ ": " ~ c.name) | code }}`{% if not loop.last %}, {% endif %}{% endfor %}
 {% endif -%}
 {% else -%}
 **Manifest has no &lt;application&gt; element** - debuggable and network-security-config below are defaults, not reads (RESID-5A/5D).
@@ -163,7 +183,7 @@ TEMPLATE = _env.from_string("""\
 ### {{ heading }}
 - Confidence: {{ confidence_bound(cat, classification[cat], coverage) }} -> {{ verdict_label(cat, classification[cat], coverage) }}{% if not classification[cat].detected and classification[cat].evidence %} **({{ classification[cat].evidence | length }} signature hit(s) across {{ classification[cat].evidence | map(attribute='signature_id') | unique | list | length }} signature(s) WERE recorded - below the {{ classification.root_threshold if cat == "root" else classification.ssl_threshold }} threshold, so not detected. Evidence found-and-insufficient is a DIFFERENT fact from finding nothing: a single-technique app cannot clear the threshold by construction, so read the hits below before treating this as absence)**{% endif %}{% if attr and attr.all_third_party and classification[cat].detected %} (**bundled SDK only** - none of these {{ noun }} matches are in the app's own package){% endif %}
 {% for e in classification[cat].evidence -%}
-- `{{ e.signature_id | md }}` ({{ e.evidence_type | md }}) at {{ e.file | md }}:{{ e.line_or_offset | md }} - `{{ e.matched_text | md }}`
+- `{{ e.signature_id | code }}` ({{ e.evidence_type | md }}) at {{ e.file | md }}:{{ e.line_or_offset | md }} - `{{ e.matched_text | code }}`
 {% endfor %}
 {% if attr and attr.all_third_party and classification[cat].detected -%}
 > **Attribution:** all {{ attr.third_party }} {{ noun }} matches are in bundled third-party libraries ({{ attr.vendors | join(', ') }}), none in the app's own package (`{{ attr.app_package }}`) - {{ vendor_note }}
@@ -327,7 +347,7 @@ claimed here. Status meaning:
 | Class | Method | Binding |
 |---|---|---|
 {% for b in jni_bindings -%}
-| `{{ b.class_name | md }}` | `{{ b.method_name | md }}` | {{ b.status }} |
+| `{{ b.class_name | code }}` | `{{ b.method_name | code }}` | {{ b.status }} |
 {% endfor %}
 {% endif %}
 {% if packer_findings -%}
@@ -338,7 +358,7 @@ corpus. This is a **deterministic** identification (`deterministic_matched`), no
 hypothesis or an AI guess:
 
 {% for p in packer_findings -%}
-- **{{ p.packer }}** (`{{ p.packer_id }}`) — matched {% for s in p.signals %}`{{ s | md }}`{% if not loop.last %}, {% endif %}{% endfor %}
+- **{{ p.packer }}** (`{{ p.packer_id }}`) — matched {% for s in p.signals %}`{{ s | code }}`{% if not loop.last %}, {% endif %}{% endfor %}
 {% endfor %}
 
 A packed app's real DEX is hidden behind a loader, so the code this run decompiled
@@ -373,7 +393,7 @@ that is a provenance fact about this run's analysis, not an implementation detai
 | Library | ABI | Packer | Analyzed from | This library's coverage |
 |---|---|---|---|---|
 {% for lib in packed_native_libs -%}
-| `{{ lib.name | md }}` | `{{ lib.abi | md }}` | {{ lib.packer or "unidentified" }} | {% if lib.unpacked %}the unpacked copy (not the shipped bytes){% else %}**the packed stub only**{% endif %} | {{ lib.coverage }} |
+| `{{ lib.name | code }}` | `{{ lib.abi | code }}` | {{ lib.packer or "unidentified" }} | {% if lib.unpacked %}the unpacked copy (not the shipped bytes){% else %}**the packed stub only**{% endif %} | {{ lib.coverage }} |
 {% endfor %}
 {% set _packed_bound = packed_native_libs|rejectattr("coverage", "equalto", "fully_analyzed")|list -%}
 {% if _packed_bound -%}
@@ -391,7 +411,7 @@ Each entry is a member the APK ships that was **never analyzed** - part of the
 app's own native surface, left unread:
 
 {% for f in extraction_failures -%}
-- `{{ f | md }}`
+- `{{ f | code }}`
 {% endfor %}
 
 Native coverage is forced to `partial` and a native NEITHER is **not** a confident
@@ -407,7 +427,7 @@ Each entry is a library that **was** extracted, and whose scan failed - a tool
 timeout, a non-zero exit, or an unpack that did not work:
 
 {% for e in native_scan_errors -%}
-- `{{ e | md }}`
+- `{{ e | code }}`
 {% endfor %}
 
 Native coverage is `partial` or `unscannable` for that library, so a native
@@ -429,13 +449,13 @@ can confirm what these actually load.
 | Load target |
 |---|
 {% for t in unaccounted_loads -%}
-| `{{ t | md }}` |
+| `{{ t | code }}` |
 {% endfor %}
 {% endif %}
 {% if platform_libs_exempted -%}
 ### Platform libraries exempted from the unaccounted list (boundary #4)
 
-The app requests {% for b in platform_libs_exempted %}`{{ b | md }}`{% if not loop.last %}, {% endif %}{% endfor %} by name and the APK does not ship that library, so the OS provides it (an Android platform library). It is not an unexamined app surface and native coverage is **not** degraded for it. Listed here because the unaccounted-loads section above would otherwise read as "this app loads nothing outside the APK" — these loads were seen and deliberately excluded. Nothing in them is this app's code, so a match found inside such a library would not be attributable to the app.
+The app requests {% for b in platform_libs_exempted %}`{{ b | code }}`{% if not loop.last %}, {% endif %}{% endfor %} by name and the APK does not ship that library, so the OS provides it (an Android platform library). It is not an unexamined app surface and native coverage is **not** degraded for it. Listed here because the unaccounted-loads section above would otherwise read as "this app loads nothing outside the APK" — these loads were seen and deliberately excluded. Nothing in them is this app's code, so a match found inside such a library would not be attributable to the app.
 {% endif %}
 {% if dynamic_loads -%}
 ### Dynamic code loading (coverage-limited)
@@ -450,7 +470,7 @@ what this actually loads.
 | Call site |
 |---|
 {% for d in dynamic_loads -%}
-| `{{ d | md }}` |
+| `{{ d | code }}` |
 {% endfor %}
 {% endif %}
 {% if webview_sites -%}
@@ -469,7 +489,7 @@ can confirm what the bridge actually checks.
 | Call site |
 |---|
 {% for w in webview_sites -%}
-| `{{ w | md }}` |
+| `{{ w | code }}` |
 {% endfor %}
 {% endif %}
 {% if js_evidence -%}
@@ -486,7 +506,7 @@ runtime (Frida, Phase 5+) view can confirm the surrounding logic.
 | Signature | Matched constant | File |
 |---|---|---|
 {% for sig_id, _cat, matched_text, bundle_file in js_evidence -%}
-| `{{ sig_id }}` | `{{ matched_text | md }}` | `{{ bundle_file | md }}` |
+| `{{ sig_id }}` | `{{ matched_text | code }}` | `{{ bundle_file | code }}` |
 {% endfor %}
 {% endif %}
 {% if dart_aot_libs -%}
@@ -506,7 +526,7 @@ checks.
 | Dart AOT snapshot |
 |---|
 {% for d in dart_aot_libs -%}
-| `{{ d | md }}` |
+| `{{ d | code }}` |
 {% endfor %}
 {% endif %}
 {% if regenerated_with_annotation_loss -%}
@@ -554,14 +574,14 @@ string in this APK; only its *ownership* is unverified.
 - Root bypassed: {% if verification %}{% if verification.root_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.root_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason and dynamic_stage_status not in ("success", "failed") %}not run ({{ dynamic_skip_reason | md }}){% else %}bypass not verified (see stage status and evidence below){% endif %}{% endif %}
 - SSL bypassed: {% if verification %}{% if verification.ssl_bypassed is none %}inconclusive (see evidence below){% else %}{{ verification.ssl_bypassed }}{% endif %}{% else %}{% if dynamic_skip_reason and dynamic_stage_status not in ("success", "failed") %}not run ({{ dynamic_skip_reason | md }}){% else %}bypass not verified (see stage status and evidence below){% endif %}{% endif %}
 {% if self_termination_note -%}
-- ⚠ **App anti-instrumentation fired (FR-4.6):** `{{ self_termination_note | md }}`. This is a **positive finding** - the app has active anti-tampering that detected the Frida/root instrumentation and self-terminated - not merely an unverified bypass. A bypass could not be confirmed *because* the app's own defenses ended the process first; treat the inconclusive/​not-verified verdict above as a consequence of that defense, not evidence the app lacks the protection.
+- ⚠ **App anti-instrumentation fired (FR-4.6):** `{{ self_termination_note | code }}`. This is a **positive finding** - the app has active anti-tampering that detected the Frida/root instrumentation and self-terminated - not merely an unverified bypass. A bypass could not be confirmed *because* the app's own defenses ended the process first; treat the inconclusive/​not-verified verdict above as a consequence of that defense, not evidence the app lacks the protection.
 {% endif -%}
 {% if install_recovery_note -%}
 - ⚠ **Device state changed by this run — a differently-signed copy of the package was uninstalled:** {{ install_recovery_note | md }} This removal was **not** something this run was asked to do, and it is not reversible from here. It does not change any verdict above or below: the target analysed *is* the build installed over that copy, signed with this run's key — but the previous build's on-device data is gone, and any device-side state it held is therefore not part of this run's picture.
 {% endif -%}
 {% if verification -%}
 {% for key, value in verification.evidence_lines.items() -%}
-- {{ key }}: `{{ value | md }}`
+- {{ key }}: `{{ value | code }}`
 {% endfor %}
 {% if handshake_capture_note -%}
 - TLS handshakes (capture proxy): `{{ handshake_capture_note }}`
@@ -653,7 +673,7 @@ Raw flow file: `{{ capture_flows_path }}`
 > **Partial capture:** the injected pinning-bypass script raised {{ capture_bypass_script_errors | length }} uncaught error(s) during this otherwise-successful capture ({{ capture_bypass_script_errors | join("; ") | md }}). Flows were still decrypted, but a crashed hook can leave some pinned endpoints unbypassed and therefore uncaptured — **treat the flow list above as a lower bound, not a complete inventory of the app's traffic.**
 {% endif -%}
 {% if capture_tls_failed_clients %}
-> **Partial capture — certificate refusals:** the capture proxy recorded {{ capture_tls_failed_clients | length }} client TLS handshake(s) it refused its own certificate for ({% for f in capture_tls_failed_clients %}`{{ (f.host or 'host not captured') | md }}`{% if not loop.last %}, {% endif %}{% endfor %}). Those connections were **not** decrypted — the app rejected the proxy's CA on them, the proxy-side signature of certificate pinning — so the flow list above is a lower bound, and the hosts named here are exactly the ones this capture could **not** see into. Their traffic is unmeasured by this run.
+> **Partial capture — certificate refusals:** the capture proxy recorded {{ capture_tls_failed_clients | length }} client TLS handshake(s) it refused its own certificate for ({% for f in capture_tls_failed_clients %}`{{ (f.host or 'host not captured') | code }}`{% if not loop.last %}, {% endif %}{% endfor %}). Those connections were **not** decrypted — the app rejected the proxy's CA on them, the proxy-side signature of certificate pinning — so the flow list above is a lower bound, and the hosts named here are exactly the ones this capture could **not** see into. Their traffic is unmeasured by this run.
 {% endif -%}
 {% else -%}
 {% if capture_not_attempted -%}
@@ -680,7 +700,7 @@ No traffic was captured ({{ capture_reason | md or "reason not recorded" }}).{% 
 {% if capture_cleanup_warnings -%}
 > **Capture cleanup warnings:** device/proxy teardown did not fully complete this run — {{ capture_cleanup_warnings | length }} warning(s), which may indicate a leaked device proxy setting, an un-removed `adb reverse`, or a stray `mitmdump` process (including one on the WSL2 Windows host holding the capture port). Surfaced here so a leaked teardown is visible in the report, not only in the stored evidence (principle 3):
 {% for w in capture_cleanup_warnings -%}
-> - `{{ w | md }}`
+> - `{{ w | code }}`
 {% endfor -%}
 {% endif -%}
 {% endif %}
@@ -720,7 +740,7 @@ stage's `cached` evidence key existed but had no consumer, so a replay rendered 
 {% if hooks_audit_present -%}
 **Bypass hooks engaged (auditable, this run).** Reconstructed from the dynamic stage's own Frida message stream so engagement traces back to the signatures that drove it (G10), not an opaque yes/no. Every count below is a real delivered message:
 {% if hooks_script_errors -%}
-- ⚠ **{{ hooks_script_errors | length }} Frida hook script error(s) delivered this run** — one or more injected hooks raised an uncaught error while running ({% for e in hooks_script_errors %}`{{ e | md }}`{% if not loop.last %}; {% endif %}{% endfor %}). The bypass instrumentation did NOT run cleanly this run, so any absence of engagement or verification below is a **script fault to fix**, not a property of the app.
+- ⚠ **{{ hooks_script_errors | length }} Frida hook script error(s) delivered this run** — one or more injected hooks raised an uncaught error while running ({% for e in hooks_script_errors %}`{{ e | code }}`{% if not loop.last %}; {% endif %}{% endfor %}). The bypass instrumentation did NOT run cleanly this run, so any absence of engagement or verification below is a **script fault to fix**, not a property of the app.
 {% endif -%}
 {% if hooks_driving_signatures -%}
 - Driven by static signatures: {% for s in hooks_driving_signatures %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}.

@@ -1566,6 +1566,24 @@ def _wrap_stage(stage_name: str, fn, *args, **kwargs):
 
 def _halt(stage_results: list[StageResult]) -> None:
     console.print("[bold red]Pipeline halted - see the failed stage above.[/bold red]")
+    # Finish the progress sidecar before exiting. Its contract (run_status.finish)
+    # requires it on EVERY path that reaches an outcome, including a deliberate
+    # non-zero halt - a sidecar left in "started" asserts the run never reached an
+    # end, so _print_uncompleted_runs reads a deliberate halt as an interruption
+    # ("ended with its process gone"), the exact absent-vs-ended distinction
+    # ADR-0021 exists to keep. Best-effort: a sidecar write failure here must not
+    # mask the halt itself.
+    if _RUN_STATUS is not None:
+        failed = next(
+            (s for s in reversed(stage_results) if s.status == "failed"), None)
+        try:
+            _RUN_STATUS.finish(
+                report_path=None, audited=False,
+                audit_error=(
+                    f"pipeline halted at {failed.stage if failed else 'unknown'}"),
+            )
+        except OSError:
+            pass
     raise typer.Exit(code=1)
 
 
@@ -3983,16 +4001,8 @@ def re_attribute_cmd(
         affected_run_ids=affected_run_ids,
         force=force,
     )
-    if audit.status == "failed":
-        console.print(
-            f"[bold red]re-attribute applied {updated} run(s) but its audit record "
-            f"could not be appended: {audit.error}[/bold red]"
-        )
-    console.print(
-        f"[bold green]re-attributed {updated} stored run(s); "
-        f"{third_party_only} now carry an all-third-party caveat; "
-        f"regenerated {regenerated} report(s)[/bold green]"
-    )
+    # Per-row report-regeneration failures are a separate, non-audit class: they are
+    # surfaced (printed) but are not an exit-code failure on their own.
     if errors:
         for err in errors:
             console.print(f"[bold red]{err}[/bold red]")
@@ -4000,6 +4010,20 @@ def re_attribute_cmd(
             f"[bold red]{len(errors)} report(s) could not be regenerated - "
             f"their DB attribution was still applied.[/bold red]"
         )
+    if audit.status == "failed":
+        console.print(
+            f"[bold red]re-attribute applied {updated} run(s) but its audit record "
+            f"could not be appended: {audit.error}[/bold red]"
+        )
+        # A mutation of persisted findings with NO record on the immutable trail is
+        # a failure, not a success with a red line above it: exit non-zero so a
+        # shell/CI consumer cannot read this as a clean run.
+        raise typer.Exit(code=1)
+    console.print(
+        f"[bold green]re-attributed {updated} stored run(s); "
+        f"{third_party_only} now carry an all-third-party caveat; "
+        f"regenerated {regenerated} report(s)[/bold green]"
+    )
 
 
 # REGEN-FIELDLOSS2: the coverage-cause sections a report renders out of the
@@ -4323,7 +4347,7 @@ def _manifest_from_json(m) -> ManifestInfo | None:
     )
 
 
-def _print_uncompleted_runs(result: dict) -> None:
+def _print_uncompleted_runs(result: dict, sidecar_root: Path | None = None) -> None:
     """Report authorizations whose runs never completed (ADR-0021).
 
     Printed on BOTH the valid and the failed path. Chain integrity and
@@ -4347,8 +4371,13 @@ def _print_uncompleted_runs(result: dict) -> None:
         f"[yellow]Note: {len(details)} authorized run(s) have no completion in this "
         "log (in flight, interrupted, or deliberately halted):[/yellow]"
     )
+    # The sidecars live beside the log (outputs/analysis/). The caller that knows
+    # the log's real path passes that tree; the module-level ANALYSIS_ROOT is only a
+    # fallback for callers/tests that patch it (and would otherwise look under the
+    # process CWD, the defect verify-audit-log now avoids by passing the root).
+    root = sidecar_root if sidecar_root is not None else ANALYSIS_ROOT
     for entry in details:
-        status = read_run_status(ANALYSIS_ROOT, entry.get("apk_hash"))
+        status = read_run_status(root, entry.get("apk_hash"))
         if status is None:
             where = "no sidecar (progress was not recorded for this run)"
         elif status.get("state") == "unreadable":
@@ -4504,7 +4533,12 @@ def verify_audit_log_cmd(
     # deliberately-halted analysis). Not a failure - but an auditor must not read
     # a plain "OK" as "every run finished", and must not lose the fact to an
     # unrelated chain error either, so it is reported before the exit.
-    _print_uncompleted_runs(result)
+    # Read the sidecars from the LOG's own tree (outputs/analysis/<hash>/), not the
+    # process CWD: the log path is deliberately anchored to PROJECT_ROOT (M9), so a
+    # verifier run from any other directory must not then look for sidecars under
+    # whatever CWD it happened to start in and report every orphan as "no sidecar
+    # (progress was not recorded)" - progress that WAS recorded, just not read.
+    _print_uncompleted_runs(result, log_path.parent / "analysis")
     if result["errors"]:
         raise typer.Exit(code=1)
 
@@ -4731,17 +4765,6 @@ def regen_reports_cmd(
         dry_run=dry_run,
         missing_corpus_only=missing_corpus,
     )
-    if audit.status == "failed":
-        console.print(
-            f"[bold red]regen-reports finished but its audit record could not be "
-            f"appended: {audit.error}[/bold red]"
-        )
-    console.print(
-        f"[bold green]{'would regenerate' if dry_run else 'regenerated'} "
-        f"{len(regenerated_run_ids)} report(s); "
-        f"{len(refused_run_ids)} refused (unreproducible - left exactly as they "
-        f"are); {len(failed_run_ids)} failed[/bold green]"
-    )
     if refused_run_ids or failed_run_ids:
         console.print(
             "[bold red]Nothing was written for the rows above. A refusal is not a "
@@ -4749,6 +4772,21 @@ def regen_reports_cmd(
             "cause sections, and backfilling coverage_causes is the real fix "
             "(ADR-0027, REGEN-FIELDLOSS2).[/bold red]"
         )
+    if audit.status == "failed":
+        console.print(
+            f"[bold red]regen-reports finished but its audit record could not be "
+            f"appended: {audit.error}[/bold red]"
+        )
+        # A rewrite of stored reports with no record on the immutable trail is a
+        # failure, not a success with a red line above it: exit non-zero so a
+        # shell/CI consumer cannot read it as a clean run.
+        raise typer.Exit(code=1)
+    console.print(
+        f"[bold green]{'would regenerate' if dry_run else 'regenerated'} "
+        f"{len(regenerated_run_ids)} report(s); "
+        f"{len(refused_run_ids)} refused (unreproducible - left exactly as they "
+        f"are); {len(failed_run_ids)} failed[/bold green]"
+    )
 
 
 if __name__ == "__main__":

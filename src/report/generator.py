@@ -1728,7 +1728,14 @@ def _handshake_capture_note(verification, capture_summary: dict) -> str | None:
     # disabled the reconciliation in exactly the case it was written for.
     if not any(w in hs for w in TLS_HANDSHAKE_NO_COMPLETION_WORDINGS):
         return None
-    flows = capture_summary.get("capture_flows") or []
+    # The note asserts "N flow(s) decrypted ... which requires completed TLS
+    # handshakes". It must therefore count DECRYPTED (https) flows only: using
+    # `capture_flows` (every flow, cleartext included) fabricated a TLS observation
+    # from cleartext HTTP traffic and named HTTP-only hosts as having completed a
+    # handshake - contradicting the Captured Traffic section right below it. With no
+    # decrypted flow there is nothing to reconcile, so return None (the observer's
+    # "no handshake" and zero decrypted flows are consistent).
+    flows = capture_summary.get("capture_decrypted_flows") or []
     if not flows:
         return None
     # flow_summary rows are dicts (the capture stage's own shape); the report

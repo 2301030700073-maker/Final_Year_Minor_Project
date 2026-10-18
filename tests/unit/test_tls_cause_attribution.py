@@ -51,7 +51,7 @@ def _verification(handshake_line):
         evidence_lines={"TLS handshakes completed post-bypass": handshake_line})
 
 
-FLOWS = {"capture_flows": [{"host": "api.propertyguru.com", "scheme": "https"}]}
+FLOWS = {"capture_decrypted_flows": [{"host": "api.propertyguru.com", "scheme": "https"}]}
 
 
 def test_note_fires_when_no_handshake_was_observed():

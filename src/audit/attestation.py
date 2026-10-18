@@ -286,7 +286,15 @@ def _append_outcome(
     never a raw traceback."""
     try:
         _append_audit_record(audit_log_path, record)
-    except ValueError as exc:
+    except (ValueError, OSError) as exc:
+        # ValueError = corrupt log (LIM-D/RESID-2D); OSError = the append could not
+        # be performed at all (ENOSPC / EACCES / EROFS / EDQUOT). BOTH must map to a
+        # failed StageResult instead of escaping as a raw traceback: _finalize_run
+        # calls this before save_run and _RUN_STATUS.finish, so an escaping
+        # exception dropped the run's DB row and left the sidecar reading "started"
+        # - a fully-completed analysis reported as an interruption. The append
+        # failure is still surfaced (this StageResult is failed); it just no longer
+        # aborts the finalization that records the rest of the outcome.
         return StageResult(
             stage="audit", status="failed", evidence={}, error=str(exc),
             duration_ms=elapsed_ms(start),

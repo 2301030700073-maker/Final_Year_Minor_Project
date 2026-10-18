@@ -29,7 +29,7 @@ def _ver(handshake_line: str):
 
 def test_note_none_when_verification_missing():
     # No dynamic verification ran at all - there is nothing to reconcile.
-    assert _handshake_capture_note(None, {"capture_flows": [{"host": "x"}]}) is None
+    assert _handshake_capture_note(None, {"capture_decrypted_flows": [{"host": "x"}]}) is None
 
 
 def test_note_fires_on_none_observed_with_decrypted_flows():
@@ -38,7 +38,7 @@ def test_note_fires_on_none_observed_with_decrypted_flows():
     # consumer is ever rewired to a different literal, or the constant is changed
     # without the consumer following, this stops matching and the test fails.
     ver = _ver(TLS_HANDSHAKE_NONE_OBSERVED)
-    cap = {"capture_flows": [{"host": "api.example.com"}, {"host": "cdn.example.com"}]}
+    cap = {"capture_decrypted_flows": [{"host": "api.example.com"}, {"host": "cdn.example.com"}]}
     note = _handshake_capture_note(ver, cap)
     assert note is not None
     assert "2 flow(s) decrypted" in note              # counts flows, not hosts
@@ -46,10 +46,26 @@ def test_note_fires_on_none_observed_with_decrypted_flows():
     assert "not promoted" in note                      # a handshake is not a pin-check (ADR-0006)
 
 
+def test_note_is_silent_for_a_cleartext_only_capture():
+    # The note claims "flow(s) DECRYPTED ... requires completed TLS handshakes". A
+    # capture that saw only CLEARTEXT HTTP flows (capture_flows non-empty, but
+    # capture_decrypted_flows empty) has NO TLS handshake to reconcile, so the note
+    # must not fire. Pre-fix it read capture_flows and fabricated a TLS observation
+    # ("N flow(s) decrypted") from HTTP traffic, contradicting the Captured Traffic
+    # section that says no HTTPS flow was decrypted.
+    ver = _ver(TLS_HANDSHAKE_NONE_OBSERVED)
+    cap = {
+        "capture_flows": [{"host": "api.example.com", "scheme": "http"}],
+        "capture_decrypted_flows": [],
+        "capture_cleartext_flows": [{"host": "api.example.com", "scheme": "http"}],
+    }
+    assert _handshake_capture_note(ver, cap) is None
+
+
 def test_note_silent_when_observer_saw_a_handshake():
     # Emitter state #1 ("yes ..."): observer and proxy agree, no contradiction.
     ver = _ver("yes (a TLS handshake completed through the neutralized stack)")
-    assert _handshake_capture_note(ver, {"capture_flows": [{"host": "x"}]}) is None
+    assert _handshake_capture_note(ver, {"capture_decrypted_flows": [{"host": "x"}]}) is None
 
 
 def test_note_fires_on_attempted_but_rejected_state_too():
@@ -67,13 +83,13 @@ def test_note_fires_on_attempted_but_rejected_state_too():
         "none completed - handshakes were ATTEMPTED but rejected on the cert "
         "trust path (SSL bypass did not neutralize them; see startup-TLS signal)"
     )
-    assert "x" in _handshake_capture_note(ver, {"capture_flows": [{"host": "x"}]})
+    assert "x" in _handshake_capture_note(ver, {"capture_decrypted_flows": [{"host": "x"}]})
 
 
 def test_note_silent_when_none_observed_but_no_flows():
     # None observed AND no decrypted flows: there is no contradiction to reconcile.
     ver = _ver(TLS_HANDSHAKE_NONE_OBSERVED)
-    assert _handshake_capture_note(ver, {"capture_flows": []}) is None
+    assert _handshake_capture_note(ver, {"capture_decrypted_flows": []}) is None
 
 
 def test_note_host_extraction_is_dict_and_attr_aware():
@@ -81,7 +97,7 @@ def test_note_host_extraction_is_dict_and_attr_aware():
     # _flow_host must read both, else getattr(dict, 'host') silently blanks hosts.
     ver = _ver(TLS_HANDSHAKE_NONE_OBSERVED)
     flows = [{"host": "d.example.com"}, SimpleNamespace(host="a.example.com")]
-    note = _handshake_capture_note(ver, {"capture_flows": flows})
+    note = _handshake_capture_note(ver, {"capture_decrypted_flows": flows})
     assert "a.example.com" in note and "d.example.com" in note
 
 
@@ -89,7 +105,7 @@ def test_note_falls_back_to_capture_hosts_when_flows_lack_host():
     # Flows present but none carry a host: fall back to the summary's host list
     # rather than printing an empty "(hosts: )".
     ver = _ver(TLS_HANDSHAKE_NONE_OBSERVED)
-    cap = {"capture_flows": [{"host": ""}], "capture_hosts": ["fallback.example.com"]}
+    cap = {"capture_decrypted_flows": [{"host": ""}], "capture_hosts": ["fallback.example.com"]}
     note = _handshake_capture_note(ver, cap)
     assert note is not None
     assert "fallback.example.com" in note
@@ -100,7 +116,7 @@ def test_note_host_preview_caps_at_five_with_ellipsis():
     # The host preview is bounded so a chatty app does not dump every host inline.
     ver = _ver(TLS_HANDSHAKE_NONE_OBSERVED)
     flows = [{"host": f"h{i}.example.com"} for i in range(7)]
-    note = _handshake_capture_note(ver, {"capture_flows": flows})
+    note = _handshake_capture_note(ver, {"capture_decrypted_flows": flows})
     assert "..." in note
     assert "7 flow(s) decrypted" in note
 
@@ -114,7 +130,7 @@ def test_note_names_the_capture_windows_own_observer_record():
     # other window's saw nothing.
     ver = _ver(TLS_HANDSHAKE_NONE_OBSERVED)
     cap = {
-        "capture_flows": [{"host": "api.example.com"}],
+        "capture_decrypted_flows": [{"host": "api.example.com"}],
         "capture_observer_ssl_effects": {"ssl-pin-check": 2, "ssl-handshake": 1},
     }
     note = _handshake_capture_note(ver, cap)
@@ -133,7 +149,7 @@ def test_note_says_so_when_the_capture_windows_observer_was_loaded_and_silent():
     # and the note must not let the two read alike.
     ver = _ver(TLS_HANDSHAKE_NONE_OBSERVED)
     cap = {
-        "capture_flows": [{"host": "api.example.com"}],
+        "capture_decrypted_flows": [{"host": "api.example.com"}],
         "capture_observer_ssl_effects": {},
         "capture_bypass_applied": True,
     }
@@ -151,7 +167,7 @@ def test_note_does_not_claim_a_reading_from_a_window_with_no_observer():
     # not in the process.
     ver = _ver(TLS_HANDSHAKE_NONE_OBSERVED)
     cap = {
-        "capture_flows": [{"host": "api.example.com"}],
+        "capture_decrypted_flows": [{"host": "api.example.com"}],
         "capture_observer_ssl_effects": {},
         "capture_bypass_applied": False,
     }

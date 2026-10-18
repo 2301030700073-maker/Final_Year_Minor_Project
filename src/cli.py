@@ -10,6 +10,20 @@ gated behind the authorization check the way decompilation/scanning/
 classification/dynamic-bypass do (ADR-0005/FR-8.2). A failed ingest still
 writes an `ingest_failed` audit event (with the hash if computed) so the
 attempt is never invisible (ADR-0005).
+
+H2 - the authorization gate is a CLI-SURFACE control, not an enforcement
+boundary. `--justification` is validated by `require_authorization()` at the
+top of `run` (before any target is analyzed), and the audit record is appended
+by the same command (ADR-0005/FR-8.2). Both live ONLY here: the capability
+functions the pipeline calls - `dynamic.frida_runner`, `dynamic.mitmproxy_capture`,
+`static.decompile`, `static.signatures` - are ordinary library entry points with
+no authorization parameter, so any caller that imports them directly (a script,
+a notebook, a future service) performs the same analysis with no justification
+check and no audit record. That is a known, documented gap: the gate protects
+the CLI contract, and moving it into the capability functions would be a
+signature change owned outside this module. Treat direct calls to those
+functions as UNGATED, and require callers that embed them to apply their own
+authorization check before deploying a bypass or capturing traffic.
 """
 
 from __future__ import annotations
@@ -1056,45 +1070,6 @@ def _merge_capture_window_evaluation(
         SSL_CONFIRMATION_LINE: capture_verification.evidence_lines[SSL_CONFIRMATION_LINE],
     }
     return replace(with_hooks, ssl_bypassed=True, evidence_lines=merged_lines)
-    """Fold a confirming capture-window evaluation into the run's verification
-    (ADR-0016). Called only when that window's own observer carried BOTH the app's
-    pin-check and a completed handshake AND the run had not already confirmed, so
-    this function performs the merge without deciding to: the upgrade-only property
-    stays visible at the call site rather than buried in here.
-
-    With an existing verification, ONLY the two SSL lines move, plus the capture
-    launch's own native-hook statement when its check filed one (ADR-0023). The
-    capture window cannot speak to root - its bypass is pinning-only by construction
-    (ADR-0015), so it carries no root recipe and observed no root probe - and its
-    post-bypass liveness belongs to a different launch than the one the run's lines
-    were measured in. Those stay exactly as the dynamic window measured them. The
-    two keys are the check's own constants rather than literals here: a rename in one
-    file that silently stopped merging them would leave a report whose SSL verdict
-    and SSL evidence line contradict each other, with nothing raising.
-
-    The hook line is adopted rather than overwritten, and only in its windowed form
-    (ADR-0023): it reports what the script injected into ONE process managed to
-    install, so the capture launch's answer neither replaces nor is replaced by the
-    dynamic launch's. Selective by construction - an unattributed hook line is the
-    dynamic window's own key and is left alone, which is also what keeps this
-    function from becoming a general evidence merge that would drag the capture
-    launch's liveness and root lines across with it.
-
-    With no existing verification (the dynamic stage produced none), the capture
-    window's own evaluation becomes the run's. Its root lines say no root-artifact
-    probe was observed during the run, which is what this window measured, and
-    `root_bypassed` stays unpromoted rather than being manufactured out of a
-    pinning-only bypass."""
-    if verification is None:
-        return capture_verification
-    merged_lines = {
-        **verification.evidence_lines,
-        SSL_HANDSHAKE_LINE: capture_verification.evidence_lines[SSL_HANDSHAKE_LINE],
-        SSL_CONFIRMATION_LINE: capture_verification.evidence_lines[SSL_CONFIRMATION_LINE],
-    }
-    for key, value in capture_verification.evidence_lines.items():
-        if key.startswith(WINDOWED_NATIVE_HOOK_INSTALLATION_PREFIX):
-            merged_lines[key] = value
 
 
 def _success_check_stage(target: str, verification: "VerificationResult") -> StageResult:
@@ -1686,6 +1661,43 @@ def _effective_dynamic_action(action: Action, force_dynamic: bool) -> Action:
     return action
 
 
+def _flag_enabled(value) -> bool:
+    """True only for a real boolean True.
+
+    Calling a Typer command function directly (as the unit suite does) leaves
+    every omitted option bound to its `typer.Option(...)` default object, which
+    is truthy. A plain truth test therefore reads "not passed" as "passed" - so
+    the contradictory-flag guard below asks this instead, and stays about what
+    the caller actually asked for.
+    """
+    return value is True
+
+
+def require_authorization(justification: str, *, context: str = "before any analysis") -> None:
+    """Validate an operator justification or abort with exit code 1 (M3/ADR-0005).
+
+    The single justification gate for the `run` command: called before any
+    analysis so an unauthorized target is never even tool-analyzed (aapt2
+    badging + apksigner verify), and kept separate from `record_authorization`
+    (which runs after ingest so it can carry the real hash).
+
+    SCOPE (H2): this is a CLI-SURFACE gate, not an enforcement boundary. It
+    guards this command's pipeline only. The capability functions the pipeline
+    calls - `dynamic.frida_runner`, `dynamic.mitmproxy_capture`,
+    `static.decompile`, `static.signatures` - take no authorization argument and
+    stay callable directly, so a caller that bypasses the CLI bypasses this check
+    and the audit write as well. See the module docstring.
+    """
+    if validate_justification(justification):
+        return
+    console.print(
+        f"[bold red]Invalid --justification '{justification}' - aborting {context}. "
+        "Use one of OWN_APP, CTF, ACADEMIC_TRAINING_TARGET, or "
+        "AUTHORIZED_ENGAGEMENT:<id>.[/bold red]"
+    )
+    raise typer.Exit(code=1)
+
+
 @app.command("run")
 def run(
     apk: Path = typer.Option(..., "--apk", exists=True, help="Path to the APK to analyze"),
@@ -1730,8 +1742,9 @@ def run(
             "dynamic result stays gated on real observed behaviour (dynamically_confirmed "
             "only on a real probe-hit / pin-check+handshake, else UNVERIFIED). Intended "
             "for coverage-limited misses (e.g. a React-Native/Hermes app whose root "
-            "checks the signature engine cannot attribute). No-op with --skip-dynamic or "
-            "when a category was already detected."
+            "checks the signature engine cannot attribute). Rejected together with "
+            "--skip-dynamic (they contradict: one deploys the bypass, the other "
+            "removes the stage that would). No-op when a category was already detected."
         ),
     ),
     device_serial: Optional[str] = typer.Option(None, "--device", help="Specific device/emulator serial"),
@@ -1750,6 +1763,24 @@ def run(
     ),
 ):
     global _RUN_STATUS
+    # --- contradictory-flag guards (M10) ---
+    # `--force-dynamic` asks for an on-device bypass; `--skip-dynamic` removes the
+    # stage that would deploy it. The combination used to be a silent no-op (the
+    # override is gated on `not skip_dynamic`), so an operator could believe a
+    # bypass had been forced while the run was static-only. Fail loudly instead -
+    # a silent no-op is exactly the false-confidence class this project refuses.
+    #
+    # `--skip-dynamic --capture-traffic` is deliberately NOT rejected: the capture
+    # stage resolves its own device and runs as an un-hooked cold-start control
+    # (see the capture stage below), and the unit suite pins that behaviour.
+    if _flag_enabled(skip_dynamic) and _flag_enabled(force_dynamic):
+        raise typer.BadParameter(
+            "--force-dynamic and --skip-dynamic contradict each other: "
+            "--skip-dynamic removes the dynamic stage that --force-dynamic would "
+            "drive. Pass one of them, not both.",
+            param_hint="--skip-dynamic / --force-dynamic",
+        )
+
     stage_results: list[StageResult] = []
     # Full 128-bit uuid, not a [:8] truncation: RunRecord.run_id is the PK and
     # save_run upserts via session.merge, so a 32-bit collision would silently
@@ -1781,13 +1812,8 @@ def run(
     # analyze the target (aapt2 badging + apksigner verify) and persist metadata
     # before an invalid justification halted the run. Fail the cheap pure check
     # up front so no unauthorized target is ever analyzed (FR-8.2/ADR-0005).
-    if not validate_justification(justification):
-        console.print(
-            f"[bold red]Invalid --justification '{justification}' - aborting before "
-            "any analysis. Use one of OWN_APP, CTF, ACADEMIC_TRAINING_TARGET, or "
-            "AUTHORIZED_ENGAGEMENT:<id>.[/bold red]"
-        )
-        raise typer.Exit(code=1)
+    # See require_authorization() for why this gate covers the CLI surface only (H2).
+    require_authorization(justification)
 
     # Resolve the --target to the canonical key once, up front, so the bypass
     # dispatch (SCRIPTS_BY_TARGET_ACTION) and the success-check lookup
@@ -2575,8 +2601,9 @@ def run(
     # ONLY when the operator forces a bypass on a NEITHER verdict (-> Action.BOTH);
     # the static verdict is never mutated, so every static / confidence / calibration
     # / correlation consumer below keeps reading classification.action unchanged.
-    # Gated on `not skip_dynamic` so --force-dynamic is a true no-op alongside
-    # --skip-dynamic (the flag's documented contract).
+    # Gated on `not skip_dynamic` as defence in depth: the contradictory pair is
+    # now rejected up front by the flag guard at the top of this command, so this
+    # clause only keeps the helper total for a direct/legacy caller.
     dynamic_action = _effective_dynamic_action(
         classification.action, force_dynamic and not skip_dynamic
     )
@@ -3863,7 +3890,13 @@ def re_attribute_cmd(
             ssl = cj.get("ssl") or {}
             root_ev = root.get("evidence") or []
             ssl_ev = ssl.get("evidence") or []
-            pkg = (apk.package_name if apk else None) or ""
+            # Prefer the APK row's manifest-derived package; fall back to the value
+            # already denormalized on the run. The outerjoin above can yield NO ApkRecord
+            # (apk is None) and an ApkRecord can carry an empty package_name - the old
+            # `... or ""` then made pkg empty, and the write below overwrote a good
+            # run.package_name with "". An empty package also degrades attribution to
+            # "unknown app", so the stored value is the honest fallback here.
+            pkg = (apk.package_name if apk else None) or run.package_name or ""
             root_attr = gate_all_third_party(
                 attribute_root_evidence(pkg, root_ev), bool(root.get("detected"))
             )
@@ -3889,7 +3922,10 @@ def re_attribute_cmd(
             # F1: run rows now denormalize the authoritative package identity
             # (derived from the APK manifest) so a consumer keying on the run
             # doesn't rely on the operator-supplied `target` label.
-            if run.package_name != pkg:
+            # Guarded on a NON-EMPTY pkg: when neither the APK row nor the run carries
+            # one there is nothing authoritative to write, and blanking a present
+            # package_name would destroy the very identity this column exists for.
+            if pkg and run.package_name != pkg:
                 run.package_name = pkg
                 changed = True
             # Item 1: denormalized bundled-SDK qualifiers, so calibration and
@@ -4362,16 +4398,89 @@ def _print_uncompleted_runs(result: dict) -> None:
         )
 
 
+def _resolve_audit_log_path(audit_log: Optional[Path]) -> Path:
+    """Resolve `verify-audit-log`'s default to the project's own trail, not the CWD's.
+
+    AUDIT_LOG_PATH is cwd-relative (`outputs/audit_log.jsonl`) for the writers,
+    but a VERIFIER must not silently look at whatever directory it happened to be
+    started in: run from anywhere else it found no file, and reported "Audit log
+    OK - 0 records" over a trail it never opened (M9). Anchoring the default to
+    PROJECT_ROOT means the command always checks the project's canonical log
+    unless `--audit-log` names another one. An absolute path - including a
+    monkeypatched AUDIT_LOG_PATH in tests - is used unchanged.
+    """
+    if audit_log is not None:
+        return audit_log
+    return AUDIT_LOG_PATH if AUDIT_LOG_PATH.is_absolute() else PROJECT_ROOT / AUDIT_LOG_PATH
+
+
+def _audit_log_absent_reason(log_path: Path) -> str | None:
+    """Why there is nothing to verify at `log_path`, or None when it holds records.
+
+    `audit.verify_audit_log` returns a clean empty result for a missing trail on
+    purpose ("nothing was ever logged" is not corruption), which is right for a
+    library call. A verifier COMMAND has the opposite duty: it must not report a
+    verification it did not perform, so the CLI turns "no file / no records" into
+    a loud failure (M9).
+    """
+    if not log_path.exists():
+        return (
+            f"no audit log at {log_path} - nothing was verified. Pass --audit-log "
+            "with the trail's real path, or run an analysis first."
+        )
+    if not log_path.is_file():
+        return f"{log_path} is not a file - nothing was verified."
+    try:
+        with log_path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if line.strip():
+                    return None
+    except OSError as exc:
+        return f"could not read the audit log at {log_path} ({exc}) - nothing was verified."
+    return f"the audit log at {log_path} is empty - nothing was verified."
+
+
 @app.command("verify-audit-log")
 def verify_audit_log_cmd(
-    audit_log: Path = typer.Option(
-        AUDIT_LOG_PATH, "--audit-log",
-        help="Path to the audit log to verify",
+    audit_log: Optional[Path] = typer.Option(
+        None, "--audit-log",
+        help=(
+            "Path to the audit log to verify. Defaults to the project's own "
+            "outputs/audit_log.jsonl, resolved from the PROJECT ROOT (not the "
+            "current directory). A missing or empty log is a failure, never an "
+            "'OK - 0 records'."
+        ),
+    ),
+    allow_legacy: bool = typer.Option(
+        False, "--allow-legacy",
+        help=(
+            "Accept a log whose records ALL lack a hash chain (a genuinely "
+            "pre-hashing log). Without this, a non-empty log with zero intact "
+            "chain hashes fails: stripping every record_hash is a tamper signal."
+        ),
     ),
 ) -> None:
     """Parse the audit log and re-derive its hash chain to confirm no record
-    was edited, deleted, or reordered (A1/A5 - tamper-evidence for ADR-0005)."""
-    result = verify_audit_log(audit_log)
+    was edited, deleted, or reordered (A1/A5 - tamper-evidence for ADR-0005).
+
+    The chain is unkeyed: it detects an edit by someone who cannot recompute the
+    hashes. Set AUDIT_HMAC_KEY to have new records carry a keyed HMAC anchor
+    (`head_hmac`) that is checked here as well.
+
+    A log that does not exist, or holds no records, exits non-zero (M9): an "OK"
+    over an unopened trail is a false claim of verification, and this command
+    exists precisely so an auditor can trust that claim."""
+    log_path = _resolve_audit_log_path(audit_log)
+    # `allow_legacy is True`, not `allow_legacy`: when this command is called
+    # directly (tests, or another command) the default is Typer's OptionInfo
+    # object rather than False, and OptionInfo is truthy - which would silently
+    # enable the escape hatch for every caller.
+    result = verify_audit_log(log_path, allow_legacy=allow_legacy is True)
+    absent = _audit_log_absent_reason(log_path)
+    if absent is not None and not result["errors"]:
+        console.print("[bold red]Audit log integrity FAILED:[/bold red]")
+        console.print(f"  [red]{absent}[/red]")
+        raise typer.Exit(code=1)
     if result["errors"]:
         console.print("[bold red]Audit log integrity FAILED:[/bold red]")
         for err in result["errors"]:

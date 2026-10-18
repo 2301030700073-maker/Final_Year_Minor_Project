@@ -515,3 +515,60 @@ def test_a_non_failed_status_is_still_engagement():
         ).evidence_lines
         assert "h" in lines[_ENGAGED_KEY], status
         assert _FAILURE_KEY not in lines, status
+
+
+# --- M6: "target class absent" is NOT "hook failed to install" ---------------
+# An app that simply does not ship OkHttp/Conscrypt/TrustKit made the observer log
+# one "[synth] hook target absent" line per class, and every "[synth] " line was
+# rendered under "hook(s) the injected script could NOT install" - a report line
+# asserting broken hooks where nothing was wrong. Only a class that IS present and
+# whose hook assignment threw is a failed install.
+
+_ABSENT_MSGS = [
+    {"type": "log",
+     "payload": "[synth] hook target not present in the app: okhttp3.CertificatePinner"},
+    {"type": "log",
+     "payload": "[synth] hook target not present in the app: "
+                "com.android.org.conscrypt.TrustManagerImpl"},
+]
+
+
+def test_absent_target_class_is_not_a_failed_hook_install():
+    line = _install_line(_ABSENT_MSGS)
+    assert "could NOT install" not in line
+    # ...and the clean-install statement still stands
+    assert "no failed hook installation" in line
+    # the fact itself is still reported - as a property of the APP
+    assert "not present in the app" in line
+    assert "okhttp3.CertificatePinner" in line
+
+
+def test_absent_targets_are_deduped_and_named_once():
+    msgs = _ABSENT_MSGS * 3
+    line = _install_line(msgs)
+    assert line.count("okhttp3.CertificatePinner") == 1
+
+
+def test_a_present_target_whose_hook_was_refused_is_still_a_failed_install():
+    # The legitimate signal must survive: the class is in the app, the hook
+    # assignment threw. That IS a failed install and keeps its wording.
+    msgs = [{"type": "log",
+             "payload": "[synth] okhttp3.CertificatePinner.check found but the hook "
+                        "could not be installed: Error: already replaced this function"}]
+    line = _install_line(msgs)
+    assert "could NOT install" in line
+    assert "already replaced this function" in line
+
+
+def test_absent_and_refused_are_reported_side_by_side():
+    msgs = _ABSENT_MSGS + [{"type": "log",
+                            "payload": "[synth] SSLSocket.startHandshake found but the "
+                                       "hook could not be installed: Error: no such method"}]
+    line = _install_line(msgs)
+    # the refusal is a failed install...
+    assert "could NOT install" in line
+    assert "no such method" in line
+    # ...and the absent class is filed as a fact about the app, not a failure
+    assert "not present in the app" in line
+    failure_part, absent_part = line.split("not present in the app", 1)
+    assert "okhttp3.CertificatePinner" not in failure_part

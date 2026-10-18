@@ -189,7 +189,12 @@ def _wait_for_checkpoint(
     deadline = time.monotonic() + settle_seconds
     seen_root, seen_ssl = False, False
     while time.monotonic() < deadline:
-        for m in messages:
+        # Snapshot: `on_message` appends to `messages` from Frida's reactor
+        # thread while this worker thread iterates, so a bare `for m in messages`
+        # can raise `RuntimeError: list modified during iteration` under message
+        # load. Copying per poll is safe (messages only grows; the next poll
+        # re-scans and sees anything new) and costs nothing at these sizes.
+        for m in list(messages):
             payload = m.get("payload") if isinstance(m, dict) else None
             if not isinstance(payload, dict):
                 continue
@@ -344,33 +349,100 @@ def _ui_actions_for(target: str, action) -> list[tuple]:
     return list(UI_ACTIONS_BY_TARGET.get(target, ()))
 
 
-def _run_ui_action(serial: str, action: tuple) -> None:
-    """Run one target-specific UI action via adb. Best-effort: a UI step
-    failing shouldn't crash the whole dynamic stage, but it also can't be
-    silent - the stage result's evidence captures whether it ran."""
+def _run_ui_action(serial: str, action: tuple) -> dict:
+    """Run one target-specific UI action via adb and RETURN what happened.
+
+    Best-effort: a UI step failing shouldn't crash the whole dynamic stage, but it
+    also can't be silent. This used to discard the subprocess result entirely, so a
+    launch that never started (wrong component, app not installed) or a tap the
+    device rejected was indistinguishable from one that worked - the stage then
+    waited out its window and reported "inconclusive" with no record of why, which
+    contradicts the function's own contract that the evidence captures whether the
+    step ran (M5).
+
+    Every outcome is returned, refusals included, in the shape the stage stores
+    under `ui_actions` (mirrors mitmproxy_capture._drive_ui's record): the kind and
+    rendered command, whether it was attempted, `ok` (True/False, None when nothing
+    was observed), the adb return code, and a reason when it did not succeed."""
     adb = _require_adb()
     kind = action[0]
-    if kind == "am_start":
-        subprocess.run(
-            [adb, "-s", serial, "shell", "am", "start", "-n", action[1]],
-            capture_output=True, text=True, timeout=15,
-        )
-    elif kind == "tap":
-        subprocess.run(
-            [adb, "-s", serial, "shell", "input", "tap", str(action[1]), str(action[2])],
-            capture_output=True, text=True, timeout=15,
-        )
-    elif kind == "sleep":
+    if kind == "sleep":
         time.sleep(action[1])
+        return {"kind": "sleep", "action": f"sleep {action[1]}", "attempted": True,
+                "ok": True, "returncode": None, "reason": None}
+    if kind == "am_start":
+        argv = [adb, "-s", serial, "shell", "am", "start", "-n", action[1]]
+        label = f"am start -n {action[1]}"
+    elif kind == "tap":
+        argv = [adb, "-s", serial, "shell", "input", "tap",
+                str(action[1]), str(action[2])]
+        label = f"input tap {action[1]} {action[2]}"
+    else:
+        return {"kind": str(kind), "action": str(action), "attempted": False,
+                "ok": False, "returncode": None,
+                "reason": f"unknown UI action kind {kind!r}"}
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+    except Exception as exc:
+        # A timeout or a missing adb is a RECORDED failure, not a stage crash -
+        # the step did not run, which is exactly what the record must say.
+        return {"kind": kind, "action": label, "attempted": True, "ok": False,
+                "returncode": None, "reason": f"{label} failed: {exc}"}
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+    ok = proc.returncode == 0
+    reason = None
+    if not ok:
+        detail = stderr or stdout or "no output"
+        reason = f"{label} exited {proc.returncode}: {detail}"
+    return {"kind": kind, "action": label, "attempted": True, "ok": ok,
+            "returncode": proc.returncode, "stdout": stdout, "stderr": stderr,
+            "reason": reason}
+
+
+def _record_ui_actions(serial: str, actions: list[tuple], records: list[dict]) -> None:
+    """Run `actions` in order, appending one outcome record per action.
+
+    A patched/stubbed `_run_ui_action` that returns nothing (several unit tests
+    replace it with a plain recorder) still gets an honest record: the action was
+    attempted, but no outcome was observed - `ok` stays None rather than being
+    guessed as a pass."""
+    for action in actions:
+        record = _run_ui_action(serial, action)
+        if not isinstance(record, dict):
+            record = {"kind": str(action[0]), "action": str(action),
+                      "attempted": True, "ok": None, "returncode": None,
+                      "reason": "the UI runner returned no outcome"}
+        records.append(record)
 
 
 def run_dynamic_stage(
     device_serial: str, package_name: str, action: Action,
     target: str = "uncrackable1", settle_seconds: int = 5,
-    synthesized: dict | None = None,
+    synthesized: dict | None = None, auth_context=None,
 ) -> StageResult:
+    """Run the dynamic stage for one target/action.
+
+    `auth_context` is an OPTIONAL, currently unenforced hook for the H2
+    authorization gate: the stage will be able to refuse to instrument a package
+    without an operator-supplied authorization context. It defaults to None, which
+    preserves today's behaviour exactly (no enforcement) for every existing
+    caller, and it is not recorded in the evidence or reflected in the result type -
+    threading it now only gives the gate one place to land."""
     start = time.monotonic()
     messages: list[dict] = []
+    # M5: one record per UI action (am start / tap / sleep), so a launch or tap the
+    # device refused is reported as such instead of vanishing into a later
+    # "inconclusive".
+    ui_action_records: list[dict] = []
+
+    def _with_ui_actions(result: StageResult) -> StageResult:
+        """Attach the UI-action outcomes to a result's evidence on every exit path.
+
+        Recorded even when empty: "the stage drove no UI step" and "it drove steps
+        whose outcomes were lost" must not look alike."""
+        result.evidence["ui_actions"] = list(ui_action_records)
+        return result
 
     if action == Action.NEITHER:
         return StageResult(
@@ -564,8 +636,9 @@ def run_dynamic_stage(
             outcome["phase"] = "device.resume"
             device.resume(pid)
             time.sleep(1.0)  # let the launcher activity draw before any UI action
-            for ui_action in _ui_actions_for(target, ui_kind):
-                _run_ui_action(device_serial, ui_action)
+            _record_ui_actions(
+                device_serial, _ui_actions_for(target, ui_kind), ui_action_records,
+            )
             _wait_for_checkpoint(messages, settle_seconds, require_evidence=True)
             return device, pid, instrument
 
@@ -680,11 +753,11 @@ def run_dynamic_stage(
             outcome["phase"] = "device.resume"
             device.resume(pid)
             time.sleep(1.0)  # let the launcher activity draw before any UI action
-            for ui_action in ui_actions:
-                # RESID-6A: `ui_action`, not `action` - the loop variable must
-                # not shadow the Action parameter (a latent footgun for any
-                # later use of action.value after this point).
-                _run_ui_action(device_serial, ui_action)
+            # RESID-6A: `ui_action`, not `action` - the loop variable must
+            # not shadow the Action parameter (a latent footgun for any
+            # later use of action.value after this point). Each step's outcome is
+            # recorded (M5) so a refused launch/tap is visible in the evidence.
+            _record_ui_actions(device_serial, ui_actions, ui_action_records)
             # RESID-6D: signal-aware wait instead of a blind settle sleep. When
             # the flow is UI-triggered (button-tapped checks like AndroGoat's
             # root/pinning), the hook-install checkpoint fires at resume but the
@@ -759,7 +832,7 @@ def run_dynamic_stage(
     if worker.is_alive():
         # RESID-6B: exceeded the hard ceiling - fail loudly. (The daemon thread
         # is orphaned, but the pipeline proceeds instead of hanging forever.)
-        return StageResult(
+        return _with_ui_actions(StageResult(
             stage="dynamic", status="failed",
             evidence={
                 "frida_messages": messages,
@@ -776,5 +849,5 @@ def run_dynamic_stage(
                 f"the server if spawn itself never returns."
             ),
             duration_ms=elapsed_ms(start),
-        )
-    return outcome["result"]
+        ))
+    return _with_ui_actions(outcome["result"])

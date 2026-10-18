@@ -111,7 +111,12 @@ def test_annotation_types_and_modifiers_still_count_as_declarations(tmp_path):
     (tmp_path / "a.java").write_text("@Deprecated\npublic final class a {}\n")
     (tmp_path / "b.java").write_text("/** doc */ public class b {}\n")
     files = sorted(tmp_path.glob("*.java"))
-    assert _class_simple_names(files) == ["Anno", "a", "b"]
+    # Compare order-independently: `sorted()` over Path objects is CASE-SENSITIVE
+    # on Linux (Anno.java before a.java) and CASE-INSENSITIVE on Windows (a.java
+    # before Anno.java), and _class_simple_names preserves that input order. What
+    # this test asserts is WHICH declarations are harvested, not file iteration
+    # order, so sorting the harvested names makes it hold on both platforms.
+    assert sorted(_class_simple_names(files)) == ["Anno", "a", "b"]
 
 
 def test_heavy_when_mostly_single_char():

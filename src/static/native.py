@@ -19,7 +19,6 @@ no-ops (principle 3).
 from __future__ import annotations
 
 import concurrent.futures
-import hashlib
 import os
 import re
 import shutil
@@ -27,8 +26,6 @@ import subprocess
 import zipfile
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-
-import yaml
 
 from common import CATEGORIES, KNOWN_NATIVE_LIBS, Evidence, atomic_json_write, find_ghidra_headless, load_json_cache, load_yaml_entries, sha256_file, read_text_ignore
 from static.coverage import _min_coverage
@@ -1045,8 +1042,9 @@ def _ghidra_project_dir(out_path: Path) -> Path:
     NOT a shared `_ghidra_proj` for the whole ABI dir. Concurrent analyze_so
     passes (analyze_so_many) would otherwise both write the same project dir and
     corrupt each other, so each lib gets its own. Serial runs are unchanged (each
-    .so still gets its own); `-deleteProject` removes it after each pass, so
-    nothing accumulates."""
+    .so still gets its own); ghidra_decompile removes it in a finally, so nothing
+    accumulates even on a timeout or a failed launch (where `-deleteProject`
+    never runs)."""
     return out_path.parent / f"_ghidra_proj_{out_path.stem}"
 
 
@@ -1084,14 +1082,28 @@ def ghidra_decompile(so_path: Path, out_path: Path) -> tuple[bool, list[str], bo
         "-deleteProject", "-overwrite",
     ]
     try:
-        subprocess.run(cmd, capture_output=True, text=True, timeout=GHIDRA_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return False, [], False, f"ghidra timed out after {GHIDRA_TIMEOUT:.0f}s on {so_path.name}"
-    except OSError as exc:
-        return False, [], False, f"ghidra failed to launch: {exc}"
+        try:
+            subprocess.run(cmd, capture_output=True, text=True, timeout=GHIDRA_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return False, [], False, f"ghidra timed out after {GHIDRA_TIMEOUT:.0f}s on {so_path.name}"
+        except OSError as exc:
+            return False, [], False, f"ghidra failed to launch: {exc}"
+    finally:
+        # `-deleteProject` only clears the project's own files, and does not run
+        # at all when the pass times out or never launches - so without this the
+        # per-lib `_ghidra_proj_<stem>` directory accumulated next to every
+        # extracted lib (inside the APK's own analysis tree) on every failed
+        # pass. Best-effort: a JVM that outlived the timeout may still hold it.
+        shutil.rmtree(project_dir, ignore_errors=True)
     if not out_path.exists():
         return False, [], False, "ghidra produced no output file"
-    raw, truncated = _strip_truncation_sentinel(out_path.read_text(errors="replace"))
+    try:
+        raw_text = out_path.read_text(errors="replace")
+    except OSError as exc:
+        # An unreadable output file is a failed pass to report, not a raise out
+        # of the native stage (the caller's contract is ok=False + error).
+        return False, [], False, f"ghidra output unreadable: {exc}"
+    raw, truncated = _strip_truncation_sentinel(raw_text)
     bodies = _parse_ghidra_functions(raw)
     if not bodies:
         return False, [], truncated, "ghidra decompiled no functions"

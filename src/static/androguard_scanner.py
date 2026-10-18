@@ -43,11 +43,21 @@ ordinary attributed scan (ADR-0006: an unreliable view cannot certify a clean).
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from pathlib import Path
 
 from common import Evidence, atomic_json_write, is_known_third_party, is_under_package, load_json_cache, sha256_file
+
+# M15: fraction of a scan's xrefs whose referring class could not be identified
+# at all (`_xref_class_desc` returned None) above which attribution is reported
+# degraded. The wholesale failure this guards against - androguard's xref view
+# yielding entries no descriptor can be read from - makes EVERY string take
+# keep=False, so app_strings comes back empty and the run reads as a fully
+# attributed, evidence-free clean negative. A handful of odd entries among
+# hundreds of thousands of resolvable ones is normal and must NOT degrade (that
+# would bound every real scan's java coverage to `partial` for nothing); a
+# majority of unresolvable xrefs means the view, not the app, is empty.
+_XREF_UNRESOLVED_DEGRADE_RATIO = 0.5
 
 
 class BrokenSignatureError(RuntimeError):
@@ -124,11 +134,15 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> tuple[set[str],
 
     Strings only reachable from vendor namespaces are dropped so precision is
     not weakened by library strings. `attribution_degraded` is True when that
-    per-class attribution could NOT be applied and the whole constant pool was
-    returned instead - either no app-owned namespace was derivable, or the xref
-    walk raised. The caller must propagate it: a whole-pool result is a weaker
-    claim than an attributed one (it may include vendor strings, and the same
-    broken view may equally have missed app-owned ones), so it must not be
+    per-class attribution could NOT be applied: no app-owned namespace was
+    derivable, the xref walk raised (in both cases the whole constant pool is
+    returned instead), or (M15) most xrefs carried no readable class descriptor
+    so the walk resolved nothing - that last case keeps the (near-empty) kept set
+    rather than promoting a broken view's strings to evidence, so `app_strings`
+    can be small or empty. The flag means "attribution was not applied", not
+    "whole pool", and the caller must propagate it either way: the result is a
+    weaker claim than an attributed one (it may include vendor strings, and the
+    same broken view may equally have missed app-owned ones), so it must not be
     reported as an ordinary, fully-attributed scan."""
     app_ns: set[str] = set()
     namespace_walk_failed = False
@@ -155,6 +169,16 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> tuple[set[str],
     # walk that failed on any DEX degrades too, for the reason above.
     degraded = namespace_walk_failed or not app_ns
     app_strings: set[str] = set()
+    # M15: per-xref attribution accounting. `_xref_class_desc` returns None when
+    # the entry carries no readable class descriptor at all - the string then
+    # takes keep=False and is silently dropped. That is correct for one odd entry,
+    # but if it happens for essentially every xref the whole pool is dropped while
+    # `degraded` stayed False: app_strings empty, attribution_degraded False, and
+    # the run presents as a fully-attributed clean negative with zero evidence
+    # (ADR-0006: an unreliable view cannot certify a clean). Counting the failures
+    # is what lets the flag below tell the two apart.
+    xref_total = 0
+    xref_unresolved = 0
     try:
         for s_analysis in dx.find_strings():
             val = s_analysis.get_value()
@@ -168,8 +192,12 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> tuple[set[str],
                 continue
             keep = False
             for xref in (s_analysis.get_xref_from() or ()):
+                xref_total += 1
                 cn = _xref_class_desc(xref)
-                ns = _class_namespace(cn) if cn else None
+                if cn is None:
+                    xref_unresolved += 1
+                    continue
+                ns = _class_namespace(cn)
                 if ns is not None and ns in app_ns:
                     keep = True
                     break
@@ -185,6 +213,16 @@ def _app_owned_strings(dex_objs, dx, app_package: str | None) -> tuple[set[str],
                     app_strings.add(s)
             except Exception:
                 continue
+    else:
+        # M15: a wholesale xref-resolution failure reaches here WITHOUT raising -
+        # every entry resolves to None, every string takes keep=False, and the
+        # result is an empty app_strings set that reads as "this app has no
+        # strings". Past the threshold the view is broken, not the app, so report
+        # the lost attribution instead of certifying a clean. Guarded on
+        # xref_total so an APK whose strings genuinely have no xrefs (xref_total 0)
+        # is not degraded by 0/0.
+        if xref_total and xref_unresolved / xref_total >= _XREF_UNRESOLVED_DEGRADE_RATIO:
+            degraded = True
     return app_strings, degraded
 
 
@@ -275,9 +313,10 @@ def scan_dex_strings(apk_path: Path, signatures: list, cache_dir: Path | None = 
     enhancement source, so a degraded note is the usual handling, not a pipeline
     halt.
 
-    `attribution_degraded` True means app-owned attribution could not be applied
-    and the WHOLE constant pool was matched instead, so these matches are a
-    weaker claim than usual and the java coverage surface must be bounded
+    `attribution_degraded` True means app-owned attribution could not be applied:
+    either the WHOLE constant pool was matched instead, or (M15) the xref view
+    resolved almost nothing and most strings were dropped. Both are a weaker
+    claim than an attributed scan, so the java coverage surface must be bounded
     accordingly (coverage.apply_attribution_degraded_java).
 
     With `cache_dir` set, the expensive AnalyzeAPK string extraction runs once

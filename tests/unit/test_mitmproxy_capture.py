@@ -448,6 +448,11 @@ def test_the_internet_baseline_is_re_established_after_the_adbd_restart(monkeypa
     order: list[str] = []
     monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: True)
     monkeypatch.setattr(mitmproxy_capture, "_windows_mitmdump", lambda: r"C:\mitmdump.exe")
+    # H1: pin the %TEMP% parent so both the stage's _windows_capture_dir(stamp) and
+    # this test's own call resolve to the same owner-only dir WITHOUT the real
+    # powershell.exe %TEMP% probe or a mkdir under the actual C: drive.
+    monkeypatch.setattr(mitmproxy_capture, "_windows_temp_dir",
+                        lambda: Path("/tmp/fymp-wsl2-temp"))
     monkeypatch.setattr(mitmproxy_capture, "_prepare_windows_confdir",
                         lambda confdir, dest: r"C:\conf")
     monkeypatch.setattr(mitmproxy_capture, "_write_windows_addon",
@@ -957,7 +962,9 @@ def test_stop_windows_mitmdump_stops_by_port_then_by_name(monkeypatch):
     assert mitmproxy_capture._stop_windows_mitmdump(8081) is None
     assert len(seen) == 2, seen
     assert "8081" in seen[0], seen[0]
-    assert "Listen" in seen[0] or "Listen" in seen[0].title() or "8081" in seen[0]
+    # ...and it keys on the LISTENING port, not on any process holding 8081 open.
+    assert "Get-NetTCPConnection -LocalPort 8081" in seen[0], seen[0]
+    assert "-State Listen" in seen[0], seen[0]
     assert "mitmdump" in seen[1]
     # no port -> the by-name sweep still runs (a caller with no port is not an error)
     seen.clear()
@@ -1122,6 +1129,11 @@ def test_run_capture_stage_wsl2_records_real_flows(monkeypatch, tmp_path):
     monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: True)
     monkeypatch.setattr(mitmproxy_capture, "_windows_mitmdump",
                         lambda: "C:\\x\\mitmdump.exe")
+    # H1: pin the %TEMP% parent so the stage's _windows_capture_dir(stamp) and this
+    # test's own _windows_capture_dir(12345) resolve to the SAME owner-only dir
+    # without the real powershell.exe %TEMP% probe or a mkdir under the actual C:.
+    monkeypatch.setattr(mitmproxy_capture, "_windows_temp_dir",
+                        lambda: Path("/tmp/fymp-wsl2-temp"))
     monkeypatch.setattr(pass_through_proxy, "ensure_internet", lambda *a, **k: None)
     monkeypatch.setattr(pass_through_proxy, "is_listening", lambda *a, **k: True)
     monkeypatch.setattr(mitmproxy_capture, "_prepare_windows_confdir",
@@ -1160,10 +1172,12 @@ def test_run_capture_stage_wsl2_records_real_flows(monkeypatch, tmp_path):
     assert result.evidence["flows_count"] == 2
     # The wsl2 branch deliberately binds the flows file to a WSL2 /mnt/c path (so
     # Windows mitmdump can write it). Build the expectation the same way the
-    # product does - str(Path("/mnt/c/...") / ...) - because that is '\'-separated
-    # if this test is ever run off-POSIX, and the value is the product's real
-    # output rather than one platform's spelling of it.
-    assert result.evidence["flows_path"] == str(Path("/mnt/c/Users/Public") / "12345.mitm")
+    # product does - through _windows_capture_dir, which since H1 puts every
+    # artifact of a run in its own owner-only directory instead of the
+    # world-readable C:\Users\Public root.
+    capture_dir, _ = mitmproxy_capture._windows_capture_dir(12345)
+    assert result.evidence["flows_path"] == str(capture_dir / "12345.mitm")
+    assert "Users/Public/12345.mitm" not in result.evidence["flows_path"].replace("\\", "/")
     assert result.evidence["hosts"] == ["api.example.com", "example.com"]
 
 
@@ -2304,6 +2318,13 @@ def test_reachability_probe_never_raises_on_timeout(monkeypatch):
 def _wsl2_empty_stubs(monkeypatch, log_text, reachable):
     monkeypatch.setattr(mitmproxy_capture, "_on_wsl2", lambda: True)
     monkeypatch.setattr(mitmproxy_capture, "_windows_mitmdump", lambda: "C:\\x\\mitmdump.exe")
+    # H1: the WSL2 placement resolves a per-run capture dir, whose real host form
+    # spends a powershell.exe %TEMP% probe and an icacls ACL under C: on a box
+    # with /mnt/c. Stub the whole helper so the empty-flows verdict logic is
+    # exercised without touching the host (the guard forbids the spawn anyway).
+    monkeypatch.setattr(mitmproxy_capture, "_windows_capture_dir",
+                        lambda stamp: (Path("/tmp/fymp-capture-%d" % stamp),
+                                       r"C:\Temp\fymp-capture-%d" % stamp))
     monkeypatch.setattr(pass_through_proxy, "ensure_internet", lambda *a, **k: None)
     monkeypatch.setattr(pass_through_proxy, "is_listening", lambda *a, **k: True)
     monkeypatch.setattr(mitmproxy_capture, "_prepare_windows_confdir",

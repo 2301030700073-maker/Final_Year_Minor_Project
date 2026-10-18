@@ -422,3 +422,49 @@ def test_dex_scan_matched_text_is_deterministic_across_set_order(tmp_path, monke
 
     r = ags.scan_dex_strings(apk, sigs, cache_dir=None)
     assert r["matched"]["multi"] == "su"
+
+
+# ------------------------------------------------------------------ M15
+# A wholesale xref-resolution failure never raised: every entry resolved to no
+# class descriptor, so every string took keep=False, app_strings came back empty,
+# and attribution_degraded stayed False. The run then presented as a
+# fully-attributed clean negative with zero evidence (ADR-0006: an unreliable
+# view cannot certify a clean). The failure is now counted.
+
+def test_app_owned_strings_degrades_when_every_xref_is_unresolvable():
+    # object() carries no .name, get_class_name(), get_name() or get_vm_class(),
+    # so _xref_class_desc returns None for it - the "we could not identify the
+    # referring class" case. Every xref failing means the pool was dropped
+    # wholesale, which must be reported, not read as an app with no strings.
+    app_class = _FakeClass("Lcom/example/app/Main;")
+    unresolvable = object()
+    dx = _FakeDx([
+        _FakeString("root-detection-marker", {unresolvable: None}),
+        _FakeString("su", {unresolvable: None}),
+    ])
+    dexs = [_FakeDex([app_class])]
+
+    result, degraded = _app_owned_strings(dexs, dx, "com.example.app")
+
+    assert result == set()      # nothing attributable - the surface is empty
+    assert degraded is True     # ...so the empty result must not certify a clean
+
+
+def test_app_owned_strings_not_degraded_by_a_few_unresolvable_xrefs():
+    # A handful of odd entries among resolvable ones is normal and must not bound
+    # every real scan's java coverage to `partial`: 1 of 3 xrefs here fails, below
+    # the wholesale threshold, and the app-owned string is still kept.
+    app_class = _FakeClass("Lcom/example/app/Main;")
+    vendor_class = _FakeClass("Lokhttp3/OkHttpClient;")
+    dx = _FakeDx([
+        _FakeString("com.android.insecurebankv2", {app_class: None}),
+        _FakeString("test-keys", {vendor_class: None}),
+        _FakeString("orphan", {object(): None}),
+    ])
+    dexs = [_FakeDex([app_class, vendor_class])]
+
+    result, degraded = _app_owned_strings(dexs, dx, "com.example.app")
+
+    assert "com.android.insecurebankv2" in result
+    assert "test-keys" not in result
+    assert degraded is False

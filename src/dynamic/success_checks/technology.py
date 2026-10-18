@@ -216,6 +216,13 @@ def _summarize(message: dict, limit: int = _PAYLOAD_TRUNCATE) -> str:
 # a line could name a symbol the lookup had in fact found, and a genuinely absent
 # symbol produced no line at all.
 _SYNTH_LOG_MARKER = "[synth] "
+# M6: "the class this optional hook targets is not in the app" is NOT "the hook
+# failed to install". An app without OkHttp/Conscrypt/TrustKit legitimately ships
+# none of those classes, and the observer logs one line per absent target; counting
+# those as failed installs told the operator something was broken when nothing was.
+# Only the other shape - a target the app DOES have whose hook assignment threw
+# ("... found but the hook could not be installed: <e>") - is a failed install.
+_SYNTH_ABSENT_TARGET_MARKER = "[synth] hook target not present in the app: "
 _VENDOR_ROOT_MARKER = "[OK] [ROOT]"
 _VENDOR_SSL_MARKER = "[OK] [SSL]"
 
@@ -259,18 +266,31 @@ def native_hook_installation_key(window: str | None = None) -> str:
     return WINDOWED_NATIVE_HOOK_INSTALLATION_PREFIX + window
 
 
-def _native_hook_installation_line(uninstalled: list[str], captured: bool) -> str:
+def _native_hook_installation_line(
+    uninstalled: list[str], captured: bool, absent_targets: list[str] | None = None,
+) -> str:
     """Tri-state on purpose: "the script reported no failure" and "the script's
     output was not captured" are different facts, and only the first says anything
     about whether a hook went in. An empty or absent message list is reported as
-    not-captured, never as a clean install."""
+    not-captured, never as a clean install.
+
+    `absent_targets` are the classes the app simply does not contain. They are
+    named in their own clause - a fact about the APP, not a failure of the script -
+    so an app without OkHttp no longer reads as having a broken hook (M6)."""
     if not captured:
         return "not captured (no Frida script output this run)"
     if not uninstalled:
-        return ("the injected script reported no failed hook installation this run "
+        line = ("the injected script reported no failed hook installation this run "
                 "(it names a symbol only when no loaded module exports it or the "
                 "hook could not be installed)")
-    return ("hook(s) the injected script could NOT install: " + "; ".join(uninstalled))
+    else:
+        line = "hook(s) the injected script could NOT install: " + "; ".join(uninstalled)
+    if absent_targets:
+        # Informational only: nothing was installed because there was nothing to
+        # hook, which is not a failed install and must never be counted as one.
+        line += ("; optional hook targets not present in the app (nothing to "
+                 "install, not a failure): " + ", ".join(absent_targets))
+    return line
 
 
 class TechnologyHooksEngagedCheck:
@@ -326,6 +346,7 @@ class TechnologyHooksEngagedCheck:
         root_probe_hits: list[str] = []
         effects: list[str] = []
         not_installed: list[str] = []
+        absent_targets: list[str] = []
         hook_failures: list[str] = []
         for m in messages:
             if isinstance(m, str):
@@ -386,7 +407,14 @@ class TechnologyHooksEngagedCheck:
                     effects.append(str(eff))
             elif isinstance(payload, str) and _SYNTH_LOG_MARKER in payload:
                 line = payload.strip()
-                if line not in not_installed:
+                if _SYNTH_ABSENT_TARGET_MARKER in line:
+                    # M6: the app does not contain this class - nothing was there
+                    # to hook. Collected separately (and named as such) so it can
+                    # never be rendered as a hook the script failed to install.
+                    name = line.split(_SYNTH_ABSENT_TARGET_MARKER, 1)[1].strip()
+                    if name and name not in absent_targets:
+                        absent_targets.append(name)
+                elif line not in not_installed:
                     not_installed.append(line)
             elif isinstance(payload, str) and (
                 _VENDOR_ROOT_MARKER in payload or _VENDOR_SSL_MARKER in payload
@@ -487,7 +515,10 @@ class TechnologyHooksEngagedCheck:
             # ADR-0023: windowed key, so the capture launch's own statement of
             # the same question lands BESIDE this one instead of replacing it.
             native_hook_installation_key(window): (
-                _native_hook_installation_line(not_installed, captured=bool(messages))
+                _native_hook_installation_line(
+                    not_installed, captured=bool(messages),
+                    absent_targets=absent_targets,
+                )
             ),
             SSL_HANDSHAKE_LINE: (
                 "yes (a TLS handshake completed through the neutralized stack"

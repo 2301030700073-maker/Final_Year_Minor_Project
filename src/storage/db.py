@@ -19,12 +19,28 @@ dataset starts fresh from here, deliberately.
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, create_engine, event, inspect, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 DB_FILENAME = "results.db"
+
+# M8: how long a connection waits for another writer's lock before SQLite raises
+# "database is locked". cli.py:1883/1947 documents that a concurrent run CAN hit
+# that OperationalError (existing_metadata / save_* run while a second run holds
+# the write lock), and the previous default (5s) made it a real, observed failure
+# instead of a short wait. 30s matches the timeout signatures.py already uses on
+# its own evidence SQLite connection.
+BUSY_TIMEOUT_SECONDS = 30.0
+
+# M8: engines are expensive to build and - far worse - get_engine used to run
+# create_all() + a full schema inspection on EVERY save_* call. One engine per
+# resolved DB path, built (and migrated) exactly once, is returned thereafter.
+_ENGINES: dict[str, Engine] = {}
+_ENGINE_LOCK = threading.Lock()
 
 
 class Base(DeclarativeBase):
@@ -175,26 +191,71 @@ class RunRecord(Base):
     stage_results_json: Mapped[list] = mapped_column(JSON)
 
 
-def get_engine(analysis_root: Path):
+def get_engine(analysis_root: Path) -> Engine:
+    """The engine for this analysis root's results.db, created and migrated ONCE.
+
+    M8: every save_* call (storage/results.py: save_metadata, save_run, ...) goes
+    through here, and the body below used to run `create_all()` plus a full
+    `inspect()` of every table on every one of those calls - schema work whose
+    answer cannot change between saves in one process. The engine is now cached
+    per DB path and the schema work happens only on a cache miss, under a lock so
+    two threads racing on the first save cannot both run the ALTER TABLE
+    migration (the old check-then-act: both inspected the columns, both saw the
+    column missing, both ALTERed, and the loser raised "duplicate column name").
+    Every caller keeps getting a usable engine - the only change is that later
+    calls get the same one instead of rebuilding it.
+    """
     db_path = Path(analysis_root) / DB_FILENAME
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    # NFR-1: runs.apk_sha256 -> apks.sha256 is declared but SQLite enforces
-    # foreign keys only when PRAGMA foreign_keys=ON runs on each connection (it
-    # is OFF by default). Without this, a save_run whose apks row is missing
-    # silently writes an orphan instead of erroring. Enable it per-connection so
-    # the declared referential integrity is actually enforced.
+    key = str(db_path)
+    # Fast path: an already-migrated engine. dict.get is safe without the lock -
+    # a racing miss falls through to the locked block and re-checks there.
+    engine = _ENGINES.get(key)
+    if engine is not None:
+        return engine
+
+    with _ENGINE_LOCK:
+        engine = _ENGINES.get(key)
+        if engine is not None:
+            return engine
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        engine = _create_engine(db_path)
+        Base.metadata.create_all(engine)  # idempotent - only creates missing tables
+        _migrate_schema(engine)  # ...but create_all never adds columns to existing tables
+        _ENGINES[key] = engine
+        return engine
+
+
+def _create_engine(db_path: Path) -> Engine:
+    """Build the engine and configure every connection it hands out.
+
+    NFR-1: runs.apk_sha256 -> apks.sha256 is declared but SQLite enforces foreign
+    keys only when PRAGMA foreign_keys=ON runs on each connection (it is OFF by
+    default). Without this, a save_run whose apks row is missing silently writes
+    an orphan instead of erroring. Enable it per-connection so the declared
+    referential integrity is actually enforced.
+
+    M8: busy_timeout and WAL are also per-connection pragmas here. busy_timeout
+    makes a contended write wait instead of immediately raising the "database is
+    locked" OperationalError cli.py:1883 documents; WAL lets a reader (a report
+    or calibration query) proceed while a run is writing, which is the actual
+    concurrency this store sees (a run saving while a second run reads).
+    """
     engine = create_engine(f"sqlite:///{db_path}")
 
     @event.listens_for(engine, "connect")
-    def _enforce_foreign_keys(dbapi_connection, _connection_record):
-        # Runs on every new pooled connection - FK enforcement is per-connection,
-        # not per-database.
+    def _configure_connection(dbapi_connection, _connection_record):
+        # Runs on every new pooled connection - FK enforcement and busy_timeout
+        # are per-connection, not per-database. journal_mode is persisted in the
+        # file, but re-asserting it per connection is a no-op once WAL is set and
+        # guarantees a DB created before this change is switched over.
         cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+        try:
+            cursor.execute(f"PRAGMA busy_timeout={int(BUSY_TIMEOUT_SECONDS * 1000)}")
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
 
-    Base.metadata.create_all(engine)  # idempotent - only creates missing tables
-    _migrate_schema(engine)  # ...but create_all never adds columns to existing tables
     return engine
 
 
@@ -217,6 +278,11 @@ def _migrate_schema(engine) -> None:
     on disk is skipped (this step only ADDs columns/indexes to existing tables, the
     strictly safe direction), so calling this directly on a partially-built DB
     (e.g. only `runs` created) never errors on the absent table.
+
+    Called from get_engine's locked cache-miss path, so it runs once per process
+    per DB rather than once per save - the check-then-act window (inspect, then
+    ALTER) is no longer re-entered by every writer. The inspection below stays
+    idempotent regardless, which is what makes a re-entry safe.
     """
     with engine.begin() as conn:
         insp = inspect(conn)

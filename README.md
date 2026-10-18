@@ -20,7 +20,7 @@ Everything runs from the **WSL2 Ubuntu** terminal (the repo, `uv`, `adb`, `frida
 
 Nothing else has to be open — no model server, no daemon, no `mitmproxy` in WSL2 (the one that matters is the Windows-host binary). A **static-only** run (`--skip-dynamic`, recipe A) needs only the WSL2 row plus jadx/apktool — no emulator, no root, no frida-server: skip straight to it.
 
-**Where the configuration lives** (`config/`): `settings.yaml` (decision thresholds `root: 0.7` / `ssl: 0.7`, output paths), `signatures/*.yaml` (120 versioned detection rules: 49 root, 51 ssl, 12 native, 8 packers), `ground_truth.yaml` (the independent calibration truth used by `calibration-report`).
+**Where the configuration lives** (`config/`): `settings.yaml` (the two live decision thresholds, `root: 0.7` / `ssl: 0.7` — its commented path blocks are intent only and are read by nothing; output roots come from `cli.OUTPUTS_ROOT`/`cli.AUDIT_LOG_PATH`), `signatures/*.yaml` (120 versioned detection rules: 49 root, 51 ssl, 12 native, 8 packers), `ground_truth.yaml` (the independent calibration truth used by `calibration-report`).
 
 ### 0. One-time / after every `git pull`
 ```bash
@@ -64,7 +64,7 @@ If no emulator is online it prints one line (`[emulator-up] no online emulator-5
 ```bash
 uv run python scripts/check_environment.py --fix
 ```
-Runs six check groups — Python/WSL2, `uv sync`, the Android toolchain (jadx/apktool/frida/mitmproxy/…), adb + emulator + root + frida-server, the Frida WSL→Windows bridge, and the project components (unit suite, signature load, CLI entrypoint, report generator) — and with `--fix` auto-starts the adb server and device `frida-server`. Expected tail:
+Runs six check groups — Python/WSL2, `uv sync`, the Android toolchain (JDK 17+, jadx/apktool/frida, and mitmproxy **on the Windows host** when running under WSL2), adb + emulator + root + frida-server, the Frida WSL→Windows bridge, and the project components (unit suite, signature load, CLI entrypoint, report generator) — and with `--fix` auto-starts the adb server and device `frida-server`. It exits non-zero if any check failed. Expected tail:
 ```
   NN/NN checks passed
   Mode: --fix (auto-start enabled)
@@ -133,7 +133,7 @@ PYTHONPATH=src uv run python -m cli run --apk APK_Test/AndroGoat.apk --target ow
 ```
 Expected: `Decision: BOTH` (AndroGoat has both a 14-path root check and a real `CertificatePinner`); the capture stage routes the app through `mitmdump`, decrypts, and records the flows in the report as SSL-bypass evidence. `mitmproxy` must be installed on the **Windows host** (the stage launches `mitmdump.exe` there; see the table at the top), and the stage probes route reachability before it captures.
 
-**This app is interactive, so an empty capture here is expected, not a bug.** AndroGoat makes no network request until a screen is tapped, and the capture stage does not drive the UI. A measured 2026-09-24 run recorded exactly that, naming each leg rather than guessing: the pre-flight route probe was **UP**, `0` client connections arrived at the proxy, no client-certificate refusal was recorded, and the in-process TLS observer saw the app's own pinned request run (`TrustManagerImpl.verifyChain` = 2) — so the report reads *"the app made no network requests during the capture window (interactive capture needed)"* and renders no flow list. Tap through the app while the window is open (or use an app that fetches on launch) to get flows; an empty capture is always reported with its recorded reason, never a fabricated one.
+**This app is interactive, so an empty capture here is a possible outcome, not necessarily a bug.** AndroGoat makes no network request until a screen is tapped, and the capture stage's single deterministic tap (`--drive-ui`, on by default) is not a walkthrough — it does not navigate the app's screens. A measured 2026-09-24 run recorded exactly that, naming each leg rather than guessing: the pre-flight route probe was **UP**, `0` client connections arrived at the proxy, no client-certificate refusal was recorded, and the in-process TLS observer saw the app's own pinned request run (`TrustManagerImpl.verifyChain` = 2) — so the report reads *"the app made no network requests during the capture window (interactive capture needed)"* and renders no flow list. Tap through the app while the window is open (or use an app that fetches on launch) to get flows; an empty capture is always reported with its recorded reason, never a fabricated one.
 
 **D. Forced bypass on a coverage-limited NEITHER (PropertyGuru root + SSL):**
 ```bash
@@ -151,7 +151,7 @@ PYTHONPATH=src uv run python -m cli run \
   --force-dynamic \
   --capture-traffic
 ```
-Expected: same behaviour as recipe D, additionally pinned to the `emulator-5554` serial with an engagement-id justification written to the audit log. Note `--skip-dynamic` is deliberately absent — it is mutually exclusive with `--force-dynamic`/`--capture-traffic` (a static-only run can neither bypass nor capture).
+Expected: same behaviour as recipe D, additionally pinned to the `emulator-5554` serial with an engagement-id justification written to the audit log. Note `--skip-dynamic` is deliberately absent: it is **rejected** together with `--force-dynamic` (the CLI exits non-zero with a `BadParameter` — one asks for an on-device bypass, the other removes the stage that would deploy it). `--skip-dynamic` with `--capture-traffic` is *not* rejected: that pair runs the capture stage as an un-hooked cold-start window (a control for "did the app talk without instrumentation?"), and the report states which window it was.
 
 ### Targets in `APK_Test/` — package ids + documented ground truth
 
@@ -212,11 +212,11 @@ uv run pytest tests/unit
 
 This exercises the signature matcher and decision engine against fixtures only — if this passes, the deterministic core's logic is sound independent of whether the rest of this setup is done yet.
 
-Expected result on WSL2/Linux — **2,172 tests collected, all passing** (a machine missing an optional tool may report one or two skipped instead) (on Windows, expect the handful of POSIX-only failures noted above instead of a fully clean run):
+Expected result on WSL2/Linux — **2,387 tests collected, all passing** (a machine missing an optional tool may report one or two skipped instead) (on Windows, expect the handful of POSIX-only failures noted above instead of a fully clean run). This figure is authoritative and is enforced by `tests/unit/test_ledger_suite_count.py` against `docs/plans/audit/full-project-audit-ledger.md`, so it cannot silently drift:
 
 ```
 $ uv run pytest tests/unit --collect-only -q | tail -1
-2172 tests collected in 0.55s
+2387 tests collected in 0.55s
 ```
 
 The count moves whenever a gap is closed; the exact collected number is recorded in `docs/plans/audit/full-project-audit-ledger.md`, which is updated with each change.
@@ -269,13 +269,15 @@ The `run` command's full option set (from `src/cli.py`):
 | Option | Meaning |
 |---|---|
 | `--apk` | path to the APK to analyze (**required**) |
-| `--justification` | authorization reason for this run — **required**, written to the immutable audit log (ADR-0005) |
-| `--skip-dynamic` | static-only: no device, root, or frida-server needed |
+| `--justification` | authorization reason for this run — **required**, written to the append-only audit log (ADR-0005) |
+| `--skip-dynamic` | static-only: no device, root, or frida-server needed. Contradicts `--force-dynamic` (the CLI rejects the pair); combined with `--capture-traffic` it still captures, as an un-hooked cold-start window. |
 | `--capture-traffic` | additionally capture live TLS traffic through the bypass (mitmproxy) |
-| `--drive-ui` / `--no-drive-ui` | with `--capture-traffic` only: let the capture stage drive the UI during the capture window (**on** by default) so an app that fetches only after a tap still produces flows; pass `--no-drive-ui` to tap through the app yourself instead. Ignored without `--capture-traffic`. |
-| `--force-dynamic` | operator override (ADR-0005): deploy the universal root+SSL bypass on a **NEITHER** target that would otherwise skip the dynamic stage — for coverage-limited misses (e.g. RN/Hermes root checks the signature engine can't attribute). Does **not** change the static verdict/confidence/calibration; the result stays gated on real behaviour (`dynamically_confirmed` only on a real probe-hit / pin-check+handshake, else `UNVERIFIED`). No-op with `--skip-dynamic` or when a category was already detected. |
+| `--drive-ui` / `--no-drive-ui` | with `--capture-traffic` only: let the capture stage make at most **one** deterministic tap during the capture window (**on** by default), read from the device's live UI hierarchy, so an app that fetches only after a tap still produces flows; pass `--no-drive-ui` to tap through the app yourself instead. It refuses an ambiguous target rather than guessing. Ignored without `--capture-traffic`. |
+| `--force-dynamic` | operator override (ADR-0005): deploy the universal root+SSL bypass on a **NEITHER** target that would otherwise skip the dynamic stage — for coverage-limited misses (e.g. RN/Hermes root checks the signature engine can't attribute). Does **not** change the static verdict/confidence/calibration; the result stays gated on real behaviour (`dynamically_confirmed` only on a real probe-hit / pin-check+handshake, else `UNVERIFIED`). Rejected together with `--skip-dynamic`; a no-op when a category was already detected. |
 | `--device` | target a specific device/emulator serial |
 | `--target` | package id selecting the success-check module; auto-derived from the manifest when omitted |
+
+**Scope of the authorization gate (H2).** `--justification` is validated at the top of the `run` command, before any target is analyzed, and the `audit` record is written by that same command. Both are CLI-surface controls: the capability functions the pipeline calls (`dynamic.frida_runner`, `dynamic.mitmproxy_capture`, `static.decompile`, `static.signatures`, …) take no authorization argument and remain callable directly, so code that imports them bypasses the justification check and the audit write. Treat direct calls to those functions as **ungated** — a caller embedding them is responsible for its own authorization check.
 
 Example console output from a real end-to-end run against UnCrackable Level 1 (verification bundle `docs/plans/handoff/bundles/20260729T163534Z/cli_output.txt` — a genuine run, not a mock):
 
@@ -294,7 +296,7 @@ Report: outputs/reports/1da8bf57…/2f64a1c2.md
 
 Each stage returns a structured `StageResult`; a `failed` status halts the pipeline loudly rather than being swallowed (principle 3). `Decision: ROOT_ONLY` is the deterministic verdict (root-detection present, no SSL-pinning); the `dynamic` stage's genuine `bypassed=True` — all three UnCrackable hooks fired — is what promotes that verdict from `deterministic_matched` to `dynamically_confirmed`.
 
-**That output is the 2026-07-29 run the bundle holds — the pipeline has grown since.** A current run emits **13** stages, the six additions being `signature_load:root`, `signature_load:ssl`, `native_scan`, `obfuscation`, `packers` and `success-check` (and `audit` now appears twice: once for the ingest attestation, once to flush the classification). Read the block above as an *example of the shape*, not as the current stage list. Note also that `normalize`, `input-prep` and `metadata-persist` are **failure-only** stages — an exception handler records them — so they never print on a clean run; their absence is not a gap. Run [`scripts/verify_all.py`](scripts/verify_all.py) for the current shape against your own machine — it checks the environment gate, every tool the code invokes, every referenced path, a real run per target, the written outputs, and the unit suite, and prints a pass/fail table with the measured evidence beside each line.
+**That output is the 2026-07-29 run the bundle holds — the pipeline has grown since.** A current default run emits **14** stage rows (**15** with `--capture-traffic`), the six additions being `signature_load:root`, `signature_load:ssl`, `native_scan`, `obfuscation`, `packers` and `success-check` (and `audit` now appears twice: once for the ingest attestation, once to flush the classification). Read the block above as an *example of the shape*, not as the current stage list. Note also that `normalize`, `input-prep` and `metadata-persist` are **failure-only** stages — an exception handler records them — so they never print on a clean run; their absence is not a gap. Run [`scripts/verify_all.py`](scripts/verify_all.py) for the current shape against your own machine — it checks the environment gate, every tool the code invokes, every referenced path, a real run per target, the written outputs, and the unit suite, and prints a pass/fail table with the measured evidence beside each line.
 
 **Where these commands run, and the full sequence.** Every scan command runs in the **WSL2 Ubuntu** terminal — the repo, `uv`, and `adb` all live there; Windows is used only to boot the emulator/AVD. For the complete boot → static-only → static + dynamic → static + dynamic + traffic-capture sequence, with the exact per-shell (Windows vs Ubuntu) commands, the manual per-boot prerequisites, and the per-`--target` table, follow the local scan runbook: [`docs/plans/runbook-local-scan.md`](docs/plans/runbook-local-scan.md). Static-only (`--skip-dynamic`) needs no device, root, or frida-server — it is the one scan type that runs anywhere the Python core and jadx/apktool are installed.
 
@@ -322,13 +324,13 @@ Excluded (partial/under-covered surface — a negative there
 
 Those 1.00s are measured over a deliberately small, certifiable subset — the report itself prints that only ~10 ground-truthed category-observations exist and that "zero false positives" is **not** a claim this system makes (ADR-0006); read them as directional, not as a precision guarantee.
 
-Note the requirement split: `calibration-report` takes no `--justification` (it only reads already-audited history, not a fresh analysis act), whereas the `run` command **requires** `--justification` — it refuses to run without it (ADR-0005). Analysis artifacts land in `outputs/analysis/{sha256}/`; the generated report lands in `outputs/reports/{sha256}/`; the audit log is appended to `outputs/audit_log.jsonl`. `outputs/` can be committed directly (no longer gitignored) - see `CONTRIBUTING.md`'s Ground Rules for why that restriction was dropped. The verification bundle script (below) is still the recommended way to push a specific run's evidence as a clean, timestamped snapshot.
+Note the requirement split: `calibration-report` takes no `--justification` (it only reads already-audited history, not a fresh analysis act), whereas the `run` command **requires** `--justification` — it refuses to run without it (ADR-0005). Analysis artifacts land in `outputs/analysis/{sha256}/`; the generated report lands in `outputs/reports/{sha256}/`; the audit log is appended to `outputs/audit_log.jsonl`. `outputs/` is **gitignored** (`.gitignore` line 13: it is regenerable run output, and committing it bloats the repo with decompiled trees and per-run JSON) — evidence travels to the repo through the verification bundle script (below), which is the recommended way to push a specific run's evidence as a clean, timestamped snapshot.
 
 ## Other commands
 
 Three maintenance commands round out the CLI (`src/cli.py`):
 
-- **`verify-audit-log`** — re-derives the audit log's hash chain to confirm no record was edited, deleted, or reordered (tamper-evidence for ADR-0005). Prints `Audit log OK — N record(s), M chained, K legacy`, or exits non-zero listing the break. Defaults to `outputs/audit_log.jsonl`; `--audit-log` points it elsewhere.
+- **`verify-audit-log`** — re-derives the audit log's hash chain to detect a record that was edited, deleted, or reordered. The chain is **unkeyed**, so this is not tamper-*proof*: anyone with write access can re-derive every later hash and the check then passes. Set `AUDIT_HMAC_KEY` to add a keyed HMAC-SHA256 anchor on each new record (`head_hmac`), which a forger without the key cannot reproduce; with the variable unset the log carries no anchor and the check is chain-only. Prints `Audit log OK - N record(s), M chained, K legacy`, or exits non-zero listing the break. Records written before hash-chaining are `legacy` and only count as clean with `--allow-legacy`. The default is the project's own `outputs/audit_log.jsonl`, resolved from the **project root** (not the current directory), so the command verifies the same trail from anywhere; `--audit-log` points it elsewhere. A missing or empty log is a **failure** (non-zero, naming the path it looked at), never `OK — 0 records`.
   ```bash
   PYTHONPATH=src uv run python -m cli verify-audit-log
   ```

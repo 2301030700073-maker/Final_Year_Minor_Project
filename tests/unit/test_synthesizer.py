@@ -645,7 +645,9 @@ def test_native_jni_root_check_routes_to_native_envelope():
     assert res.strategy == "targeted"
     assert "native_jni_root_check" in res.applied_hooks
     src = res.source
-    assert "hidePathProbe('access'" in src or "hidePathProbe" in src
+    # the libc path-hiding half of the envelope: the access() probe specifically,
+    # not merely the helper's name appearing anywhere in the source.
+    assert "hidePathProbe('access'" in src
     assert "'execve'" in src
     assert "probeHit" in src
 
@@ -1094,3 +1096,55 @@ def test_single_category_actions_unchanged_by_independent_guards():
     assert ro.ssl_hook_count == 0 and "ssl" not in ro.universal_categories
     so = synthesize(_cls(Action.SSL_ONLY, ssl_ids=["okhttp_certificate_pinner"]), Action.SSL_ONLY)
     assert so.root_hook_count == 0 and "root" not in so.universal_categories
+
+
+# --- M6: an absent class is a fact about the app, not a failed hook ---------
+# Every class hook used to catch both "Java.use threw (class not in the app)" and
+# "the assignment threw (class present, hook refused)" into one "[synth] hook
+# target absent" line, which the report rendered as a hook the script could NOT
+# install. An app without OkHttp therefore read as broken.
+
+def test_observer_separates_an_absent_class_from_a_refused_hook():
+    from dynamic.synthesizer import _ssl_effect_observer
+    src = _ssl_effect_observer()
+    # the conflating wording is gone...
+    assert "[synth] hook target absent" not in src
+    # ...each class lookup names absence as a property of the app (7 observer blocks)
+    assert src.count(
+        "catch (e) { console.log('[synth] hook target not present in the app: "
+    ) == 7
+    # ...and a present target whose install threw keeps the real refusal wording
+    assert "found but the hook could not be installed: ' + e" in src
+    # the install catch is no longer the one that names the class, so an absent
+    # class cannot be reported as a refused install
+    for block in src.split("Java.perform(function () {")[1:]:
+        head = block.split("catch (e) {", 1)[0]
+        assert "Java.use(" in head, "class lookup must be its own try block"
+
+
+def test_no_recipe_reports_an_absent_class_as_a_failure():
+    # The same conflation existed in the recipe bodies ("<X> absent" logged from
+    # the catch around the install). None may survive.
+    from dynamic.synthesizer import ROOT_RECIPES, SSL_RECIPES
+    for name, body in {**ROOT_RECIPES, **SSL_RECIPES}.items():
+        assert "hook target absent" not in body, name
+        for stale in ("CertificatePinner absent", "TrustManagerImpl absent",
+                      "WebViewClient absent", "PinningTrustManager absent",
+                      "RootBeer class absent"):
+            assert stale not in body, f"{name}: {stale}"
+
+
+# --- H2: optional authorization context, unenforced for now -----------------
+
+def test_auth_context_is_optional_and_does_not_change_the_result():
+    # H2 entrypoint threading: the parameter exists so a future gate has one place
+    # to land, and defaulting it to None must keep today's behaviour byte-for-byte.
+    base = synthesize(
+        _cls(Action.SSL_ONLY, ssl_ids=["okhttp_certificate_pinner"]), Action.SSL_ONLY)
+    threaded = synthesize(
+        _cls(Action.SSL_ONLY, ssl_ids=["okhttp_certificate_pinner"]), Action.SSL_ONLY,
+        auth_context={"operator": "lab", "target_package": "com.example.app"},
+    )
+    assert threaded.source == base.source
+    assert threaded.strategy == base.strategy
+    assert threaded.applied_hooks == base.applied_hooks

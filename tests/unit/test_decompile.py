@@ -640,12 +640,14 @@ def test_lru_keeps_recently_touched_target_when_evicting(tmp_path):
     # budget squeeze must evict older hashes, never the in-flight target.
     _make_cached_hash(tmp_path, "old1", last_accessed=1.0, size_bytes=1000)
     _make_cached_hash(tmp_path, "old2", last_accessed=2.0, size_bytes=1000)
+    (tmp_path / "target").mkdir()  # the in-flight target's cache dir exists
     _touch_registry(tmp_path, "target")  # newest access
 
     evicted = _enforce_cache_budget(tmp_path, budget_bytes=1500)
 
     assert "target" not in evicted
-    assert (tmp_path / "target").exists() or True  # target never a candidate
+    assert (tmp_path / "target").exists()  # target's dir survived - never a candidate
+    assert "target" in _load_registry(tmp_path)  # and its LRU entry was not dropped
     assert evicted == ["old1"]  # oldest evicted first
 
 

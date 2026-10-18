@@ -8,6 +8,8 @@ fork, so 32 interrupted runs were invisible from the command line while the
 result dict held them all along.
 """
 import json
+import socket
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,15 @@ from audit.attestation import record_authorization, verify_audit_log
 from storage.run_status import RunStatusRecorder, read_run_status, run_status_path
 
 runner = CliRunner()
+
+# run_is_alive probes /proc/<pid>/stat, which exists only on Linux; elsewhere the
+# liveness answer is correctly UNKNOWN. Any test that asserts a measured alive/dead
+# verdict therefore needs a real procfs (the project's CI target is Linux).
+_requires_linux_proc = pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="run_is_alive probes /proc/<pid>/stat (Linux only); elsewhere the "
+           "liveness answer is unknown",
+)
 
 
 def _log_with_one_orphan(tmp_path, apk_hash="deadbeef"):
@@ -147,13 +158,18 @@ def test_an_unaudited_ending_is_not_reported_as_an_interruption(tmp_path, monkey
     assert "last stage:" not in flat
 
 
+@_requires_linux_proc
 def test_an_in_flight_run_is_not_reported_as_having_never_completed(tmp_path, monkeypatch, capsys):
     """The sidecar in this test was written by THIS process, so the run behind it
     is demonstrably still alive. `started` is not a death, and reporting a running
     run among the never-completed asserts an ending that has not happened - the
-    live Netflix run that was read as an interruption for half an hour."""
+    live Netflix run that was read as an interruption for half an hour.
+
+    The sidecar must carry THIS host (run_is_alive refuses to probe a host it
+    cannot identify) so the liveness probe actually runs and finds the writer's
+    pid alive."""
     monkeypatch.setattr(cli, "ANALYSIS_ROOT", tmp_path)
-    _sidecar(tmp_path, "deadbeef", last_stage="static_scan")
+    _sidecar(tmp_path, "deadbeef", last_stage="static_scan", host=socket.gethostname())
     cli._print_uncompleted_runs({
         "uncompleted_run_details": [{"run_id": "r-orphan", "apk_hash": "deadbeef"}],
     })
@@ -164,6 +180,7 @@ def test_an_in_flight_run_is_not_reported_as_having_never_completed(tmp_path, mo
     assert "never completed" not in flat
 
 
+@_requires_linux_proc
 def test_a_run_whose_process_is_gone_is_reported_as_ended(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "ANALYSIS_ROOT", tmp_path)
     _sidecar(tmp_path, "deadbeef", last_stage="native_scan", dead=True)
@@ -344,6 +361,7 @@ class _Stage:
         self.error = error
 
 
+@_requires_linux_proc
 def test_the_note_names_the_stage_a_dead_run_was_inside(tmp_path, monkeypatch, capsys):
     """The observed defect: Telegram's run of 2026-09-18 was killed 20 minutes into
     `native_scan` while its sidecar read `last stage: manifest_parse (success)` -

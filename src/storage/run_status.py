@@ -93,7 +93,11 @@ def run_is_alive(status: dict[str, Any]) -> bool | None:
     pid = status.get("pid")
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
         return None
-    if not Path("/proc").is_dir():
+    # /proc is a Linux interface, and a bare filesystem probe can be ALIASED: on a
+    # Windows interpreter whose cwd is a \\wsl.localhost share, Path("/proc")
+    # stats the DISTRO's /proc, so this would read a Windows pid against the WSL
+    # pid table and report a live process as gone. Gate on the host first.
+    if os.name != "posix" or not Path("/proc").is_dir():
         return None
     current_start = _proc_start_time(pid)
     if current_start is None:

@@ -1167,6 +1167,18 @@ def create_mitm_ca(confdir: Path) -> Path:
     (mitmproxy-ca.pem) and the cert-only PEM to install on the device, both into
     confdir. Fails loudly on generation failure (NFR-7)."""
     confdir.mkdir(parents=True, exist_ok=True)
+    # CREDENTIAL: mitmproxy-ca.pem is the CA PRIVATE KEY, and this confdir lives
+    # in the repo's outputs tree (out_dir/mitm-conf). Created under the default
+    # umask it would be 0755/0644 - readable by every local account - and a
+    # readable CA key lets anyone mint certificates the target device trusts.
+    # Restrict the DIRECTORY before openssl writes the key into it, so no
+    # other-user-readable key ever exists (it covers the reuse branch's files
+    # too, since reaching them needs traversal). Best-effort: a filesystem that
+    # refuses chmod must not break a capture.
+    try:
+        os.chmod(confdir, 0o700)
+    except OSError:
+        pass
     bundle = confdir / "mitmproxy-ca.pem"
     cert = confdir / "mitmproxy-ca-cert.pem"
     if bundle.exists() and cert.exists():
@@ -1184,5 +1196,9 @@ def create_mitm_ca(confdir: Path) -> Path:
         )
     # mitmdump's confdir expects the private key + cert in one file.
     bundle.write_bytes(key_tmp.read_bytes() + cert.read_bytes())
+    try:
+        os.chmod(bundle, 0o600)
+    except OSError:
+        pass
     key_tmp.unlink()
     return cert

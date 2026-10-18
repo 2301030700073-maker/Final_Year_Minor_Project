@@ -12,6 +12,7 @@ check below cannot catch.
 """
 
 import contextlib
+import os
 import socket
 import subprocess
 import sys
@@ -252,9 +253,21 @@ def test_windows_python_falls_back_to_known_dirs_when_path_lookup_fails(monkeypa
     # reference box, which is the worst way for a test to be wrong (green locally,
     # red in CI, for a reason that says nothing about the code). Stub the predicate
     # so the resolution LOGIC is what is under test, on any host.
+    # The comparison normalises separators: `str(Path("/mnt/c/..."))` is
+    # "\\mnt\\c\\..." on a Windows host, so a forward-slash-only comparison
+    # silently found no candidate there and failed for a reason unrelated to
+    # the code under test.
     monkeypatch.setattr(Path, "is_file",
-                        lambda self: str(self) == "/mnt/c/Python314/python.exe")
-    assert ptp._windows_python() == "C:\\Python314\\python.exe"
+                        lambda self: str(self).replace("\\", "/") == "/mnt/c/Python314/python.exe")
+    # The /mnt/c -> C:\ conversion is only meaningful where /mnt/c is a mount
+    # (WSL2); on a Windows host the same candidate resolves through the UNC cwd,
+    # so pin the conversion on POSIX and the accepted candidate elsewhere.
+    got = ptp._windows_python()
+    assert got is not None, "the fallback candidate was not accepted"
+    if os.name == "posix":
+        assert got == "C:\\Python314\\python.exe"
+    else:
+        assert got.replace("\\", "/").endswith("/Python314/python.exe"), got
     assert seen["calls"] >= 1, "the fallback must actually be consulted"
 
 

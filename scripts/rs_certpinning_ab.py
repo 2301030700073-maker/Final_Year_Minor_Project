@@ -19,7 +19,7 @@ the emulator lives on the Windows host. Reports results honestly (NFR-7), never
 a fabricated flow list (principle 3).
 
 Usage:
-    python scripts/rs_certpinning_ab.py [--window 14] [--ab /path/to/apk]
+    python scripts/rs_certpinning_ab.py [--window 14]
 """
 
 from __future__ import annotations
@@ -38,11 +38,6 @@ MAIN = "com.redshift.rs_certpinning_bypass/.MainActivity"
 CAPTURE_PORT = mc.DEFAULT_PROXY_PORT
 _OUT = Path("outputs/analysis/rs_certpinning")
 BYPASS_SCRIPT = "ssl_pinning_bypass_universal.js"
-
-
-def _adb() -> str:
-    import shutil
-    return shutil.which("adb") or "/home/ubuntu/.local/bin/adb"
 
 
 def _run_arm(bypass_script, window, label):
@@ -79,7 +74,18 @@ def _run_arm(bypass_script, window, label):
 
 
 def main() -> int:
-    window = float(sys.argv[sys.argv.index("--window") + 1]) if "--window" in sys.argv else 14.0
+    if "--window" in sys.argv:
+        i = sys.argv.index("--window")
+        if i + 1 >= len(sys.argv):
+            print("--window needs a value (seconds)", file=sys.stderr)
+            return 2
+        try:
+            window = float(sys.argv[i + 1])
+        except ValueError:
+            print(f"--window must be a number, got {sys.argv[i + 1]!r}", file=sys.stderr)
+            return 2
+    else:
+        window = 14.0
     a = _run_arm(None, window, "WITHOUT script")
     b = _run_arm(BYPASS_SCRIPT, window, "WITH script")
 

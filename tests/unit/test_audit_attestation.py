@@ -540,7 +540,12 @@ def test_verify_audit_log_skips_blank_lines(tmp_path):
     # legacy (hashless) record preceded by a blank line: the blank line must be
     # skipped (not counted, not errored) so total stays exactly 1.
     log.write_text('\n{"event":"run_authorized","justification":"CTF"}\n')
-    result = verify_audit_log(log)
+    # H4: a non-empty log with ZERO chain hashes is now itself a tamper signal
+    # (stripping every record_hash used to verify clean). This test is about the
+    # blank-line skip, so it opts into the explicit pre-hashing-log escape hatch
+    # rather than asserting the old clean verdict - the new failure is pinned in
+    # test_verify_audit_log_fails_a_log_with_every_hash_stripped.
+    result = verify_audit_log(log, allow_legacy=True)
     assert result["errors"] == []
     assert result["total"] == 1      # the blank line was not counted
     assert result["legacy"] == 1

@@ -57,6 +57,11 @@ class ShippedEvidence:
     calibration_markdown: str | None = None
     report: str | None = None
     analysis: str | None = None
+    # The durable runs snapshot. It was the one shipped artefact whose SUMMARY
+    # line was unconditional: when no results.db existed the collector skipped the
+    # file and the summary still said it was there - the same "SUMMARY describes a
+    # directory the bundle does not hold" defect ADR-0037 fixed for the others.
+    calibration_snapshot: str | None = None
     # The collector's own record of the branches it took (ADR-0039). Rendered as a
     # section of the summary, so the absent-evidence arms can point at something the
     # reader is already holding - instead of at cli_output.txt, which holds the
@@ -162,6 +167,15 @@ def _run(cmd: list[str], timeout: int = 60) -> dict:
         return {"command": " ".join(cmd), "found": False, "exit_code": None, "stdout": "", "stderr": ""}
     except subprocess.TimeoutExpired:
         return {"command": " ".join(cmd), "found": True, "exit_code": None, "stdout": "", "stderr": "TIMED OUT"}
+    except OSError as exc:
+        # The contract above says "never raises". A binary that exists but cannot
+        # be executed (PermissionError, e.g. a non-executable file on Windows), and
+        # OSError generally, are neither "not found" nor a timeout - record the
+        # outcome instead of aborting a collection run that has already done most
+        # of its work. FileNotFoundError is a subclass of OSError, so it is caught
+        # by the arm above first.
+        return {"command": " ".join(cmd), "found": True, "exit_code": None,
+                "stdout": "", "stderr": f"could not execute: {type(exc).__name__}: {exc}"}
 
 
 def _pipeline_adb() -> str | None:
@@ -293,7 +307,7 @@ def ship_calibration_markdown(bundle_dir: Path, stdout: str) -> str | None:
     return f"calibration/{source.name}"
 
 
-def export_calibration_snapshot(bundle_dir: Path) -> None:
+def export_calibration_snapshot(bundle_dir: Path) -> str | None:
     """Durability snapshot of the calibration-relevant `runs` table rows -
     outputs/ and every *.db file are both gitignored, so without this the
     accumulating calibration dataset (this project's least-regenerable
@@ -303,23 +317,31 @@ def export_calibration_snapshot(bundle_dir: Path) -> None:
     db_path = REPO_ROOT / "outputs" / "analysis" / "results.db"
     if not db_path.exists():
         print("  (no results.db yet - skipping calibration snapshot)")
-        return
+        return None
 
     json_columns = {"classification_json", "verification_json", "correlation_json", "stage_results_json"}
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
     try:
-        rows = []
-        for row in conn.execute("SELECT * FROM runs"):
-            row_dict = dict(row)
-            for col in json_columns:
-                if row_dict.get(col):
-                    row_dict[col] = json.loads(row_dict[col])
-            rows.append(row_dict)
-    finally:
-        conn.close()
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = []
+            for row in conn.execute("SELECT * FROM runs"):
+                row_dict = dict(row)
+                for col in json_columns:
+                    if row_dict.get(col):
+                        row_dict[col] = json.loads(row_dict[col])
+                rows.append(row_dict)
+        finally:
+            conn.close()
+    except (sqlite3.Error, json.JSONDecodeError) as exc:
+        # A locked/corrupt DB, or a stored JSON cell that does not parse, must not
+        # abort a bundle that has already collected everything else. The SUMMARY
+        # renders the absent snapshot as absent (calibration_snapshot=None).
+        print(f"  (note: could not snapshot {db_path.name}: {type(exc).__name__}: {exc} - not writing one)")
+        return None
 
     (bundle_dir / "calibration_runs_snapshot.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    return "calibration_runs_snapshot.json"
 
 
 def outcome_label(result: dict, *, ok: str, failed: str, artifact: str) -> str:
@@ -428,7 +450,16 @@ def write_summary(
             f"**shipped as `{shipped.calibration_markdown}`** - the curve, its sample definition and "
             f"its threshold markers are in that file and nowhere else."
         )
-    lines.append("- Durable row snapshot for backup: `calibration_runs_snapshot.json`")
+    if shipped.calibration_snapshot:
+        lines.append(f"- Durable row snapshot for backup: `{shipped.calibration_snapshot}`")
+    else:
+        # ADR-0037's rule, applied to the one artefact that still had an
+        # unconditional line: an absent file must not be described as shipped.
+        lines.append(
+            "- Durable row snapshot for backup: **not written in this bundle** - no "
+            "readable `results.db` was available when the collector ran, so there was "
+            "nothing to snapshot. The collector printed the reason it wrote none."
+        )
     lines.append("")
     lines.append("## Real pipeline run")
     if pipeline_result is None:
@@ -611,13 +642,14 @@ def main() -> int:
     # substance - the curve, its sample, its threshold markers - is markdown-only,
     # so this invocation's own markdown travels with the bundle too.
     calibration_markdown = ship_calibration_markdown(bundle_dir, calibration_result["stdout"] or "")
-    export_calibration_snapshot(bundle_dir)
+    calibration_snapshot = export_calibration_snapshot(bundle_dir)
 
     write_summary(
         bundle_dir, environment, test_result, pipeline_result,
         ShippedEvidence(
                 calibration_markdown=calibration_markdown, report=report_shipped,
-                analysis=analysis_shipped, notes=tuple(collector_notes),
+                analysis=analysis_shipped, calibration_snapshot=calibration_snapshot,
+                notes=tuple(collector_notes),
             ),
     )
 

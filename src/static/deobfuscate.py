@@ -83,11 +83,20 @@ def parse_mapping(text: str) -> MappingTable:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        m = _CLASS_LINE.match(line)
-        if m:
-            orig_full, obf_full = m.group(1).strip(), m.group(2).strip()
-            table[obf_full.split(".")[-1]] = orig_full.split(".")[-1]
-            continue
+        # `_CLASS_LINE`'s lazy `(.+?)` followed by `\s+->` backtracks
+        # quadratically on a line that cannot match: measured 32k spaces -> 1.06s,
+        # and 4x the length costs 16x the time. mapping.txt is attacker-supplied
+        # (it ships inside the APK under assets/ or res/raw/), so one long
+        # whitespace run was a hang. Both conditions below are NECESSARY for the
+        # pattern to match at all - the line is already stripped, so `:\s*$` is
+        # exactly `endswith(":")`, and group 2 is preceded by `->` - so skipping
+        # the lines that fail them is the same verdict without the backtracking.
+        if line.endswith(":") and "->" in line:
+            m = _CLASS_LINE.match(line)
+            if m:
+                orig_full, obf_full = m.group(1).strip(), m.group(2).strip()
+                table[obf_full.split(".")[-1]] = orig_full.split(".")[-1]
+                continue
         m = _MEMBER_LINE.match(line)
         if m:
             table[m.group(3)] = m.group(2)

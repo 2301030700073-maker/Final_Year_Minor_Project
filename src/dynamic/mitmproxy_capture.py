@@ -19,10 +19,12 @@ mitmdump placement (both reachable from the device via adb reverse):
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -1168,7 +1170,13 @@ def _windows_mitmdump() -> str | None:
     # PATH could not answer. Probe the documented install locations instead, which
     # cannot fail for environment reasons (they are filesystem reads, not lookups).
     for cand in pass_through_proxy.windows_known_dir_candidates("mitmdump.exe"):
-        return str(Path(cand).resolve()).replace("/mnt/c/", "C:\\").replace("/", "\\")
+        # Convert the /mnt/<drive>/... form TEXTUALLY, before anything resolves it.
+        # Path.resolve() on a Windows interpreter whose cwd is a \\wsl.localhost
+        # share rewrites "/mnt/c/..." to "\\\\wsl.localhost\\Ubuntu\\mnt\\c\\...",
+        # after which the "/mnt/c/" replacement no longer matches and the stage
+        # would launch a path the Windows host cannot execute. _windows_path_for
+        # is the one converter that keeps the drive mapping intact.
+        return _windows_path_for(Path(cand))
     return None
 
 
@@ -1186,13 +1194,211 @@ def _windows_mitmdump_site() -> str | None:
     cands = pass_through_proxy.windows_user_site_candidates("mitmproxy")
     if not cands:
         return None
-    return str(Path(cands[0]).resolve()).replace("/mnt/c/", "C:\\").replace("/", "\\")
+    # Same rule as _windows_mitmdump: convert before resolving (see the comment
+    # there); Path.resolve() over a UNC cwd destroys the /mnt/<drive> mapping.
+    return _windows_path_for(Path(cands[0]))
+
+
+# ---------------------------------------------------------------------------
+# H1: capture-artifact hygiene.
+#
+# mitmdump's `-w` flow file is not a log - it is a serialization of every
+# captured request and response, HEADERS AND BODIES included, so it contains
+# whatever Authorization / Cookie / token / PII values the target app put on the
+# wire. The WSL2 placement used to write it (plus the addon's URL log) into
+# C:\Users\Public, which every local account can read, and left it there
+# indefinitely. Three things below close that:
+#
+#   1. the artifacts live in a per-run directory on the Windows host that is
+#      restricted to the current user (and the native placement's file is
+#      created 0600 instead of whatever the process umask allows);
+#   2. the raw flow file and the addon URL log are DELETED once the stage has
+#      extracted the summary it reports - the stage's evidence is the parsed
+#      host/method/path list, never the raw traffic;
+#   3. a warning is emitted at capture time, naming the file and what it holds,
+#      so an operator is never surprised by a full-traffic write.
+#
+# The capture capability is untouched: mitmdump still records flows, and the
+# parsed summary is unchanged.
+# ---------------------------------------------------------------------------
+
+# Per-run capture work dir under the Windows user's %TEMP%. A per-user temp dir
+# is already owner-private; the ACL is tightened explicitly anyway so the
+# guarantee does not depend on how the host's temp dir happens to be configured.
+_CAPTURE_WORKDIR_NAME = "fymp-capture"
+# Only used when %TEMP% cannot be resolved: better a per-run owner-only subdir
+# here than a world-readable file directly in C:\Users\Public.
+_CAPTURE_FALLBACK_BASE = Path("/mnt/c/Users/Public")
+
+# Header names whose VALUES are credentials/session state. Matched
+# case-insensitively in flow_detail-style text, where headers are indented
+# under their request line.
+_SENSITIVE_HEADER_RE = re.compile(
+    r"(?im)^(?P<indent>[ \t]*)(?P<name>"
+    r"authorization|proxy-authorization|authentication|cookie|set-cookie|"
+    r"x-api-key|api-key|x-auth-token|x-csrf-token|x-session-token"
+    r")[ \t]*:[ \t]*(?P<value>.*)$"
+)
+
+
+def redact_sensitive_headers(text: str) -> str:
+    """Mask credential-bearing header VALUES in flow_detail-style text.
+
+    `Authorization: Bearer <token>` becomes `Authorization: [REDACTED]`, and the
+    same for Cookie / Set-Cookie / proxy-authorization / common API-key and
+    session-token headers. The header NAME and the line's indentation are
+    preserved, so nothing that identifies the flow is lost and the parser's
+    column-0 request-line rule still sees exactly the same shape it did before
+    (a masked line can only ever be MORE inert: the value that could have
+    contained " HTTP/" is gone).
+
+    Applied to the captured text before it is parsed or excerpted into evidence,
+    so a future mitmdump/flow_detail level that starts printing headers cannot
+    leak a token into the report. Returns the text unchanged when it contains no
+    such header (including empty text)."""
+    if not text:
+        return text
+    return _SENSITIVE_HEADER_RE.sub(
+        lambda m: f"{m.group('indent')}{m.group('name')}: [REDACTED]", text)
+
+
+def _windows_path_for(path: Path) -> str | None:
+    """The C:\\ form of `path` (from a /mnt/c WSL path or an already-Windows
+    one), or None when the path is on neither - e.g. a native Linux out_dir."""
+    text = str(path).replace("\\", "/")
+    if re.match(r"^[A-Za-z]:/", text):
+        return text.replace("/", "\\")
+    match = re.match(r"^/mnt/([A-Za-z])/(.*)$", text)
+    if match:
+        return f"{match.group(1).upper()}:\\" + match.group(2).replace("/", "\\")
+    return None
+
+
+def _windows_temp_dir() -> Path | None:
+    """The Windows user's %TEMP% as a /mnt/c path, or None when it cannot be
+    resolved (including on a host that is not actually WSL2 with C: mounted,
+    where the question is meaningless and no subprocess should be spent)."""
+    # os.name first: on a Windows host "/mnt/c" is a rooted path with no meaning
+    # (and, from a UNC working directory, one that stats a \\mnt\c share), so the
+    # WSL2 placement must be established before the filesystem is consulted.
+    if os.name != "posix" or not Path("/mnt/c").is_dir():
+        return None
+    try:
+        res = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command",
+             "[System.IO.Path]::GetTempPath()"],
+            capture_output=True, text=True, timeout=15)
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return None
+    win = (res.stdout or "").strip()
+    if res.returncode != 0 or not re.match(r"^[A-Za-z]:\\", win):
+        return None
+    return Path("/mnt/" + win[0].lower() + "/" + win[3:].replace("\\", "/"))
+
+
+def _restrict_path_to_owner(path: Path) -> bool:
+    """Make `path` (a dir or file) accessible only to the current user.
+
+    POSIX (native placement): chmod 0700/0600. A Windows path - always the case
+    for the WSL2 placement, and for /mnt/c on WSL - needs a real ACL: os.chmod
+    there only toggles the read-only bit, which restricts nothing. Best-effort
+    by design: returns False when the restriction could not be applied (the
+    caller still deletes the artifacts), and never raises."""
+    if os.name == "posix" and _windows_path_for(path) is None:
+        try:
+            os.chmod(path, 0o700 if path.is_dir() else 0o600)
+            return True
+        except OSError:
+            return False
+    win_path = _windows_path_for(path)
+    if win_path is None:
+        return False
+    script = (
+        "$p = '" + win_path.replace("'", "''") + "'; "
+        "icacls $p /inheritance:r /grant:r \"$($env:USERNAME):(OI)(CI)F\" "
+        "| Out-Null; exit $LASTEXITCODE"
+    )
+    try:
+        res = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", script],
+            capture_output=True, text=True, timeout=30)
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+    return res.returncode == 0
+
+
+def _windows_capture_dir(
+    stamp: int, *, base: Path | None = None, enforce: bool = True
+) -> tuple[Path, str]:
+    """Create (and lock down) this run's capture work dir on the Windows host.
+
+    Returns `(wsl_path, windows_path)`. Everything the Windows mitmdump writes
+    for this capture - the CA confdir, the addon, the raw flow file and its URL
+    log - lives under here, so one owner-only ACL covers all of it and nothing
+    lands in a shared, world-readable location.
+
+    Path COMPUTATION is kept separate from ENFORCEMENT (the mkdir + the owner-only
+    ACL) so a unit test can pin the naming and the "not the shared C:\\Users\\Public
+    root" guarantee on ANY host without touching it: `base` supplies the %TEMP%
+    parent and `enforce=False` skips the mkdir and ACL. On the reference WSL2 box
+    /mnt/c exists and the probe it would spend is a real `powershell.exe` - which
+    the unit suite forbids a test from spawning - so the pure path questions
+    (which this function's names and location are) are answered through these two
+    parameters instead. The stage calls it with the defaults, and then (and only
+    then) does the real %TEMP% lookup and the owner-only ACL happen."""
+    if base is None:
+        base = _windows_temp_dir() or _CAPTURE_FALLBACK_BASE
+    # One directory per run, named as before - only its PARENT changed, so the
+    # artifact file names (and everything that reads them) stay identical.
+    wsl_dir = base / f"{_CAPTURE_WORKDIR_NAME}-{stamp}"
+    win_dir = _windows_path_for(wsl_dir) or ""
+    if not enforce or os.name != "posix" or not Path("/mnt/c").is_dir() or not win_dir:
+        return wsl_dir, win_dir
+    try:
+        wsl_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # Let mitmdump fail loudly on its own if the dir really is unusable.
+        return wsl_dir, win_dir
+    _restrict_path_to_owner(wsl_dir)
+    return wsl_dir, win_dir
+
+
+def _precreate_private_file(path: Path) -> None:
+    """Create a capture file up front with owner-only permissions, so mitmdump
+    truncates an already-private file instead of creating one under the process
+    umask (0644 by default - world-readable). Best-effort: a failure here must
+    not stop the capture."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            os.close(os.open(path, os.O_CREAT | os.O_WRONLY, 0o600))
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def _discard_raw_capture(*paths: Path | None) -> bool:
+    """Delete raw-traffic artifacts. Returns True when none remain (deleted, or
+    never written), False when at least one survived - a surviving full-traffic
+    file is recorded on the evidence rather than silently dropped.
+
+    Best-effort and never raises: this runs from a `finally`, where an exception
+    would replace the stage's real result."""
+    clean = True
+    for path in paths:
+        if path is None:
+            continue
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            clean = False
+    return clean
 
 
 def _write_windows_addon(addon_path: Path, log_win: str) -> Path:
     """Write the flow-capturing mitmdump addon to addon_path (a /mnt/c path so
-    it doubles as C:\\Users\\Public\\... on the Windows side) with log_win baked
-    in as where it writes. addon_path.parent must already exist."""
+    it doubles as the Windows-side path) with log_win baked in as where it
+    writes. addon_path.parent must already exist."""
     addon_path.parent.mkdir(parents=True, exist_ok=True)
     # replace() (not str.format) so the addon's own .format()/f-string braces
     # are untouched; only the @LOG_WIN@ token is substituted.
@@ -1516,6 +1722,10 @@ def run_capture_stage(
     # try because the CA push above it can fail: an unbound read inside the
     # handler would raise NameError and replace the real reason for the failure.
     proxy_log_wsl: Path | None = None
+    # The WSL2 addon's own URL log (bound before the try for the same reason: the
+    # `finally` deletes it, and a failure before the branch reached its own
+    # binding must not turn cleanup into a NameError).
+    log_wsl: Path | None = None
     try:
         cert = device.create_mitm_ca(confdir)
         system_ca = device.push_system_ca(serial, cert)
@@ -1541,22 +1751,31 @@ def run_capture_stage(
 
         if wsl2:
             stamp = time.time_ns()
+            # H1: every artifact this capture writes on the Windows host - the
+            # CA confdir, the addon, the raw flow file and its URL log - goes
+            # into ONE per-run dir restricted to the current user, instead of
+            # C:\Users\Public (world-readable) where the full-traffic .mitm and
+            # the URL log used to sit after the run.
+            capture_wsl_dir, capture_win_dir = _windows_capture_dir(stamp)
             confdir_win = _prepare_windows_confdir(
-                confdir, Path("/mnt/c/Users/Public") / f"{stamp}-conf")
-            flows_win = f"C:\\Users\\Public\\{stamp}.mitm"
-            addon_win = f"C:\\Users\\Public\\{stamp}-addon.py"
-            log_win = f"C:\\Users\\Public\\{stamp}-flows.log"
-            flows_path = Path("/mnt/c/Users/Public") / f"{stamp}.mitm"
-            addon_path = Path("/mnt/c/Users/Public") / f"{stamp}-addon.py"
-            log_wsl = Path("/mnt/c/Users/Public") / f"{stamp}-flows.log"
-            proxy_log_win = f"C:\\Users\\Public\\{stamp}-mitmdump.log"
-            proxy_log_wsl = Path("/mnt/c/Users/Public") / f"{stamp}-mitmdump.log"
+                confdir, capture_wsl_dir / "conf")
+            flows_win = f"{capture_win_dir}\\{stamp}.mitm"
+            addon_win = f"{capture_win_dir}\\{stamp}-addon.py"
+            log_win = f"{capture_win_dir}\\{stamp}-flows.log"
+            flows_path = capture_wsl_dir / f"{stamp}.mitm"
+            addon_path = capture_wsl_dir / f"{stamp}-addon.py"
+            log_wsl = capture_wsl_dir / f"{stamp}-flows.log"
+            proxy_log_win = f"{capture_win_dir}\\{stamp}-mitmdump.log"
+            proxy_log_wsl = capture_wsl_dir / f"{stamp}-mitmdump.log"
             _write_windows_addon(addon_path, log_win)
             _start_windows_mitmdump(win_mitmdump, confdir_win, addon_win,
                                     flows_win, proxy_port, proxy_log_win)
             _wait_windows_listening(proxy_port, log_path=proxy_log_wsl)
         else:
             flows_path = out_dir / f"{time.time_ns()}.mitm"
+            # H1: create it 0600 before mitmdump opens it, so the raw traffic is
+            # never world-readable even for the moment before a chmod could run.
+            _precreate_private_file(flows_path)
             proc = subprocess.Popen(
                 [mitmdump, "--set", f"confdir={confdir}",
                  "--set", "flow_detail=2",
@@ -1564,6 +1783,19 @@ def run_capture_stage(
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             )
             time.sleep(2.0)  # let mitmdump bind before routing traffic through it
+
+        # H1: say it out loud, every capture. `-w` is not a log - it holds every
+        # request/response header and body the target app sent, including any
+        # Authorization/Cookie/token value. The file is owner-only and is deleted
+        # once this stage has extracted the summary, but the operator must know a
+        # full-traffic write happened and where.
+        warnings.warn(
+            "capture writes FULL request/response traffic (headers and bodies, "
+            f"including any Authorization/Cookie values) to {flows_path}; it is "
+            "restricted to the current user and deleted after the flows are "
+            "parsed - only the parsed host/method/path summary is retained",
+            RuntimeWarning, stacklevel=2,
+        )
 
         # Route the device's traffic: device 127.0.0.1:<port> -> adb reverse ->
         # adb-server host's 127.0.0.1:<port> (where mitmdump listens).
@@ -1679,6 +1911,14 @@ def run_capture_stage(
                 proc.kill()
                 stdout_text, _ = proc.communicate(timeout=5)
             proc = None
+
+        # H1: mask any credential-bearing header value in the captured text
+        # BEFORE it is parsed or excerpted into evidence. flow_detail=2 does not
+        # print headers today, so this is normally a no-op - but the report
+        # persists excerpts of this text, and a header line must never be able
+        # to carry a live Authorization/Cookie value into it if that changes.
+        stdout_text = redact_sensitive_headers(stdout_text or "")
+        proxy_log = redact_sensitive_headers(proxy_log or "")
 
         flows = _parse_flow_detail(stdout_text or "")
 
@@ -2138,3 +2378,18 @@ def run_capture_stage(
         cleanup_warnings = _cleanup(serial, proxy_port, proc)
         if cleanup_warnings and result is not None:
             result.evidence["cleanup_warnings"] = cleanup_warnings
+        # H1: the raw flow file (full headers + bodies) and the addon's URL log
+        # exist only so this stage could extract the summary it reports; they are
+        # deleted here, once parsing is done and the proxy is stopped. Recorded
+        # on the result either way - a surviving full-traffic file is evidence the
+        # operator must see, not something to drop quietly. `flows_path` stays in
+        # the evidence as the provenance of WHERE the capture was written.
+        # The delete runs even when `result` is None (the try was interrupted by
+        # something `except Exception` does not catch, e.g. Ctrl-C during the
+        # capture window): the artifact is left behind either way, so the one case
+        # with no result to annotate is exactly the case that must not skip the
+        # delete - otherwise a full-traffic file survives a run that recorded no
+        # evidence at all.
+        flows_deleted = _discard_raw_capture(flows_path, log_wsl)
+        if result is not None:
+            result.evidence["flows_deleted"] = flows_deleted

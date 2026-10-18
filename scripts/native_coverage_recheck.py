@@ -48,23 +48,37 @@ ANALYSIS = Path("outputs/analysis")
 
 
 def latest_runs() -> list[tuple[str, str, dict]]:
-    con = sqlite3.connect(DB)
-    out = []
-    for sha, ts in con.execute("select apk_sha256, max(timestamp) from runs group by apk_sha256"):
-        # ORDER BY rowid pins "the latest of the runs sharing this second": the
-        # timestamp is second-granular, so a retry inside the same second leaves two
-        # rows, and [-1] over an unordered result picks between them by whatever
-        # order SQLite happened to return rather than by which ran last.
-        row = con.execute(
-            "select coverage, package_name from runs where apk_sha256=? and timestamp=?"
-            " order by rowid", (sha, ts)
-        ).fetchall()[-1]
-        cov = json.loads(row[0]) if row[0] else {}
-        out.append((sha, ts, {"pkg": row[1], "native": cov.get("native"), "cov": cov}))
-    return sorted(out, key=lambda r: r[1])
+    # mode=ro: this script only reads, and a plain connect() on a missing path
+    # CREATES an empty results.db and then fails on "no such table: runs" -
+    # leaving a stray database behind while reporting a traceback instead of
+    # "there is nothing to re-measure yet". The connection is closed in a finally
+    # for the same reason every other reader in this project does.
+    con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+    try:
+        out = []
+        for sha, ts in con.execute("select apk_sha256, max(timestamp) from runs group by apk_sha256"):
+            # ORDER BY rowid pins "the latest of the runs sharing this second": the
+            # timestamp is second-granular, so a retry inside the same second leaves two
+            # rows, and [-1] over an unordered result picks between them by whatever
+            # order SQLite happened to return rather than by which ran last.
+            row = con.execute(
+                "select coverage, package_name from runs where apk_sha256=? and timestamp=?"
+                " order by rowid", (sha, ts)
+            ).fetchall()[-1]
+            cov = json.loads(row[0]) if row[0] else {}
+            out.append((sha, ts, {"pkg": row[1], "native": cov.get("native"), "cov": cov}))
+        return sorted(out, key=lambda r: r[1])
+    finally:
+        con.close()
 
 
 def main() -> int:
+    if not DB.exists():
+        # Nothing has been persisted, so there are no stored claims to re-measure.
+        # Say so instead of letting mode=ro raise - and never create the DB.
+        print(f"no {DB} - nothing has been persisted yet, so there is no stored "
+              f"native claim to re-measure")
+        return 0
     wanted = tuple(sys.argv[1:])
     stale: list[str] = []
     unmeasurable: list[str] = []

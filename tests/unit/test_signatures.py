@@ -2397,3 +2397,67 @@ def test_a_linear_multiline_signature_over_a_large_file_does_not_halt(tmp_path):
     # Must not raise TimeoutError.
     evidence = scan([tmp_path], multiline, app_package="com.example.app")
     assert evidence is not None
+
+
+# ---------------------------------------------------------------- LINE-BUDGET-SCALE1
+# M14: the per-line budget was a flat 1.0s while it bounds a CUMULATIVE loop
+# (one line x every single-line signature), so its cost is (signatures x chars).
+# A minified .js/.bundle/.json - all in SCANNED_SUFFIXES - is one multi-MB line,
+# and the aggregate cost of a legitimate linear pass over it tripped TimeoutError
+# and aborted the run. The budget now scales with that work, exactly as the
+# multiline budget above scales with file size.
+
+def test_line_budget_scales_with_line_length_and_signature_count():
+    from static.signatures import LINE_MATCH_BUDGET_SECONDS, line_match_budget
+    # A 2 MB minified line against 100 signatures: ~200 MB of matching work.
+    big = line_match_budget(2_000_000, 100)
+    assert big > LINE_MATCH_BUDGET_SECONDS, (
+        "a long line must get more than the flat per-line budget"
+    )
+    # Same line, same signatures: the budget is the work divided by the rate.
+    assert big == pytest.approx(2_000_000 * 100 / 50_000_000)
+
+
+def test_line_budget_keeps_its_floor_on_small_lines():
+    # The guard must keep its teeth: a ReDoS on an ordinary line still trips at 1.0s.
+    from static.signatures import LINE_MATCH_BUDGET_SECONDS, line_match_budget
+    assert line_match_budget(0, 1) == LINE_MATCH_BUDGET_SECONDS
+    assert line_match_budget(40, 100) == LINE_MATCH_BUDGET_SECONDS   # 4 KB of work
+    assert line_match_budget(1_000_000, 1) == LINE_MATCH_BUDGET_SECONDS
+
+
+def test_line_budget_is_monotonic_in_both_dimensions():
+    from static.signatures import line_match_budget
+    assert [line_match_budget(n, 10) for n in (0, 1_000, 1_000_000, 50_000_000)] == sorted(
+        line_match_budget(n, 10) for n in (0, 1_000, 1_000_000, 50_000_000)
+    )
+    assert [line_match_budget(1_000_000, n) for n in (1, 10, 100)] == sorted(
+        line_match_budget(1_000_000, n) for n in (1, 10, 100)
+    )
+
+
+def test_a_long_minified_line_over_many_signatures_does_not_halt(tmp_path, monkeypatch):
+    """THE M14 REGRESSION. One multi-MB line matched against 100 signatures must
+    scan cleanly. Driven by simulated time (see _advancing_monotonic) so the
+    aggregate cost is deterministic: the clock advances 0.02s per read, so the
+    cumulative loop reaches ~2.0s on this line - over the old flat 1.0s budget,
+    under the scaled one (100 x 2 MB / 50 MB/s = 4.0s). Before the fix this
+    raised TimeoutError and aborted the scan of a legitimate bundle."""
+    import static.signatures as sig_mod
+    from static.signatures import Signature
+
+    monkeypatch.setattr(sig_mod.time, "monotonic", _advancing_monotonic(0.02))
+    (tmp_path / "index.android.bundle").write_text("a" * 2_000_000, encoding="utf-8")
+
+    sigs = [
+        Signature(
+            id=f"bulk_{i}", category="root", weight=0.0, pattern_type="regex",
+            patterns=["zzz_no_match"], evidence_type="bytecode_string",
+        )
+        for i in range(100)
+    ]
+
+    evidence = sig_mod.scan([tmp_path], sigs, app_package="com.example.app")
+
+    assert evidence is not None
+    assert evidence.root_evidence == []   # nothing matched; the point is it did not halt

@@ -12,14 +12,11 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
-import yaml
-
 from common import (
     CATEGORIES,
     Evidence,
     StaticEvidence,
     derive_namespace,
-    is_known_third_party,
     is_third_party_file,
     load_yaml_entries,
 )
@@ -72,7 +69,19 @@ MAX_EVIDENCE_PER_SIGNATURE = 50
 # NFR-1/principle-3 violation ReDoS exploits). A legitimate source line never
 # approaches this even across 12+ regex signatures; a hostile line that does
 # means a bug in a hand-authored rule, and the pipeline should halt, not burn.
+#
+# M14: this is the FLOOR, not a flat cap. The budget is CUMULATIVE across every
+# signature on the line, so its cost is (number of signatures x line length), and
+# a minified .js/.bundle/.json line is one multi-MB line - the exact suffixes
+# SCANNED_SUFFIXES walks. A flat 1.0s therefore charged a legitimate 2 MB
+# minified bundle the same budget as a 40-char Java statement, and a single
+# linear pass per signature over that line tripped TimeoutError and aborted a
+# real run. Scaling by the work (see line_match_budget) keeps the teeth: a ReDoS
+# on a small line still trips at the floor, while a linear pass over a large one
+# is not mistaken for one - the same argument, and the same rate, as the
+# multiline budget below.
 LINE_MATCH_BUDGET_SECONDS = 1.0
+LINE_MATCH_BYTES_PER_SECOND = 50_000_000
 
 # Whole-text (multiline) budget - deliberately NOT the per-line constant above.
 #
@@ -100,6 +109,23 @@ def multiline_match_budget(chars: int) -> float:
     """Seconds allowed for one whole-text regex search over `chars` characters."""
     return max(MULTILINE_MATCH_BUDGET_FLOOR_SECONDS,
                chars / MULTILINE_MATCH_BYTES_PER_SECOND)
+
+
+def line_match_budget(chars: int, signatures: int) -> float:
+    """Seconds allowed for the whole per-line signature loop over one line.
+
+    M14: the guard measures ONE line against EVERY signature (line_start is set
+    per line, not per signature), so the work it bounds is
+    `signatures x chars`, not `chars`. Charging a flat LINE_MATCH_BUDGET_SECONDS
+    to that cumulative loop made a legitimate minified multi-MB line - one line
+    of a .js/.bundle/.json, all of which are scanned - indistinguishable from a
+    backtracking regex, and TimeoutError aborted the run. Scaling by the work
+    keeps the guard honest: a ReDoS on a normal line still trips at the floor
+    (the blowup is superlinear in the input, far above the linear rate), while a
+    linear pass over a huge line gets the budget its size justifies.
+    """
+    return max(LINE_MATCH_BUDGET_SECONDS,
+               signatures * chars / LINE_MATCH_BYTES_PER_SECOND)
 
 
 @dataclass
@@ -623,6 +649,10 @@ def scan(
     # is behaviour-identical.
     literal_gate = _build_literal_gate(signatures)
     has_literal_gate = any(g is not None for g in literal_gate)
+    # M14: the per-line budget below bounds ONE line against every single-line
+    # signature (multiline ones run in their own pass), so its size is part of the
+    # work being budgeted. Computed once - the signature set is fixed for the scan.
+    line_signature_count = sum(1 for s in signatures if not s.multiline)
     files = _collect_files(roots)
     con = None
     if sqlite_path is not None:
@@ -828,6 +858,12 @@ def scan(
             # skipped here - they need the whole text and run in their own pass below.
             for line_number, line in enumerate(lines, start=1):
                 line_start = time.monotonic()
+                # M14: budget for THIS line, scaled by the work the loop below does
+                # (signatures x chars). A flat budget made a legitimate minified
+                # multi-MB line - the exact input .js/.bundle/.json scanning exists
+                # for - indistinguishable from a backtracking regex. Computed once
+                # per line, so the guard's own clock reads stay where they were.
+                line_budget = line_match_budget(len(line), line_signature_count)
                 # LITPREF (PERF-3): gate the literal signatures. gate_fires is True
                 # when at least one literal pattern could match this line; when
                 # False, no literal signature can match (the gate is an exact
@@ -847,33 +883,39 @@ def scan(
                     # regex can return None after burning the time). A single slow
                     # line means a hand-authored rule is backtracking quadratically,
                     # so scan() raises loudly instead of hanging the whole pipeline.
-                    if time.monotonic() - line_start > LINE_MATCH_BUDGET_SECONDS:
+                    if time.monotonic() - line_start > line_budget:
                         # The budget is cumulative across ALL signatures on this one
                         # line (line_start is per line), so two distinct causes reach
                         # this raise: a single catastrophically-backtracking regex, OR
                         # the aggregate cost of every signature over an unusually long
                         # line (a minified .js/.bundle can be one multi-MB line, and
-                        # those suffixes are scanned). Report the measured facts - the
-                        # line LENGTH is the discriminator between the two - and name
-                        # the signature that was EXECUTING when the budget tripped
-                        # WITHOUT asserting it is the culprit: it may be a perfectly
-                        # linear rule (even a non-regex string_literal) that merely ran
-                        # last, so the old "signature X is catastrophically backtracking
-                        # (ReDoS)" was a false specific-cause claim (principle 3). Still
-                        # fail loud (NFR-1); the budget itself is unchanged. The
-                        # multiline pass below times each signature on its own
-                        # (match_start is per signature), so its message CAN name the
-                        # responsible signature and does.
+                        # those suffixes are scanned). M14: line_budget now scales
+                        # with that aggregate work, so the second cause only reaches
+                        # this raise when the cost exceeds even a linear pass at
+                        # LINE_MATCH_BYTES_PER_SECOND - i.e. when the line is
+                        # genuinely pathological, not merely large. Report the
+                        # measured facts - the line LENGTH is the discriminator
+                        # between the two - and name the signature that was
+                        # EXECUTING when the budget tripped WITHOUT asserting it is
+                        # the culprit: it may be a perfectly linear rule (even a
+                        # non-regex string_literal) that merely ran last, so the old
+                        # "signature X is catastrophically backtracking (ReDoS)" was
+                        # a false specific-cause claim (principle 3). Still fail loud
+                        # (NFR-1). The multiline pass below times each signature on
+                        # its own (match_start is per signature), so its message CAN
+                        # name the responsible signature and does.
                         raise TimeoutError(
                             f"static scan: matching line {line_number} "
                             f"({len(line)} chars) of {file_path.name} against "
-                            f"{len(signatures)} signatures took > "
-                            f"{LINE_MATCH_BUDGET_SECONDS:.1f}s (executing signature "
-                            f"'{signature.id}' when the budget tripped). Cause is "
-                            f"either a catastrophically-backtracking regex or the "
-                            f"aggregate matching cost over an unusually long line - "
-                            f"the line length above is the discriminator. Linearize "
-                            f"the offending regex or split the input; see signatures.py."
+                            f"{line_signature_count} signatures took > "
+                            f"{line_budget:.1f}s (its budget for that line length "
+                            f"across {line_signature_count} signatures; executing "
+                            f"signature '{signature.id}' when the budget tripped). "
+                            f"Cause is either a catastrophically-backtracking regex "
+                            f"or the aggregate matching cost over an unusually long "
+                            f"line - the line length above is the discriminator. "
+                            f"Linearize the offending regex or split the input; see "
+                            f"signatures.py."
                         )
                     if matched_text is None:
                         continue

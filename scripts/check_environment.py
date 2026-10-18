@@ -10,11 +10,14 @@ Usage:
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 PASS = "✅"
 FAIL = "❌"
@@ -45,6 +48,62 @@ def run(cmd, timeout=15, **kwargs):
         # A long-running check is a failed check, not a crashed script (principle 3):
         # return None so the caller records a clean failure and the run continues.
         return None
+
+
+def _java_major_version(result) -> int | None:
+    """Parse the JDK feature release from `java -version` output, or None.
+
+    `java -version` writes the version banner to STDERR (a detail the old check
+    missed entirely: it only asserted the binary EXISTED, so any java - 8, 11,
+    a broken JRE - passed as "JDK 17+"). Handles both banner shapes:
+    `openjdk version "17.0.11" 2024-04-16` -> 17 and the legacy
+    `java version "1.8.0_392"` -> 8.
+    """
+    if result is None:
+        return None
+    text = (result.stderr or "") + "\n" + (result.stdout or "")
+    m = re.search(r'version\s+"(\d+)(?:\.(\d+))?', text)
+    if not m:
+        return None
+    major = int(m.group(1))
+    if major == 1 and m.group(2):
+        # 1.8.0_x is the pre-9 numbering; the feature release is the second field.
+        major = int(m.group(2))
+    return major
+
+
+def _windows_mitmdump():
+    """Resolve the Windows-host mitmdump.exe the capture stage actually launches.
+
+    On WSL2 the emulator/adb server live on the Windows host and the device
+    reaches that host's localhost (README §3), so `--capture-traffic` runs
+    `mitmdump.exe` THERE - never in WSL2. Checking `shutil.which("mitmdump")`
+    in this namespace therefore reported a false failure on a correctly
+    configured box. This asks the pipeline's own resolver
+    (`dynamic.mitmproxy_capture._windows_mitmdump`, which is what the stage
+    uses), so the gate and the stage can never disagree about where mitmdump is.
+
+    Returns (path_or_None, detail). The probe runs in a child process so a
+    broken/hanging powershell.exe lookup degrades to "not found" here instead of
+    taking the whole checker down.
+    """
+    try:
+        r = subprocess.run(
+            [sys.executable, "-c",
+             "from dynamic import mitmproxy_capture as m;"
+             "print(m._windows_mitmdump() or 'NONE')"],
+            capture_output=True, text=True, timeout=90,
+            env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT / "src")},
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"resolver probe failed ({type(exc).__name__}: {exc})"
+    if r.returncode != 0:
+        tail = (r.stderr or r.stdout or "").strip().splitlines()
+        return None, f"resolver probe failed ({tail[-1][:80] if tail else 'no output'})"
+    found = (r.stdout or "").strip()
+    if not found or found == "NONE":
+        return None, "not found on the Windows host (install mitmproxy there)"
+    return found, found
 
 
 def _find_windows_adb():
@@ -137,7 +196,14 @@ check("uv sync", r and r.returncode == 0)
 print("\n[3/6] Android toolchain")
 
 r = run(["java", "-version"])
-check("JDK 17+", r is not None)
+# Existence was never the requirement: the pipeline needs a JDK 17+ toolchain
+# (README §3), and a java 8/11 JRE satisfies "the binary exists" while every
+# tool that needs a modern JDK fails later, far from the cause (M12).
+_java_major = _java_major_version(r)
+check(
+    "JDK 17+", _java_major is not None and _java_major >= 17,
+    f"found {_java_major}" if _java_major is not None else "java not found or version unparseable",
+)
 
 adb_wrapper = shutil.which("adb")
 check("adb on PATH", adb_wrapper is not None)
@@ -173,7 +239,17 @@ if r and r.returncode == 0:
 else:
     check("objection (optional)", False, "pip install objection")
 
-check("mitmproxy", shutil.which("mitmproxy") is not None)
+# mitmproxy lives on the WINDOWS host on WSL2 (README §3): the device reaches the
+# adb-server host's localhost through adb reverse, and the capture stage launches
+# mitmdump.exe there. A WSL2-PATH lookup therefore reported a false failure on a
+# correct setup, so on WSL2 the check asks the stage's own resolver (M13). On
+# native Linux the proxy does run in this namespace, so PATH is the right probe.
+if wsl:
+    _win_mitmdump, _win_note = _windows_mitmdump()
+    check("mitmproxy (Windows host, capture proxy)", _win_mitmdump is not None, _win_note)
+else:
+    _mitmdump = shutil.which("mitmdump") or shutil.which("mitmproxy")
+    check("mitmproxy", _mitmdump is not None, _mitmdump or "not on PATH")
 for tool in ["aapt2", "readelf", "strings"]:
     check(tool, shutil.which(tool) is not None)
 
@@ -308,8 +384,11 @@ r = run(["uv", "run", "python", "-c",
          "s=load_signatures('config/signatures/ssl_pinning.yaml'); "
          "print(len(r), 'root,', len(s), 'ssl')"],
         env={**os.environ, "PYTHONPATH": "src"})
-if r:
-    check("Signatures loaded", r.returncode == 0, r.stdout.strip())
+# Recorded even when the spawn itself failed (r is None): the old `if r:` dropped
+# the check from the run entirely, so an unparseable/broken invocation shrank the
+# total instead of failing - a check that passes by never happening.
+check("Signatures loaded", bool(r) and r.returncode == 0,
+      (r.stdout or "").strip() if r else "could not run the loader")
 
 r = run(["uv", "run", "python", "-m", "cli", "--help"],
         env={**os.environ, "PYTHONPATH": "src"})
@@ -340,9 +419,17 @@ check("Report generator", r and r.returncode == 0 and "ok" in (r.stdout or ""))
 print("\n" + "=" * 60)
 passed = sum(1 for _, s in results if s in (PASS, FIX))
 total = len(results)
+failed_names = [n for n, s in results if s == FAIL]
 print(f"  {passed}/{total} checks passed")
-if passed < total:
-    failed_names = [n for n, s in results if s == FAIL]
+if failed_names:
     print(f"  Failed: {', '.join(failed_names)}")
 print(f"  Mode: {'--fix (auto-start enabled)' if AUTO_FIX else 'check only'}")
 print("=" * 60)
+
+# M12: a gate that always exits 0 is not a gate. Callers - verify_all.py's
+# environment section, run.sh's --check-only, a human's `&&` chain - branch on
+# this exit code, and every failed check must reach it. Guarded on __main__ so
+# importing this module (a lint/import check, a future test) does not exit the
+# interpreter out from under the caller.
+if __name__ == "__main__":
+    sys.exit(1 if failed_names else 0)

@@ -706,3 +706,177 @@ def test_bypass_success_result_records_liveness_true_for_both_spawn_paths():
         ui_liveness={"activity_resumed": True, "anr_detected": False})
     assert single.evidence["app_still_running"] is True
     assert single.evidence["ui_liveness"] == {"activity_resumed": True, "anr_detected": False}
+
+
+# --- M5: a UI step's outcome is RECORDED, not discarded ----------------------
+# _run_ui_action used to run adb and throw the result away, so a launch that never
+# started or a tap the device rejected was indistinguishable from one that worked:
+# the stage then reported "inconclusive" with nothing saying why.
+
+class _Proc:
+    def __init__(self, returncode, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def test_run_ui_action_records_a_failed_am_start(monkeypatch):
+    monkeypatch.setattr("dynamic.frida_runner._require_adb", lambda: "adb")
+    monkeypatch.setattr(
+        "dynamic.frida_runner.subprocess.run",
+        lambda argv, **kw: _Proc(255, stderr="Error: Activity class does not exist"),
+    )
+    rec = frida_runner._run_ui_action(
+        "emulator-5554", ("am_start", "owasp.sat.agoat/.MissingActivity"))
+    assert rec["attempted"] is True
+    assert rec["ok"] is False
+    assert rec["returncode"] == 255
+    assert "am start -n owasp.sat.agoat/.MissingActivity" in rec["action"]
+    assert "Activity class does not exist" in rec["reason"]
+
+
+def test_run_ui_action_records_a_successful_tap(monkeypatch):
+    seen = []
+
+    def fake_run(argv, **kw):
+        seen.append(argv)
+        return _Proc(0)
+
+    monkeypatch.setattr("dynamic.frida_runner._require_adb", lambda: "adb")
+    monkeypatch.setattr("dynamic.frida_runner.subprocess.run", fake_run)
+    rec = frida_runner._run_ui_action("emulator-5554", ("tap", 720, 1251))
+    assert rec["ok"] is True and rec["attempted"] is True
+    assert rec["returncode"] == 0 and rec["reason"] is None
+    assert seen[0][-3:] == ["tap", "720", "1251"]
+
+
+def test_run_ui_action_records_a_raised_step_instead_of_crashing(monkeypatch):
+    # A timeout / missing adb must be a recorded failure - not an exception that
+    # turns the whole stage into "failed" with no UI record.
+    def boom(argv, **kw):
+        raise TimeoutError("adb did not answer")
+
+    monkeypatch.setattr("dynamic.frida_runner._require_adb", lambda: "adb")
+    monkeypatch.setattr("dynamic.frida_runner.subprocess.run", boom)
+    rec = frida_runner._run_ui_action("emulator-5554", ("tap", 1, 2))
+    assert rec["ok"] is False and rec["attempted"] is True
+    assert "adb did not answer" in rec["reason"]
+
+
+def test_stage_evidence_carries_one_record_per_ui_action(monkeypatch):
+    # End-to-end through the stage: every step the loop drove appears in
+    # evidence["ui_actions"], in order, with its own outcome.
+    class _FakeDevice:
+        def spawn(self, pkg):
+            return 1234
+
+        def resume(self, pid):
+            return None
+
+    def fake_ui(serial, action):
+        # the first navigation step succeeds, the tap is refused by the device
+        if action[0] == "tap":
+            return {"kind": "tap", "action": "input tap 720 1251",
+                    "attempted": True, "ok": False, "returncode": 1,
+                    "reason": "input tap 720 1251 exited 1: no output"}
+        return {"kind": action[0], "action": str(action), "attempted": True,
+                "ok": True, "returncode": 0, "reason": None}
+
+    monkeypatch.setattr(
+        "dynamic.frida_runner.attach",
+        lambda serial, pkg: (_FakeDevice(), object(), 1234,
+                             {"client": "16.7", "server": "16.7"}),
+    )
+    monkeypatch.setattr("dynamic.frida_runner.load_script",
+                        lambda session, name, on_message=None: None)
+    monkeypatch.setattr("dynamic.frida_runner._run_ui_action", fake_ui)
+    monkeypatch.setattr(
+        "dynamic.frida_runner._wait_for_checkpoint",
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
+    )
+
+    result = frida_runner.run_dynamic_stage(
+        "emulator-5554", "owasp.sat.agoat", Action.SSL_ONLY, target="AndroGoat",
+    )
+
+    records = result.evidence["ui_actions"]
+    assert [r["kind"] for r in records] == ["am_start", "sleep", "tap"]
+    assert records[0]["ok"] is True
+    assert records[2]["ok"] is False and "exited 1" in records[2]["reason"]
+
+
+def test_stage_records_a_stubbed_ui_runner_as_unobserved(monkeypatch):
+    # Several tests replace _run_ui_action with a plain recorder returning None.
+    # The action still ran; its outcome was not observed - recorded as such rather
+    # than guessed as a pass.
+    class _FakeDevice:
+        def spawn(self, pkg):
+            return 1234
+
+        def resume(self, pid):
+            return None
+
+    monkeypatch.setattr(
+        "dynamic.frida_runner.attach",
+        lambda serial, pkg: (_FakeDevice(), object(), 1234,
+                             {"client": "16.7", "server": "16.7"}),
+    )
+    monkeypatch.setattr("dynamic.frida_runner.load_script",
+                        lambda session, name, on_message=None: None)
+    monkeypatch.setattr("dynamic.frida_runner._run_ui_action",
+                        lambda serial, action: None)
+    monkeypatch.setattr(
+        "dynamic.frida_runner._wait_for_checkpoint",
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
+    )
+
+    result = frida_runner.run_dynamic_stage(
+        "emulator-5554", "owasp.sat.agoat", Action.SSL_ONLY, target="AndroGoat",
+    )
+    records = result.evidence["ui_actions"]
+    assert len(records) == 3
+    assert all(r["ok"] is None for r in records)
+    assert all("no outcome" in r["reason"] for r in records)
+
+
+def test_ui_actions_key_is_present_even_with_no_steps(monkeypatch):
+    # "the stage drove no UI step" must be visible, not an absent key that looks
+    # like lost records.
+    class _FakeDevice:
+        def spawn(self, pkg):
+            return 1234
+
+        def resume(self, pid):
+            return None
+
+    monkeypatch.setattr(
+        "dynamic.frida_runner.attach",
+        lambda serial, pkg: (_FakeDevice(), object(), 1234,
+                             {"client": "16.7", "server": "16.7"}),
+    )
+    monkeypatch.setattr("dynamic.frida_runner.load_script_source",
+                        lambda session, src, on_message=None: None)
+    monkeypatch.setattr(
+        "dynamic.frida_runner._wait_for_checkpoint",
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
+    )
+
+    result = frida_runner.run_dynamic_stage(
+        "emulator-5554", "com.example.app", Action.ROOT_ONLY,
+        target="unknown_app", synthesized={"source": "x", "applied_hooks": []},
+    )
+    assert result.evidence["ui_actions"] == []
+
+
+def test_dynamic_stage_accepts_an_optional_auth_context():
+    # H2 entrypoint threading: the parameter must exist and default to today's
+    # behaviour. The skipped path proves the signature accepts it without any
+    # device work, and that the result type is unchanged.
+    result = frida_runner.run_dynamic_stage(
+        device_serial="emulator-5554",
+        package_name="com.example.app",
+        action=Action.NEITHER,
+        target="completely_unknown_target",
+        auth_context={"operator": "lab"},
+    )
+    assert result.status == "skipped"

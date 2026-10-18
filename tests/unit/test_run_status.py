@@ -3,6 +3,7 @@ interrupted run leaves a durable account of where it stopped."""
 import json
 import os
 import socket
+import sys
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,16 @@ from storage.run_status import (
     read_run_status,
     run_is_alive,
     run_status_path,
+)
+
+# /proc is a Linux interface: a pid's start time and its liveness cannot be
+# established without it, and run_is_alive() correctly answers None on a host
+# that has none. The tests below assert the MEASURED True/False answers, so they
+# need a real procfs - on Windows they would otherwise be asserting a fact the
+# module explicitly declines to claim there.
+_HAS_LINUX_PROC = sys.platform.startswith("linux") and Path("/proc").is_dir()
+_requires_proc = pytest.mark.skipif(
+    not _HAS_LINUX_PROC, reason="requires Linux /proc (pid start time and liveness)"
 )
 
 
@@ -264,6 +275,7 @@ def test_a_save_error_is_recorded_against_a_completed_run(tmp_path):
 # --- `started` is not a death: the sidecar names a process, and it is probed ---
 
 
+@_requires_proc
 def test_start_records_the_host_and_process_that_owns_the_run(tmp_path):
     rec = _recorder(tmp_path)
     rec.start()
@@ -275,12 +287,14 @@ def test_start_records_the_host_and_process_that_owns_the_run(tmp_path):
     assert data["pid_start"]
 
 
+@_requires_proc
 def test_run_is_alive_true_for_the_process_that_wrote_the_sidecar(tmp_path):
     rec = _recorder(tmp_path)
     rec.start()
     assert run_is_alive(read_run_status(tmp_path, "abc")) is True
 
 
+@_requires_proc
 def test_run_is_alive_false_for_a_pid_that_is_gone(tmp_path):
     rec = _recorder(tmp_path)
     rec.start()
@@ -291,6 +305,7 @@ def test_run_is_alive_false_for_a_pid_that_is_gone(tmp_path):
     assert run_is_alive(read_run_status(tmp_path, "abc")) is False
 
 
+@_requires_proc
 def test_run_is_alive_false_when_the_pid_was_recycled(tmp_path):
     # a live pid whose recorded start time is not the one /proc reports now: the
     # process holding this pid is not the run, so "alive" would be about someone

@@ -38,8 +38,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
-
 from common import load_yaml_entries
 
 VALID_PACKER_SIGNAL_FIELDS = {"native_lib", "application", "asset"}

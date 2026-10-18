@@ -384,6 +384,29 @@ def test_the_summary_states_which_calibration_markdown_travelled(tmp_path):
     )
 
 
+def test_the_summary_does_not_claim_a_snapshot_that_was_not_written(tmp_path):
+    """ADR-0037's rule, for the one artefact that still had an unconditional line.
+
+    When no results.db exists the collector writes no snapshot; the SUMMARY used
+    to say `calibration_runs_snapshot.json` anyway, describing a file the bundle
+    does not hold. The line must follow what actually travelled.
+    """
+    env = _summary_env()
+    bundle.write_summary(tmp_path, env, _run_shape(0), None, bundle.ShippedEvidence())
+    text = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
+    line = [ln for ln in text.splitlines() if ln.startswith("- Durable row snapshot")][0]
+    assert "not written" in line, line
+    assert "`calibration_runs_snapshot.json`" not in line, line
+
+    bundle.write_summary(
+        tmp_path, env, _run_shape(0), None,
+        bundle.ShippedEvidence(calibration_snapshot="calibration_runs_snapshot.json"),
+    )
+    text = (tmp_path / "SUMMARY.md").read_text(encoding="utf-8")
+    line = [ln for ln in text.splitlines() if ln.startswith("- Durable row snapshot")][0]
+    assert "`calibration_runs_snapshot.json`" in line, line
+
+
 def test_main_ships_the_markdown_and_passes_it_to_the_summary():
     """A helper nothing calls is the unit-tested-parser trap in reverse."""
     src = (Path(__file__).resolve().parents[2] / "scripts"

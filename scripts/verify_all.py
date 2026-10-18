@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """VERIFY-ALL — prove every phase, tool, file and contract actually works.
 
-One entry point. Run it with the project's own interpreter:
+One entry point. Run it with the project's own interpreter, from the project:
 
     /home/ubuntu/Testing/Final_Year_Minor_Project/.venv/bin/python \
-        "/mnt/c/Users/Divyang/WorkBuddy AI/2026-10-04-15-04-59/audit/verify_all.py"
+        /home/ubuntu/Testing/Final_Year_Minor_Project/scripts/verify_all.py
 
 It reports MEASURED facts, never assumptions: each line is something it ran or
 read. Exit code 0 only when every check passed.
@@ -41,8 +41,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-PROJECT = Path("/home/ubuntu/Testing/Final_Year_Minor_Project")
-PY = PROJECT / ".venv" / "python"
+_HERE = Path(__file__).resolve().parent.parent
+# Derive the root from this file's own location so a moved or renamed project
+# still verifies itself. The hardcoded reference path is only a fallback for a
+# copy that sits outside a project tree (e.g. an audit scratch directory).
+PROJECT = _HERE if (_HERE / "src").is_dir() else Path("/home/ubuntu/Testing/Final_Year_Minor_Project")
 PYBIN = PROJECT / ".venv" / "bin" / "python"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -119,7 +122,11 @@ TOOLS = [
     ("apktool", ["--version"]),
     ("apksigner", ["--version"]),
     ("aapt2", ["version"]),
-    ("mitmdump", ["--version"]),
+    # mitmdump is deliberately NOT in this PATH list: on WSL2 it runs on the
+    # WINDOWS host (README §3), so a WSL2-PATH lookup reported a false failure on
+    # a correct setup. It is checked below through the capture stage's own
+    # resolver, which is the only thing that can answer where the stage will
+    # launch it (M13).
     ("readelf", ["--version"]),
     ("strings", ["--version"]),
     ("nm", ["--version"]),
@@ -173,8 +180,21 @@ def check_tools() -> None:
                  "print(m._windows_mitmdump() or 'NONE');"
                  "print(p._windows_python() or 'NONE')"], timeout=120)
     lines = ANSI.sub("", probe.stdout or "").strip().splitlines()
-    record("windows mitmdump (capture proxy)", bool(lines and lines[0] != "NONE"),
-           lines[0] if lines else "(probe failed)")
+    win_mitmdump = lines[0] if lines else "NONE"
+    # On WSL2 the capture stage launches mitmdump on the Windows host, so the
+    # resolver's answer is the authoritative one. On native Linux there is no
+    # Windows host and mitmdump legitimately runs in this namespace - accept the
+    # PATH binary there instead of failing a correct setup (M13).
+    local_mitmdump = shutil.which("mitmdump") or shutil.which("mitmproxy")
+    if win_mitmdump and win_mitmdump != "NONE":
+        record("mitmdump (capture proxy)", True,
+               f"{win_mitmdump} (Windows host, the one the stage launches)")
+    elif local_mitmdump:
+        record("mitmdump (capture proxy)", True,
+               f"{local_mitmdump} (this namespace; no Windows-host resolver)")
+    else:
+        record("mitmdump (capture proxy)", False,
+               "not found on the Windows host, nor on PATH in this namespace")
     record("windows python (pass-through)", len(lines) > 1 and lines[1] != "NONE",
            lines[1] if len(lines) > 1 else "(probe failed)")
 
@@ -359,7 +379,14 @@ def check_outputs() -> None:
     out = ANSI.sub("", (r.stdout or "") + (r.stderr or ""))
     forks = re.findall(r"line (\d+): prev_hash forks", out)
     doc = PROJECT / "docs" / "plans" / "handoff" / "audit-log-known-fork-2026-08-17.md"
-    if not forks:
+    # "No fork found" is only a PASS when the command actually verified a log. The
+    # command now exits non-zero on a MISSING or EMPTY trail (M9); without the rc
+    # check this line would read that same refusal as "no fork reported" and turn
+    # the one check that guards tamper-evidence into a green over nothing.
+    if not forks and r.returncode != 0:
+        record("audit-log chain", False,
+               f"rc={r.returncode} :: {head(out, 2)}")
+    elif not forks:
         record("audit-log chain", True, "no fork reported")
     elif set(forks) == {"185"} and doc.is_file():
         record_known(
@@ -490,6 +517,12 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             record(name, False, f"{type(exc).__name__}: {exc}")
 
+    if not RESULTS:
+        # A run that executed nothing is not a pass. `--only <typo>` matched no
+        # section, printed "0 checks" and exited 0 - a green verdict over no
+        # evidence, which is the failure mode this script exists to catch.
+        record("verify-all", False,
+               f"no section ran (--only {', '.join(sorted(only)) if only else '-'})")
     failed = [(n, d) for n, ok, d in RESULTS if not ok]
     print("\n" + "=" * 68)
     print(f"  SUMMARY: {len(RESULTS) - len(failed)} passed, {len(failed)} failed, "

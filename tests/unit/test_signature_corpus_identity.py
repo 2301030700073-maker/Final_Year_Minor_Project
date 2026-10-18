@@ -202,7 +202,12 @@ def test_only_one_place_can_create_a_runs_row():
             continue  # the model's own definition, not a write
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if re.search(r"\bRunRecord\s*\(", line):
-                constructions.append(f"{path.relative_to(_REPO)}:{number}")
+                # as_posix(): the provenance string this file asserts is written
+                # with forward slashes, and a bare relative_to() renders with the
+                # host's separator - so on Windows the assertion below read
+                # "src\storage\results.py:165" and failed on a correct tree.
+                rel = path.relative_to(_REPO).as_posix()
+                constructions.append(f"{rel}:{number}")
     assert len(constructions) == 1, (
         f"a runs row can now be written from {constructions}; the report tells a "
         "reader that a missing corpus fingerprint means the run predates ADR-0022, "

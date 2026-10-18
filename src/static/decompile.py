@@ -22,7 +22,6 @@ and a successful apktool that wrote no manifest is treated as failure (D4).
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -237,7 +236,11 @@ def _tail_file(log_path: Path, max_chars: int = 4000) -> str:
     if size == 0:
         return ""
     if size <= max_chars:
-        return log_path.read_text(encoding="utf-8")
+        # errors="replace", exactly like the tail-window read below: a tool log
+        # is arbitrary bytes (jadx/apktool echo resource paths and class names),
+        # and a strict decode here raised UnicodeDecodeError out of the decompile
+        # stage for a log the caller only ever reads as text.
+        return log_path.read_text(encoding="utf-8", errors="replace")
     with open(log_path, "rb") as f:
         f.seek(size - max_chars)
         tail = f.read().decode("utf-8", errors="replace")
@@ -599,6 +602,14 @@ def _run_secondary_fallback(apk_path: Path, target_dir: Path, log_path: Path) ->
             ).returncode
         except subprocess.TimeoutExpired:
             d2j_rc = _TIMEOUT_RC
+        except OSError as exc:
+            # A resolved-but-unexecutable tool (a .sh without the exec bit, the
+            # Windows WinError 193 case _decompile_dexes already guards) used to
+            # raise straight out of decompile(), turning a best-effort recovery
+            # into a failed stage that discarded a good jadx decompile. Record it
+            # and let the honest "recovered nothing" result below stand.
+            logf.write(f"\ndex2jar failed to launch: {exc}\n")
+            d2j_rc = -1
         if d2j_rc == 0 and recovered_jar.exists():
             cmd = ([cfr_bin, str(recovered_jar), "--outputdir", str(cfr_dir)]
                    if cfr_bin else ["java", "-jar", cfr_jar, str(recovered_jar), "--outputdir", str(cfr_dir)])
@@ -608,6 +619,9 @@ def _run_secondary_fallback(apk_path: Path, target_dir: Path, log_path: Path) ->
                 ).returncode
             except subprocess.TimeoutExpired:
                 cfr_rc = _TIMEOUT_RC
+            except OSError as exc:
+                logf.write(f"\nCFR failed to launch: {exc}\n")
+                cfr_rc = -1
         else:
             cfr_rc = -1
     recovered_count = _count_java_files(cfr_dir)
@@ -866,6 +880,11 @@ def _run_dex_fallback(dex_file: Path, target_dir: Path, log_path: Path) -> dict:
             ).returncode
         except subprocess.TimeoutExpired:
             d2j_rc = _TIMEOUT_RC
+        except OSError as exc:
+            # Same guard as _run_secondary_fallback: an unexecutable tool must
+            # not raise out of the per-DEX loop and fail the whole stage.
+            logf.write(f"\ndex2jar failed to launch: {exc}\n")
+            d2j_rc = -1
         if d2j_rc == 0 and recovered_jar.exists():
             cmd = ([cfr_bin, str(recovered_jar), "--outputdir", str(cfr_dir)]
                    if cfr_bin else ["java", "-jar", cfr_jar, str(recovered_jar), "--outputdir", str(cfr_dir)])
@@ -875,6 +894,9 @@ def _run_dex_fallback(dex_file: Path, target_dir: Path, log_path: Path) -> dict:
                 ).returncode
             except subprocess.TimeoutExpired:
                 cfr_rc = _TIMEOUT_RC
+            except OSError as exc:
+                logf.write(f"\nCFR failed to launch: {exc}\n")
+                cfr_rc = -1
         else:
             cfr_rc = -1
     recovered = _count_java_files(cfr_dir)

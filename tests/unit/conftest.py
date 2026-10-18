@@ -22,6 +22,16 @@ the boundary itself - `shutil.which`, `subprocess.run`/`Popen`, `_find_jadx`,
 """
 from __future__ import annotations
 
+# Imported BEFORE any fixture replaces `subprocess.Popen` with a function (see
+# `_no_ambient_toolchain_execution`). On Windows, `import asyncio` loads
+# `asyncio.windows_utils`, which does `class Popen(subprocess.Popen)`; if that
+# runs after the guard has swapped the class for a function it raises
+# `TypeError: function() argument 'code' must be code, not str`, and every test
+# that reaches `dynamic.pass_through_proxy` -> `frida` -> `asyncio` errors at
+# setup. Importing it here binds windows_utils to the real class first; on
+# Linux this import is a no-op for that purpose. Bound: this covers asyncio,
+# the one known library that subclasses Popen at import time.
+import asyncio  # noqa: F401
 import os
 import shutil
 import subprocess

@@ -6,15 +6,41 @@ see ADR-0005 for why this isn't a database table yet.
 
 Integrity: records are hash-chained. Each line carries `prev_hash` (the
 previous record's `record_hash`) and its own `record_hash` computed over
-the canonicalized record (including prev_hash), so any edit, deletion, or
-reorder is detectable. `verify_audit_log()` re-derives the chain; a CLI
-`verify-audit-log` command surfaces it (A1/A5). Each append is fsynced so
-a crash cannot silently drop the last record (A4).
+the canonicalized record (including prev_hash). An edit, deletion or
+reorder is therefore detectable - but ONLY against someone who cannot
+recompute the hashes: the chain is UNKEYED, so anyone with write access to
+this file can edit a record and re-derive every later `record_hash` /
+`prev_hash`, and `verify_audit_log()` will then report valid=True. That is
+a limit of a self-contained hash chain, not a defect in this
+implementation, and it must not be read as protection against a writer.
+
+The defence against such a writer is the OPTIONAL keyed anchor below: when
+the environment variable `AUDIT_HMAC_KEY` is set, every new record also
+carries `head_hmac` - an HMAC-SHA256, under that key, over the record's
+canonical content (prev_hash included). `verify_audit_log()` recomputes it
+whenever the field is present AND the key is set, so a forged record that
+was re-hashed still fails unless the attacker also holds the key. The
+anchor's own limit, stated rather than implied: the field is not itself
+covered by anything the attacker cannot recompute, so an attacker who
+DELETES `head_hmac` (and re-derives the chain) leaves records that carry no
+anchor to check - verification cannot distinguish those from records
+written before the key was configured, and reports them in `hmac_missing`
+instead of claiming an anchor that is not there. The anchor therefore
+raises the cost of a forgery (it must strip the field from every record it
+re-hashed, and the stripped count is reported); it is not a MAC over the
+whole log, and no self-contained log can be. With the variable unset the
+log is byte-identical to what it was before: no field, no check, no change
+in behaviour.
+
+`verify_audit_log()` re-derives the chain; a CLI `verify-audit-log` command
+surfaces it (A1/A5). Each append is fsynced so a crash cannot silently drop
+the last record (A4).
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -60,6 +86,38 @@ def _canonical(record: dict) -> str:
     (which is computed over this), so the hash is stable across dict ordering."""
     base = {k: v for k, v in record.items() if k != "record_hash"}
     return json.dumps(base, sort_keys=True, separators=(",", ":"))
+
+
+# H3: optional keyed integrity anchor. The chain above is unkeyed, so a writer
+# who edits a record can recompute every hash after it and verify_audit_log()
+# will then see a clean chain. Setting AUDIT_HMAC_KEY makes every new record
+# carry `head_hmac`: an HMAC-SHA256 under that key over the record's canonical
+# content. verify_audit_log() recomputes it when both the field and the key are
+# present, so a re-hashed forgery fails unless the attacker also holds the key.
+# Unset (the default) => no field is written and nothing is checked, so records
+# stay byte-identical to what they were before this anchor existed.
+AUDIT_HMAC_KEY_ENV = "AUDIT_HMAC_KEY"
+_HMAC_FIELD = "head_hmac"
+
+
+def _audit_hmac_key() -> bytes | None:
+    """The configured key, or None when the optional anchor is disabled."""
+    key = os.environ.get(AUDIT_HMAC_KEY_ENV)
+    if not key:
+        return None
+    return key.encode("utf-8")
+
+
+def _hmac_anchor(record: dict, key: bytes) -> str:
+    """HMAC-SHA256 over the record's canonical content, excluding BOTH hash
+    fields: `record_hash` is derived from this anchor, and an anchor cannot
+    cover itself."""
+    base = {
+        k: v for k, v in record.items()
+        if k not in ("record_hash", _HMAC_FIELD)
+    }
+    payload = json.dumps(base, sort_keys=True, separators=(",", ":"))
+    return hmac.new(key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 # Per-path tail cache (LIM-B), held as (file_size_when_cached, tail_record_hash).
@@ -199,6 +257,12 @@ def _append_audit_record(audit_log_path: Path, record: dict) -> None:
             # a concurrent appender already landed a record in it, that record is
             # the real tail, and anchoring past it would fork the chain.
             record["prev_hash"] = on_disk_tail if on_disk_tail is not None else anchor
+            # H3: the optional keyed anchor is added BEFORE record_hash so the
+            # chain hash covers it too - otherwise the field would sit outside
+            # the chain and could be stripped or rewritten without a mismatch.
+            key = _audit_hmac_key()
+            if key is not None:
+                record[_HMAC_FIELD] = _hmac_anchor(record, key)
             record["record_hash"] = hashlib.sha256(_canonical(record).encode()).hexdigest()
             f.write(json.dumps(record, sort_keys=True) + "\n")
             f.flush()
@@ -569,11 +633,26 @@ def authorization_for_run(audit_log_path: Path, run_id: str) -> dict | None:
     return found
 
 
-def verify_audit_log(audit_log_path: Path) -> dict:
+def verify_audit_log(audit_log_path: Path, allow_legacy: bool = False) -> dict:
     """Re-derive the hash chain and report integrity. Returns a dict and never
-    raises on corrupt content - it collects every error it finds. Records
-    written before hashing existed are counted as `legacy` (unchainable) and
-    don't fail the check on their own.
+    raises on corrupt content - it collects every error it finds.
+
+    A record written before hashing existed (no `record_hash` key at all) is
+    counted as `legacy` (unchainable). Legacy records are only legitimate as the
+    PREFIX of a genuinely pre-hashing log, so a log that contains records but
+    ZERO intact chain hashes is treated as tampering: deleting `record_hash`
+    from every line is exactly how an attacker would disable the chain, and
+    counting such a file as clean `legacy` made that edit invisible. Pass
+    `allow_legacy=True` (CLI: `--allow-legacy`) only for a log known to predate
+    hashing.
+
+    When `AUDIT_HMAC_KEY` is set and a record carries the optional `head_hmac`
+    anchor (H3), it is recomputed and checked too, so a record edited AND
+    re-hashed still fails unless the attacker also holds the key. Records
+    without the field are unaffected, and with the key unset nothing is checked
+    (`hmac_checked` reports how many anchors were verified, `hmac_missing` how
+    many records carried none while the key was set - reported, never an error,
+    because a pre-key record and a stripped field are indistinguishable here).
 
     Scans the current log AND every rotated archive sibling (RESID-2C) oldest to
     newest, carrying prev_hash across the boundary - the fresh file's first record
@@ -618,7 +697,7 @@ def verify_audit_log(audit_log_path: Path) -> dict:
         return {
             "valid": True, "total": 0, "chained": 0, "legacy": 0,
             "archives_checked": 0, "orphan_completions": [], "uncompleted_runs": [],
-            "uncompleted_run_details": [],
+            "uncompleted_run_details": [], "hmac_checked": 0, "hmac_missing": 0,
             "errors": [],
         }
     # L6: a missing current log with archives present is a truncated tail, not a
@@ -634,6 +713,16 @@ def verify_audit_log(audit_log_path: Path) -> dict:
 
     total = chained = legacy = 0
     archives_checked = 0
+    # H3: how many records carried a keyed anchor that was actually verified.
+    hmac_checked = 0
+    # ...and how many carried NONE while the key is configured. Not an error: a
+    # record written before the key was set (or during a run that did not have it)
+    # legitimately has no anchor, and this module cannot tell that apart from a
+    # field stripped by a re-hashing attacker. Counting it is the honest half of
+    # that limit - a stripped log reads `hmac_missing == chained`, never as a log
+    # whose anchors were all verified.
+    hmac_missing = 0
+    hmac_key = _audit_hmac_key()
     # RESID-2A/ADR-0021: run_id -> the identity its authorization carried, so an
     # uncompleted run can be reported by what it was (which APK, under which
     # justification) and not only by a bare hex id an auditor cannot act on.
@@ -696,6 +785,24 @@ def verify_audit_log(audit_log_path: Path) -> dict:
                 chained += 1
                 if hashlib.sha256(_canonical(rec).encode()).hexdigest() != record_hash:
                     errors.append(f"{file.name} line {lineno}: record_hash mismatch (record edited)")
+                # H3: the optional keyed anchor. Only checked when BOTH the field
+                # and the key are present - a log written without the key (or an
+                # older record that predates it) must keep verifying exactly as
+                # it did before, so an absent anchor is never itself an error.
+                if hmac_key is not None and _HMAC_FIELD in rec:
+                    hmac_checked += 1
+                    if not hmac.compare_digest(
+                            str(rec.get(_HMAC_FIELD)), _hmac_anchor(rec, hmac_key)):
+                        errors.append(
+                            f"{file.name} line {lineno}: {_HMAC_FIELD} mismatch - the "
+                            "record was edited and its hashes re-derived without "
+                            f"{AUDIT_HMAC_KEY_ENV} (or the key changed)"
+                        )
+                elif hmac_key is not None:
+                    # Unanchored while the key is configured - reported, not failed:
+                    # this is exactly the shape a field-stripped forgery leaves, and
+                    # also the shape of every record written before the key existed.
+                    hmac_missing += 1
                 if prev != prev_hash:
                     if prev in seen_hashes:
                         # Fork: this record chained onto an EARLIER record's hash
@@ -749,10 +856,25 @@ def verify_audit_log(audit_log_path: Path) -> dict:
                             )
                             orphan_order.append(run_id)
 
+    # H4: a present log with NO intact chain hash at all. Every record this
+    # writer has ever emitted carries `record_hash`, so `chained == 0` over a
+    # non-empty log means the hash keys were stripped from every line - the
+    # cheapest way to disable the chain, and previously indistinguishable from a
+    # legitimately pre-hashing log (legacy == total, valid=True, no errors). The
+    # legacy count stays visible in the result; it just no longer certifies a
+    # log as clean without the caller saying, explicitly, that it is pre-hashing.
+    if total > 0 and chained == 0 and not allow_legacy:
+        errors.append(
+            f"no intact hash chain in {total} record(s) - every record lacks a "
+            "record_hash, which this writer always emits; a log stripped of its "
+            "hashes is a tamper signal (pass --allow-legacy only for a log known "
+            "to predate hashing)"
+        )
     uncompleted = sorted(set(authorized_run_ids) - completed_run_ids)
     return {
         "valid": not errors, "total": total, "chained": chained, "legacy": legacy,
-        "archives_checked": archives_checked,
+        "archives_checked": archives_checked, "hmac_checked": hmac_checked,
+        "hmac_missing": hmac_missing,
         "orphan_completions": orphan_order,
         "uncompleted_runs": uncompleted,
         "uncompleted_run_details": [

@@ -119,6 +119,12 @@ def main() -> None:
     start = time.monotonic()
     files_read = 0
     analysis_root = Path("outputs/analysis")
+    if not analysis_root.is_dir():
+        # A traceback here reads as a script defect; the actual state is "nothing
+        # has been analysed yet (or this is not the project root)".
+        print(f"no {analysis_root} - run this from the project root after at least "
+              f"one analysis has produced a decompiled corpus")
+        return
     for analysis_dir in sorted(analysis_root.iterdir()):
         if not analysis_dir.is_dir():
             continue

@@ -182,13 +182,25 @@ def _native_root_exec_blocking() -> str:
     native root check does fork+execve("/system/bin/su", ...) or system("which su")
     directly (never touching Java Runtime.exec/ProcessBuilder), so hiding libc
     stat/access alone misses it. execve(path,...) is blocked when the basename is a
-    root binary (su/magisk/ksu/apatch); system(cmd) is blocked when the shell
+    root binary (su/magisk/ksu/apatch); system(cmd) is REPORTED as -1 when the shell
     string references one or uses the which/command -v idiom. A blocked execve makes
-    the child exit non-zero (execve -1 -> _exit(127)), and a blocked system returns
-    -1 - so the parent's waitpid/return sees "not rooted". Conservative: only a root
-    binary basename/reference triggers, never a benign exec. Each blocked probe emits
-    the probeHit that confirms root. Deterministic; try/catch per symbol so a missing
-    export degrades silently (ADR-0006)."""
+    the syscall fail with -1/ENOENT, so a fork+exec child exits non-zero (127). The
+    system() call itself still RUNS - only its exit status is overridden - so a check
+    that inspects the command's side effects rather than its status is not covered;
+    a check reading the status sees "not rooted".
+    Conservative: only a root binary basename/reference triggers, never a benign
+    exec. Each blocked probe emits the probeHit that confirms root. Deterministic;
+    try/catch per symbol so a missing export degrades silently (ADR-0006).
+
+    The execve block must land BEFORE the syscall, not in onLeave: execve does not
+    return on success (it replaces the image, or fails and returns -1), so an
+    onLeave `ret.replace(ptr(-1))` never fires for the success case and never
+    affects the failure case - the block was dead code. Instead onEnter rewrites
+    args[0] to a nonexistent sentinel path for a root binary, so the kernel's own
+    exec fails with ENOENT and the caller receives -1: the same "not rooted"
+    outcome the app would see for an absent su, without replacing the function
+    (no trampoline/original-call question, no arch-specific syscall number).
+    system() DOES return, so its onLeave -1 override stays as it was."""
     return (
         "function nbasename(p) { var i = p.lastIndexOf('/'); return i === -1 ? p : p.substr(i + 1); }\n"
         # Single source of truth for the root-binary set: isRootBin (execve
@@ -215,13 +227,22 @@ def _native_root_exec_blocking() -> str:
         "}\n"
         "try {\n"
         "  var ev = Module.findExportByName('libc.so', 'execve');\n"
+        "  // Allocated once and held in a global: the onEnter rewrite only puts the\n"
+        "  // pointer in a register, so a per-call allocation would be collectable\n"
+        "  // before the syscall reads it (use-after-free).\n"
+        "  var BLOCKED_EXEC = Memory.allocUtf8String('/nonexistent/.frida-blocked-exec');\n"
         "  if (ev) Interceptor.attach(ev, {\n"
         "    onEnter: function (args) {\n"
-        "      this.block = false;\n"
-        "      try { var p = args[0].readUtf8String(); if (p && isRootBin(nbasename(p))) { this.block = true; this.p = p; } } catch (e) {}\n"
-        "    },\n"
-        "    onLeave: function (ret) {\n"
-        "      if (this.block) { try { send({probeHit: 'root', path: this.p}); } catch (e) {} ret.replace(ptr(-1)); }\n"
+        "      try {\n"
+        "        var p = args[0].readUtf8String();\n"
+        "        if (p && isRootBin(nbasename(p))) {\n"
+        "          try { send({probeHit: 'root', path: p}); } catch (e) {}\n"
+        "          // execve never returns on success, so there is no onLeave to\n"
+        "          // override: redirect the path BEFORE the syscall so the kernel\n"
+        "          // itself refuses the exec (ENOENT -> -1 to the caller).\n"
+        "          args[0] = BLOCKED_EXEC;\n"
+        "        }\n"
+        "      } catch (e) {}\n"
         "    }\n"
         "  });\n"
         "} catch (e) { console.log('[synth] execve hook unavailable'); }\n"
@@ -557,7 +578,12 @@ def _ssl_effect_observer() -> str:
     connection it would otherwise reject - that is the deterministic confirmation
     that the SSL bypass worked for that connection (the app's own observable
     behavior, not a fabricated pass). Either signal alone stays effect evidence.
-    Guarded try/catch over every class hook so a missing class degrades silently.
+    Guarded so a missing class degrades silently - and the two failure shapes are
+    named separately: a class the app does not ship logs `hook target not present
+    in the app: <class>` (nothing to install, NOT a failed install), while a class
+    that IS present but whose hook assignment throws logs `<member> found but the
+    hook could not be installed: <e>` (a real refusal). The report reads only the
+    latter as a failed install (M6).
     This is the strongest honest unknown-target SSL signal short of a target
     SuccessCheck (ADR-0006): it is only ever promoted to confirmed when the app's
     own pin-check path demonstrably accepted."""
@@ -567,48 +593,56 @@ def _ssl_effect_observer() -> str:
         # `this.check`/`this.checkServerTrusted` is the recipe's neutralized impl
         # and returns normally -> pin-check fires; a real check would throw.
         "Java.perform(function () {\n"
+        "  var CP;\n"
+        "  try { CP = Java.use('okhttp3.CertificatePinner'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: okhttp3.CertificatePinner'); return; }\n"
         "  try {\n"
-        "    var CP = Java.use('okhttp3.CertificatePinner');\n"
         "    var _wrap_check = function () {\n"
         "      var r = this.check.apply(this, arguments);\n"
         "      send({bypassEffect: 'ssl-pin-check'});\n"
         "      return r;\n"
         "    };\n"
         "    CP.check.overload('java.lang.String', 'java.util.List').implementation = _wrap_check;\n"
-        "  } catch (e) { console.log('[synth] hook target absent'); }\n"
+        "  } catch (e) { console.log('[synth] okhttp3.CertificatePinner.check(String,List) found but the hook could not be installed: ' + e); }\n"
         "});\n"
         "Java.perform(function () {\n"
+        "  var CP;\n"
+        "  try { CP = Java.use('okhttp3.CertificatePinner'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: okhttp3.CertificatePinner'); return; }\n"
         "  try {\n"
-        "    var CP = Java.use('okhttp3.CertificatePinner');\n"
         "    var _wrap_check = function () {\n"
         "      var r = this.check.apply(this, arguments);\n"
         "      send({bypassEffect: 'ssl-pin-check'});\n"
         "      return r;\n"
         "    };\n"
         "    CP.check.overload('java.lang.String', '[Ljava.security.cert.Certificate;').implementation = _wrap_check;\n"
-        "  } catch (e) { console.log('[synth] hook target absent'); }\n"
+        "  } catch (e) { console.log('[synth] okhttp3.CertificatePinner.check(String,Certificate[]) found but the hook could not be installed: ' + e); }\n"
         "});\n"
         "Java.perform(function () {\n"
+        "  var TMI;\n"
+        "  try { TMI = Java.use('com.android.org.conscrypt.TrustManagerImpl'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: com.android.org.conscrypt.TrustManagerImpl'); return; }\n"
         "  try {\n"
-        "    var TMI = Java.use('com.android.org.conscrypt.TrustManagerImpl');\n"
         "    var _wrap_cst = function () {\n"
         "      var r = this.checkServerTrusted.apply(this, arguments);\n"
         "      send({bypassEffect: 'ssl-pin-check'});\n"
         "      return r;\n"
         "    };\n"
         "    TMI.checkServerTrusted.overload('[Ljava.security.cert.X509Certificate;', 'java.lang.String').implementation = _wrap_cst;\n"
-        "  } catch (e) { console.log('[synth] hook target absent'); }\n"
+        "  } catch (e) { console.log('[synth] TrustManagerImpl.checkServerTrusted(X509Certificate[],String) found but the hook could not be installed: ' + e); }\n"
         "});\n"
         "Java.perform(function () {\n"
+        "  var TMI;\n"
+        "  try { TMI = Java.use('com.android.org.conscrypt.TrustManagerImpl'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: com.android.org.conscrypt.TrustManagerImpl'); return; }\n"
         "  try {\n"
-        "    var TMI = Java.use('com.android.org.conscrypt.TrustManagerImpl');\n"
         "    var _wrap_cst = function () {\n"
         "      var r = this.checkServerTrusted.apply(this, arguments);\n"
         "      send({bypassEffect: 'ssl-pin-check'});\n"
         "      return r;\n"
         "    };\n"
         "    TMI.checkServerTrusted.overload('[Ljava.security.cert.X509Certificate;', 'java.lang.String', 'java.lang.String').implementation = _wrap_cst;\n"
-        "  } catch (e) { console.log('[synth] hook target absent'); }\n"
+        "  } catch (e) { console.log('[synth] TrustManagerImpl.checkServerTrusted(X509Certificate[],String,String) found but the hook could not be installed: ' + e); }\n"
         "});\n"
         "// Custom (non-platform) TrustManager: a real app often ships its OWN\n"
         "// X509TrustManager implementation with the pin check inside checkServerTrusted\n"
@@ -621,33 +655,39 @@ def _ssl_effect_observer() -> str:
         "// explicit TrustManagerImpl hook above - harmless (effects are deduped) and the\n"
         "// same honest signal: a pin-check that returned without rejecting.\n"
         "Java.perform(function () {\n"
+        "  var XT;\n"
+        "  try { XT = Java.use('javax.net.ssl.X509TrustManager'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: javax.net.ssl.X509TrustManager'); return; }\n"
         "  try {\n"
-        "    var XT = Java.use('javax.net.ssl.X509TrustManager');\n"
         "    var _wrap_xt = function () {\n"
         "      var r = this.checkServerTrusted.apply(this, arguments);\n"
         "      send({bypassEffect: 'ssl-pin-check'});\n"
         "      return r;\n"
         "    };\n"
         "    XT.checkServerTrusted.implementation = _wrap_xt;\n"
-        "  } catch (e) { console.log('[synth] hook target absent'); }\n"
+        "  } catch (e) { console.log('[synth] X509TrustManager.checkServerTrusted found but the hook could not be installed: ' + e); }\n"
         "});\n"
         "Java.perform(function () {\n"
+        "  var CE;\n"
+        "  try { CE = Java.use('com.android.org.conscrypt.ConscryptEngineSocket'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: com.android.org.conscrypt.ConscryptEngineSocket'); return; }\n"
         "  try {\n"
-        "    var CE = Java.use('com.android.org.conscrypt.ConscryptEngineSocket');\n"
         "    CE.startHandshake.implementation = function () {\n"
         "      this.startHandshake();\n"
         "      send({bypassEffect: 'ssl-handshake'});\n"
         "    };\n"
-        "  } catch (e) { console.log('[synth] hook target absent'); }\n"
+        "  } catch (e) { console.log('[synth] ConscryptEngineSocket.startHandshake found but the hook could not be installed: ' + e); }\n"
         "});\n"
         "Java.perform(function () {\n"
+        "  var SS;\n"
+        "  try { SS = Java.use('javax.net.ssl.SSLSocket'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: javax.net.ssl.SSLSocket'); return; }\n"
         "  try {\n"
-        "    var SS = Java.use('javax.net.ssl.SSLSocket');\n"
         "    SS.startHandshake.implementation = function () {\n"
         "      this.startHandshake();\n"
         "      send({bypassEffect: 'ssl-handshake'});\n"
         "    };\n"
-        "  } catch (e) { console.log('[synth] hook target absent'); }\n"
+        "  } catch (e) { console.log('[synth] SSLSocket.startHandshake found but the hook could not be installed: ' + e); }\n"
         "});\n"
         "// Native TLS handshake observation - pure-native hosts (Flutter dart:io,\n"
         "// Unity, or a renamed/vendored BoringSSL) have NO Java SSL stack, so the\n"
@@ -777,11 +817,13 @@ ROOT_RECIPES: dict[str, str] = {
     ),
     "rootbeer_framework": (
         "Java.perform(function () {\n"
+        "  var RootBeer;\n"
+        "  try { RootBeer = Java.use('com.scottyab.rootbeer.RootBeer'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: com.scottyab.rootbeer.RootBeer'); return; }\n"
         "  try {\n"
-        "    var RootBeer = Java.use('com.scottyab.rootbeer.RootBeer');\n"
         "    RootBeer.isRooted.implementation = function () { return false; };\n"
         "    RootBeer.isRootedWithBusyBoxCheck.implementation = function () { return false; };\n"
-        "  } catch (e) { console.log('[synth] RootBeer class absent'); }\n"
+        "  } catch (e) { console.log('[synth] RootBeer.isRooted found but the hook could not be installed: ' + e); }\n"
         "});"
     ),
     # Real-world root tooling beyond the classic Magisk/KingUser set: APatch
@@ -860,20 +902,24 @@ SSL_RECIPES: dict[str, str] = {
     ),
     "okhttp_certificate_pinner": (
         "Java.perform(function () {\n"
+        "  var CP;\n"
+        "  try { CP = Java.use('okhttp3.CertificatePinner'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: okhttp3.CertificatePinner'); return; }\n"
         "  try {\n"
-        "    var CP = Java.use('okhttp3.CertificatePinner');\n"
         "    CP.check.overload('java.lang.String', 'java.security.cert.Certificate').implementation = function () {};\n"
         "    CP.check.overload('java.lang.String', 'java.util.List').implementation = function () {};\n"
-        "  } catch (e) { console.log('[synth] okhttp3.CertificatePinner absent'); }\n"
+        "  } catch (e) { console.log('[synth] okhttp3.CertificatePinner.check found but the hook could not be installed: ' + e); }\n"
         "});"
     ),
     "certificate_pin_hash_literal": (
         "Java.perform(function () {\n"
+        "  var CP;\n"
+        "  try { CP = Java.use('okhttp3.CertificatePinner'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: okhttp3.CertificatePinner'); return; }\n"
         "  try {\n"
-        "    var CP = Java.use('okhttp3.CertificatePinner');\n"
         "    CP.check.overload('java.lang.String', 'java.security.cert.Certificate').implementation = function () {};\n"
         "    CP.check.overload('java.lang.String', 'java.util.List').implementation = function () {};\n"
-        "  } catch (e) { console.log('[synth] okhttp3.CertificatePinner absent'); }\n"
+        "  } catch (e) { console.log('[synth] okhttp3.CertificatePinner.check found but the hook could not be installed: ' + e); }\n"
         "});"
     ),
     # Conscrypt (Android's default TLS provider) installs its own
@@ -883,11 +929,13 @@ SSL_RECIPES: dict[str, str] = {
     # unpinned without relying on the interface dispatch.
     "pin_conscrypt_trustmanagerimpl": (
         "Java.perform(function () {\n"
+        "  var TMI;\n"
+        "  try { TMI = Java.use('com.android.org.conscrypt.TrustManagerImpl'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: com.android.org.conscrypt.TrustManagerImpl'); return; }\n"
         "  try {\n"
-        "    var TMI = Java.use('com.android.org.conscrypt.TrustManagerImpl');\n"
         "    TMI.checkServerTrusted.implementation = function () {};\n"
         "    TMI.verifyChain.implementation = function () {};\n"
-        "  } catch (e) { console.log('[synth] Conscrypt TrustManagerImpl absent'); }\n"
+        "  } catch (e) { console.log('[synth] TrustManagerImpl.checkServerTrusted found but the hook could not be installed: ' + e); }\n"
         "});"
     ),
     # OkHttp4 is Kotlin; its CertificatePinner exposes the same check() entrypoints
@@ -895,11 +943,13 @@ SSL_RECIPES: dict[str, str] = {
     # string+Certificate forms so whichever the app actually uses is neutralized.
     "okhttp4_kotlin_certificate_pinner": (
         "Java.perform(function () {\n"
+        "  var CP;\n"
+        "  try { CP = Java.use('okhttp3.CertificatePinner'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: okhttp3.CertificatePinner'); return; }\n"
         "  try {\n"
-        "    var CP = Java.use('okhttp3.CertificatePinner');\n"
         "    CP.check.overload('java.lang.String', 'java.security.cert.Certificate').implementation = function () {};\n"
         "    CP.check.overload('java.lang.String', 'java.util.List').implementation = function () {};\n"
-        "  } catch (e) { console.log('[synth] okhttp3.CertificatePinner absent'); }\n"
+        "  } catch (e) { console.log('[synth] okhttp3.CertificatePinner.check found but the hook could not be installed: ' + e); }\n"
         "});"
     ),
     # A WebView that shows the SSL error dialog via onReceivedSslError still
@@ -907,12 +957,14 @@ SSL_RECIPES: dict[str, str] = {
     # handler.proceed() so the cert error is tolerated.
     "webview_ssl_error_handler_proceed": (
         "Java.perform(function () {\n"
+        "  var WVC;\n"
+        "  try { WVC = Java.use('android.webkit.WebViewClient'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: android.webkit.WebViewClient'); return; }\n"
         "  try {\n"
-        "    var WVC = Java.use('android.webkit.WebViewClient');\n"
         "    WVC.onReceivedSslError.implementation = function (view, handler, error) {\n"
         "      handler.proceed();\n"
         "    };\n"
-        "  } catch (e) { console.log('[synth] WebViewClient absent'); }\n"
+        "  } catch (e) { console.log('[synth] WebViewClient.onReceivedSslError found but the hook could not be installed: ' + e); }\n"
         "});"
     ),
     # TrustKit (com.datatheorem.android.trustkit) is the standard pinning lib in
@@ -922,16 +974,23 @@ SSL_RECIPES: dict[str, str] = {
     # pinned app is unpinned deterministically.
     "trustkit_pinning": (
         "Java.perform(function () {\n"
+        "  var PTM;\n"
+        "  try { PTM = Java.use('com.datatheorem.android.trustkit.PinningTrustManager'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: com.datatheorem.android.trustkit.PinningTrustManager'); }\n"
+        "  if (PTM) {\n"
+        "    try {\n"
+        "      PTM.checkServerTrusted.implementation = function () {};\n"
+        "      PTM.verifyChain.implementation = function () {};\n"
+        "    } catch (e) { console.log('[synth] TrustKit PinningTrustManager.checkServerTrusted found but the hook could not be installed: ' + e); }\n"
+        "  }\n"
+        "  var CP;\n"
+        "  try { CP = Java.use('okhttp3.CertificatePinner'); }\n"
+        "  catch (e) { console.log('[synth] hook target not present in the app: okhttp3.CertificatePinner'); }\n"
+        "  if (!CP) return;\n"
         "  try {\n"
-        "    var PTM = Java.use('com.datatheorem.android.trustkit.PinningTrustManager');\n"
-        "    PTM.checkServerTrusted.implementation = function () {};\n"
-        "    PTM.verifyChain.implementation = function () {};\n"
-        "  } catch (e) { console.log('[synth] TrustKit PinningTrustManager absent'); }\n"
-        "  try {\n"
-        "    var CP = Java.use('okhttp3.CertificatePinner');\n"
         "    CP.check.overload('java.lang.String', 'java.security.cert.Certificate').implementation = function () {};\n"
         "    CP.check.overload('java.lang.String', 'java.util.List').implementation = function () {};\n"
-        "  } catch (e) { console.log('[synth] okhttp3.CertificatePinner absent'); }\n"
+        "  } catch (e) { console.log('[synth] okhttp3.CertificatePinner.check found but the hook could not be installed: ' + e); }\n"
         "});"
     ),
     # Native pinning (BoringSSL/OpenSSL family). _native_ssl_pin_bypass enumerates
@@ -1133,13 +1192,22 @@ def _environment_normalization() -> str:
     ))
 
 
-def synthesize(classification: ClassificationResult, action: Action) -> SynthesisResult:
+def synthesize(
+    classification: ClassificationResult, action: Action, auth_context=None,
+) -> SynthesisResult:
     """Compose a deterministic bypass script from the detected techniques.
 
     Targeted when the static evidence names techniques with dedicated hooks;
     otherwise (or when only category-level detection exists) falls back to the
     deterministic universal base for each relevant category so a real attempt
-    always happens. Pure - no I/O, no Frida."""
+    always happens. Pure - no I/O, no Frida.
+
+    `auth_context` is an OPTIONAL, currently unenforced hook for the H2
+    authorization gate (the same parameter the dynamic entrypoint takes): the
+    synthesizer will be able to refuse to build an instrumentation script without
+    an operator-supplied authorization context. It defaults to None, which
+    preserves today's behaviour exactly, and it changes nothing about the returned
+    SynthesisResult - threading it now only gives the gate one place to land."""
     if action == Action.NEITHER:
         return SynthesisResult(source="", strategy="universal", universal_categories=["none"])
 

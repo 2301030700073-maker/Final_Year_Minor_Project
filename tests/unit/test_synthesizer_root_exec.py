@@ -59,3 +59,47 @@ def test_exec_blocking_no_su_only_literals_survive_outside_the_loop():
     assert "t.indexOf('/su ')" not in src
     assert "t.indexOf('type su')" not in src
     assert "t.indexOf('which magisk')" not in src
+
+
+# --- M4: the execve block must land BEFORE the syscall -----------------------
+# execve does not return on success (it replaces the image, or fails with -1), so
+# an onLeave `ret.replace(ptr(-1))` is dead code: the success case never fires it
+# and the failure case is already -1. The block has to change the call on entry.
+
+def _execve_attach_block(src: str) -> str:
+    start = src.index("var ev = Module.findExportByName")
+    end = src.index("var sy = Module.findExportByName")
+    return src[start:end]
+
+
+def test_execve_block_is_installed_on_entry_not_on_leave():
+    src = _native_root_exec_blocking()
+    block = _execve_attach_block(src)
+    assert "onEnter: function (args)" in block
+    assert "onLeave: function" not in block, (
+        "the execve block still relies on onLeave, which execve never reaches on "
+        "success - the block would be dead code"
+    )
+    # It must redirect the path BEFORE the syscall so the kernel fails the exec.
+    assert "args[0] = BLOCKED_EXEC;" in block
+    assert "Memory.allocUtf8String('/nonexistent/.frida-blocked-exec')" in block
+    # ...and still emit the probeHit that confirms the app's own check ran.
+    assert "send({probeHit: 'root', path: p})" in block
+
+
+def test_execve_block_still_matches_only_root_binaries():
+    src = _native_root_exec_blocking()
+    block = _execve_attach_block(src)
+    assert "isRootBin(nbasename(p))" in block
+    # a benign exec must reach the real syscall untouched: the rewrite is inside
+    # the root-binary branch only
+    guard = block.index("isRootBin(nbasename(p))")
+    assert block.index("args[0] = BLOCKED_EXEC;") > guard
+
+
+def test_system_block_keeps_its_on_leave_override():
+    # system() DOES return, so its onLeave -1 override is correct and must stay.
+    src = _native_root_exec_blocking()
+    system_part = src[src.index("var sy = Module.findExportByName"):]
+    assert "onLeave: function (ret)" in system_part
+    assert "ret.replace(ptr(-1))" in system_part

@@ -12,6 +12,14 @@
 # the report stamps which signature files a run used, so a corpus selected from
 # here would have to carry its identity into that stamp.
 
+# These two values are LIVE, not a decorative copy: cli._load_thresholds() reads
+# them and passes them to the decision engine (and to the report, so a run
+# records the boundary it was classified at). Editing one moves that category's
+# detection boundary. They currently equal decision_engine.DEFAULT_THRESHOLD
+# (0.7) on purpose - that is the uncalibrated starting point, so an untuned run
+# behaves exactly like the code default. They are not dead because the code
+# default exists: the code default is only the fallback when this section is
+# absent. Values outside [0, 1] fail loud rather than being clamped.
 thresholds:
   root: 0.7
   ssl: 0.7

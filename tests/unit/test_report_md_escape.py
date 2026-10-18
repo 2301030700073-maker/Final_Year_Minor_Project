@@ -69,3 +69,20 @@ def test_md_adjacent_escaped_pipes_each_stay_escaped():
     out = _md("\\|\\|")                    # value: \ | \ |
     for m in re.finditer(r"(\\*)\|", out):
         assert len(m.group(1)) % 2 == 1, out
+
+
+def test_md_escapes_html_sensitive_chars():
+    # M3 hardening: an APK-derived string may be rendered into a report that a
+    # consumer converts to HTML, so &, < and > must be entity-escaped to stop
+    # markup injection (the gap the M3 fix closed). These chars are not
+    # table/markdown delimiters, but they are HTML ones.
+    assert _md("<script>alert(1)</script>") == "&lt;script&gt;alert(1)&lt;/script&gt;"
+    assert _md("a&b") == "a&amp;b"
+    assert _md("<>") == "&lt;&gt;"
+    # No RAW angle brackets survive (the escaped forms use entities).
+    assert "<" not in _md("x<y>")
+    assert ">" not in _md("x>y")
+    # The bare '&' must never survive as itself; it becomes '&amp;'.
+    out = _md("x<y>z&w")
+    assert out == "x&lt;y&gt;z&amp;w"
+    assert "&" in out and out.count("&") == 3  # each entity carries exactly one &

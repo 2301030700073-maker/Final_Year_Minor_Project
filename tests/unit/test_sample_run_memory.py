@@ -8,12 +8,25 @@ a worker pool is holding, and matching the CLI loosely makes the sampler watch
 itself or a non-analysis command.
 """
 import os
+import sys
 import types
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
+
+# sample_run_memory.py calls POSIX-only os.sysconf("SC_CLK_TCK") at import time, so
+# it can only be collected on Linux. Skip cleanly elsewhere (the project already
+# guards its other POSIX-only tests this way, e.g. test_uncompleted_run_surface.py)
+# instead of erroring at collection and breaking suite-wide collection on non-Linux
+# hosts - which also breaks the ledger suite-count guard. Linux/CI behaviour is
+# unchanged.
+if sys.platform != "linux":
+    pytest.skip(
+        "sample_run_memory.py relies on POSIX os.sysconf; collected on Linux/CI only",
+        allow_module_level=True,
+    )
 
 # Compile the source rather than importing it: the bytecode cache is keyed on the
 # source's size and whole-second mtime, so a same-size edit made in the same second

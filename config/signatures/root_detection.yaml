@@ -994,9 +994,14 @@
   weight: 0.3
   pattern_type: string_literal
   patterns:
+    # The bare "/proc/net/unix" path is deliberately NOT a pattern: it is a common
+    # connectivity read (netstat-style socket enumeration) and, as an OR, fired this
+    # 0.3 root signature on any app that read it - a false positive with no
+    # magisk/ksu/zygisk token present. The daemon-socket tokens below are what
+    # actually identify the scan; a real scan reads the file AND carries one of
+    # them, so the true positive is preserved.
     - "@magisk_service"
     - "@ksu_"
-    - "/proc/net/unix"
     - "@zygisk_service"
   evidence_type: bytecode_string
 
@@ -1006,7 +1011,11 @@
   weight: 0.3
   pattern_type: string_literal
   patterns:
-    - "/proc/self/maps"
+    # Same rule: "/proc/self/maps" is read by stack/ANR samplers, memory profilers
+    # and anti-debug code, so it must not fire this 0.3 root signature on its own
+    # (it did, as an OR). A real zygisk maps scan still carries "zygisk" /
+    # "libzygisk.so" - the tokens that NAME the technique - so the true positive
+    # survives.
     - "zygisk"
     - "libzygisk.so"
   evidence_type: bytecode_string

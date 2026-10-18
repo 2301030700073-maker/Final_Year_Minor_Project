@@ -258,6 +258,13 @@ def test_scan_matches_frida_detection_and_not_benign(tmp_path):
     signatures = load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")
     evidence = scan(tmp_path, signatures)
     assert any(e.signature_id == "frida_detection" for e in evidence.root_evidence)
+    # FP regression (SESSION8-PROC-FP): reading /proc/self/maps is common (stack/ANR
+    # samplers, profilers, anti-debug). On its own it must NOT fire the 0.3
+    # zygisk_process_maps_scan root signature - only a real zygisk scan, which also
+    # carries "zygisk"/"libzygisk.so", does. Pre-fix the bare path was an OR pattern,
+    # so this fixture (no zygisk token) falsely scored 0.3 toward ROOT.
+    assert not any(
+        e.signature_id == "zygisk_process_maps_scan" for e in evidence.root_evidence)
 
     # benign: "frida" as a plain token, no Frida artifact literal
     (tmp_path / "MainActivity.java").write_text(
@@ -1917,7 +1924,11 @@ def test_2026_corpus_broadening_round3_webgrounded_additions_loaded():
     root_sigs = {s.id: s for s in load_signatures(REPO_ROOT / "config/signatures/root_detection.yaml")}
     for sig_id, marker in {
         "magisk_daemon_socket_scan": "@magisk_service",
-        "zygisk_process_maps_scan": "/proc/self/maps",
+        # The identifying marker is the technique token, NOT the bare /proc/self/maps
+        # path: that path is a common read (stack/ANR/profiler) and was dropped from
+        # the pattern list because, as an OR, it fired this root signature on its own
+        # (SESSION8-PROC-FP). A real zygisk scan carries "zygisk"/"libzygisk.so".
+        "zygisk_process_maps_scan": "zygisk",
         "selinux_policy_probe_magisk_ksu": "ksu_file:s0",
         "rootguard_flutter_shield_framework": "flutter_shield",
     }.items():

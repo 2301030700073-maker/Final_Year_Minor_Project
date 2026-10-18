@@ -115,13 +115,16 @@ def test_no_root_probe_is_root_inconclusive():
 
 
 def test_pin_hook_fired_requires_same_line_pair():
-    # _pin_hook_fired (RESID-6G): the pin-hook check must be line-coherent - a
-    # "not present" line naming the hook must NOT pair with a stray `bypassed`
-    # on a different line to claim ssl_bypassed. Both tokens must share one line.
-    # Had zero direct coverage.
+    # _pin_hook_fired (RESID-6G + AG-FIRED-POLARITY): the pin-hook check must be
+    # line-coherent - the two tokens must share one message - AND the runtime flag
+    # must be a real `bypassed: true`. A {\"bypassed\": false} (the hook RAN but did
+    # NOT defeat the pin) answers True today on the word-substring form, which is a
+    # fabricated SSL bypass.
     from dynamic.success_checks.androgoat import _pin_hook_fired
-    assert _pin_hook_fired("hook present\n  ok: bypassed") is False  # split across lines
-    assert _pin_hook_fired("OkHttp CertificatePinner.check ... bypassed") is True
+    assert _pin_hook_fired("hook present\n  ok: {'bypassed': true}") is False  # split across lines
+    assert _pin_hook_fired("{'hook': 'OkHttp CertificatePinner.check', 'bypassed': True}") is True
+    # the hook ran but did NOT defeat the pin - must NOT confirm
+    assert _pin_hook_fired("{'hook': 'OkHttp CertificatePinner.check', 'bypassed': False}") is False
     assert _pin_hook_fired("hook not present\nno bypassed here") is False
     assert _pin_hook_fired("") is False
 

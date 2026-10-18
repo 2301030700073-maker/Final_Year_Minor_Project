@@ -28,7 +28,13 @@ from common import VerificationResult
 # when the message carries the runtime `bypassed` flag (loaded-but-never-called
 # hooks send nothing, not a negative).
 SSL_PIN_HOOK = "OkHttp CertificatePinner.check"
+# Only a runtime `bypassed: true` FIRE counts (AG-FIRED-POLARITY). The bare word
+# "bypassed" also appears in a {\'bypassed\': False} message - the hook ran but the
+# pin was NOT defeated - and in the "not present" note this constant's own comment
+# warns about, so a substring match on the word would confirm an SSL bypass that
+# never happened. Require the value true, mirroring _ROOT_PROBE_RE's value-matching.
 HOOK_FIRED_MARKER = "bypassed"
+_HOOK_FIRED_RE = re.compile(r"bypassed['\"]?\s*:\s*(?:true|True)\b")
 
 # doPinning logs the fetched body via Log.v("Response", ...) - bonus evidence.
 RESPONSE_LOG_TAG = "V/Response"
@@ -42,7 +48,7 @@ def _pin_hook_fired(frida_log: str) -> bool:
     line-coherent `_fired_hook_ids` design of the root checkers: a hook name and
     its runtime flag must come from the same message."""
     for line in frida_log.splitlines():
-        if SSL_PIN_HOOK in line and HOOK_FIRED_MARKER in line:
+        if SSL_PIN_HOOK in line and _HOOK_FIRED_RE.search(line):
             return True
     return False
 

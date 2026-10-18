@@ -74,6 +74,17 @@ def test_tier2_precision_recall_f1_real_math():
     assert report.f1 == 1.0
 
 
+def test_tier2_f1_is_zero_not_none_when_every_case_went_wrong():
+    # A detector that got EVERY case wrong (0 TP, but both denominators populated -
+    # FP=3/FN=2) has a MEASURED precision and recall of 0.0 and an F1 of 0.0, not
+    # "no data". Returning None there rendered N/A, conflating worst-possible with
+    # not-yet-measured - the exact confusion this module's docstring forbids.
+    report = CategoryTier2Report(true_positive=0, false_positive=3, false_negative=2, true_negative=1)
+    assert report.precision.rate == 0.0
+    assert report.recall.rate == 0.0
+    assert report.f1 == 0.0
+
+
 def test_end_to_end_against_real_current_numbers():
     """Regression test using the actual, real, currently-committed report
     data - not synthetic (docs/plans/handoff/bundles/20260729T163534Z,

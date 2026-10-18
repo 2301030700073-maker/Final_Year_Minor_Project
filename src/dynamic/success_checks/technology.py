@@ -389,7 +389,14 @@ class TechnologyHooksEngagedCheck:
                         entry = f"{hook} ({detail})" if detail else str(hook)
                         if entry not in hook_failures:
                             hook_failures.append(entry)
-                elif hook and str(hook) not in engaged:
+                    # A message that reports its OWN hook/effect FAILED must not also
+                    # contribute a confirmation: a {"status":"failed","probeHit":"root"}
+                    # (or a bypassed/neutralized effect on the same failed message)
+                    # would list the hook as broken AND feed root_bypassed/ssl_bypassed
+                    # - a bypass "confirmed" by the very message saying it broke. Read
+                    # the probeHit/effect reads below only from a non-failed message.
+                    continue
+                if hook and str(hook) not in engaged:
                     engaged.append(str(hook))
                 ph = payload.get("probeHit")
                 # Only a root-VALUED probeHit confirms a ROOT bypass. The

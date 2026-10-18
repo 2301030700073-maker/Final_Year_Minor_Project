@@ -29,6 +29,32 @@ def test_reports_engaged_hooks_from_checkpoint_messages():
     )
 
 
+def test_a_hook_reporting_its_own_failure_cannot_confirm_a_bypass():
+    # F7: a message that reports its OWN hook FAILED must not also feed a
+    # confirmation. A {"status":"failed","probeHit":"root"} would list the hook as
+    # broken AND (pre-fix) append its probeHit to root_probe_hits, so root_bypassed
+    # read True - a bypass "confirmed" by the very message that says it broke.
+    v = TechnologyHooksEngagedCheck().check([
+        {"type": "send", "payload": {
+            "hook": "okhttp_certificate_pinner", "status": "failed",
+            "error": "no frida module", "probeHit": "root", "path": "/system/bin/su"}},
+    ])
+    assert v.root_bypassed is not True  # the failed message's probeHit does NOT confirm
+    combined = " ".join(str(x) for x in v.evidence_lines.values())
+    assert "okhttp_certificate_pinner" in combined   # ... and the hook IS named as failed
+    assert "no frida module" in combined             # ... with its reason
+
+
+def test_a_non_failed_root_probe_hit_still_confirms():
+    # Positive control: the fix is a polarity guard on the failed branch, not a
+    # removal of probeHit reading - a clean message carrying probeHit=root still
+    # confirms a root bypass.
+    v = TechnologyHooksEngagedCheck().check([
+        {"type": "send", "payload": {"probeHit": "root", "path": "/system/bin/su"}},
+    ])
+    assert v.root_bypassed is True
+
+
 def test_no_checkpoint_means_not_engaged():
     # A status-only checkpoint (legacy script style) has no "hook" key - the
     # technology check must not mistake it for an engaged recipe hook.

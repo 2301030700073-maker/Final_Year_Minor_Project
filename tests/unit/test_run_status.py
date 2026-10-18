@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from storage import run_status
 from storage.run_status import (
     RUN_STATUS_FILENAME,
     RunStatusRecorder,
@@ -317,6 +318,31 @@ def test_run_is_alive_false_when_the_pid_was_recycled(tmp_path):
     data["pid_start"] = "1"
     path.write_text(json.dumps(data), encoding="utf-8")
     assert run_is_alive(read_run_status(tmp_path, "abc")) is False
+
+
+@_requires_proc
+def test_run_is_alive_is_unknown_when_the_stat_cannot_be_read(tmp_path, monkeypatch):
+    # A live process whose /proc/<pid>/stat is UNREADABLE (hidepid/permission/EIO)
+    # must be "unknown", not "gone": the entry exists, we just cannot read it. The
+    # pre-fix _proc_start_time mapped EVERY OSError to None, so run_is_alive called
+    # such a run "ended with its process gone" - the very confusion this split ends.
+    rec = _recorder(tmp_path)
+    rec.start()
+
+    def _boom(pid):
+        raise PermissionError(13, "permission denied")
+
+    monkeypatch.setattr(run_status, "_proc_start_time", _boom)
+    assert run_is_alive(read_run_status(tmp_path, "abc")) is None
+
+
+@_requires_proc
+def test_run_is_alive_is_unknown_when_the_stat_does_not_parse(tmp_path, monkeypatch):
+    # Present but unparseable stat -> unknown, never a liveness claim either way.
+    rec = _recorder(tmp_path)
+    rec.start()
+    monkeypatch.setattr(run_status, "_proc_start_time", lambda pid: run_status._UNREADABLE)
+    assert run_is_alive(read_run_status(tmp_path, "abc")) is None
 
 
 def test_run_is_alive_is_unknown_for_another_host(tmp_path):

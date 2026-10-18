@@ -7,8 +7,24 @@ FR-4.6 self-termination detection is pure logic (no device) and so is unit
 tested here too.
 """
 
+import pytest
+
 from common import Action
 from dynamic import frida_runner
+from dynamic.synthesizer import ROOT_RECIPES
+
+
+@pytest.fixture(autouse=True)
+def _no_live_ui_liveness(monkeypatch):
+    """run_dynamic_stage gathers UI liveness on the hooked arm via
+    `ui_liveness.check_ui_liveness`, which shells out to adb/dumpsys. A unit test
+    that reaches it is not hermetic: on the reference WSL2 box the conftest
+    `_no_ambient_toolchain_execution` guard raises inside it and its per-signal
+    `except Exception` swallows the raise (ui_liveness becomes a dict of errors),
+    while on CI the tool is absent (None) - the same test, two different results.
+    `frida_runner` imports the function at call time, so patching the source
+    attribute wins. No test here asserts real device UI data, so stub it away."""
+    monkeypatch.setattr("dynamic.ui_liveness.check_ui_liveness", lambda *a, **k: None)
 
 
 def test_unknown_target_degrades_to_skipped_instead_of_crashing():
@@ -294,8 +310,16 @@ def test_both_keeps_the_replacement_the_first_attach_performed(monkeypatch):
 
 def _run_capture_scripts_applied(monkeypatch, action, target, synthesized):
     """Drive run_dynamic_stage through the single-spawn synthesized path and return
-    the scripts_applied label list, so a test can assert the label matches what was
-    actually loaded (principle 3)."""
+    (scripts_applied label list, the source the stage actually LOADED), so a test
+    can assert the label matches what was actually loaded (principle 3).
+
+    The loaded source is captured, not discarded: the envelope-append
+    (`frida_runner` appends the native root envelope to `synth_source` for a
+    root-needing action) and the `scripts_applied` label are two independent
+    conditions, so a label-only assertion would stay green even if the append were
+    reverted - the false-confidence this helper now closes."""
+
+    loaded: list[str] = []
 
     class _FakeDevice:
         def spawn(self, pkg):
@@ -315,7 +339,7 @@ def _run_capture_scripts_applied(monkeypatch, action, target, synthesized):
     )
     monkeypatch.setattr(
         "dynamic.frida_runner.load_script_source",
-        lambda session, src, on_message=None: None,
+        lambda session, src, on_message=None: loaded.append(src),
     )
     monkeypatch.setattr("dynamic.frida_runner._run_ui_action", lambda serial, a: None)
     monkeypatch.setattr("dynamic.frida_runner.time.sleep", lambda s: None)
@@ -327,7 +351,10 @@ def _run_capture_scripts_applied(monkeypatch, action, target, synthesized):
         "emulator-5554", "com.example.app", action, target=target,
         synthesized=synthesized,
     )
-    return result.evidence["scripts_applied"]
+    return (
+        result.evidence["scripts_applied"],
+        "\n".join(s for s in loaded if isinstance(s, str)),
+    )
 
 
 def test_synth_ssl_only_label_omits_root_envelope(monkeypatch):
@@ -338,7 +365,7 @@ def test_synth_ssl_only_label_omits_root_envelope(monkeypatch):
     # root-envelope recipes ran - previously the synth label branch appended them
     # whenever synth_source was set, over-claiming two root bypasses on an SSL-only
     # run against a real target with pinning but no root check.
-    applied = _run_capture_scripts_applied(
+    applied, loaded = _run_capture_scripts_applied(
         monkeypatch, Action.SSL_ONLY, "some_real_app",
         {"source": "sslsrc", "applied_hooks": ["custom_ssl_hook"]},
     )
@@ -346,6 +373,11 @@ def test_synth_ssl_only_label_omits_root_envelope(monkeypatch):
     assert "custom_ssl_hook" in applied  # the SSL hook that WAS loaded
     assert "synthesized:native_su_binary_embedded" not in applied
     assert "synthesized:root_runtime_exec_su" not in applied
+    # ...and the LOAD proves it too: neither root-envelope recipe's JS appears in
+    # the source the stage actually loaded, so the label is not over-claiming two
+    # root bypasses on a run that loaded only the SSL bypass.
+    assert ROOT_RECIPES["native_su_binary_embedded"] not in loaded
+    assert ROOT_RECIPES["root_runtime_exec_su"] not in loaded
 
 
 def test_synth_root_only_label_includes_root_envelope(monkeypatch):
@@ -354,13 +386,21 @@ def test_synth_root_only_label_includes_root_envelope(monkeypatch):
     # labels MUST be present. Pins the fix in both directions - SSL_ONLY omits,
     # ROOT_ONLY includes - so a later change cannot silently drop the envelope
     # label on a run that actually loads it.
-    applied = _run_capture_scripts_applied(
+    applied, loaded = _run_capture_scripts_applied(
         monkeypatch, Action.ROOT_ONLY, "some_real_app",
         {"source": "rootsrc", "applied_hooks": []},
     )
     assert "synthesized" in applied
     assert "synthesized:native_su_binary_embedded" in applied
     assert "synthesized:root_runtime_exec_su" in applied
+    # Pins the fix in both directions - SSL_ONLY omits (above), ROOT_ONLY includes
+    # - so a later change cannot silently drop the envelope label on a run that
+    # actually loads it, NOR claim it while loading nothing: both root-envelope
+    # recipes' JS is present in the source the stage actually loaded. (This is the
+    # assertion the label-only version was missing; without it the append could be
+    # reverted and the label branch alone would keep this green.)
+    assert ROOT_RECIPES["native_su_binary_embedded"] in loaded
+    assert ROOT_RECIPES["root_runtime_exec_su"] in loaded
 
 
 def _run_with_captured_require_evidence(monkeypatch, action, target, synthesized):
@@ -510,9 +550,19 @@ def test_unknown_ssl_run_requires_ssl_evidence(monkeypatch):
 def test_wait_for_checkpoint_returns_early_on_hook_signal(monkeypatch):
     # RESID-6D: as soon as a bypass script signals its hooks are in (a send
     # payload carrying a 'hook' key), the settle wait returns - no blind sleep.
+    clock = {"now": 0.0}
     sleeps = []
-    monkeypatch.setattr("dynamic.frida_runner.time.sleep", lambda s: sleeps.append(s))
-    monkeypatch.setattr("dynamic.frida_runner.time.monotonic", lambda: 0.0)
+    # Advancing clock, not a frozen one. With `monotonic` pinned to a constant and
+    # `sleep` a no-op, a regression that stops the early return would spin the
+    # `while monotonic() < deadline` loop forever - the suite HANGS rather than
+    # fails. The advancing clock bounds the loop, so a regression burns the window
+    # and fails `sleeps == []` below (the correct signal), like the siblings.
+    def fake_sleep(s):
+        sleeps.append(s)
+        clock["now"] += s
+
+    monkeypatch.setattr("dynamic.frida_runner.time.sleep", fake_sleep)
+    monkeypatch.setattr("dynamic.frida_runner.time.monotonic", lambda: clock["now"])
     messages = [{"type": "send", "payload": {"hook": "c.a", "forced_result": False}}]
 
     frida_runner._wait_for_checkpoint(messages, settle_seconds=5)
@@ -564,9 +614,17 @@ def test_wait_for_checkpoint_requires_evidence_when_ui_driven(monkeypatch):
 
 def test_wait_for_checkpoint_evidence_arrives_early(monkeypatch):
     # With the app's bypass evidence present, require_evidence returns immediately.
+    clock = {"now": 0.0}
     sleeps = []
-    monkeypatch.setattr("dynamic.frida_runner.time.sleep", lambda s: sleeps.append(s))
-    monkeypatch.setattr("dynamic.frida_runner.time.monotonic", lambda: 0.0)
+    # Advancing clock (not frozen): a regression that stops the early return must
+    # fail this test, not hang the suite in an unbounded poll - see the hook-signal
+    # test above for the full rationale.
+    def fake_sleep(s):
+        sleeps.append(s)
+        clock["now"] += s
+
+    monkeypatch.setattr("dynamic.frida_runner.time.sleep", fake_sleep)
+    monkeypatch.setattr("dynamic.frida_runner.time.monotonic", lambda: clock["now"])
     msgs = [
         {"type": "send", "payload": {"hook": "okhttp_certificate_pinner"}},
         {"type": "send", "payload": {"bypassEffect": "ssl-pin-check"}},

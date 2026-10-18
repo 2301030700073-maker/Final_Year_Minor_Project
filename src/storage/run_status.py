@@ -58,18 +58,32 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# A distinguishable "present but unparseable" result: NOT None (which means gone)
+# and not a real start time. Keeps gone / unreadable / live as three facts.
+_UNREADABLE = "__unreadable_proc_stat__"
+
+
 def _proc_start_time(pid: int) -> str | None:
-    """The kernel's start time for a pid (field 22 of /proc/<pid>/stat), or None
-    when it cannot be read - the process is gone, or this platform has no /proc."""
+    """The kernel's start time for a pid (field 22 of /proc/<pid>/stat), `None`
+    when the entry does not exist (the process is gone, or this platform has no
+    /proc), or the sentinel `_UNREADABLE` when the entry is present but does not
+    parse.
+
+    Other OSErrors - the entry exists but is UNREADABLE (permission denied on a
+    hidepid mount, EIO, ...) - PROPAGATE rather than collapsing to None. "Unknown"
+    and "gone" are different facts, and mapping an unreadable-but-live process to
+    "gone" is exactly the bug this split closes (run_is_alive's own contract:
+    unknown, never dead - the same absent-vs-unreadable distinction this module
+    keeps elsewhere)."""
     try:
         stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-    except OSError:
+    except FileNotFoundError:
         return None
     # The parenthesised comm can contain spaces and parentheses, so split after
     # the LAST ')' rather than on whitespace. fields[0] is field 3 (state), which
     # puts starttime - field 22 - at index 19.
     fields = stat.rsplit(")", 1)[-1].split()
-    return fields[19] if len(fields) > 19 else None
+    return fields[19] if len(fields) > 19 else _UNREADABLE
 
 
 def run_is_alive(status: dict[str, Any]) -> bool | None:
@@ -99,9 +113,16 @@ def run_is_alive(status: dict[str, Any]) -> bool | None:
     # pid table and report a live process as gone. Gate on the host first.
     if os.name != "posix" or not Path("/proc").is_dir():
         return None
-    current_start = _proc_start_time(pid)
+    try:
+        current_start = _proc_start_time(pid)
+    except OSError:
+        # /proc/<pid>/stat exists but is UNREADABLE (permission/hidepid/fault).
+        # The process may well be alive and we cannot tell: unknown, never dead.
+        return None
     if current_start is None:
         return False  # the pid is gone
+    if current_start == _UNREADABLE:
+        return None  # present but its stat did not parse - unknown, never dead
     recorded_start = status.get("pid_start")
     if recorded_start and current_start != recorded_start:
         return False  # the pid now belongs to a different process

@@ -77,8 +77,16 @@ class CategoryTier2Report:
     @property
     def f1(self) -> float | None:
         p, r = self.precision.rate, self.recall.rate
-        if p is None or r is None or (p + r) == 0:
+        if p is None or r is None:
+            # No data at all (an empty denominator) - genuinely undefined.
             return None
+        # p + r == 0 with BOTH denominators non-empty (precision.rate is None when
+        # its denominator is empty, so reaching here means both are measurable) is
+        # a MEASURED F1 of 0.0 - every case got wrong - not "no data". Rendering it
+        # None/N-A conflates the two, the exact confusion this module's docstring
+        # says it exists to prevent.
+        if (p + r) == 0:
+            return 0.0
         return 2 * p * r / (p + r)
 
     @property

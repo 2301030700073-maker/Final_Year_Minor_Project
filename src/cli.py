@@ -2010,7 +2010,17 @@ def run(
             "signature_corpus": signature_corpus,
         },
     )
-    _RUN_STATUS.start()
+    try:
+        _RUN_STATUS.start()
+    except OSError as exc:
+        # The progress sidecar is best-effort: an unwritable one is loudly noted
+        # but must not halt a 40-minute analysis. The audit record two lines below
+        # is NOT best-effort. NORM-AUDIT1 / PREP-AUDIT1 / SAVEMETA-AUDIT1 each
+        # closed an earlier pre-auth step that could abort before
+        # record_authorization and leave an authorized, hashed, partly-persisted
+        # attempt with no trail at all - this (the sidecar write) was the last one
+        # still able to do that, because `start()` raises on a failed write.
+        _caution_sidecar(exc)
 
     # --- audit (FR-8.2/FR-3.3: before any actual analysis stage) ---
     _begin_stage("audit")

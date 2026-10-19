@@ -126,6 +126,21 @@ def test_universal_ssl_enumerates_certificatepinner_overloads():
     assert "CP.check.overloads.forEach" in res.source
 
 
+def test_vendored_universal_script_enumerates_certificatepinner_overloads():
+    # SESSION11: the vendored universal-robust-advanced-root--ssl-pinning-bypass.js
+    # (PREDEFINED_SCRIPT, loaded for unknown targets - Fix-5) previously hardcoded
+    # okhttp3 / Squareup CertificatePinner.check overloads, which fail to install
+    # on builds where those exact types do not exist. It was hardened to enumerate
+    # check.overloads. This guards the regression so an upstream re-sync of the
+    # vendored file cannot silently re-introduce the fragile hardcoded form.
+    js = Path(
+        "scripts/universal-robust-advanced-root--ssl-pinning-bypass.js"
+    ).read_text(encoding="utf-8")
+    assert "CertificatePinner.check.overload(" not in js
+    assert "CertificatePinner.check$okhttp.overload(" not in js
+    assert ".check.overloads" in js
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 def test_synthesized_sources_parse_as_valid_javascript():
     # The synthesized bypasses are Frida JS strings. The other tests assert their

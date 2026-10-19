@@ -457,53 +457,42 @@ Java.perform(function() {
         SSLContext_init.call(this, keyManager, TrustManagers, secureRandom);
     };
 
-    // OkHTTPv3 (quadruple bypass) //
-    /////////////////////////////////
+    // OkHTTPv3 (check overloads + Kotlin-internal check$okhttp) //
+    //////////////////////////////////////////////////////////////
     try {
-        // Bypass OkHTTPv3 {1}
-        var okhttp3_Activity_1 = Java.use('okhttp3.CertificatePinner');
-        okhttp3_Activity_1.check.overload('java.lang.String', 'java.util.List').implementation = function(a, b) {
-            console.log('[+] Bypassing OkHTTPv3 {1}: ' + a);
-            return;
-        };
+        // Enumerate every overload of check and neutralize each. The exact
+        // argument-type strings vary across OkHTTP builds; a hardcoded
+        // overload('java.lang.String', 'java.util.List' / 'java.security.cert.Certificate'
+        // / '[Ljava.security.cert.Certificate;') that does not exist on this app's
+        // build throws and that pinning hook never engages. Iterating the resolved
+        // overload objects is robust to any overload set the app actually ships
+        // (covering the deprecated (String,Certificate) form automatically).
+        var okhttp3_CertificatePinner = Java.use('okhttp3.CertificatePinner');
+        var _ok_ovs = okhttp3_CertificatePinner.check.overloads;
+        for (var _ok_i = 0; _ok_i < _ok_ovs.length; _ok_i++) {
+            _ok_ovs[_ok_i].implementation = function(a, b) {
+                console.log('[+] Bypassing OkHTTPv3: ' + a);
+                return;
+            };
+        }
+        if (_ok_ovs.length === 0) {
+            console.log('[-] OkHTTPv3: no check overloads to wrap');
+        }
     } catch (err) {
-        console.log('[-] OkHTTPv3 {1} pinner not found');
+        console.log('[-] OkHTTPv3 pinner not found');
         //console.log(err);
         errDict[err] = ['okhttp3.CertificatePinner', 'check'];
     }
     try {
-        // Bypass OkHTTPv3 {2}
-        // This method of CertificatePinner.check is deprecated but could be found in some old Android apps
-        var okhttp3_Activity_2 = Java.use('okhttp3.CertificatePinner');
-        okhttp3_Activity_2.check.overload('java.lang.String', 'java.security.cert.Certificate').implementation = function(a, b) {
-            console.log('[+] Bypassing OkHTTPv3 {2}: ' + a);
-            return;
-        };
-    } catch (err) {
-        console.log('[-] OkHTTPv3 {2} pinner not found');
-        //console.log(err);
-        //errDict[err] = ['okhttp3.CertificatePinner', 'check'];
-    }
-    try {
-        // Bypass OkHTTPv3 {3}
-        var okhttp3_Activity_3 = Java.use('okhttp3.CertificatePinner');
-        okhttp3_Activity_3.check.overload('java.lang.String', '[Ljava.security.cert.Certificate;').implementation = function(a, b) {
-            console.log('[+] Bypassing OkHTTPv3 {3}: ' + a);
-            return;
-        };
-    } catch (err) {
-        console.log('[-] OkHTTPv3 {3} pinner not found');
-        //console.log(err);
-        errDict[err] = ['okhttp3.CertificatePinner', 'check'];
-    }
-    try {
-        // Bypass OkHTTPv3 {4}
+        // Bypass OkHTTPv3 {4} - Kotlin-internal check$okhttp (separate method, not check)
         var okhttp3_Activity_4 = Java.use('okhttp3.CertificatePinner');
-        //okhttp3_Activity_4['check$okhttp'].implementation = function(a, b) {
-        okhttp3_Activity_4.check$okhttp.overload('java.lang.String', 'kotlin.jvm.functions.Function0').implementation = function(a, b) {
-            console.log('[+] Bypassing OkHTTPv3 {4}: ' + a);
-            return;
-        };
+        var _ok4_ovs = okhttp3_Activity_4.check$okhttp.overloads;
+        for (var _ok4_i = 0; _ok4_i < _ok4_ovs.length; _ok4_i++) {
+            _ok4_ovs[_ok4_i].implementation = function(a, b) {
+                console.log('[+] Bypassing OkHTTPv3 {4}: ' + a);
+                return;
+            };
+        }
     } catch (err) {
         console.log('[-] OkHTTPv3 {4} pinner not found');
         //console.log(err);
@@ -864,29 +853,28 @@ Java.perform(function() {
 
 
 
-    // Squareup CertificatePinner [OkHTTP<v3] (double bypass) //
+    // Squareup CertificatePinner [OkHTTP<v3] (all check overloads) //
     ////////////////////////////////////////////////////////////
     try {
-        // Bypass Squareup CertificatePinner  {1}
-        var Squareup_CertificatePinner_Activity_1 = Java.use('com.squareup.okhttp.CertificatePinner');
-        Squareup_CertificatePinner_Activity_1.check.overload('java.lang.String', 'java.security.cert.Certificate').implementation = function(a, b) {
-            console.log('[+] Bypassing Squareup CertificatePinner {1}: ' + a);
-            return;
-        };
+        // Enumerate every overload of check and neutralize each. The exact
+        // argument-type strings vary across builds; a hardcoded
+        // overload('java.lang.String', 'java.security.cert.Certificate') or
+        // (String,List) that does not exist on this app's build throws and the
+        // pinning hook silently never engages. Iterating the resolved overload
+        // objects is robust to either overload set.
+        var Squareup_CertificatePinner = Java.use('com.squareup.okhttp.CertificatePinner');
+        var _sq_ovs = Squareup_CertificatePinner.check.overloads;
+        for (var _sq_i = 0; _sq_i < _sq_ovs.length; _sq_i++) {
+            _sq_ovs[_sq_i].implementation = function(a, b) {
+                console.log('[+] Bypassing Squareup CertificatePinner: ' + a);
+                return;
+            };
+        }
+        if (_sq_ovs.length === 0) {
+            console.log('[-] Squareup CertificatePinner: no check overloads to wrap');
+        }
     } catch (err) {
-        console.log('[-] Squareup CertificatePinner {1} pinner not found');
-        //console.log(err);
-        errDict[err] = ['com.squareup.okhttp.CertificatePinner', 'check'];
-    }
-    try {
-        // Bypass Squareup CertificatePinner {2}
-        var Squareup_CertificatePinner_Activity_2 = Java.use('com.squareup.okhttp.CertificatePinner');
-        Squareup_CertificatePinner_Activity_2.check.overload('java.lang.String', 'java.util.List').implementation = function(a, b) {
-            console.log('[+] Bypassing Squareup CertificatePinner {2}: ' + a);
-            return;
-        };
-    } catch (err) {
-        console.log('[-] Squareup CertificatePinner {2} pinner not found');
+        console.log('[-] Squareup CertificatePinner pinner not found');
         //console.log(err);
         errDict[err] = ['com.squareup.okhttp.CertificatePinner', 'check'];
     }

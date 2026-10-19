@@ -295,7 +295,8 @@ def test_recorded_refusal_decides_over_the_app_silence_inference():
     # the app DID exercise that path. The refusal must decide, and the reason must
     # name the host instead of re-offering app-silence as a live possibility.
     out = _reclassify_empty_capture(
-        _capture(tls_failed_clients=[{"host": "api.example.com", "error": "unknown ca"}]),
+        _capture(tls_failed_clients=[{"host": "api.example.com", "error": "unknown ca"}],
+                 proxy_attribution={"reached": True, "reason": "app uid on the proxy"}),
         _manifest(_INTERNET), _dynamic([]))
     assert out.status == "skipped"
     assert out.evidence["reclassified_from"] == "failed"
@@ -304,6 +305,43 @@ def test_recorded_refusal_decides_over_the_app_silence_inference():
     assert "api.example.com" in reason
     assert "refused its certificate" in reason
     assert "neither a wiring failure nor app-silence" in reason
+    # The affirmative "the app exercised its network path" is licensed ONLY by the
+    # per-uid attribution confirming the app was on the proxy.
+    assert "the app exercised its network path" in reason
+
+
+def test_unattributed_refusal_is_not_credited_to_the_app():
+    # ADR-0012 regression (the independent-review HIGH): a refusal the per-uid
+    # attribution did NOT tie to the app (reached False, or unmeasured) must NOT
+    # be narrated as the app's pinning. The old wording asserted "the app
+    # exercised its network path ... a pinning result" on ANY refusal, crediting a
+    # Play-services/WebView refusal to the target - the over-credit cls.py's own
+    # mitmproxy stage refused. It stays skipped (a refusal proves the route
+    # worked, so not a wiring fault) but the reason must NOT credit the app.
+    out = _reclassify_empty_capture(
+        _capture(tls_failed_clients=[{"host": "gstatic.com", "error": "unknown ca"}],
+                 proxy_attribution={"reached": False, "reason": "no app uid seen"}),
+        _manifest(_INTERNET), _dynamic([]))
+    assert out.status == "skipped"
+    reason = out.evidence["not_applicable_reason"]
+    assert "gstatic.com" in reason
+    assert "could NOT be attributed to the target package" in reason
+    assert "do NOT establish that THIS app" in reason
+    assert "the app exercised its network path" not in reason  # the over-claim is gone
+    assert "a pinning result" not in reason  # not asserted without attribution
+
+
+def test_unmeasured_attribution_refusal_is_also_not_credited():
+    # reached=None (attribution not taken / no uid map) is NOT True, so the same
+    # caution applies - unmeasured is never read as "the app pinned".
+    out = _reclassify_empty_capture(
+        _capture(tls_failed_clients=[{"host": "x.example.com", "error": "unknown ca"}],
+                 proxy_attribution={"reached": None, "reason": "not measured"}),
+        _manifest(_INTERNET), _dynamic([]))
+    assert out.status == "skipped"
+    reason = out.evidence["not_applicable_reason"]
+    assert "could NOT be attributed to the target package" in reason
+    assert "the app exercised its network path" not in reason
 
 
 def test_refusal_reason_states_its_attribution_bound_when_no_host_was_captured():

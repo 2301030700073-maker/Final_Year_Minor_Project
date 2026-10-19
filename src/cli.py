@@ -1352,22 +1352,52 @@ def _reclassify_empty_capture(
             if isinstance(r, dict) and r.get("host")
         })
         where = ", ".join(hosts) if hosts else "host not captured (no SNI recorded)"
+        # ADR-0012: a proxy-recorded refusal is NOT a fact about the TARGET by
+        # itself. The proxy is device-global and a refusal by ANY process looks
+        # identical proxy-side (measured 2026-10-04 Arm 1: 6 of 7 refusals were
+        # Google Play services). run_capture_stage gates its own narration on
+        # per-uid attribution (`proxy_attribution.reached`); Signal 0 must apply
+        # the SAME gate or it re-asserts the over-credit the stage refused.
+        # reached True => the app demonstrably connected, so the refusal that
+        # killed its handshake is the app's. reached False/None => recorded and
+        # printed, but NOT credited to the target.
+        reached = (evidence.get("proxy_attribution") or {}).get("reached")
+        no_host_bound = (
+            " With no host captured it is only some client on the device."
+            if not hosts else ""
+        )
+        if reached is True:
+            reason = (
+                f"the capture proxy recorded {len(refusals)} client TLS handshake(s) "
+                f"it refused its certificate for ({where}) - the app rejected the "
+                "capture CA, the proxy-side signature of certificate pinning (or a "
+                "custom/limited trust store). A refusal requires the connection, so "
+                "the device->proxy route worked AND the app exercised its network "
+                "path: this is neither a wiring failure nor app-silence, and the "
+                "host(s) above were not decryptable by this route - a pinning result, "
+                "not a capture fault. Credited to the target only because this run's "
+                "per-uid attribution found the app on the proxy (reached=True); not "
+                "per-flow proof." + no_host_bound
+            )
+        else:
+            reason = (
+                f"the capture proxy recorded {len(refusals)} client TLS handshake(s) "
+                f"it refused its certificate for ({where}). A refusal requires the "
+                "connection, so the device->proxy route worked and this empty capture "
+                "is neither a wiring failure nor app-silence. But these refusals "
+                "could NOT be attributed to the target package (per-uid attribution "
+                f"reached={reached!r}), and a refusal by any process on the device "
+                "looks identical proxy-side, so they do NOT establish that THIS app "
+                "rejected the capture CA or that it pins its traffic: do not treat "
+                "this as pinning evidence without re-running with the app's uid "
+                "attributable, or matching the refusal hosts to the package's own "
+                "traffic. The proxy is set device-globally for a capture."
+                + no_host_bound
+            )
         return StageResult(
             stage="capture-traffic", status="skipped",
             evidence={**evidence, "reclassified_from": "failed",
-                      "not_applicable_reason": (
-                          f"the capture proxy recorded {len(refusals)} client TLS "
-                          f"handshake(s) it refused its certificate for ({where}) - the "
-                          "client rejected the capture CA, the proxy-side signature of "
-                          "certificate pinning (or a custom/limited trust store). A "
-                          "refusal requires the connection, so the device->proxy route "
-                          "worked AND the app exercised its network path: this is neither "
-                          "a wiring failure nor app-silence, and the host(s) above were "
-                          "not decryptable by this route - a pinning result, not a "
-                          "capture fault. Attribution bound: the proxy is set "
-                          "device-globally for a capture, so a refusal is attributed to "
-                          "the target app by its recorded SNI host; with no host "
-                          "captured it is only some client on the device")},
+                      "not_applicable_reason": reason},
             error=None, duration_ms=capture_stage.duration_ms,
         )
 

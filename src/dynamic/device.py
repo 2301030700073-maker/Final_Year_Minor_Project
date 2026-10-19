@@ -1121,11 +1121,14 @@ def _install_apex_ca(adb: str, serial: str, local_tmp: str, hash_name: str) -> s
     if probe.returncode != 0 or _APEX_CACERTS not in (probe.stdout or ""):
         return None
     apex_path = f"{_APEX_CACERTS}/{hash_name}.0"
-    subprocess.run(
-        [adb, "-s", serial, "shell", "setenforce", "0"],
-        capture_output=True, text=True, timeout=15,
-    )  # best-effort: already-permissive builds make this a no-op
     try:
+        # Permissive for the instant of the mount: SELinux enforcing rejects the
+        # APEX overlay with ENOENT on a userdebug build. INSIDE the try so the
+        # finally always restores, even if this very call raises or times out.
+        subprocess.run(
+            [adb, "-s", serial, "shell", "setenforce", "0"],
+            capture_output=True, text=True, timeout=15,
+        )
         bind_setup = (
             f"mkdir -p {_APEX_CACERTS_STAGING} && "
             f"(grep -qs ' {_APEX_CACERTS} ' /proc/mounts && echo already) || "
@@ -1144,10 +1147,21 @@ def _install_apex_ca(adb: str, serial: str, local_tmp: str, hash_name: str) -> s
                 + ((proc.stderr or proc.stdout or "").strip() or "no output")
             )
     finally:
-        subprocess.run(
+        restored = subprocess.run(
             [adb, "-s", serial, "shell", "setenforce", "1"],
             capture_output=True, text=True, timeout=15,
-        )  # restore enforcing; best-effort
+        )
+        # Restore to enforcing, and NEVER return success while the device is left
+        # permissive: an installed-but-permissive device is a silent security
+        # regression, so a failed restore fails loudly (surfacing above any
+        # in-flight install error - a permissive device is the worse state).
+        if restored.returncode != 0:
+            raise RuntimeError(
+                "SELinux was NOT restored to enforcing after the API-34 APEX CA "
+                f"install - the device may be left PERMISSIVE. Run: adb -s {serial} "
+                "shell setenforce 1. adb said: "
+                + ((restored.stderr or restored.stdout or "").strip() or "no output")
+            )
     return apex_path
 
 

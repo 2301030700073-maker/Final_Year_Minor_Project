@@ -12,11 +12,12 @@ class _FakeSubprocess:
     """Records subprocess.run calls and dispatches canned answers by command -
     enough of the adb surface for _install_apex_ca (no real adb/device)."""
 
-    def __init__(self, *, sdk=34, apex_present=True, apex_rc=0):
+    def __init__(self, *, sdk=34, apex_present=True, apex_rc=0, restore_rc=0):
         self.calls = []
         self._sdk = sdk
         self._apex_present = apex_present
         self._apex_rc = apex_rc
+        self._restore_rc = restore_rc
 
     @staticmethod
     def _rc(rc, out=""):
@@ -30,9 +31,9 @@ class _FakeSubprocess:
             return self._rc(0, f"{self._sdk}\n")
         if "mount -o bind" in joined:  # the bind+cp+chmod idempotent chain
             return self._rc(self._apex_rc, "ok-apex\n" if self._apex_rc == 0 else "")
-        if "setenforce" in args and "0" in args:
-            return self._rc(0)
         if "setenforce" in args and "1" in args:
+            return self._rc(self._restore_rc)
+        if "setenforce" in args and "0" in args:
             return self._rc(0)
         if "-d" in args and device._APEX_CACERTS in joined:  # the presence probe
             return self._rc(0 if self._apex_present else 1,
@@ -82,6 +83,15 @@ def test_install_apex_ca_failure_raises_and_still_restores_enforcing(monkeypatch
     with pytest.raises(RuntimeError):
         device._install_apex_ca("adb", "emu-5554", "/data/local/tmp/abc.0", "abc")
     assert fake._has(lambda c: "setenforce" in c and "1" in c), "enforcing not restored on failure"
+
+
+def test_install_apex_ca_failed_restore_never_reports_success(monkeypatch):
+    # A failed setenforce 1 (device left permissive) must NOT be swallowed - the
+    # function must refuse to report a successful install while permissive.
+    fake = _FakeSubprocess(sdk=34, apex_present=True, restore_rc=1)
+    monkeypatch.setattr(device, "subprocess", fake)
+    with pytest.raises(RuntimeError, match="PERMISSIVE"):
+        device._install_apex_ca("adb", "emu-5554", "/data/local/tmp/abc.0", "abc")
 
 
 # The `is_listening` gate that `setup_frida_connection` re-asserts behind is a

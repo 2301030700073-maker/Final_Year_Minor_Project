@@ -65,6 +65,11 @@ def _pin_hook_fired(frida_log: str) -> bool:
 # OR double quotes means a future switch to JSON logging cannot silently turn this
 # into a false negative.
 _ROOT_PROBE_RE = re.compile(r"probeHit['\"]?\s*:\s*['\"]root['\"]")
+# F-1/F-2: a root probeHit whose artifact was explicitly absent (`present: False`)
+# is a no-op hide - hiding a file that was never on the device changes nothing, so
+# it is NOT evidence the app's root check was defeated. The exact Python-repr /
+# JSON forms cli.py logs both spell it `present: False` / `"present": false`.
+_PRESENT_FALSE_RE = re.compile(r"present['\"]?\s*:\s*False")
 
 
 def _root_probe_hit(frida_log: str) -> bool:
@@ -81,9 +86,18 @@ def _root_probe_hit(frida_log: str) -> bool:
     AG-SC1: match the probeHit value precisely (`_ROOT_PROBE_RE`) rather than a
     loose `"root" in line`, so a non-root probeHit - or an error line that merely
     mentions "root" - cannot over-claim a confirmed root bypass. Same line-coherent
-    rigor `_pin_hook_fired` applies to the SSL side (RESID-6G)."""
+    rigor `_pin_hook_fired` applies to the SSL side (RESID-6G).
+
+    F-1/F-2: a root probeHit whose artifact was explicitly absent (`present:
+    False`) is a no-op hide and is excluded (it would false-confirm root on a
+    non-rooted device, ADR-0006). Legacy probeHits with no `present` field still
+    confirm, preserving pre-fix behavior."""
     for line in frida_log.splitlines():
         if _ROOT_PROBE_RE.search(line):
+            # Skip a probeHit that hid an artifact that was never present - see
+            # _PRESENT_FALSE_RE above.
+            if _PRESENT_FALSE_RE.search(line):
+                continue
             return True
     return False
 

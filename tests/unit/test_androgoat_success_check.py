@@ -104,6 +104,42 @@ def test_root_probe_hit_without_pin_still_confirms_root_ssl_inconclusive():
     assert "root_probe_hit" in result.evidence_lines
 
 
+def test_root_probe_hit_present_false_is_no_op_hide_not_confirmation():
+    # F-1/F-2 regression: a root probeHit whose artifact was explicitly absent
+    # (`present: False`) is a no-op hide - hiding a file that was never on the
+    # device changes nothing - so it must NOT confirm root (it would
+    # false-confirm root on a non-rooted device, ADR-0006). This falsifies the old
+    # "probeHit on CALL, not changed-outcome" behavior.
+    from dynamic.success_checks.androgoat import _root_probe_hit
+    assert _root_probe_hit(
+        "{'type': 'send', 'payload': {'probeHit': 'root', 'path': '/system/bin/su', 'present': False}}"
+    ) is False
+    # The whole-log check respects it too: a run whose only root signal is a
+    # no-op hide leaves root inconclusive (not confirmed, not a failure).
+    result = check.check(
+        logcat_output="",
+        frida_log=_frida_log(
+            _pin_hook_fired_message(),
+            {"type": "send", "payload": {"probeHit": "root", "path": "/system/bin/su", "present": False}},
+        ),
+    )
+    assert result.root_bypassed is None
+    assert result.ssl_bypassed is True     # pin hook still confirms SSL
+    assert "root_probe_hit" not in result.evidence_lines
+
+
+def test_root_probe_hit_present_true_still_confirms():
+    # Control: a root probeHit for an artifact that WAS present still confirms.
+    result = check.check(
+        logcat_output="",
+        frida_log=_frida_log(
+            {"type": "send", "payload": {"probeHit": "root", "path": "/system/bin/su", "present": True}},
+        ),
+    )
+    assert result.root_bypassed is True
+    assert "root_probe_hit" in result.evidence_lines
+
+
 def test_no_root_probe_is_root_inconclusive():
     # No probeHit -> root is None (inconclusive), never a definitive failure.
     result = check.check(

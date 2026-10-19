@@ -84,7 +84,11 @@ def test_execve_block_is_installed_on_entry_not_on_leave():
     assert "args[0] = BLOCKED_EXEC;" in block
     assert "Memory.allocUtf8String('/nonexistent/.frida-blocked-exec')" in block
     # ...and still emit the probeHit that confirms the app's own check ran.
-    assert "send({probeHit: 'root', path: p})" in block
+    assert "send({probeHit: 'root', path: p, present: present})" in block
+    # F-1/F-2: the execve probeHit now carries `present` - the genuine existence
+    # of the blocked root binary - so a no-op hide (binary never installed) is not
+    # confirmed as a defeated root check.
+    assert "_real_access" in block
 
 
 def test_execve_block_still_matches_only_root_binaries():

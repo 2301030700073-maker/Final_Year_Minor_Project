@@ -179,6 +179,40 @@ def test_root_confirmed_on_observed_probe_hit():
     assert v3.root_bypassed is None  # engagement alone, no probe observed
 
 
+def test_root_probe_hit_with_present_false_is_no_op_hide_not_confirmation():
+    # F-1/F-2: the synthesizer now emits `present` for every root probeHit, and a
+    # probeHit whose artifact was NOT actually on the device (present=False) is a
+    # no-op hide - hiding an absent file changes nothing, so it must NOT confirm a
+    # defeated root check (that would false-confirm root on a non-rooted device,
+    # ADR-0006). This is the regression test that falsifies the old "probeHit on
+    # CALL, not changed-outcome" behavior: before the fix, ANY root probeHit
+    # confirmed root regardless of presence.
+    v = TechnologyHooksEngagedCheck().check([
+        {"type": "send", "payload": {"probeHit": "root", "path": "/system/bin/su", "present": False}},
+    ])
+    assert v.root_bypassed is None        # no-op hide does NOT confirm
+    # the no-op hide is surfaced honestly, never promoted to a bypass confirmation
+    assert "/system/bin/su" in v.evidence_lines["root artifact probes (artifact absent - no-op hide)"]
+
+
+def test_root_probe_hit_with_present_true_still_confirms():
+    # Control: a probeHit for an artifact that WAS present still confirms root.
+    v = TechnologyHooksEngagedCheck().check([
+        {"type": "send", "payload": {"probeHit": "root", "path": "/system/bin/su", "present": True}},
+    ])
+    assert v.root_bypassed is True
+    assert "/system/bin/su" in v.evidence_lines["root artifact probes answered-false"]
+
+
+def test_root_probe_hit_legacy_without_present_still_confirms():
+    # Backward-compat: a captured message from before this change (no `present`
+    # field) still confirms, so existing evidence is not silently downgraded.
+    v = TechnologyHooksEngagedCheck().check([
+        {"type": "send", "payload": {"probeHit": "root", "path": "/data/adb/magisk"}},
+    ])
+    assert v.root_bypassed is True
+
+
 def test_non_root_probe_hit_does_not_confirm_root():
     # Decider-owns-its-guard (parallels AG-SC1 for the AndroGoat check): ROOT is
     # confirmed ONLY by a root-VALUED probeHit. Every probeHit the synthesizer

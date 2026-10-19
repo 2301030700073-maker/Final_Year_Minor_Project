@@ -80,6 +80,30 @@ def test_ssl_only_composition_carries_no_root_hook_whatever_root_detected():
     assert "ssl-handshake" in res.source
 
 
+def test_ssl_observer_enumerates_certificatepinner_overloads():
+    # Real-world regression (AndroGoat, 2026-10-19): the SSL effect observer used
+    # CertificatePinner.check.overload('java.lang.String', 'java.util.List'), which
+    # failed to install on AndroGoat's OkHttp build ("argument types do not match
+    # any of: (String,List)/(String,Certificate[])") - so the pinning hook never
+    # engaged and HTTPS could not be decrypted. The observer must now wrap EVERY
+    # overload via CP.check.overloads instead of hardcoding one signature string.
+    res = synthesize(
+        _cls(Action.SSL_ONLY, ssl_ids=["okhttp_certificate_pinner"]),
+        Action.SSL_ONLY,
+    )
+    assert "ssl-pin-check" in res.source
+    # The fragile single-overload ASSIGNMENT is gone (only the comment text may
+    # mention it): no hardcoded `CP.check.overload('<types>').implementation`.
+    assert "CP.check.overload(" not in res.source
+    # The robust enumerate-overloads form is present:
+    assert "CP.check.overloads" in res.source
+    assert "CP.check.overloads.forEach" in res.source
+    # The hand-authored script shares the failure and gets the same robustness:
+    js = Path("src/dynamic/scripts/ssl_pinning_bypass_v1.js").read_text(encoding="utf-8")
+    assert "CertificatePinner.check.overloads" in js
+    assert '.overload("java.lang.String", "java.util.List")' not in js
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 def test_synthesized_sources_parse_as_valid_javascript():
     # The synthesized bypasses are Frida JS strings. The other tests assert their
@@ -906,6 +930,54 @@ def test_file_exists_patch_hides_all_four_file_probes():
     assert "/system/bin/su" in src
 
 
+def test_file_exists_patch_emits_present_for_genuine_existence():
+    # F-1/F-2: the Java File patch must call the ORIGINAL impl to learn whether
+    # the root artifact was ACTUALLY present and emit `present`, so the readers
+    # can exclude a no-op hide (hidden artifact was never on the device) from root
+    # confirmation. Before the fix the patch returned false without recording
+    # presence, so every probeHit confirmed root even on a non-rooted device.
+    from dynamic.synthesizer import _file_exists_patch
+    src = _file_exists_patch()
+    # it calls the real impl for the root branch...
+    assert "var real = this[m]();" in src
+    # ...and emits present alongside the probeHit
+    assert "send({probeHit: 'root', path: p, present: real})" in src
+
+
+def test_native_root_path_hiding_emits_present_from_real_return():
+    # F-1/F-2: the native libc path-hiding arm computes `present` from the REAL
+    # return value of the probed primitive (fopen -> non-null, open/openat -> fd
+    # >= 0, access/stat/... -> 0) and emits it, so an absent artifact reads
+    # present=false (a no-op hide) and is excluded from confirmation.
+    import re
+    from dynamic.synthesizer import _native_root_path_hiding
+    src = _native_root_path_hiding(["/system/bin/su"])
+    # caches the REAL access before any hook attaches (so it does not ask its own
+    # hooked export, which would report a hidden su as absent even on a rooted
+    # device)
+    assert "var _real_access =" in src
+    assert "Module.findExportByName('libc.so', 'access')" in src
+    # emits present derived from the original return
+    assert "send({probeHit: 'root', path: this.hp.readUtf8String(), present: present})" in src
+    # presence is computed per-primitive (pointer vs int return encodings)
+    for frag in ("fn === 'fopen'", "fn === 'open' || fn === 'openat'", "toInt32() === 0"):
+        assert frag in src
+
+
+def test_native_root_exec_blocking_emits_present_for_blocked_binary():
+    # F-1/F-2: the execve/system arm emits `present` = whether the blocked root
+    # binary was ACTUALLY on the device, so blocking a binary that was never
+    # installed (a no-op) is not confirmed as a defeated root check.
+    import re
+    from dynamic.synthesizer import _native_root_exec_blocking, _native_root_path_hiding
+    # _real_access is cached by the path-hiding arm, which always precedes the
+    # exec arm in the composed native root envelope.
+    exec_src = _native_root_exec_blocking()
+    assert "present: present" in exec_src
+    assert "rootBinPresent" in exec_src        # resolves a referenced binary's real presence
+    assert "_real_access" in exec_src           # uses the cached real access
+
+
 def test_native_ssl_pin_bypass_covers_boringssl_family():
     # _native_ssl_pin_bypass: must carry all four verify-control entrypoints
     # (the classic set_verify + custom_verify BoringSSL API), enumerate loaded
@@ -1109,10 +1181,12 @@ def test_observer_separates_an_absent_class_from_a_refused_hook():
     src = _ssl_effect_observer()
     # the conflating wording is gone...
     assert "[synth] hook target absent" not in src
-    # ...each class lookup names absence as a property of the app (7 observer blocks)
+    # ...each class lookup names absence as a property of the app (6 observer blocks:
+    # CertificatePinner + conscrypt TrustManagerImpl's two checkServerTrusted overloads
+    # + the native BoringSSL hooks)
     assert src.count(
         "catch (e) { console.log('[synth] hook target not present in the app: "
-    ) == 7
+    ) == 6
     # ...and a present target whose install threw keeps the real refusal wording
     assert "found but the hook could not be installed: ' + e" in src
     # the install catch is no longer the one that names the class, so an absent

@@ -344,6 +344,7 @@ class TechnologyHooksEngagedCheck:
         messages = frida_messages or []
         engaged: list[str] = []
         root_probe_hits: list[str] = []
+        root_noop_hides: list[str] = []
         effects: list[str] = []
         not_installed: list[str] = []
         absent_targets: list[str] = []
@@ -408,7 +409,27 @@ class TechnologyHooksEngagedCheck:
                 # _ROOT_PROBE_RE). The decider owns this guard here rather than
                 # relying on the synthesizer only ever emitting 'root'.
                 if ph and str(ph) == "root":
-                    root_probe_hits.append(f"{ph}:{payload.get('path', '?')}")
+                    # F-1/F-2: a root probeHit only confirms a defeated root check
+                    # when the hidden artifact was ACTUALLY PRESENT. The
+                    # synthesizer now emits `present` = whether the artifact
+                    # existed on the device before it was hidden. Hiding a
+                    # root-artifact path that was NEVER present is a no-op (an
+                    # absent file reads false regardless), so confirming root from
+                    # it would false-confirm root on a non-rooted device -
+                    # contradicting ADR-0006. A probeHit whose `present` is
+                    # explicitly False is recorded as a no-op hide and must NOT
+                    # confirm. Legacy probeHits (no `present` field, e.g. a
+                    # captured message from before this change) default to
+                    # present=True, preserving the pre-fix confirmation behavior.
+                    present = payload.get("present", True)
+                    path = payload.get("path", "?")
+                    if present is False:
+                        if path not in root_noop_hides:
+                            root_noop_hides.append(path)
+                        continue
+                    hit = f"{ph}:{path}"
+                    if hit not in root_probe_hits:
+                        root_probe_hits.append(hit)
                 eff = payload.get("bypassEffect")
                 if eff and eff not in effects:
                     effects.append(str(eff))
@@ -505,6 +526,15 @@ class TechnologyHooksEngagedCheck:
             "root artifact probes answered-false": (
                 ", ".join(dict.fromkeys(root_probe_hits)) if root_probe_hits
                 else "none observed (no root check reached during the run)"
+            ),
+            # F-1/F-2: root-artifact probes that fired on a device where the hidden
+            # artifact was NEVER present - a no-op hide (an absent file reads false
+            # regardless), which must NOT confirm root (it would false-confirm on a
+            # non-rooted device, ADR-0006). Surfaced honestly so the operator can
+            # see the distinction, never promoted to a bypass confirmation.
+            "root artifact probes (artifact absent - no-op hide)": (
+                ", ".join(dict.fromkeys(root_noop_hides)) if root_noop_hides
+                else "none"
             ),
             # Fix-1: observable SSL effect - a TLS handshake completed through the
             # neutralized stack, evidence the bypass had a real effect. This line

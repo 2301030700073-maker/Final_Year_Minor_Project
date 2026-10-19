@@ -8,9 +8,22 @@
 Java.perform(function () {
     try {
         var CertificatePinner = Java.use("okhttp3.CertificatePinner");
-        CertificatePinner.check.overload("java.lang.String", "java.util.List").implementation = function (hostname, certs) {
-            send({ hook: "OkHttp CertificatePinner.check", hostname: hostname, bypassed: true });
-        };
+        // Enumerate every overload of check and wrap each. The exact argument-type
+        // strings vary across OkHttp builds; a hardcoded overload('java.lang.String',
+        // 'java.util.List') that does not match this app's build fails to install and
+        // the pinning hook silently never engages (observed live on AndroGoat).
+        var overloads = CertificatePinner.check.overloads;
+        for (var i = 0; i < overloads.length; i++) {
+            (function (ov) {
+                ov.implementation = function () {
+                    var hostname = arguments[0];
+                    send({ hook: "OkHttp CertificatePinner.check", hostname: hostname, bypassed: true });
+                };
+            })(overloads[i]);
+        }
+        if (overloads.length === 0) {
+            send({ hook: "OkHttp CertificatePinner", present: false });
+        }
     } catch (e) {
         send({ hook: "OkHttp CertificatePinner", present: false });
     }

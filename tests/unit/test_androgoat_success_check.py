@@ -140,6 +140,38 @@ def test_root_probe_hit_present_true_still_confirms():
     assert "root_probe_hit" in result.evidence_lines
 
 
+def test_root_probe_hit_present_false_json_lowercase_is_excluded():
+    # SESSION11G: cli logs str(message) (Python repr, capitalized) today, but the
+    # JSON form spells it `false` (lowercase). A future JSON logger must not be able
+    # to silently re-open the no-op-hide over-claim - `[Ff]alse` matches both.
+    from dynamic.success_checks.androgoat import _root_probe_hit
+    assert _root_probe_hit('{"probeHit": "root", "path": "/system/bin/su", "present": false}') is False
+
+
+def test_root_probe_hit_status_failed_is_not_confirmation():
+    # M-STATUS1 (independent review): a message that REPORTS ITS OWN FAILURE
+    # (status: failed) cannot confirm a bypass, even if it also carries a root
+    # probeHit token - mirrors technology.py's status=='failed' guard.
+    from dynamic.success_checks.androgoat import _root_probe_hit
+    assert _root_probe_hit(
+        "{'probeHit': 'root', 'path': '/system/bin/su', 'present': True, 'status': 'failed'}"
+    ) is False
+
+
+def test_pin_hook_fired_ignores_a_status_failed_message():
+    # M-STATUS1 (independent review): an error/send-failure message that happens to
+    # carry the pin-hook name + bypassed:true must NOT confirm SSL - its status is
+    # 'failed', so it is a diagnostic, not the hook defeating the pin.
+    from dynamic.success_checks.androgoat import _pin_hook_fired
+    assert _pin_hook_fired(
+        "{'hook': 'OkHttp CertificatePinner.check', 'bypassed': True, 'status': 'failed'}"
+    ) is False
+    # control: same tokens WITHOUT status: failed still confirm
+    assert _pin_hook_fired(
+        "{'hook': 'OkHttp CertificatePinner.check', 'bypassed': True}"
+    ) is True
+
+
 def test_no_root_probe_is_root_inconclusive():
     # No probeHit -> root is None (inconclusive), never a definitive failure.
     result = check.check(

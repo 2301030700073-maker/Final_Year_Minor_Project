@@ -1360,6 +1360,12 @@ def test_generate_report_reconciles_nsc_pins_not_manifest_declared(tmp_path):
     content = not_declared.read_text(encoding="utf-8")
     assert "NOT manifest-declared" in content
     assert "network_security_config_pinset" in content
+    # SESSION11G wording fix: the note must NOT assert the pins ARE enforced by
+    # the app (only a <pin-set> string was found); it says NOT OS-enforced and that
+    # app-code loading is not established.
+    assert "NOT OS-enforced" in content
+    assert "enforced by the app itself" not in content
+    assert "does NOT establish whether the app" in content
 
     declared = generate_report(
         run_id="runNSC2", apk_hash="nsc124", timestamp="2026-10-19T12:00:00",
@@ -1371,6 +1377,28 @@ def test_generate_report_reconciles_nsc_pins_not_manifest_declared(tmp_path):
                               application_present=True, nsc_file_present=True),
     )
     assert "NOT manifest-declared" not in declared.read_text(encoding="utf-8")
+
+    # SESSION11G file-shape gate (Agent 2 repro): a pinset-shaped string matched in
+    # a NON-NSC resource (res/raw/*.xml) must NOT be narrated as an NSC pin-set.
+    clf_raw = ClassificationResult(
+        action=Action.SSL_ONLY,
+        root=CategoryVerdict(confidence=0.0, detected=False, evidence=[]),
+        ssl=CategoryVerdict(
+            confidence=0.9, detected=True,
+            evidence=[Evidence(signature_id="network_security_config_pinset",
+                               file="res/raw/unrelated.xml",
+                               line_or_offset=2, matched_text="<pin-set")],
+        ),
+    )
+    raw_file = generate_report(
+        run_id="runNSC3", apk_hash="nsc125", timestamp="2026-10-19T12:00:00",
+        metadata={"hashes": {"sha256": "nsc125"}, "package": {"package_name": "test.app"}},
+        classification=clf_raw, verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+        manifest=ManifestInfo(debuggable=False, network_security_config=None,
+                              application_present=True, nsc_file_present=None),
+    )
+    assert "NOT manifest-declared" not in raw_file.read_text(encoding="utf-8")
 
 
 def test_generate_report_renders_inconclusive_bypass_as_not_a_failure(tmp_path):

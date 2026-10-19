@@ -49,6 +49,10 @@ def _pin_hook_fired(frida_log: str) -> bool:
     its runtime flag must come from the same message."""
     for line in frida_log.splitlines():
         if SSL_PIN_HOOK in line and _HOOK_FIRED_RE.search(line):
+            # A message reporting its own failure (status: failed) is not a fired
+            # hook being observed - see _STATUS_FAILED_RE.
+            if _STATUS_FAILED_RE.search(line):
+                continue
             return True
     return False
 
@@ -65,11 +69,19 @@ def _pin_hook_fired(frida_log: str) -> bool:
 # OR double quotes means a future switch to JSON logging cannot silently turn this
 # into a false negative.
 _ROOT_PROBE_RE = re.compile(r"probeHit['\"]?\s*:\s*['\"]root['\"]")
-# F-1/F-2: a root probeHit whose artifact was explicitly absent (`present: False`)
+# F-1/F-2: a root probeHit whose artifact was explicitly absent (`present: false`)
 # is a no-op hide - hiding a file that was never on the device changes nothing, so
-# it is NOT evidence the app's root check was defeated. The exact Python-repr /
-# JSON forms cli.py logs both spell it `present: False` / `"present": false`.
-_PRESENT_FALSE_RE = re.compile(r"present['\"]?\s*:\s*False")
+# it is NOT evidence the app's root check was defeated. The Python-repr form spells
+# it `present: False` and the JSON form `"present": false`; `[Ff]alse` matches both
+# (cli.py logs str(message_dict) - repr - today; `[Ff]alse` is a forward-compat
+# guard so a future JSON logger cannot silently re-open the no-op-hide over-claim).
+_PRESENT_FALSE_RE = re.compile(r"present['\"]?\s*:\s*[Ff]alse")
+# M-STATUS1 (independent review): a message that REPORTS ITS OWN FAILURE
+# (`{..., status: 'failed'}` from a send/launch error) cannot confirm a bypass.
+# Excluded from BOTH the root probeHit and the pin-hook confirmation, mirroring
+# technology.py's status=='failed' guard, so an error line that happens to also
+# carry a root/pin token cannot over-claim a confirmation.
+_STATUS_FAILED_RE = re.compile(r"['\"]status['\"]?\s*:\s*['\"]failed['\"]", re.IGNORECASE)
 
 
 def _root_probe_hit(frida_log: str) -> bool:
@@ -94,6 +106,10 @@ def _root_probe_hit(frida_log: str) -> bool:
     confirm, preserving pre-fix behavior."""
     for line in frida_log.splitlines():
         if _ROOT_PROBE_RE.search(line):
+            # A message reporting its own failure (status: failed) is not the app's
+            # root check being defeated - see _STATUS_FAILED_RE.
+            if _STATUS_FAILED_RE.search(line):
+                continue
             # Skip a probeHit that hid an artifact that was never present - see
             # _PRESENT_FALSE_RE above.
             if _PRESENT_FALSE_RE.search(line):

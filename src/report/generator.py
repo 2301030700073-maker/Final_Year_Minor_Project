@@ -159,7 +159,7 @@ TEMPLATE = _env.from_string("""\
 {% if manifest -%}
 {% if manifest.application_present -%}
 **Debuggable:** {{ "yes" if manifest.debuggable else "no" }}
-**Network security config:** {{ manifest.network_security_config | md or "none" }}{% if manifest.nsc_file_present is false %} (**MISSING** - declared `{{ manifest.network_security_config | code }}` was not found in the decoded resources){% elif nsc_resource_pins %} (**pins ship in the resources but are NOT manifest-declared** - `{{ nsc_resource_pins | join(", ") }}` matched a `network_security_config` pin-set in the decoded resources while the manifest declares no `android:networkSecurityConfig`, so the platform loads and enforces NO network-security-config: these pins are enforced by the app itself (in code) or via another mechanism, NOT by the OS - see SSL-pinning below){% endif %}
+**Network security config:** {{ manifest.network_security_config | md or "none" }}{% if manifest.nsc_file_present is false %} (**MISSING** - declared `{{ manifest.network_security_config | code }}` was not found in the decoded resources){% elif nsc_resource_pins %} (**pins ship in res/xml but are NOT manifest-declared** - `{{ nsc_resource_pins | join(", ") }}` matched a `network_security_config` pin-set under `res/xml/` while the manifest declares no `android:networkSecurityConfig`, so the platform loads and enforces **no app-declared** network-security-config: these pins are **NOT OS-enforced**. This report does NOT establish whether the app's own code actually loads this pin-set (it may be dead/sample config) - read the SSL-pinning section and the dynamic evidence below for whether pinning is actually exercised){% endif %}
 **Package:** {{ (manifest.package_name or "unknown") | md }}
 **Allow backup:** {{ "yes" if manifest.allow_backup else ("no" if manifest.allow_backup is false else "unset") }}
 **Cleartext permitted (effective):** {{ "yes" if manifest.cleartext_permitted else ("no" if manifest.cleartext_permitted is false else "unset (platform default)") }}
@@ -1453,18 +1453,21 @@ def _expired_pin_sets(manifest, timestamp: str) -> list[str]:
 
 def _nsc_resource_pins(classification, manifest) -> list[str]:
     """Distinct signature ids of network-security-config PIN matches whose
-    `<pin-set>`/digest lives in the decoded resources but is NOT referenced by the
-    manifest's `android:networkSecurityConfig` attribute. The platform loads and
-    enforces an NSC only when the manifest points at it, so a pin-set shipped
-    WITHOUT that reference is enforced by the app in code (or via another
-    mechanism), never by the OS. Reporting that distinction is the honest thing to
-    do beside a bare Network security config: none - the pins are a real,
-    detected signal, but they are not OS-enforced, and a reader should not infer
-    platform-level pinning from the attribute alone (or its absence).
+    `<pin-set>`/digest lives in the DECODED resource XML (res/xml/) but is NOT
+    referenced by the manifest's `android:networkSecurityConfig` attribute. The
+    platform loads and enforces an NSC only when the manifest points at it, so a
+    pin-set shipped without that reference is NOT OS-enforced. Reporting that
+    distinction is the honest thing to do beside a bare Network security config:
+    none - the pins are a real, detected signal, but whether the app's own code
+    ever loads them (vs. dead/sample config) is NOT established here, and a reader
+    must not infer platform-level pinning from the attribute alone or its absence.
 
-    Empty (no note) when the manifest DECLARES the NSC - there the pins ARE wired
-    and any expiry caveat already belongs to `_expired_pin_sets` - or when no pin
-    XML was found, so it never fires on the ordinary case."""
+    Gated to `res/xml/` so a `<pin-set`-shaped string in some OTHER resource
+    (e.g. res/raw/*.xml - reproduced synthetically) is never narrated as a
+    network-security-config pin-set: only the NSC resource surface counts. Empty
+    (no note) when the manifest DECLARES the NSC - there the pins ARE wired and any
+    expiry caveat belongs to `_expired_pin_sets` - or when no NSC pin XML was found,
+    so it never fires on the ordinary case."""
     if getattr(manifest, "network_security_config", None):
         return []
     try:
@@ -1475,6 +1478,10 @@ def _nsc_resource_pins(classification, manifest) -> list[str]:
     hit_ids = [
         e.signature_id for e in evidence
         if getattr(e, "signature_id", None) in pin_ids
+        # Only the NSC resource surface (res/xml/...). A pinset-shaped string in
+        # any other resource (res/raw, a bundled asset) must NOT be named a
+        # network_security_config pin-set - name the surface, not a guess.
+        and "/xml/" in str(getattr(e, "file", "") or "").replace("\\", "/")
     ]
     return list(dict.fromkeys(hit_ids))
 

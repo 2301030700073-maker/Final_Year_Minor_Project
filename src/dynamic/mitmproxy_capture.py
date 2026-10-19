@@ -462,6 +462,18 @@ def _count_tls_failed_clients(text: str) -> list[dict[str, str]]:
         # header value that merely quotes the phrase cannot register a refusal.
         # The host exists only inside the message text, so it is extracted
         # best-effort: a miss leaves it empty and the refusal still counts.
+        #
+        # KNOWN LIMITATION (independent review, SESSION11G - deliberately NOT
+        # tightened): the generic phrase "tls handshake failed" is ALSO emitted by
+        # mitmdump for a SERVER-side (upstream) handshake failure, so on the native
+        # placement this branch can count a server-side failure as a "client
+        # certificate refusal". It is left as-is because narrowing it needs a real
+        # mitmdump fixture to confirm the exact client-vs-server discriminator, and
+        # a wrong/narrow match would silently DROP real refusals (a false negative)
+        # - worse than a possible over-count that the per-uid attribution gate in
+        # cli._reclassify_empty_capture (SESSION11F) already refuses to credit to
+        # the app when `reached` is not True. The WSL2 reference path uses the
+        # explicit `_TLS_FAILED_CLIENT_MARKER` above, not this phrase.
         if _TLS_HANDSHAKE_FAILED_PHRASE in line.lower() and not raw[0].isspace():
             match = _TLS_FAILED_HOST_RE.search(line)
             detail = line.split("failed.", 1)[1].strip() if "failed." in line else line

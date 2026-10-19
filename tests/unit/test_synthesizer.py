@@ -16,6 +16,7 @@ from dynamic.synthesizer import (
     NATIVE_SSL_PIN_ARM,
     ROOT_RECIPES,
     SSL_RECIPES,
+    UNIVERSAL_SSL,
     synthesize,
 )
 from static.native import load_native_signatures
@@ -102,6 +103,27 @@ def test_ssl_observer_enumerates_certificatepinner_overloads():
     js = Path("src/dynamic/scripts/ssl_pinning_bypass_v1.js").read_text(encoding="utf-8")
     assert "CertificatePinner.check.overloads" in js
     assert '.overload("java.lang.String", "java.util.List")' not in js
+
+
+def test_universal_ssl_enumerates_certificatepinner_overloads():
+    # Second-pass regression (2026-10-19): the commit that fixed the targeted
+    # SSL_RECIPES + the SSL effect observer MISSED UNIVERSAL_SSL, the universal
+    # SSL fallback appended to every SSL action. It still hardcoded
+    # CP.check.overload('java.lang.String','java.security.cert.Certificate') /
+    # (String,List) inside an EMPTY catch(e){} - so on an app build where those
+    # exact overloads do not exist, the (String,List) pinning hook never installed
+    # AND the error was swallowed with no diagnostic (worse than the logged case
+    # it fixed). The universal path must enumerate overloads like the rest.
+    assert "CP.check.overload(" not in UNIVERSAL_SSL
+    assert "CP.check.overloads.forEach" in UNIVERSAL_SSL
+    # And the synthesized universal path (no targeted evidence -> universal) must
+    # not contain any hardcoded CertificatePinner overload assignment - this is
+    # precisely the assertion that would have FAILED before the fix (UNIVERSAL_SSL
+    # was in res.source and carried the fragile overload form).
+    res = synthesize(_cls(Action.SSL_ONLY), Action.SSL_ONLY)
+    assert res.strategy == "universal"
+    assert "CP.check.overload(" not in res.source
+    assert "CP.check.overloads.forEach" in res.source
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")

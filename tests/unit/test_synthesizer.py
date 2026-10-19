@@ -516,10 +516,34 @@ def test_ssl_observer_covers_custom_trustmanager_interface():
     )
     assert res.strategy == "targeted"
     assert "javax.net.ssl.X509TrustManager" in res.source
-    # the observer's interface wrapper calls through then emits the pin-check signal
-    assert "_wrap_xt" in res.source
+    # the observer's interface wrapper save-chains to the neutralized impl (not
+    # this.checkServerTrusted re-dispatch) then emits the pin-check signal
+    assert "_prevx" in res.source
+    assert "this.checkServerTrusted.apply" not in res.source
     assert "checkServerTrusted" in res.source
     assert "ssl-pin-check" in res.source
+
+
+def test_ssl_observer_save_chains_and_never_redispatches_this_method():
+    # Regression (independent review, SESSION11G): the SSL effect observer wrapped
+    # its hooks with `this.<method>.apply(this, arguments)`. Inside a Frida method
+    # replacement that re-dispatches to the CURRENT impl (this same wrapper again
+    # -> unbounded recursion) or the ORIGINAL check (which throws on a mismatch
+    # and silently defeats the bypass) - either way the neutralizer it is meant to
+    # observe is bypassed and ssl-pin-check never fires honestly. The observer must
+    # SAVE-CHAIN to the implementation already installed (the recipe's neutralizer,
+    # or the original if none) and call THAT. Assert the idiom is present and the
+    # re-dispatch anti-pattern is GONE in the composed sources (recipes + observer).
+    for ssl_ids in (["okhttp_certificate_pinner"],
+                    ["custom_trustmanager_checkservertrusted"]):
+        src = synthesize(_cls(Action.SSL_ONLY, ssl_ids=ssl_ids), Action.SSL_ONLY).source
+        assert "this.check.apply" not in src, f"{ssl_ids}: observer still re-dispatches this.check"
+        assert "this.checkServerTrusted.apply" not in src, f"{ssl_ids}: observer still re-dispatches this.checkServerTrusted"
+        assert "_prev" in src, f"{ssl_ids}: observer did not install a save-chain"
+    # The universal/synthetic-nothing path appends the same observer too.
+    uni = synthesize(_cls(Action.SSL_ONLY), Action.SSL_ONLY).source
+    assert "this.check.apply" not in uni
+    assert "_prev" in uni
 
 
 def test_cronet_verifier_routes_to_native_verify():

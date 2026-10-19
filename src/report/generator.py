@@ -159,7 +159,7 @@ TEMPLATE = _env.from_string("""\
 {% if manifest -%}
 {% if manifest.application_present -%}
 **Debuggable:** {{ "yes" if manifest.debuggable else "no" }}
-**Network security config:** {{ manifest.network_security_config | md or "none" }}{% if manifest.nsc_file_present is false %} (**MISSING** - declared `{{ manifest.network_security_config | code }}` was not found in the decoded resources){% endif %}
+**Network security config:** {{ manifest.network_security_config | md or "none" }}{% if manifest.nsc_file_present is false %} (**MISSING** - declared `{{ manifest.network_security_config | code }}` was not found in the decoded resources){% elif nsc_resource_pins %} (**pins ship in the resources but are NOT manifest-declared** - `{{ nsc_resource_pins | join(", ") }}` matched a `network_security_config` pin-set in the decoded resources while the manifest declares no `android:networkSecurityConfig`, so the platform loads and enforces NO network-security-config: these pins are enforced by the app itself (in code) or via another mechanism, NOT by the OS - see SSL-pinning below){% endif %}
 **Package:** {{ (manifest.package_name or "unknown") | md }}
 **Allow backup:** {{ "yes" if manifest.allow_backup else ("no" if manifest.allow_backup is false else "unset") }}
 **Cleartext permitted (effective):** {{ "yes" if manifest.cleartext_permitted else ("no" if manifest.cleartext_permitted is false else "unset (platform default)") }}
@@ -969,6 +969,7 @@ def generate_report(
         install_recovery_note=_install_recovery_note(stage_results),
         manifest=manifest,
         expired_pin_sets=_expired_pin_sets(manifest, timestamp),
+        nsc_resource_pins=_nsc_resource_pins(classification, manifest),
         coverage=coverage,
         obfuscation_level=obfuscation_level,
         obfuscation_reason=obfuscation_reason,
@@ -1448,6 +1449,34 @@ def _expired_pin_sets(manifest, timestamp: str) -> list[str]:
         exp for exp in (getattr(manifest, "pin_set_expirations", None) or [])
         if _is_iso_date(exp) and exp <= run_date
     ]
+
+
+def _nsc_resource_pins(classification, manifest) -> list[str]:
+    """Distinct signature ids of network-security-config PIN matches whose
+    `<pin-set>`/digest lives in the decoded resources but is NOT referenced by the
+    manifest's `android:networkSecurityConfig` attribute. The platform loads and
+    enforces an NSC only when the manifest points at it, so a pin-set shipped
+    WITHOUT that reference is enforced by the app in code (or via another
+    mechanism), never by the OS. Reporting that distinction is the honest thing to
+    do beside a bare Network security config: none - the pins are a real,
+    detected signal, but they are not OS-enforced, and a reader should not infer
+    platform-level pinning from the attribute alone (or its absence).
+
+    Empty (no note) when the manifest DECLARES the NSC - there the pins ARE wired
+    and any expiry caveat already belongs to `_expired_pin_sets` - or when no pin
+    XML was found, so it never fires on the ordinary case."""
+    if getattr(manifest, "network_security_config", None):
+        return []
+    try:
+        evidence = classification.ssl.evidence or []
+    except Exception:
+        return []
+    pin_ids = {"network_security_config_pinset", "network_security_config_pin_digest"}
+    hit_ids = [
+        e.signature_id for e in evidence
+        if getattr(e, "signature_id", None) in pin_ids
+    ]
+    return list(dict.fromkeys(hit_ids))
 
 
 def _capture_summary(stage_results: list[StageResult]) -> dict:

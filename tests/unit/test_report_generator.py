@@ -1326,6 +1326,53 @@ def test_generate_report_flags_missing_nsc_file(tmp_path):
     assert "@xml/network_security_config" in content
 
 
+def test_generate_report_reconciles_nsc_pins_not_manifest_declared(tmp_path):
+    # RS_CertPinning (2026-10-19): the app SHIPS an NSC pin-set XML
+    # (res/xml/network_security_config.xml) but the manifest declares NO
+    # android:networkSecurityConfig, so the platform loads and enforces NO NSC.
+    # A bare "Network security config: none" printed next to a detected pin-set
+    # left a reader unable to tell those pins are real-but-not-OS-enforced; the
+    # report must reconcile the two facts. Positive case: note fires; negative
+    # control: with the NSC declared the same pinset, the note must NOT fire.
+    from static.manifest import ManifestInfo
+
+    def _clf_with_nsc_pinset():
+        return ClassificationResult(
+            action=Action.SSL_ONLY,
+            root=CategoryVerdict(confidence=0.0, detected=False, evidence=[]),
+            ssl=CategoryVerdict(
+                confidence=0.9, detected=True,
+                evidence=[Evidence(
+                    signature_id="network_security_config_pinset",
+                    file="res/xml/network_security_config.xml",
+                    line_or_offset=5, matched_text="<pin-set")],
+            ),
+        )
+
+    not_declared = generate_report(
+        run_id="runNSC1", apk_hash="nsc123", timestamp="2026-10-19T12:00:00",
+        metadata={"hashes": {"sha256": "nsc123"}, "package": {"package_name": "test.app"}},
+        classification=_clf_with_nsc_pinset(), verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+        manifest=ManifestInfo(debuggable=False, network_security_config=None,
+                              application_present=True, nsc_file_present=None),
+    )
+    content = not_declared.read_text(encoding="utf-8")
+    assert "NOT manifest-declared" in content
+    assert "network_security_config_pinset" in content
+
+    declared = generate_report(
+        run_id="runNSC2", apk_hash="nsc124", timestamp="2026-10-19T12:00:00",
+        metadata={"hashes": {"sha256": "nsc124"}, "package": {"package_name": "test.app"}},
+        classification=_clf_with_nsc_pinset(), verification=None, correlation=None,
+        stage_results=[], output_dir=tmp_path,
+        manifest=ManifestInfo(debuggable=False,
+                              network_security_config="@xml/network_security_config",
+                              application_present=True, nsc_file_present=True),
+    )
+    assert "NOT manifest-declared" not in declared.read_text(encoding="utf-8")
+
+
 def test_generate_report_renders_inconclusive_bypass_as_not_a_failure(tmp_path):
     # RESID-6F: a None bypass (hooks couldn't confirm) must render as
     # "inconclusive", not a bare Python "None" and not "False" - the report

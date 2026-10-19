@@ -7,6 +7,83 @@ import pytest
 from dynamic import device
 from dynamic.device import _find_windows_user, _wait_for_relay
 
+
+class _FakeSubprocess:
+    """Records subprocess.run calls and dispatches canned answers by command -
+    enough of the adb surface for _install_apex_ca (no real adb/device)."""
+
+    def __init__(self, *, sdk=34, apex_present=True, apex_rc=0):
+        self.calls = []
+        self._sdk = sdk
+        self._apex_present = apex_present
+        self._apex_rc = apex_rc
+
+    @staticmethod
+    def _rc(rc, out=""):
+        return subprocess.CompletedProcess(args=[], returncode=rc, stdout=out, stderr="")
+
+    def run(self, args, **kwargs):
+        args = list(args)
+        self.calls.append(args)
+        joined = " ".join(args)
+        if "ro.build.version.sdk" in joined:
+            return self._rc(0, f"{self._sdk}\n")
+        if "mount -o bind" in joined:  # the bind+cp+chmod idempotent chain
+            return self._rc(self._apex_rc, "ok-apex\n" if self._apex_rc == 0 else "")
+        if "setenforce" in args and "0" in args:
+            return self._rc(0)
+        if "setenforce" in args and "1" in args:
+            return self._rc(0)
+        if "-d" in args and device._APEX_CACERTS in joined:  # the presence probe
+            return self._rc(0 if self._apex_present else 1,
+                            (device._APEX_CACERTS + "\n") if self._apex_present else "")
+        return self._rc(0)
+
+    def _has(self, *pred):
+        return any(all(p(c) for p in pred) for c in self.calls)
+
+
+def test_install_apex_ca_on_api34_binds_store_and_restores_enforcing(monkeypatch):
+    # API-34 real-device gap: the CA must land in the conscrypt APEX store apps
+    # read, via a bind-mount overlay, with SELinux permissive for the mount and
+    # restored to enforcing right after.
+    fake = _FakeSubprocess(sdk=34)
+    monkeypatch.setattr(device, "subprocess", fake)
+    apex = device._install_apex_ca("adb", "emu-5554", "/data/local/tmp/abc.0", "abc")
+    assert apex == f"{device._APEX_CACERTS}/abc.0"
+    assert fake.calls  # adb was used
+    assert fake._has(lambda c: "setenforce" in c and "0" in c), "did not go permissive for the mount"
+    assert fake._has(lambda c: "mount -o bind" in " ".join(c)), "no APEX bind-mount issued"
+    assert fake._has(lambda c: "setenforce" in c and "1" in c), "did not restore enforcing"
+
+
+def test_install_apex_ca_skips_pre34_build(monkeypatch):
+    # A measurably pre-34 device uses /system as authoritative -> no APEX work.
+    fake = _FakeSubprocess(sdk=33)
+    monkeypatch.setattr(device, "subprocess", fake)
+    assert device._install_apex_ca("adb", "emu-5554", "/data/local/tmp/abc.0", "abc") is None
+    assert not fake._has(lambda c: "mount -o bind" in " ".join(c))
+    assert not fake._has(lambda c: "setenforce" in c)
+
+
+def test_install_apex_ca_no_apex_store_is_a_measured_skip(monkeypatch):
+    # No conscrypt APEX store on the device -> nothing to update, no error.
+    fake = _FakeSubprocess(sdk=34, apex_present=False)
+    monkeypatch.setattr(device, "subprocess", fake)
+    assert device._install_apex_ca("adb", "emu-5554", "/data/local/tmp/abc.0", "abc") is None
+    assert not fake._has(lambda c: "mount -o bind" in " ".join(c))
+
+
+def test_install_apex_ca_failure_raises_and_still_restores_enforcing(monkeypatch):
+    # An attempted install that does not take must fail loudly (a silent success
+    # leaves traffic undecryptable on 34+), AND SELinux must be restored.
+    fake = _FakeSubprocess(sdk=34, apex_present=True, apex_rc=1)
+    monkeypatch.setattr(device, "subprocess", fake)
+    with pytest.raises(RuntimeError):
+        device._install_apex_ca("adb", "emu-5554", "/data/local/tmp/abc.0", "abc")
+    assert fake._has(lambda c: "setenforce" in c and "1" in c), "enforcing not restored on failure"
+
+
 # The `is_listening` gate that `setup_frida_connection` re-asserts behind is a
 # real Windows-host probe, and taking it drives the live device. The unit suite
 # stubs it off wholesale in conftest (`_no_live_host_or_device`); the two tests

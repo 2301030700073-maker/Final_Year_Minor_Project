@@ -1070,12 +1070,99 @@ def _subject_hash_old(cert_path: Path) -> str:
     return first
 
 
+# API 34 moved the platform's default TLS trust (Conscrypt) into an APEX module:
+# apps read their system CA store from /apex/com.android.conscrypt/cacerts, NOT
+# from /system/etc/security/cacerts. A cert written only to /system is invisible
+# to apps on Android 14+ - verified on the reference emulator (API 34): the
+# /system store held 135 certs incl. the injected one, the APEX store 134
+# without it - so a non-app-pinned app still refuses the capture CA and no
+# traffic is decrypted. Both directories are read-only, so each gets the same
+# bind-mount overlay treatment; the APEX overlay additionally needs SELinux
+# permissive for the instant of the mount (enforcing rejects it with ENOENT on a
+# userdebug build), restored to enforcing immediately after.
+_APEX_CACERTS = "/apex/com.android.conscrypt/cacerts"
+_APEX_CACERTS_STAGING = "/data/local/tmp/apex_conscrypt_cacerts"
+
+
+def _device_sdk(adb: str, serial: str) -> int | None:
+    """The device's ro.build.version.sdk as an int, or None if unreadable (a
+    measured None is never read as a particular API level - the caller decides
+    what an unknown means)."""
+    try:
+        proc = subprocess.run(
+            [adb, "-s", serial, "shell", "getprop", "ro.build.version.sdk"],
+            capture_output=True, text=True, check=True, timeout=15,
+        )
+        return int((proc.stdout or "").strip())
+    except Exception:
+        return None
+
+
+def _install_apex_ca(adb: str, serial: str, local_tmp: str, hash_name: str) -> str | None:
+    """Install the CA into the conscrypt APEX store (/apex/com.android.conscrypt/
+    cacerts) that API 34+ apps actually trust. Returns the APEX path, or None when
+    the device measurably does not need it (a pre-34 build, or no APEX conScrypt
+    store at all - a measured skip, not a swallowed failure). Raises loudly if the
+    install was attempted but did not take (silent success here would leave traffic
+    undecryptable on 34+, an ADR-0006 violation).
+
+    Best-effort `setenforce 0` brackets the mount (enforcing blocks the overlay
+    with ENOENT on a userdebug build) and `setenforce 1` restores it in a finally,
+    so the device is never left permissive if the copy raises."""
+    sdk = _device_sdk(adb, serial)
+    if sdk is not None and sdk < 34:
+        return None
+    # A device with no conscrypt APEX store (old builds) has nothing to update -
+    # confirm the path exists rather than guessing from the API level alone.
+    probe = subprocess.run(
+        [adb, "-s", serial, "shell", "ls", "-d", _APEX_CACERTS],
+        capture_output=True, text=True, timeout=15,
+    )
+    if probe.returncode != 0 or _APEX_CACERTS not in (probe.stdout or ""):
+        return None
+    apex_path = f"{_APEX_CACERTS}/{hash_name}.0"
+    subprocess.run(
+        [adb, "-s", serial, "shell", "setenforce", "0"],
+        capture_output=True, text=True, timeout=15,
+    )  # best-effort: already-permissive builds make this a no-op
+    try:
+        bind_setup = (
+            f"mkdir -p {_APEX_CACERTS_STAGING} && "
+            f"(grep -qs ' {_APEX_CACERTS} ' /proc/mounts && echo already) || "
+            f"(cp -a {_APEX_CACERTS}/. {_APEX_CACERTS_STAGING}/ && "
+            f"mount -o bind {_APEX_CACERTS_STAGING} {_APEX_CACERTS}) && "
+            f"cp {local_tmp} {apex_path} && chmod 644 {apex_path} && echo ok-apex"
+        )
+        proc = subprocess.run(
+            [adb, "-s", serial, "shell", bind_setup],
+            capture_output=True, text=True, timeout=40,
+        )
+        if proc.returncode != 0 or "ok-apex" not in (proc.stdout or ""):
+            raise RuntimeError(
+                "mitmproxy CA install into the conscrypt APEX store did not take "
+                f"(API {sdk} apps read {_APEX_CACERTS}, not /system): "
+                + ((proc.stderr or proc.stdout or "").strip() or "no output")
+            )
+    finally:
+        subprocess.run(
+            [adb, "-s", serial, "shell", "setenforce", "1"],
+            capture_output=True, text=True, timeout=15,
+        )  # restore enforcing; best-effort
+    return apex_path
+
+
 def push_system_ca(serial: str, cert_path: Path) -> str:
     """Install a CA cert into the device's system trust store (rooted adbd).
 
     Android 7+ ignores user certs for most apps, so the CA must go into
     /system/etc/security/cacerts/ as <subject_hash_old>.0 to be trusted by apps
-    using the default trust store. The system partition is baked read-only on
+    using the default trust store. On API 34+ that is not sufficient by itself -
+    Conscrypt moved the default trust store into an APEX module, so apps read
+    /apex/com.android.conscrypt/cacerts, NOT /system/etc/security/cacerts (proven
+    on the reference emulator: the /system store took the cert while the APEX
+    store did not, and the app still refused the CA). This function therefore
+    also installs the cert into the APEX store via _install_apex_ca. The system
+    partition is baked read-only on
     system-as-root builds (emulator included), and remount needs a reboot that
     this environment cannot take. So the writable copy is installed via a bind
     mount instead: a writable /data/local/tmp/cacerts staging dir (pre-seeded
@@ -1149,6 +1236,9 @@ def push_system_ca(serial: str, cert_path: Path) -> str:
         [adb, "-s", serial, "shell", "chmod", "644", system_path],
         capture_output=True, text=True, check=True, timeout=20,
     )
+    # API 34+ also requires the CA in the conscrypt APEX store apps actually
+    # read (/system alone is not trusted there) - additive, no-op on pre-34.
+    _install_apex_ca(adb, serial, local_tmp, hash_name)
     return system_path
 
 

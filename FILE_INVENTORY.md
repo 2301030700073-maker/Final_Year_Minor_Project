@@ -1,7 +1,7 @@
 # Complete File Inventory
 
-Generated: 2026-10-19
-All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 314 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
+Generated: 2026-10-20
+All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 316 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
 
 ```
 .gitattributes
@@ -10,6 +10,8 @@ All files tracked in git, excluding the 672 generated verification-bundle artifa
 APK_Test/UnCrackable-Level1.apk
 APK_Test/UnCrackable-Level2.apk
 APK_Test/UnCrackable-Level3.apk
+APK_Test/realworld_targets.txt
+APK_Test/spotify_only.txt
 CLAUDE.md
 CONTRIBUTING.md
 FILE_INVENTORY.md

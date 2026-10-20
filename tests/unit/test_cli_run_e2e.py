@@ -1397,3 +1397,106 @@ def test_run_with_debug_true_sets_the_trace_env(run_setup, monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(tracemod)
+
+
+def test_run_with_omitted_flags_does_not_skip_dynamic_or_force_or_capture(
+    run_setup, monkeypatch
+):
+    # SESSION11L4: the `--debug` env leak had FOUR siblings. Every conditional
+    # that reads a run() option used a bare truth test, and a direct Python call
+    # of the command (what this whole file does) leaves an omitted option bound
+    # to its typer.Option(...) default OBJECT, which is TRUTHY. So a run() call
+    # that omitted the flags used to (a) skip the dynamic stage mid-pipeline,
+    # (b) print the OPERATOR-FORCED DYNAMIC banner for an operator override
+    # never given, and (c) launch the mitmproxy capture stage unrequested. With
+    # the flags omitted, the honest behaviour is: dynamic RUNS, no banner, no
+    # capture. Each assertion below fails on the pre-fix code.
+    from dynamic import device as device_mod
+
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    monkeypatch.setattr(
+        device_mod, "read_device_environment",
+        lambda serial: {"serial": serial, "ro.build.version.sdk": "34",
+                        "ro.build.version.release": "14", "ro.build.type": "userdebug",
+                        "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64",
+                        "ro.hardware": "ranchu",
+                        "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64xa:14/UE1A:userdebug/test-keys"})
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
+    monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
+    monkeypatch.setattr(
+        cli, "synthesize",
+        lambda classification, action: SimpleNamespace(source="root", applied_hooks=[]),
+    )
+    monkeypatch.setattr(
+        "dynamic.frida_runner.run_dynamic_stage",
+        lambda *a, **kw: _ok(
+            "dynamic",
+            frida_messages=[
+                {"type": "send", "payload": {"probeHit": "root", "path": "/system/bin/su"}},
+            ],
+        ),
+    )
+    monkeypatch.setattr(device_mod, "clear_logcat", lambda serial: None)
+    monkeypatch.setattr(device_mod, "capture_logcat", lambda serial: "")
+
+    captured = []
+    original_print = cli.console.print
+    cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
+    try:
+        cli.run(
+            apk=run_setup / "fixture.apk",
+            justification="ACADEMIC_TRAINING_TARGET",
+            # skip_dynamic, capture_traffic, force_dynamic, drive_ui and debug are
+            # all deliberately OMITTED - the direct-call shape that used to read
+            # every one of them as "passed".
+            device_serial=None,
+            target="propertyguru",
+        )
+    finally:
+        cli.console.print = original_print
+
+    report_files = sorted((run_setup / "reports").rglob("*.md"))
+    assert report_files
+    text = report_files[0].read_text(encoding="utf-8")
+    # (a) the dynamic stage actually ran - the app-agnostic root confirmation
+    # (a probeHit answered-false by the stubbed runner) reached the report.
+    assert "Root bypassed: True" in text
+    # (b) no stage recorded the skip that was never asked for ...
+    assert "--skip-dynamic passed" not in text
+    assert "| dynamic | skipped |" not in text
+    # (c) ... and no operator-override banner for a flag that was never given.
+    assert "OPERATOR-FORCED DYNAMIC" not in text
+    assert not any("OPERATOR-FORCED DYNAMIC" in c for c in captured)
+
+
+def test_run_reads_every_option_through_flag_enabled():
+    # SESSION11L4 structural guard, in the style of the ceiling-ordering test in
+    # test_decompile.py: a future edit must not reintroduce a bare `if <option>:`
+    # on any of run()'s Typer options. The COMMENT lines that name the pattern
+    # are excluded, so the check is about code, not prose.
+    import inspect
+    import re
+
+    import cli
+
+    src = inspect.getsource(cli.run)
+    code = "\n".join(
+        line for line in src.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    # The options run() itself branches on. drive_ui is deliberately absent: it
+    # is only passed through to run_capture_stage, a plain function whose default
+    # is a real bool, so the OptionInfo trap cannot reach it there.
+    for option in ("skip_dynamic", "forced_dynamic", "capture_traffic", "debug"):
+        assert f"_flag_enabled({option})" in code, (
+            f"run() must read {option} through _flag_enabled - a bare truth test "
+            f"reads a direct call's typer.Option(...) default as True")
+        assert not re.search(rf"\bif {option}\s*:", code), (
+            f"bare `if {option}:` found in run() - the truthy-OptionInfo trap")
+        assert not re.search(rf"if not {option}\b", code), (
+            f"bare `if not {option}` found in run() - the same trap, negated")
+    # And drive_ui must stay a pass-through: a conditional on it inside run()
+    # would be the same trap, on the one option nobody has branched on yet.
+    assert not re.search(r"\bif (not )?drive_ui\b", code), (
+        "drive_ui is passed through to run_capture_stage; a conditional on it "
+        "inside run() would hit the same truthy-OptionInfo trap")

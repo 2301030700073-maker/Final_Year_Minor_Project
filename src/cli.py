@@ -2835,7 +2835,12 @@ def run(
         _halt(stage_results)
 
     # --- dynamic analysis ---
-    if forced_dynamic:
+    # _flag_enabled, not a bare truth test (SESSION11L4): a direct Python call of
+    # this command leaves an omitted option bound to its typer.Option(...)
+    # default OBJECT, which is truthy - so every conditional below that reads a
+    # run() option must ask "is it really True", the same discipline the
+    # contradiction guard and the --debug env write above use.
+    if _flag_enabled(forced_dynamic):
         console.print(
             "[bold yellow]OPERATOR-FORCED DYNAMIC (--force-dynamic): static verdict "
             f"{classification.action.value} is unchanged; deploying the universal "
@@ -2880,7 +2885,7 @@ def run(
     # rather than asserting the one the row cannot prove.
     device_environment = None
     _begin_stage("dynamic")
-    if skip_dynamic:
+    if _flag_enabled(skip_dynamic):
         dynamic_stage = StageResult(
             stage="dynamic", status="skipped",
             evidence={
@@ -2991,7 +2996,7 @@ def run(
                     serial, package_name, dynamic_action, target=target_canonical,
                     synthesized={"source": synth.source, "applied_hooks": synth.applied_hooks},
                 )
-                if forced_dynamic:
+                if _flag_enabled(forced_dynamic):
                     # Record the override on the dynamic stage's OWN evidence so the
                     # report's operator-forced banner (generator._forced_dynamic)
                     # fires on the live run AND on any later regenerated report - it
@@ -3259,7 +3264,7 @@ def run(
     # already-complete static/dynamic result. It resolves its own device serial
     # so it still works under --skip-dynamic.
     capture_failed = False
-    if capture_traffic:
+    if _flag_enabled(capture_traffic):
         capture_start = time.monotonic()
         try:
             # serial is None here after ANY dynamic setup failure, not only a
@@ -3273,7 +3278,7 @@ def run(
             # emulator). Still caught below -> failed capture stage, report
             # preserved, non-zero exit. Under --skip-dynamic the capture stage
             # resolves its own serial since dynamic never ran.
-            if skip_dynamic:
+            if _flag_enabled(skip_dynamic):
                 capture_serial = device.discover_device(device_serial)
                 # ADR-0028: dynamic never ran, but capture still uses a device, so
                 # the environment is this one. Read at both resolution points for
@@ -3311,7 +3316,7 @@ def run(
             # so that arm also keeps the plain cold start and stays the no-hooks
             # control. Whatever the arm, the report states which window it is.
             capture_bypass = None
-            if not skip_dynamic and dynamic_action in (Action.SSL_ONLY, Action.BOTH):
+            if not _flag_enabled(skip_dynamic) and dynamic_action in (Action.SSL_ONLY, Action.BOTH):
                 capture_bypass = synthesize(classification, Action.SSL_ONLY).source
             _begin_stage("capture-traffic")
             # ADR-0024: a manifest declaring no `android.permission.INTERNET` is

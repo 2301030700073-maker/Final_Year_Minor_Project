@@ -707,9 +707,18 @@ def _target_running(pid_after_launch: int | None,
     use the proxy - a true statement about an empty set and a false one about the
     app ([[native-absent-vacuous-coverage]], [[success-check-engine-vacuous-truth-guard]]).
     """
-    if pid_after_launch or pid_after_capture:
+    # Proxy attribution rests on whether the app was PRESENT to reach the proxy.
+    # The capture sample is the one that matters; the launch sample is only a
+    # fallback when capture was not measured. An app that ran at launch but was
+    # GONE by capture must NOT read as "survived the whole window" - report it as
+    # not-present-at-capture (honest) rather than lumping it with the alive case.
+    if pid_after_capture:
         return True
-    if pid_after_launch == 0 or pid_after_capture == 0:
+    if pid_after_capture == 0:
+        return False
+    if pid_after_launch:
+        return True  # present at launch; capture sample unmeasured
+    if pid_after_launch == 0:
         return False
     return None
 

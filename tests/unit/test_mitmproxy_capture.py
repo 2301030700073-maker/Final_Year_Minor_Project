@@ -776,6 +776,21 @@ def test_run_capture_stage_does_not_call_a_never_launched_app_absent(monkeypatch
     assert "was not running during the capture window" in ev["proxy_attribution"]["reason"]
 
 
+def test_target_running_is_honest_when_app_dies_mid_window():
+    """Over-claim guard: an app that ran at launch but was GONE by the capture
+    sample must NOT read as "survived the whole window". The capture sample is
+    the one that matters for proxy attribution, so (launch=pid, capture=0) must
+    be False (not present at capture), not True."""
+    from dynamic.mitmproxy_capture import _target_running as tr
+    assert tr(1234, 1234) is True          # present at both samples
+    assert tr(1234, 0) is False            # ran at launch, gone by capture
+    assert tr(0, 0) is False               # never ran
+    assert tr(None, 0) is False            # unmeasured launch, absent at capture
+    assert tr(1234, None) is True          # present at launch, capture unmeasured
+    assert tr(0, None) is False
+    assert tr(None, None) is None          # neither sample measured
+
+
 def test_the_attribution_is_told_what_the_proxy_recorded(monkeypatch, tmp_path):
     """The verdict may refuse an absence only when the probe could see the window,
     and what the proxy recorded is how that is known - so the count has to reach

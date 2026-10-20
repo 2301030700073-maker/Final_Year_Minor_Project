@@ -90,11 +90,14 @@ def attach(device_serial: str, package_name: str):
 
 
 def load_script(session, script_name: str, on_message=None):
+    from trace import trace as _trace
     source = (SCRIPT_DIR / script_name).read_text(encoding="utf-8")
     script = session.create_script(source)
+    _trace("dynamic", "script.create", "start", name=script_name, chars=len(source))
     if on_message:
         script.on("message", on_message)
     script.load()
+    _trace("dynamic", "script.load", "ok", name=script_name, chars=len(source))
     return script
 
 
@@ -193,8 +196,12 @@ def _wait_for_checkpoint(
     app's own TLS handshake fires (which would defeat the longer settle window).
     Ignored unless require_evidence is set; the two-spawn path (one dimension
     per spawn) never sets it, so each spawn waits only for its own evidence."""
+    from trace import trace as _trace
+    _trace("dynamic", "checkpoint", "start", require_evidence=require_evidence,
+           require_both=require_both_dimensions, settle=settle_seconds)
     deadline = time.monotonic() + settle_seconds
     seen_root, seen_ssl = False, False
+    _found = False
     while time.monotonic() < deadline:
         # Snapshot: `on_message` appends to `messages` from Frida's reactor
         # thread while this worker thread iterates, so a bare `for m in messages`
@@ -206,6 +213,8 @@ def _wait_for_checkpoint(
             if not isinstance(payload, dict):
                 continue
             if "hook" in payload and not require_evidence:
+                _found = True
+                _trace("dynamic", "checkpoint", "ok", reason="hook-ready")
                 return
             if require_evidence:
                 if "probeHit" in payload:
@@ -214,10 +223,15 @@ def _wait_for_checkpoint(
                     seen_ssl = True
                 if require_both_dimensions:
                     if seen_root and seen_ssl:
+                        _found = True
+                        _trace("dynamic", "checkpoint", "ok", reason="root+ssl-evidence")
                         return
                 elif "probeHit" in payload or "bypassEffect" in payload:
+                    _found = True
+                    _trace("dynamic", "checkpoint", "ok", reason="evidence")
                     return
         time.sleep(_CHECKPOINT_POLL_INTERVAL)
+    _trace("dynamic", "checkpoint", "timeout", found=_found, settle=settle_seconds)
 
 
 def _self_terminated_result(
@@ -279,13 +293,18 @@ def _bypass_success_result(
     )
 
 
-def classify_self_termination(process_alive: bool) -> bool:
+def classify_self_termination(process_alive: bool | None) -> bool:
     """FR-4.6: after the bypass scripts have run and the settle window elapsed,
     a spawned process that is no longer alive self-terminated - it detected the
     instrumentation (Frida/root) and exited (System.exit / killProcess). Returns
-    True when the process is gone, so the dynamic stage can report that as a
-    first-class, logged outcome instead of a generic success or an unexplained
-    crash. Pure - unit-testable anywhere, no device."""
+    True ONLY when the process is POSITIVELY gone, so the dynamic stage can report
+    that as a first-class, logged outcome instead of a generic success or an
+    unexplained crash. A None (liveness not determined - e.g. a transient
+    enumerate error) is NOT self-termination: it is "unknown", and must not be
+    conflated with "gone" (`not None` would wrongly flag it). Pure - unit-testable
+    anywhere, no device."""
+    if process_alive is None:
+        return False
     return not process_alive
 
 
@@ -302,12 +321,13 @@ def _process_is_alive(device, pid: int) -> bool:
     reported "still running: True" (proven live: spawn pid 7158, kill,
     get_process -> AttributeError, `adb pidof` empty, enumerate_processes -> pid
     absent). The liveness check now enumerates processes and looks for the pid -
-    the reliable truth - while still treating an enumerate error as alive
-    (conservative)."""
+    the reliable truth. A transient enumerate error is NEITHER evidence of life
+    NOR of death, so it returns None ("liveness not captured this run") - the
+    report already renders None honestly instead of guessing alive/dead."""
     try:
         processes = device.enumerate_processes()
     except Exception:
-        return True  # transient frida/device error is not evidence of death
+        return None  # transient frida/device error: do NOT claim alive or dead
     return any(getattr(p, "pid", None) == pid for p in processes)
 
 
@@ -651,7 +671,10 @@ def run_dynamic_stage(
             if script_src is not None:
                 load_script_source(session, script_src, on_message)
             outcome["phase"] = "device.resume"
+            from trace import trace as _trace
+            _trace("dynamic", "resume", "start", pid=pid)
             device.resume(pid)
+            _trace("dynamic", "resume", "ok", pid=pid)
             time.sleep(1.0)  # let the launcher activity draw before any UI action
             _record_ui_actions(
                 device_serial, _ui_actions_for(target, ui_kind), ui_action_records,
@@ -783,7 +806,10 @@ def run_dynamic_stage(
 
             ui_actions = _ui_actions_for(target, action)
             outcome["phase"] = "device.resume"
+            from trace import trace as _trace
+            _trace("dynamic", "resume", "start", pid=pid)
             device.resume(pid)
+            _trace("dynamic", "resume", "ok", pid=pid)
             time.sleep(1.0)  # let the launcher activity draw before any UI action
             # RESID-6A: `ui_action`, not `action` - the loop variable must
             # not shadow the Action parameter (a latent footgun for any
@@ -827,16 +853,17 @@ def run_dynamic_stage(
             # never fabricated. This runs on the worker thread while the app is
             # still foregrounded under the attached session.
             ui_liveness = None
+            from trace import trace as _trace
             try:
                 from dynamic.ui_liveness import check_ui_liveness
                 ui_liveness = check_ui_liveness(device_serial, package_name)
-                from trace import trace as _trace
                 _trace("dynamic", "ui_liveness", "ok",
                        screen=(ui_liveness or {}).get("screen_state"),
                        resumed=(ui_liveness or {}).get("activity_resumed"),
                        changed=(ui_liveness or {}).get("screen_changed"))
-            except Exception:
+            except Exception as _ui_err:
                 ui_liveness = None
+                _trace("dynamic", "ui_liveness", "error", error=repr(_ui_err)[:120])
 
             # FR-4.6 success via the shared builder (see _bypass_success_result):
             # reaching here means the process survived the settle window, so

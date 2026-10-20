@@ -688,6 +688,13 @@ def test_classify_self_termination_false_when_process_alive():
     assert classify_self_termination(True) is False
 
 
+def test_classify_self_termination_false_when_liveness_unknown():
+    # A None (transient enumerate error - liveness NOT determined) must NOT be
+    # conflated with "gone": `not None` is True, which would falsely flag a
+    # healthy target as self-terminated. Unknown is not self-termination.
+    assert classify_self_termination(None) is False
+
+
 class ProcessNotFoundError(Exception):
     pass
 
@@ -712,14 +719,17 @@ class _FakeTransientErrorDevice:
         raise RuntimeError("transient frida/device error")
 
 
-def test_process_is_alive_is_conservative():
-    # alive -> alive
+def test_process_is_alive_is_honest_on_transient_error():
+    # alive -> alive (confirmed present in the process list)
     assert _process_is_alive(_FakeAliveDevice(), 1) is True
     # pid absent from the process list -> dead -> self-termination signal
     assert _process_is_alive(_FakeDeadDevice(), 1) is False
-    # a transient frida/device error is NOT evidence of self-termination, so it
-    # must be treated as alive rather than false-flagging a healthy target.
-    assert _process_is_alive(_FakeTransientErrorDevice(), 1) is True
+    # a transient frida/device enumerate error is NEITHER evidence of life nor of
+    # death, so it must return None ("not captured") - NOT True (which the report
+    # would render as "survived the settle window") and NOT False (which would
+    # false-flag a healthy target as self-terminated). The report renders None as
+    # "liveness not recorded this run", which is the honest statement.
+    assert _process_is_alive(_FakeTransientErrorDevice(), 1) is None
 
 
 def test_process_is_alive_detects_death_despite_get_process_raising_attributeerror():

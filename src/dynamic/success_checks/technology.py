@@ -41,7 +41,7 @@ _PAYLOAD_TRUNCATE = 80
 
 
 def liveness_evidence_lines(
-    app_still_running: bool | None, ui_liveness: dict | None
+    app_still_running: bool | None, ui_liveness: dict | None, window: str | None = None
 ) -> dict[str, str]:
     """Post-bypass process liveness + a single static UI-state snapshot, shared
     so EVERY run's report surfaces them - not just unknown/technology targets.
@@ -49,9 +49,27 @@ def liveness_evidence_lines(
     it is NOT a responsiveness/progress proof (a hung WebView/RN-surface/spinner,
     or a not-yet-ANR'd stuck app, presents the same snapshot). State it audibly for
     every target (ADR-0006), and say 'not captured' when the tool was unavailable
-    rather than guess."""
-    lines = {
-        "app still running after bypass": (
+    rather than guess.
+
+    `window` names which launch the liveness came from. When it is "capture", the
+    line is rendered as honest PROXY-PRESENCE evidence (was the app there to reach
+    the proxy?) rather than the dynamic stage's self-termination framing - an app
+    that exited the window must not read as "survived the settle window". None
+    keeps the original dynamic-stage wording byte-for-byte."""
+    if window == "capture":
+        # Capture-window liveness is about proxy presence, not self-termination.
+        running_line = (
+            "True (observed running at capture - present to reach the proxy)"
+            if app_still_running
+            else (
+                "False (not present at capture - app had exited the window)"
+                if app_still_running is False
+                else "not captured (liveness not recorded this run)"
+            )
+        )
+        running_key = "app present during capture window"
+    else:
+        running_line = (
             "True (process survived the settle window, did not self-terminate)"
             if app_still_running
             else (
@@ -60,7 +78,10 @@ def liveness_evidence_lines(
                 if app_still_running is False
                 else "not captured (liveness not recorded this run)"
             )
-        ),
+        )
+        running_key = "app still running after bypass"
+    lines = {
+        running_key: running_line,
         # SESSION11H (UI-LIVENESS-OVERCLAIM): this is a single STATIC snapshot -
         # foreground + focused + no ANR observed + a rendered frame. It does NOT
         # prove the app is responsive or making progress: a hung WebView / RN
@@ -512,7 +533,7 @@ class TechnologyHooksEngagedCheck:
         # the helper instead; the "app still running after bypass" key keeps its
         # original leading position and "App UI responsiveness ..." lands last,
         # matching the prior inline order (dict insertion order preserved).
-        liveness_lines = liveness_evidence_lines(app_still_running, ui_liveness)
+        liveness_lines = liveness_evidence_lines(app_still_running, ui_liveness, window)
         evidence_lines = {
             # Explicit post-bypass liveness (FR-4.6): the app process survived the
             # settle window and did not self-terminate on the injected

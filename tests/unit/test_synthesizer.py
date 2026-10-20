@@ -519,31 +519,33 @@ def test_ssl_observer_covers_custom_trustmanager_interface():
     # the observer's interface wrapper save-chains to the neutralized impl (not
     # this.checkServerTrusted re-dispatch) then emits the pin-check signal
     assert "_prevx" in res.source
-    assert "this.checkServerTrusted.apply" not in res.source
+    # SESSION11K2: null-guarded save-chain - for an INTERFACE method the
+    # implementation is null, so a bare _prevx.apply throws "cannot read property
+    # 'apply' of null" (proven on propertyguru). The guard falls back to the
+    # instance method call.
+    assert "_prevx ? _prevx.apply" in res.source
     assert "checkServerTrusted" in res.source
     assert "ssl-pin-check" in res.source
 
 
-def test_ssl_observer_save_chains_and_never_redispatches_this_method():
-    # Regression (independent review, SESSION11G): the SSL effect observer wrapped
-    # its hooks with `this.<method>.apply(this, arguments)`. Inside a Frida method
-    # replacement that re-dispatches to the CURRENT impl (this same wrapper again
-    # -> unbounded recursion) or the ORIGINAL check (which throws on a mismatch
-    # and silently defeats the bypass) - either way the neutralizer it is meant to
-    # observe is bypassed and ssl-pin-check never fires honestly. The observer must
-    # SAVE-CHAIN to the implementation already installed (the recipe's neutralizer,
-    # or the original if none) and call THAT. Assert the idiom is present and the
-    # re-dispatch anti-pattern is GONE in the composed sources (recipes + observer).
+def test_ssl_observer_save_chains_with_null_guard_for_interface_methods():
+    # SESSION11G + SESSION11K2: the observer's save-chain must be GUARDED for a null
+    # implementation. A CONCRETE method (okhttp CertificatePinner.check) has the
+    # recipe's neutralizer installed (non-null) so we chain to it; an INTERFACE
+    # method (javax.net.ssl.X509TrustManager.checkServerTrusted) has a NULL
+    # implementation, and a bare `_prev.apply` throws "cannot read property 'apply'
+    # of null" and derails the app (proven live on propertyguru, whose custom
+    # TrustManager IS the interface). Every saved-impl call is therefore
+    # `_prev ? _prev.apply(...) : this.<method>.apply(...)` - save-chain when
+    # available, the instance method (the old working call) when null.
     for ssl_ids in (["okhttp_certificate_pinner"],
                     ["custom_trustmanager_checkservertrusted"]):
         src = synthesize(_cls(Action.SSL_ONLY, ssl_ids=ssl_ids), Action.SSL_ONLY).source
-        assert "this.check.apply" not in src, f"{ssl_ids}: observer still re-dispatches this.check"
-        assert "this.checkServerTrusted.apply" not in src, f"{ssl_ids}: observer still re-dispatches this.checkServerTrusted"
-        assert "_prev" in src, f"{ssl_ids}: observer did not install a save-chain"
+        assert "_prev ? _prev.apply" in src, f"{ssl_ids}: concrete save-chain not guarded"
+        assert "_prevx ? _prevx.apply" in src, f"{ssl_ids}: interface save-chain not guarded"
     # The universal/synthetic-nothing path appends the same observer too.
     uni = synthesize(_cls(Action.SSL_ONLY), Action.SSL_ONLY).source
-    assert "this.check.apply" not in uni
-    assert "_prev" in uni
+    assert "_prev ? _prev.apply" in uni
 
 
 def test_cronet_verifier_routes_to_native_verify():

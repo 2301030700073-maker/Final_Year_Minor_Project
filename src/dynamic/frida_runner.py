@@ -283,15 +283,25 @@ def classify_self_termination(process_alive: bool) -> bool:
 
 
 def _process_is_alive(device, pid: int) -> bool:
-    """Reference-machine only. True unless frida confirms the process is gone
-    (ProcessNotFoundError). Conservative on purpose: a transient device/frida
-    error is NOT evidence of self-termination, so it is treated as alive rather
-    than risking a false self-termination report on a healthy target."""
+    """Reference-machine only. True unless frida POSITIVELY confirms the process is
+    gone. Conservative on purpose: a transient device/frida error is NOT evidence
+    of self-termination, so it is treated as alive rather than risking a false
+    self-termination report on a healthy target.
+
+    SESSION11K: this used `device.get_process(pid)`, but frida's get_process takes a
+    process NAME and raises `AttributeError: 'int' object has no attribute 'lower'`
+    for an int pid on the reference build - so it ALWAYS raised, this returned True
+    every time, and self-termination / crash detection NEVER fired: a dead app was
+    reported "still running: True" (proven live: spawn pid 7158, kill,
+    get_process -> AttributeError, `adb pidof` empty, enumerate_processes -> pid
+    absent). The liveness check now enumerates processes and looks for the pid -
+    the reliable truth - while still treating an enumerate error as alive
+    (conservative)."""
     try:
-        device.get_process(pid)
-        return True
-    except Exception as exc:
-        return type(exc).__name__ != "ProcessNotFoundError"
+        processes = device.enumerate_processes()
+    except Exception:
+        return True  # transient frida/device error is not evidence of death
+    return any(getattr(p, "pid", None) == pid for p in processes)
 
 
 # Target-specific UI actions to reach/trigger a bypass after resume. Tuple

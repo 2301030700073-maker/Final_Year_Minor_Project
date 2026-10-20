@@ -692,29 +692,52 @@ class ProcessNotFoundError(Exception):
     pass
 
 
+class _FakeProc:
+    def __init__(self, pid):
+        self.pid = pid
+
+
 class _FakeAliveDevice:
-    def get_process(self, pid):
-        return {"pid": pid}
+    def enumerate_processes(self):
+        return [_FakeProc(1)]
 
 
 class _FakeDeadDevice:
-    def get_process(self, pid):
-        raise ProcessNotFoundError("process not found")
+    def enumerate_processes(self):
+        return [_FakeProc(999)]  # the pid is absent -> gone
 
 
 class _FakeTransientErrorDevice:
-    def get_process(self, pid):
+    def enumerate_processes(self):
         raise RuntimeError("transient frida/device error")
 
 
 def test_process_is_alive_is_conservative():
     # alive -> alive
     assert _process_is_alive(_FakeAliveDevice(), 1) is True
-    # genuinely gone (ProcessNotFoundError) -> dead -> self-termination signal
+    # pid absent from the process list -> dead -> self-termination signal
     assert _process_is_alive(_FakeDeadDevice(), 1) is False
     # a transient frida/device error is NOT evidence of self-termination, so it
     # must be treated as alive rather than false-flagging a healthy target.
     assert _process_is_alive(_FakeTransientErrorDevice(), 1) is True
+
+
+def test_process_is_alive_detects_death_despite_get_process_raising_attributeerror():
+    # SESSION11K regression: REAL frida's get_process(int_pid) raises
+    # `AttributeError: 'int' object has no attribute 'lower'` (it wants a NAME), NOT
+    # ProcessNotFoundError. The old impl read that as "not ProcessNotFoundError" ->
+    # alive -> self-termination/crash detection NEVER fired, so a dead app was
+    # reported "still running: True" (proven live). The impl must NOT rely on
+    # get_process: a device that raises AttributeError from get_process but lists no
+    # matching pid must read DEAD.
+    class _RealFridaLike:
+        def get_process(self, pid):
+            raise AttributeError("'int' object has no attribute 'lower'")
+
+        def enumerate_processes(self):
+            return []
+
+    assert _process_is_alive(_RealFridaLike(), 7158) is False
 
 
 def test_ui_actions_for_is_action_aware():

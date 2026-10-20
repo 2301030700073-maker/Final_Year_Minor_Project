@@ -15,11 +15,13 @@ target, using only what the device reports (no app-specific assumptions):
 
 Each signal is a pure function of real device output, so it is auditable and
 never fabricated. A tool missing on the host degrades that one signal to
-"not captured" (a miss is reported honestly, never guessed). This is "the app
-is alive and its UI is live and interactive" - it is NOT a claim that a
-specific click was performed (driving an actual tap is app-specific and
-fragile; proving the UI is focused, un-ANRed, and renders interactive nodes is
-the strongest honest, deterministic responsiveness claim).
+"not captured" (a miss is reported honestly, never guessed). This is a SINGLE
+STATIC SNAPSHOT: the app is in the foreground, focused, has not (yet) ANR'd, and
+a frame with widgets is rendered. It is NOT proof of RESPONSIVENESS or progress -
+a hung WebView / RN surface / spinner, or a stuck app that has not yet crossed
+the ~5s input-dispatch ANR threshold, presents the SAME snapshot. It must never be
+read as "the app is working / all OK": a genuine progress signal needs two samples
+(does the screen change?) or a live interaction this does not take.
 """
 
 from __future__ import annotations

@@ -337,10 +337,10 @@ def test_liveness_evidence_lines_renders_true_state():
                "anr_detected": False, "clickable_nodes": 1, "screen_state": "interactive"}
     )
     assert "True" in r["app still running after bypass"]
-    assert any("UI responsiveness" in k for k in r)
+    assert any("App UI state" in k for k in r)
     r2 = liveness_evidence_lines(None, None)
     assert "not captured" in r2["app still running after bypass"]
-    assert "not captured" in r2["App UI responsiveness (live, real device data)"]
+    assert "not captured" in r2["App UI state (live, real device data; single static snapshot)"]
 
 
 def test_ui_liveness_covers_uncommon_evidence_branches():

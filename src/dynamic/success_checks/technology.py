@@ -43,12 +43,13 @@ _PAYLOAD_TRUNCATE = 80
 def liveness_evidence_lines(
     app_still_running: bool | None, ui_liveness: dict | None
 ) -> dict[str, str]:
-    """Post-bypass liveness + real-time UI-responsiveness evidence lines, shared
+    """Post-bypass process liveness + a single static UI-state snapshot, shared
     so EVERY run's report surfaces them - not just unknown/technology targets.
-    A claimed bypass is only meaningful if the process survived the settle
-    window and its UI is live, focused, un-ANRed and rendering; state it
-    audibly for every target (ADR-0006), and say 'not captured' when the tool
-    was unavailable rather than guess."""
+    The UI part proves foreground + focused + no ANR observed + a rendered frame;
+    it is NOT a responsiveness/progress proof (a hung WebView/RN-surface/spinner,
+    or a not-yet-ANR'd stuck app, presents the same snapshot). State it audibly for
+    every target (ADR-0006), and say 'not captured' when the tool was unavailable
+    rather than guess."""
     lines = {
         "app still running after bypass": (
             "True (process survived the settle window, did not self-terminate)"
@@ -60,8 +61,19 @@ def liveness_evidence_lines(
                 else "not captured (liveness not recorded this run)"
             )
         ),
-        "App UI responsiveness (live, real device data)": (
-            _summarize_ui_liveness(ui_liveness)
+        # SESSION11H (UI-LIVENESS-OVERCLAIM): this is a single STATIC snapshot -
+        # foreground + focused + no ANR observed + a rendered frame. It does NOT
+        # prove the app is responsive or making progress: a hung WebView / RN
+        # surface / spinner, or a stuck app that has not yet ANR'd, presents the
+        # SAME snapshot. Labelled "state", not "responsiveness", and the bound is
+        # spelled into the value, so a report never reads "all OK / usable" for an
+        # app that is actually frozen.
+        "App UI state (live, real device data; single static snapshot)": (
+            (_summarize_ui_liveness(ui_liveness)
+             + " - single static snapshot: proves foreground + a rendered frame + "
+               "no ANR observed; it does NOT prove the app is responsive or "
+               "progressing (a hung WebView/RN-surface/spinner, or a stuck app that "
+               "has not yet ANR'd, presents the SAME snapshot)")
             if ui_liveness else "not captured (no live UI evidence this run)"
         ),
     }
@@ -592,15 +604,15 @@ class TechnologyHooksEngagedCheck:
                 + (", ".join(_summarize(m) for m in messages[:_MESSAGE_SAMPLE_LIMIT])
                    if messages else "(none captured)")
             ),
-            # Real-time UI-responsiveness (from live device data, not inference):
-            # the app's top activity reached RESUMED (foreground), it owns window
-            # focus, no ANR / input-dispatch timeout was logged (UI thread not
-            # frozen), and a real interactive UI hierarchy is rendered. This is
-            # the honest "app is usable, not stuck" claim - it proves the UI is
-            # live and tappable without fabricating a specific click. From the
+            # A SINGLE STATIC UI-state snapshot (from live device data, not
+            # inference): the top activity is RESUMED (foreground), owns window
+            # focus, no ANR was logged, and a frame with widgets is rendered. This
+            # does NOT prove the app is responsive/progressing - a hung WebView / RN
+            # surface / spinner, or a not-yet-ANR'd stuck app, presents the SAME
+            # snapshot - so it is labelled "state", never "usable / all-OK". From the
             # shared helper (see the liveness_lines splat above).
-            "App UI responsiveness (live, real device data)": liveness_lines[
-                "App UI responsiveness (live, real device data)"
+            "App UI state (live, real device data; single static snapshot)": liveness_lines[
+                "App UI state (live, real device data; single static snapshot)"
             ],
         }
         return VerificationResult(

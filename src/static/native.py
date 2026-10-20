@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import zipfile
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -695,13 +696,36 @@ def compute_degradation(libs: list[NativeLibrary]) -> dict[str, str]:
 def _run_tool(cmd: list[str], timeout: float, tool_name: str) -> str:
     """Run a tool, returning its stdout. Raises NativeToolError on timeout or
     non-zero exit - a corrupt/hung .so must surface as unscannable, never as a
-    silent empty parse (H1/H4, principle 3)."""
+    silent empty parse (H1/H4, principle 3).
+
+    SESSION11L4: traced like decompile's tool runners - start/ok/failed with the
+    exit code and duration, a timeout kill named why=timeout rather than rounded
+    up to a generic failure. These run in worker threads (analyze_so_many), and
+    each marker is one small write, which is atomic per line on both sinks."""
+    from trace import enabled as _trace_on
+    from trace import trace as _trace
+    _tracing = _trace_on()
+    _started = time.monotonic() if _tracing else 0.0
+    if _tracing:
+        _trace("static", f"native.tool.{tool_name}", "start", timeout_s=timeout)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
+        if _tracing:
+            _trace("static", f"native.tool.{tool_name}", "failed",
+                   why="timeout", timeout_s=timeout,
+                   ms=round((time.monotonic() - _started) * 1000))
         raise NativeToolError(f"{tool_name} timed out after {timeout:.0f}s on {cmd[-1]}") from None
     if proc.returncode != 0:
+        if _tracing:
+            _trace("static", f"native.tool.{tool_name}", "failed",
+                   rc=proc.returncode,
+                   ms=round((time.monotonic() - _started) * 1000))
         raise NativeToolError(f"{tool_name} exited {proc.returncode} on {cmd[-1]}")
+    if _tracing:
+        _trace("static", f"native.tool.{tool_name}", "ok", rc=0,
+               chars=len(proc.stdout),
+               ms=round((time.monotonic() - _started) * 1000))
     return proc.stdout
 
 
@@ -1082,12 +1106,29 @@ def ghidra_decompile(so_path: Path, out_path: Path) -> tuple[bool, list[str], bo
         "-deleteProject", "-overwrite",
     ]
     try:
+        from trace import enabled as _trace_on
+        from trace import trace as _trace
+        _tracing = _trace_on()
+        _started = time.monotonic() if _tracing else 0.0
+        if _tracing:
+            _trace("static", "native.ghidra", "start",
+                   so=so_path.name, timeout_s=GHIDRA_TIMEOUT)
         try:
             subprocess.run(cmd, capture_output=True, text=True, timeout=GHIDRA_TIMEOUT)
         except subprocess.TimeoutExpired:
+            if _tracing:
+                _trace("static", "native.ghidra", "failed", why="timeout",
+                       so=so_path.name, timeout_s=GHIDRA_TIMEOUT,
+                       ms=round((time.monotonic() - _started) * 1000))
             return False, [], False, f"ghidra timed out after {GHIDRA_TIMEOUT:.0f}s on {so_path.name}"
         except OSError as exc:
+            if _tracing:
+                _trace("static", "native.ghidra", "failed", why="launch_failed",
+                       so=so_path.name, ms=round((time.monotonic() - _started) * 1000))
             return False, [], False, f"ghidra failed to launch: {exc}"
+        if _tracing:
+            _trace("static", "native.ghidra", "ok", so=so_path.name,
+                   ms=round((time.monotonic() - _started) * 1000))
     finally:
         # `-deleteProject` only clears the project's own files, and does not run
         # at all when the pass times out or never launches - so without this the
@@ -1596,16 +1637,35 @@ def analyze_so(so_path: Path, security_triggers: set[str] | None = None, cache_d
     semantics are lossless: the cached lib is the exact dataclass the uncached
     pass would have returned. With `cache_dir` None (the test default) behavior
     is unchanged - always a fresh analysis."""
+    from trace import enabled as _trace_on
+    from trace import trace as _trace
+    _tracing = _trace_on()
+    _started = time.monotonic() if _tracing else 0.0
+    if _tracing:
+        _trace("static", "native.lib", "start", so=so_path.name, cache=bool(cache_dir))
     if cache_dir is None:
-        return _analyze_so_uncached(so_path, security_triggers)
+        _lib = _analyze_so_uncached(so_path, security_triggers)
+        if _tracing:
+            _trace("static", "native.lib", "info", so=so_path.name, cached=False,
+                   coverage=_lib_coverage(_lib),
+                   ms=round((time.monotonic() - _started) * 1000))
+        return _lib
     so_hash = sha256_file(so_path)
     trigger_key = _trigger_key(security_triggers)
     version = _analyze_cache_version()
     cached = _load_analyze_cache(cache_dir, so_hash, version, trigger_key)
     if cached is not None:
+        if _tracing:
+            _trace("static", "native.lib", "info", so=so_path.name, cached=True,
+                   coverage=_lib_coverage(cached),
+                   ms=round((time.monotonic() - _started) * 1000))
         return cached
     lib = _analyze_so_uncached(so_path, security_triggers)
     _save_analyze_cache(cache_dir, so_hash, version, trigger_key, lib)
+    if _tracing:
+        _trace("static", "native.lib", "info", so=so_path.name, cached=False,
+               coverage=_lib_coverage(lib),
+               ms=round((time.monotonic() - _started) * 1000))
     return lib
 
 
@@ -1635,6 +1695,8 @@ def analyze_so_many(
         return []
     workers = max_workers or min(MAX_GHIDRA_WORKERS, os.cpu_count() or 1)
     workers = max(1, min(workers, len(reps)))
+    from trace import trace as _trace
+    _trace("static", "native.begin", "info", libs=len(reps), workers=workers)
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         return list(ex.map(
             lambda p: analyze_so(p, security_triggers=security_triggers, cache_dir=cache_dir),

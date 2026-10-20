@@ -1440,3 +1440,83 @@ def test_analyze_so_threads_ghidra_fingerprint_into_cache_key(monkeypatch, tmp_p
     assert "ghidra_11.9_PUBLIC" in captured["load_version"]
     # load and save MUST agree, or a write under one key could never be read back
     assert captured["save_version"] == captured["load_version"]
+
+
+# --- SESSION11L4: native-pass observability (src/static/native.py) -------------
+#
+# The native stage's per-.so toolchain pass (readelf/nm/strings/Ghidra, 18s on
+# spotify and potentially minutes on a big app) said nothing until the whole
+# stage returned. These pin the contract: per-lib start/info markers, tool
+# start/ok/failed with rc and duration, and nothing at all when tracing is off.
+
+@pytest.fixture
+def trace_on(monkeypatch):
+    import importlib
+    import trace as tracemod
+    monkeypatch.setenv("FYMP_TRACE", "1")
+    monkeypatch.delenv("FYMP_TRACE_VERBOSE", raising=False)
+    importlib.reload(tracemod)
+    yield tracemod
+    monkeypatch.undo()
+    importlib.reload(tracemod)
+
+
+def test_analyze_so_traces_the_per_lib_pass(tmp_path, trace_on, monkeypatch, capsys):
+    from static import native as native_mod
+
+    so = tmp_path / "libnative.so"
+    so.write_bytes(b"\x7fELF")
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+
+    monkeypatch.setattr(native_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(native_mod.subprocess, "run", lambda cmd, **kw: FakeProc())
+
+    native_mod.analyze_so(so)
+
+    err = capsys.readouterr().err
+    assert "native.lib start" in err and "so=libnative.so" in err
+    assert "native.lib info" in err and "cached=False" in err
+    # the tool that actually ran is marked too, with its exit
+    assert "native.tool.readelf ok" in err and "rc=0" in err
+
+
+def test_run_tool_marks_a_timeout_kill_as_timeout(tmp_path, trace_on, monkeypatch, capsys):
+    import subprocess as sp
+    from static import native as native_mod
+
+    def fake_run(cmd, **kwargs):
+        raise sp.TimeoutExpired(cmd=cmd, timeout=60)
+
+    monkeypatch.setattr(native_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(native_mod.subprocess, "run", fake_run)
+
+    so = tmp_path / "lib.so"
+    so.write_bytes(b"\x7fELF")
+    try:
+        native_mod.analyze_so(so)
+    except native_mod.NativeToolError:
+        pass  # the stage contract; the marker is what this test is about
+
+    err = capsys.readouterr().err
+    assert "native.tool.readelf failed" in err
+    assert "why=timeout" in err and "timeout_s=" in err
+
+
+def test_native_markers_absent_when_tracing_off(tmp_path, monkeypatch, capsys):
+    from static import native as native_mod
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+
+    monkeypatch.setattr(native_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(native_mod.subprocess, "run", lambda cmd, **kw: FakeProc())
+
+    so = tmp_path / "lib.so"
+    so.write_bytes(b"\x7fELF")
+    native_mod.analyze_so(so)
+
+    assert capsys.readouterr().err == ""

@@ -698,11 +698,21 @@ def run_dynamic_stage(
 
         # FR-4.6 success via the shared builder: root_pid survived the settle
         # window (self-termination checked just above), so app_still_running is
-        # recorded True. The two-spawn path gathers no UI liveness, so ui_liveness
-        # stays None ("not captured") - honest, not a guess.
+        # recorded True. SESSION11I: the two-spawn path now ALSO gathers UI liveness
+        # here - check_ui_liveness works for AndroGoat (proven standalone) and the
+        # second spawn has settled with the app foreground, so this path can report
+        # its real UI state + the two-sample progress signal instead of always
+        # "not captured". Best-effort: any failure stays None ("not captured"),
+        # never a guess.
+        ui_liveness = None
+        try:
+            from dynamic.ui_liveness import check_ui_liveness
+            ui_liveness = check_ui_liveness(device_serial, package_name)
+        except Exception:
+            ui_liveness = None
         outcome["result"] = _bypass_success_result(
             root_pid, messages, scripts_applied, target, start,
-            instrument=instrument,
+            instrument=instrument, ui_liveness=ui_liveness,
         )
 
     def _run_frida() -> None:

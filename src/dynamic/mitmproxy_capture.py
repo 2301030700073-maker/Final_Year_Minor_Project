@@ -1586,6 +1586,9 @@ def _drive_ui(serial: str, package: str) -> dict:
                           + f" ({fg['reason']}) - refusing to tap a screen the app does "
                             "not own"}
     dump = ui_liveness.dump_ui_targets(serial)
+    from trace import trace as _trace
+    _trace("capture", "ui.dump", "ok" if dump.get("measured") else "failed",
+           targets=len(dump.get("targets") or []))
     census = dump.get("hierarchy")
     if not dump["measured"]:
         return {"attempted": False, "tapped": False, "target": None,
@@ -1599,6 +1602,8 @@ def _drive_ui(serial: str, package: str) -> dict:
                 "unread_hierarchy": True,
                 "reason": dump["reason"]}
     target, how = ui_liveness._choose_tap_target(dump["targets"])
+    _trace("capture", "ui.choose_tap", "ok" if target is not None else "none",
+           how=how, seen=len(dump["targets"]))
     if target is None:
         return {"attempted": False, "tapped": False, "target": None,
                 "selected_by": None, "targets_seen": len(dump["targets"]),
@@ -1616,6 +1621,8 @@ def _drive_ui(serial: str, package: str) -> dict:
                            if census is not None and census.get("nodes") == 0 else how)}
     try:
         ui_liveness.tap(serial, target["center"][0], target["center"][1])
+        _trace("capture", "ui.tap", "ok",
+               x=target["center"][0], y=target["center"][1])
     except Exception as e:
         return {"attempted": True, "tapped": False, "target": target,
                 "selected_by": how, "reason": f"input tap failed: {e}"}

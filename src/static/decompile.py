@@ -623,8 +623,13 @@ def _run_secondary_fallback(apk_path: Path, target_dir: Path, log_path: Path) ->
             # and let the honest "recovered nothing" result below stand.
             logf.write(f"\ndex2jar failed to launch: {exc}\n")
             d2j_rc = -1
-        _trace("static", "tool.d2j-dex2jar", "ok" if d2j_rc == 0 else "failed",
-               rc=d2j_rc)
+        _trace("static", "tool.d2j-dex2jar",
+               "ok" if d2j_rc == 0 else "failed",
+               rc=d2j_rc,
+               # rc=-1 is the launch-failure sentinel (an unexecutable tool),
+               # not a tool exit code - named so the marker cannot read a
+               # broken toolchain as a crashed decompile.
+               why="launch_failed" if d2j_rc == -1 else None)
         if d2j_rc == 0 and recovered_jar.exists():
             cmd = ([cfr_bin, str(recovered_jar), "--outputdir", str(cfr_dir)]
                    if cfr_bin else ["java", "-jar", cfr_jar, str(recovered_jar), "--outputdir", str(cfr_dir)])
@@ -637,10 +642,17 @@ def _run_secondary_fallback(apk_path: Path, target_dir: Path, log_path: Path) ->
             except OSError as exc:
                 logf.write(f"\nCFR failed to launch: {exc}\n")
                 cfr_rc = -1
+            _trace("static", "tool.cfr", "ok" if cfr_rc == 0 else "failed",
+                   rc=cfr_rc,
+                   why=("launch_failed" if cfr_rc == -1
+                        else ("timeout" if cfr_rc == _TIMEOUT_RC else None)))
         else:
             cfr_rc = -1
-        _trace("static", "tool.cfr", "ok" if cfr_rc == 0 else "failed",
-               rc=cfr_rc)
+            # d2j failed or produced no jar, so CFR NEVER RAN. A skip is not a
+            # failure: reporting it as one would read a broken decompiler where
+            # the real fact is "the earlier stage gave it nothing to do".
+            _trace("static", "tool.cfr", "skipped",
+                   why="d2j_produced_no_jar")
     recovered_count = _count_java_files(cfr_dir)
     if recovered_count > 0:
         _trace("static", "decompile.fallback", "info", recovered=True,
@@ -671,9 +683,14 @@ def _run_tool_logged(cmd: list[str], log_path: Path, timeout_s: int, what: str) 
     # these markers give the run's outer view a start/exit pair with the exit
     # code and the measured duration (a timeout kill is rc=_TIMEOUT_RC, which
     # _runs_timed_out() maps back to "the budget was too small").
+    from trace import enabled as _trace_on
     from trace import trace as _trace
-    _started = time.monotonic()
-    _trace("static", f"tool.{what}", "start", timeout_s=timeout_s)
+    # The clock is only read when tracing is on, so a disabled trace stays a
+    # single bool check (the module's documented zero-overhead contract).
+    _tracing = _trace_on()
+    _started = time.monotonic() if _tracing else 0.0
+    if _tracing:
+        _trace("static", f"tool.{what}", "start", timeout_s=timeout_s)
     with open(log_path, "w", encoding="utf-8") as logf:
         try:
             proc = subprocess.run(
@@ -683,8 +700,16 @@ def _run_tool_logged(cmd: list[str], log_path: Path, timeout_s: int, what: str) 
         except subprocess.TimeoutExpired:
             logf.write(f"\n[{what} timed out after {timeout_s}s - process killed]\n")
             returncode = _TIMEOUT_RC
-    _trace("static", f"tool.{what}", "ok" if returncode == 0 else "failed",
-           rc=returncode, ms=round((time.monotonic() - _started) * 1000))
+    if _tracing:
+        # A timeout kill (_TIMEOUT_RC) is a DIFFERENT fact from a tool that
+        # exited non-zero on its own - one says "raise the budget", the other
+        # says "this tool is broken on this APK" (APKTOOL-TIMEOUT1's own
+        # distinction). Carried as a why= field so the marker never has to
+        # over-claim a generic failure.
+        _trace("static", f"tool.{what}", "ok" if returncode == 0 else "failed",
+               rc=returncode,
+               why="timeout" if returncode == _TIMEOUT_RC else None,
+               ms=round((time.monotonic() - _started) * 1000))
     return returncode, _tail_file(log_path)
 
 
@@ -754,7 +779,14 @@ def _run_tool_until_stalled(
         while True:
             try:
                 proc.wait(timeout=poll)
-                _trace("static", f"tool.{what}", "ok", rc=proc.returncode,
+                # rc-aware, exactly like _run_tool_logged's exit marker: a tool
+                # that exited non-zero (jadx's RegionMakerVisitor crash on an
+                # AndroidX class, measured) is a FAILED tool, and marking the
+                # exit "ok" because the wait() returned would read a crashed
+                # decompile as a clean one in the trace (the marker is a fact
+                # about the exit, so the exit code is what it must carry).
+                _trace("static", f"tool.{what}", "ok" if proc.returncode == 0 else "failed",
+                       rc=proc.returncode,
                        ms=round((time.monotonic() - start) * 1000))
                 return proc.returncode, _tail_file(log_path)
             except subprocess.TimeoutExpired:

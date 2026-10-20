@@ -1596,8 +1596,16 @@ def _drive_ui(serial: str, package: str) -> dict:
                             "not own"}
     dump = ui_liveness.dump_ui_targets(serial)
     from trace import trace as _trace
-    _trace("capture", "ui.dump", "ok" if dump.get("measured") else "failed",
-           targets=len(dump.get("targets") or []))
+    # "skipped", not "failed", when the dump could not be measured: the arm
+    # right below treats not-measured as an honest refusal (a tool that could
+    # not read the screen), and a marker that calls it a failure says the UI
+    # drive broke when the fact is that nothing was read. And an UNKNOWN target
+    # list stays unknown - `len(... or [])` would print targets=0 for "never
+    # enumerated", the fabricated-zero ADR-0006 forbids.
+    _trace("capture", "ui.dump",
+           "ok" if dump.get("measured") else "skipped",
+           targets=(len(dump["targets"])
+                    if dump.get("targets") is not None else None))
     census = dump.get("hierarchy")
     if not dump["measured"]:
         return {"attempted": False, "tapped": False, "target": None,

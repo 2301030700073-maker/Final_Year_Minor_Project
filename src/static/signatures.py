@@ -1080,7 +1080,14 @@ def scan(
         )
         con.commit()
         if _trace is not None:
-            _trace("static", "scan.xref.swap", "ok",
-                   rows=con.execute("SELECT COUNT(*) FROM evidence").fetchone()[0])
+            # The count is a diagnostic, so it must never be able to abort the
+            # scan after the swap committed: read it defensively and let an
+            # unreadable table render as the omitted (unknown) field rather
+            # than raising out of a marker call with the connection open.
+            try:
+                _rows = con.execute("SELECT COUNT(*) FROM evidence").fetchone()[0]
+            except (sqlite3.Error, TypeError, IndexError):
+                _rows = None
+            _trace("static", "scan.xref.swap", "ok", rows=_rows)
         con.close()
     return evidence

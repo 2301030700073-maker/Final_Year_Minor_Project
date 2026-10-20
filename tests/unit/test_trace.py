@@ -57,3 +57,48 @@ def test_a_bad_trace_file_path_never_breaks_the_run(monkeypatch):
     monkeypatch.setenv("FYMP_TRACE_FILE", "/nonexistent_dir_xyz/t.log")
     _fresh()
     tracemod.trace("stage", "x", "ok")  # must not raise
+
+
+def test_a_broken_stderr_never_breaks_the_run(monkeypatch):
+    # SESSION11L4 audit finding: the trace contract says "tracing must never
+    # break a run", but only the trace-FILE open was guarded - the stderr
+    # write was not, so a run whose output pipe lost its reader (BrokenPipe)
+    # or a console codepage that cannot encode the marker (UnicodeError)
+    # raised out of a marker call mid-pipeline. Both sinks are guarded now.
+    import io
+    import trace as tracemod
+
+    class _Broken(io.TextIOBase):
+        def write(self, *a, **k):
+            raise BrokenPipeError("reader went away")
+
+        def flush(self):
+            raise BrokenPipeError("reader went away")
+
+    monkeypatch.setenv("FYMP_TRACE", "1")
+    monkeypatch.delenv("FYMP_TRACE_FILE", raising=False)
+    importlib.reload(tracemod)
+    monkeypatch.setattr(tracemod.sys, "stderr", _Broken())
+    tracemod.trace("stage", "x", "ok", ms=1)  # must not raise
+    tracemod.trace("stage", "y", "info", note="marker with a unicode-ish payload")
+
+
+def test_an_unencodable_marker_never_breaks_the_run(monkeypatch):
+    # The UnicodeError half of the same contract: a marker carrying a character
+    # the stderr encoding cannot represent (cp1252 console on Windows) must be
+    # dropped, not raised.
+    import io
+    import trace as tracemod
+
+    class _Latin1(io.TextIOBase):
+        encoding = "ascii"
+
+        def write(self, text):
+            text.encode("ascii")  # raises UnicodeEncodeError for non-ASCII
+            return len(text)
+
+    monkeypatch.setenv("FYMP_TRACE", "1")
+    monkeypatch.delenv("FYMP_TRACE_FILE", raising=False)
+    importlib.reload(tracemod)
+    monkeypatch.setattr(tracemod.sys, "stderr", _Latin1())
+    tracemod.trace("stage", "x", "ok", file="café.java")  # must not raise

@@ -9,8 +9,13 @@ from a final verdict.
 
 HONESTY: a marker means the code REACHED that point and recorded the given
 fields - it NEVER means the step succeeded. Every marker carries an explicit
-status ("start" / "ok" / "failed" / "skipped" / "info"). Tracing never changes a
-verdict and never fabricates a value; it only makes the existing flow observable.
+status. The conventional set is "start" / "ok" / "failed" / "skipped" /
+"info", and call sites may add a more specific status when the fact warrants
+one ("timeout" for a budget kill, "error" for a caught exception, "none" for
+"ran and found nothing") - the vocabulary is caller-supplied precisely so a
+marker never has to round a specific fact up to a generic verdict. Tracing
+never changes a verdict and never fabricates a value; it only makes the
+existing flow observable.
 
 OFF by default (zero output, zero overhead): enabled by `FYMP_TRACE=1` (or the
 `run` command's `--debug` flag, which sets it), and optionally mirrored to a file
@@ -62,8 +67,16 @@ def trace(phase: str, step: str, status: str = "ok", **fields) -> None:
     line = f"[TRACE {rel:7.2f}s] {phase}.{step} {status}"
     if extra:
         line += " " + extra
-    sys.stderr.write(line + "\n")
-    sys.stderr.flush()
+    # Both sinks are guarded, not just the file: a closed/EPIPE stderr (a run
+    # whose output was piped into a reader that went away) or an unencodable
+    # character under a non-UTF-8 console codepage would otherwise raise out of
+    # a marker call in the middle of the pipeline - the exact "tracing must
+    # never break a run" failure the file sink already guards against.
+    try:
+        sys.stderr.write(line + "\n")
+        sys.stderr.flush()
+    except (OSError, UnicodeError):
+        pass
     path = os.environ.get("FYMP_TRACE_FILE", "").strip()
     if path:
         try:

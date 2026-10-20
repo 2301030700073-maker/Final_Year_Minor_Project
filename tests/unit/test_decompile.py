@@ -1523,3 +1523,23 @@ def test_run_tool_until_stalled_traces_a_stall_kill_with_the_silence(tmp_path, t
     assert "why=stalled" in err and "silent_s=" in err
     # a truly hung tool produces no progress heartbeat: only start + the kill
     assert "tool.fake info" not in err
+
+
+@pytest.mark.real_stall_runner
+def test_run_tool_until_stalled_marks_a_nonzero_exit_as_failed(tmp_path, trace_on, capsys):
+    # SESSION11L4 audit finding: the stall runner's success exit used to emit
+    # "ok" whenever wait() returned - so a tool that CRASHED (jadx's
+    # RegionMakerVisitor bug on an AndroidX class, measured on real APKs) read
+    # as a clean exit in the trace. The exit marker is rc-aware now, exactly
+    # like _run_tool_logged's.
+    import sys
+    from static.decompile import _run_tool_until_stalled
+
+    script = "import sys; print('starting', flush=True); sys.exit(3)"
+    log = tmp_path / "crash.log"
+    rc, _tail = _run_tool_until_stalled(
+        [sys.executable, "-c", script], log, ceiling_s=30, stall_s=10.0, what="fake")
+    err = capsys.readouterr().err
+    assert rc == 3
+    assert "tool.fake failed" in err and "rc=3" in err
+    assert "tool.fake ok" not in err

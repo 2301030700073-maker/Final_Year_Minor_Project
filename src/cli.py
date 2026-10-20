@@ -2694,9 +2694,17 @@ def run(
     # / correlation consumer below keeps reading classification.action unchanged.
     # Gated on `not skip_dynamic` as defence in depth: the contradictory pair is
     # now rejected up front by the flag guard at the top of this command, so this
-    # clause only keeps the helper total for a direct/legacy caller.
+    # clause only keeps the helper total for a direct/legacy caller. Both flags
+    # are read through _flag_enabled here too (SESSION11L4): a mixed direct call
+    # (one flag given, one omitted) must not let the omitted one's truthy
+    # OptionInfo default decide the derivation - the same discipline as the six
+    # conditionals fixed in the same session, one derivation deeper. (The audit
+    # first claimed the all-omitted case forced here too; it does not -
+    # `truthy and not truthy` is False - but the derivation is the last place a
+    # raw option could still leak through, so it is closed regardless.)
     dynamic_action = _effective_dynamic_action(
-        classification.action, force_dynamic and not skip_dynamic
+        classification.action,
+        _flag_enabled(force_dynamic) and not _flag_enabled(skip_dynamic),
     )
     forced_dynamic = dynamic_action != classification.action
 

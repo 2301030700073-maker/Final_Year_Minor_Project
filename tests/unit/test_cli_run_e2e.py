@@ -1500,3 +1500,69 @@ def test_run_reads_every_option_through_flag_enabled():
     assert not re.search(r"\bif (not )?drive_ui\b", code), (
         "drive_ui is passed through to run_capture_stage; a conditional on it "
         "inside run() would hit the same truthy-OptionInfo trap")
+
+
+def test_run_with_omitted_flags_on_a_neither_app_does_not_force_or_skip(
+    run_setup, monkeypatch
+):
+    # SESSION11L4, the case the first omitted-flags test could NOT see: on a
+    # NEITHER app there is no root confirmation to observe, so the only way an
+    # omitted-flags run goes wrong is through the stage machinery itself - the
+    # skip reason and the force banner. Pre-fix, the omitted `skip_dynamic`
+    # OptionInfo (truthy) made the dynamic stage record `--skip-dynamic passed`
+    # for a flag nobody gave (verified: this test fails against 8094443f3).
+    # The derived-force arithmetic (`force_dynamic and not skip_dynamic`) was
+    # NOT the bug an audit first claimed - `truthy and not truthy` is False -
+    # but the derivation is now read through _flag_enabled too, so a mixed
+    # direct call (one flag given, one omitted) cannot force either.
+    from dynamic import device as device_mod
+
+    # erase the root detection the shared fixture plants: a clean tree scans
+    # clean, which is exactly the NEITHER classification this test needs.
+    (run_setup / "jadx/sources/com/example/app/MainActivity.java").write_text(
+        "package com.example.app;\n"
+        "public class MainActivity {\n"
+        "    boolean fine() { return true; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(device_mod, "discover_device", lambda serial: "emulator-5554")
+    monkeypatch.setattr(
+        device_mod, "read_device_environment",
+        lambda serial: {"serial": serial, "ro.build.version.sdk": "34",
+                        "ro.build.version.release": "14", "ro.build.type": "userdebug",
+                        "ro.debuggable": "1", "ro.product.cpu.abi": "x86_64",
+                        "ro.hardware": "ranchu",
+                        "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64xa:14/UE1A:userdebug/test-keys"})
+    monkeypatch.setattr(device_mod, "install_apk", lambda serial, apk, package_name=None: None)
+    monkeypatch.setattr(device_mod, "verify_installed", lambda serial, pkg: True)
+
+    captured = []
+    original_print = cli.console.print
+    cli.console.print = lambda *a, **kw: captured.append(" ".join(str(x) for x in a))
+    try:
+        cli.run(
+            apk=run_setup / "fixture.apk",
+            justification="ACADEMIC_TRAINING_TARGET",
+            # EVERY flag omitted - the direct-call shape.
+            device_serial=None,
+            target="propertyguru",
+        )
+    finally:
+        cli.console.print = original_print
+
+    report_files = sorted((run_setup / "reports").rglob("*.md"))
+    assert report_files
+    text = report_files[0].read_text(encoding="utf-8")
+    # the static verdict is the honest NEITHER this clean app earns (the report
+    # renders the Decision line markdown-bold) ...
+    assert "**Decision:** NEITHER" in text
+    assert any("Decision: NEITHER" in c for c in captured)
+    # ... and no operator-override banner was printed for a flag never given -
+    # the regression this test exists for (pre-fix: forced_dynamic was True).
+    assert "OPERATOR-FORCED DYNAMIC" not in text
+    assert not any("OPERATOR-FORCED DYNAMIC" in c for c in captured)
+    # the dynamic stage's skip, if any, must carry the NEITHER reason - never
+    # the "--skip-dynamic passed" reason of a flag that was omitted.
+    assert "--skip-dynamic passed" not in text

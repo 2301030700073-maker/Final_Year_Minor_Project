@@ -840,6 +840,14 @@ def _stage_skip_reason(result: StageResult) -> str | None:
 
 
 def _print_stage(result: StageResult) -> None:
+    # SESSION11L: pipeline-level zero-to-end trace. EVERY stage result flows
+    # through here, so one marker per stage gives an ordered replay of the whole
+    # run (see src/trace.py). Status is the stage's own recorded status; the
+    # error, when present, is carried so a trace shows WHY a stage failed, not
+    # just that it did. No-op unless FYMP_TRACE / --debug is set.
+    from trace import trace as _trace
+    _trace("stage", result.stage, result.status,
+           ms=result.duration_ms, error=(result.error or None))
     icon = {"success": "[green]OK[/green]", "failed": "[bold red]FAILED[/bold red]", "skipped": "[yellow]SKIPPED[/yellow]"}[result.status]
     console.print(f"{icon}  {result.stage}  ({result.duration_ms}ms)")
     if result.error:
@@ -1795,6 +1803,16 @@ def run(
             "removes the stage that would). No-op when a category was already detected."
         ),
     ),
+    debug: bool = typer.Option(
+        False, "--debug",
+        help=(
+            "Emit a structured, ordered [TRACE] marker at each pipeline stage and "
+            "key dynamic sub-step to stderr (and to $FYMP_TRACE_FILE if set), so a "
+            "run can be replayed step by step to see exactly how far it got and "
+            "where it stopped. OFF by default; a marker records that a step was "
+            "REACHED, never that it succeeded. Never changes a verdict."
+        ),
+    ),
     device_serial: Optional[str] = typer.Option(None, "--device", help="Specific device/emulator serial"),
     target: Optional[str] = typer.Option(
         None, "--target",
@@ -1828,6 +1846,14 @@ def run(
             "drive. Pass one of them, not both.",
             param_hint="--skip-dynamic / --force-dynamic",
         )
+
+    # SESSION11L: --debug turns on the structured step trace (see src/trace.py),
+    # set BEFORE any stage runs so the whole pipeline is traced end to end.
+    if debug:
+        import os as _os
+        _os.environ["FYMP_TRACE"] = "1"
+        from trace import reset as _trace_reset
+        _trace_reset()
 
     stage_results: list[StageResult] = []
     # Full 128-bit uuid, not a [:8] truncation: RunRecord.run_id is the PK and

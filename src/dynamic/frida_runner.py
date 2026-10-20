@@ -80,8 +80,12 @@ def attach(device_serial: str, package_name: str):
     the device's frida-server - so the stage's own evidence can name the tool its
     verdict rests on instead of asserting one from an unnamed instrument."""
     device, instrument = setup_frida_connection(device_serial)
+    from trace import trace as _trace
+    _trace("dynamic", "frida.connect", "ok", serial=device_serial)
     pid = device.spawn([package_name])
+    _trace("dynamic", "spawn", "ok", pid=pid, pkg=package_name)
     session = device.attach(pid)
+    _trace("dynamic", "attach", "ok", pid=pid)
     return device, session, pid, instrument
 
 
@@ -98,10 +102,13 @@ def load_script_source(session, source: str, on_message=None):
     """Load a Frida script from an in-memory source string (L-M2: the
     deterministic synthesizer produces its bypass in memory, not as a committed
     .js file). Same create/load lifecycle as load_script."""
+    from trace import trace as _trace
+    _trace("dynamic", "script.create", "start", chars=len(source))
     script = session.create_script(source)
     if on_message:
         script.on("message", on_message)
     script.load()
+    _trace("dynamic", "script.load", "ok", chars=len(source))
     return script
 
 
@@ -718,6 +725,11 @@ def run_dynamic_stage(
         try:
             from dynamic.ui_liveness import check_ui_liveness
             ui_liveness = check_ui_liveness(device_serial, package_name)
+            from trace import trace as _trace
+            _trace("dynamic", "ui_liveness", "ok",
+                   screen=(ui_liveness or {}).get("screen_state"),
+                   resumed=(ui_liveness or {}).get("activity_resumed"),
+                   changed=(ui_liveness or {}).get("screen_changed"))
         except Exception:
             ui_liveness = None
         outcome["result"] = _bypass_success_result(
@@ -818,6 +830,11 @@ def run_dynamic_stage(
             try:
                 from dynamic.ui_liveness import check_ui_liveness
                 ui_liveness = check_ui_liveness(device_serial, package_name)
+                from trace import trace as _trace
+                _trace("dynamic", "ui_liveness", "ok",
+                       screen=(ui_liveness or {}).get("screen_state"),
+                       resumed=(ui_liveness or {}).get("activity_resumed"),
+                       changed=(ui_liveness or {}).get("screen_changed"))
             except Exception:
                 ui_liveness = None
 

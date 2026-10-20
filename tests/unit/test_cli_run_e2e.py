@@ -1349,3 +1349,51 @@ def test_technology_check_raise_preserves_static_report_and_exits_nonzero(run_se
     report_files = sorted((run_setup / "reports").rglob("*.md"))
     assert report_files, "the static report must still be written"
     assert "Root-detection" in report_files[0].read_text(encoding="utf-8")
+
+
+def test_run_without_debug_does_not_enable_tracing(run_setup, monkeypatch):
+    # SESSION11L4: calling this Typer command directly (the whole e2e suite does)
+    # leaves an omitted boolean bound to its typer.Option(...) default OBJECT,
+    # which is truthy - so a bare `if debug:` read "not passed" as "passed",
+    # wrote FYMP_TRACE=1 into the process environment, and silently traced every
+    # later test in the session (observable as the marker tests failing only in
+    # a full-suite run). The flag must be read with _flag_enabled (value is True)
+    # and the ambient environment must survive an unflagged run untouched.
+    import os
+
+    monkeypatch.setenv("FYMP_TRACE", "0")  # undone at teardown, even by a raw write
+    cli.run(
+        apk=run_setup / "fixture.apk",
+        justification="ACADEMIC_TRAINING_TARGET",
+        skip_dynamic=True,
+        capture_traffic=False,
+        device_serial=None,
+        target="uncrackable1",
+    )
+    assert os.environ.get("FYMP_TRACE") == "0", (
+        "an unflagged run() must not enable tracing - see _flag_enabled")
+
+
+def test_run_with_debug_true_sets_the_trace_env(run_setup, monkeypatch):
+    # The complement: a real debug=True (what the CLI parses --debug into) does
+    # enable tracing - and the write is undone with the monkeypatch, so the
+    # suite's tracer state is left exactly as it was found.
+    import importlib
+    import os
+    import trace as tracemod
+
+    monkeypatch.setenv("FYMP_TRACE", "0")
+    try:
+        cli.run(
+            apk=run_setup / "fixture.apk",
+            justification="ACADEMIC_TRAINING_TARGET",
+            skip_dynamic=True,
+            capture_traffic=False,
+            device_serial=None,
+            target="uncrackable1",
+            debug=True,
+        )
+        assert os.environ.get("FYMP_TRACE") == "1"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(tracemod)

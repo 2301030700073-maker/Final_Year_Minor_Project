@@ -326,6 +326,11 @@ def scan_dex_strings(apk_path: Path, signatures: list, cache_dir: Path | None = 
     fresh parse."""
     logging.getLogger("androguard").setLevel(logging.CRITICAL)
     from static.signatures import _line_matches  # reuse the exact same matcher
+    # SESSION11L4: the androguard pass parses the whole DEX constant pool - on a
+    # multi-dex APK that is minutes of silence with no stage marker of its own.
+    from trace import trace as _trace
+    _trace("static", "dex_strings.begin", "info", apk=apk_path.name,
+           cache=bool(cache_dir))
 
     if cache_dir is not None:
         apk_sha = sha256_file(apk_path)
@@ -333,6 +338,8 @@ def scan_dex_strings(apk_path: Path, signatures: list, cache_dir: Path | None = 
         if cached is not None:
             app_package = cached.get("app_package")
             app_strings = cached["app_strings"]
+            _trace("static", "dex_strings.cache_hit", "info",
+                   strings=len(app_strings))
             # Indexed, not .get()-defaulted: the cache version gates this key's
             # presence, so a v2 entry missing it is a corrupt entry and must fail
             # loudly rather than silently defaulting to "not degraded" - which
@@ -428,6 +435,8 @@ def scan_dex_strings(apk_path: Path, signatures: list, cache_dir: Path | None = 
         )
         for sid, mt in matched.items()
     ]
+    _trace("static", "dex_strings.done", "info", strings=len(app_strings),
+           matched=len(matched), attribution_degraded=attribution_degraded)
     return {
         "matched": matched,
         "evidence": evidence,

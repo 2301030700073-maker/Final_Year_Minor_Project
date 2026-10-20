@@ -1849,7 +1849,14 @@ def run(
 
     # SESSION11L: --debug turns on the structured step trace (see src/trace.py),
     # set BEFORE any stage runs so the whole pipeline is traced end to end.
-    if debug:
+    # _flag_enabled, not a bare truth test: a direct Python call of this command
+    # (the unit suite, any embedding) leaves an omitted `debug` bound to its
+    # typer.Option(...) default object, which is TRUTHY - so `if debug:` fired on
+    # every such call, wrote FYMP_TRACE=1 into the process environment, and left
+    # every later test in that process tracing (the e2e run tests contaminated
+    # the whole suite's tracer state until this was fixed). Same discipline as
+    # the skip-dynamic/force-dynamic guard above.
+    if _flag_enabled(debug):
         import os as _os
         _os.environ["FYMP_TRACE"] = "1"
         from trace import reset as _trace_reset

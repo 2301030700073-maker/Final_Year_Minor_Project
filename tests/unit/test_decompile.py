@@ -1420,3 +1420,106 @@ def test_a_per_dex_jadx_timeout_is_recorded_as_a_timeout(tmp_path, monkeypatch):
     # The aggregate is untouched: it is the coverage verdict, not the process one.
     assert result.evidence["jadx_exit_code"] == 1
     assert result.evidence["decompile_completeness"] == "partial"
+
+
+# --- SESSION11L4: tool-runner observability (src/static/decompile.py) ----------
+#
+# A tool that runs for minutes previously said nothing until it finished. The
+# markers pin the contract: start + exit always, a progress heartbeat exactly
+# when the tool is still writing (silence = stall), and the exit carries the
+# return code so a timeout kill (_TIMEOUT_RC) reads differently from a crash.
+
+@pytest.fixture
+def trace_on(monkeypatch):
+    import importlib
+    import trace as tracemod
+    monkeypatch.setenv("FYMP_TRACE", "1")
+    monkeypatch.delenv("FYMP_TRACE_VERBOSE", raising=False)
+    importlib.reload(tracemod)
+    yield tracemod
+    monkeypatch.undo()
+    importlib.reload(tracemod)
+
+
+class _FakeProc:
+    returncode = 0
+
+
+def test_run_tool_logged_traces_start_and_ok_exit(tmp_path, trace_on, monkeypatch, capsys):
+    from static import decompile
+    monkeypatch.setattr(decompile.subprocess, "run",
+                        lambda cmd, **kw: _FakeProc())
+    rc, _tail = decompile._run_tool_logged(["jadx", "--version"], tmp_path / "j.log",
+                                           30, "jadx")
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert "tool.jadx start" in err and "timeout_s=30" in err
+    assert "tool.jadx ok" in err and "rc=0" in err
+
+
+def test_run_tool_logged_traces_a_timeout_kill_as_failed(tmp_path, trace_on, monkeypatch, capsys):
+    import subprocess as sp
+    from static import decompile
+
+    def _timeout(cmd, **kw):
+        raise sp.TimeoutExpired(cmd, kw.get("timeout", 1))
+
+    monkeypatch.setattr(decompile.subprocess, "run", _timeout)
+    rc, _tail = decompile._run_tool_logged(["jadx", "-d", "out", "big.apk"],
+                                           tmp_path / "j.log", 7, "jadx")
+    err = capsys.readouterr().err
+    assert rc == decompile._TIMEOUT_RC
+    assert "tool.jadx failed" in err
+    assert "rc=%d" % decompile._TIMEOUT_RC in err
+
+
+def test_tool_markers_absent_when_tracing_off(tmp_path, monkeypatch, capsys):
+    from static import decompile
+    monkeypatch.setattr(decompile.subprocess, "run",
+                        lambda cmd, **kw: _FakeProc())
+    decompile._run_tool_logged(["jadx", "--version"], tmp_path / "j.log",
+                               30, "jadx")
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.real_stall_runner
+def test_run_tool_until_stalled_traces_progress_then_ok(tmp_path, trace_on, capsys):
+    # The heartbeat fires exactly when the tool PROGRESSES - the marker that
+    # separates "slow but working" (a row of progress markers) from "hung"
+    # (start marker, then silence).
+    import sys
+    from static.decompile import _run_tool_until_stalled
+
+    script = (
+        "import sys,time\n"
+        "for i in range(4):\n"
+        "    print('working', i, flush=True)\n"
+        "    time.sleep(0.4)\n"
+    )
+    log = tmp_path / "slow.log"
+    rc, _tail = _run_tool_until_stalled(
+        [sys.executable, "-c", script], log, ceiling_s=60, stall_s=5.0, what="fake")
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert "tool.fake start" in err and "stall_s=5.0" in err
+    assert "tool.fake info" in err and "log_bytes=" in err
+    assert "tool.fake ok" in err and "rc=0" in err
+
+
+@pytest.mark.real_stall_runner
+def test_run_tool_until_stalled_traces_a_stall_kill_with_the_silence(tmp_path, trace_on, capsys):
+    import sys
+    from static.decompile import _TIMEOUT_RC, _run_tool_until_stalled
+
+    # fully silent from the first byte: no output ever, so NO progress marker
+    # may fire - the start marker followed by silence IS the stall signal.
+    script = "import time; time.sleep(30)"
+    log = tmp_path / "hung.log"
+    rc, _tail = _run_tool_until_stalled(
+        [sys.executable, "-c", script], log, ceiling_s=60, stall_s=2.0, what="fake")
+    err = capsys.readouterr().err
+    assert rc == _TIMEOUT_RC
+    assert "tool.fake failed" in err
+    assert "why=stalled" in err and "silent_s=" in err
+    # a truly hung tool produces no progress heartbeat: only start + the kill
+    assert "tool.fake info" not in err

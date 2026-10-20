@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import sqlite3
 import time
@@ -59,6 +60,15 @@ VALID_PATTERN_TYPES = {"string_literal", "class_reference", "regex"}
 # the rest add bulk without signal. Confidence is unaffected: it is added once
 # per matched signature, not per match (see the matched_signatures set).
 MAX_EVIDENCE_PER_SIGNATURE = 50
+
+# SESSION11L4: scan-walk observability (see _traced_files below). A heartbeat
+# marker lands every _SCAN_HEARTBEAT_FILES files, and any single file costing
+# more than _SCAN_SLOW_FILE_MS gets a marker of its own - so a long-but-healthy
+# walk (measured: spotify needed 946s on 2026-10-07) is distinguishable from a
+# stall on one pathological file without reading a final verdict. Both values
+# are read only when tracing is enabled; with tracing off nothing below runs.
+_SCAN_SLOW_FILE_MS = 2000.0
+_SCAN_HEARTBEAT_FILES = 500
 
 # Per-line regex budget (ReDoS defense, NFR-1 fail-loud). Python's re cannot
 # be interrupted mid-backtracking, so the real cure is keeping every signature
@@ -609,6 +619,40 @@ def _prepare_evidence_table(con: sqlite3.Connection) -> None:
     con.commit()
 
 
+def _traced_files(files, trace=None, verbose=False):
+    """Yield each (file_path, root) pair, emitting a per-file trace marker after
+    the consumer's iteration of that file completes (SESSION11L4).
+
+    WHY a generator rather than inline markers in scan()'s loop body: the body
+    has several `continue` exits (binary skip, unreadable, third-party), and
+    inlining the marker would mean duplicating it at every exit - or wrapping
+    the whole 200-line body in try/finally and re-indenting it. The generator
+    resumes after every yield no matter how the body exited, so one marker site
+    covers every path. It also measures each file's true cost (regex work, not
+    just I/O) because the clock spans the caller's whole iteration.
+
+    When `trace` is None (tracing off) the caller does not even wrap the loop,
+    so this is not on the hot path at all. When on: a heartbeat every
+    _SCAN_HEARTBEAT_FILES files carries the running totals, and any file over
+    _SCAN_SLOW_FILE_MS is named individually - a stall then reads as "the last
+    marker was file N" instead of a silent gap. Tracing never changes what the
+    scan does or finds.
+    """
+    for index, (file_path, root) in enumerate(files, start=1):
+        started = time.monotonic()
+        yield file_path, root
+        elapsed_ms = (time.monotonic() - started) * 1000.0
+        if (verbose
+                or elapsed_ms > _SCAN_SLOW_FILE_MS
+                or index % _SCAN_HEARTBEAT_FILES == 0):
+            try:
+                rel = str(file_path.relative_to(root))
+            except ValueError:  # pragma: no cover - root always prefixes file_path
+                rel = str(file_path)
+            trace("static", "scan.file", "info", n=index,
+                  ms=round(elapsed_ms), file=rel)
+
+
 def scan(
     decompiled_roots: Path | list[Path],
     signatures: list[Signature],
@@ -667,6 +711,27 @@ def scan(
     # a near-empty corpus is distinguishable from a full-scan clean result.
     evidence.scanned_file_count = len(files)
 
+    # SESSION11L4: make the walk observable (see _traced_files for why). The
+    # stage line says "static_scan" and nothing about where inside it a run is
+    # or stalled - a 15-20 minute healthy walk and a stall look identical from
+    # outside, which is how a timeout-killed run leaves a silent gap. These
+    # markers add a begin/end pair, a per-file heartbeat and a slow-file marker.
+    # The flags are read once here so the per-file loop pays a single bool
+    # check when tracing is off, and the loop is not wrapped at all.
+    from trace import enabled as _trace_enabled
+    _trace = None
+    if _trace_enabled():
+        from trace import trace as _trace
+    _trace_verbose = _trace is not None and os.environ.get(
+        "FYMP_TRACE_VERBOSE", "").strip().lower() not in (
+            "", "0", "false", "no", "off")
+    if _trace is not None:
+        _trace("static", "scan.begin", "info", roots=len(roots),
+               files=len(files), signatures=len(signatures),
+               single_line=line_signature_count,
+               multiline=len(signatures) - line_signature_count,
+               xref=bool(sqlite_path), mapping=bool(mapping))
+
     # RESID-4A: read each file once and match every line against all
     # signatures, instead of looping signatures-outer (which re-read each file
     # once per signature - N sigs x M files full-file reads). Same results,
@@ -680,7 +745,8 @@ def scan(
     # caps at MAX_EVIDENCE_PER_SIGNATURE, so it can't tell the report how many
     # were actually seen). total_counts feeds the honest truncation note.
     total_counts: dict[str, int] = defaultdict(int)
-    for file_path, root in files:
+    for file_path, root in (files if _trace is None
+                            else _traced_files(files, _trace, _trace_verbose)):
         try:
             # Read the whole text once. errors="strict" (the default):
             # errors="ignore" would read a file with malformed bytes by silently
@@ -972,6 +1038,13 @@ def scan(
                         _record(signature, match.group(0), line_number)
                         break
 
+    if _trace is not None:
+        # "info": the walk finished - a marker that it reached the end, never a
+        # claim about what it found (the verdict is the caller's to render).
+        _trace("static", "scan.files.done", "info", files=len(files),
+               matched=len(matched_signatures),
+               unreadable=evidence.unreadable_file_count)
+
     # RESID-4F observability: record which signatures hit the display cap and
     # by how much, so the report can state the truncation instead of silently
     # implying the retained 50 rows are the whole match set.
@@ -1006,5 +1079,8 @@ def scan(
             "SELECT file, signature_id, category, line, matched_text FROM evidence_stage"
         )
         con.commit()
+        if _trace is not None:
+            _trace("static", "scan.xref.swap", "ok",
+                   rows=con.execute("SELECT COUNT(*) FROM evidence").fetchone()[0])
         con.close()
     return evidence

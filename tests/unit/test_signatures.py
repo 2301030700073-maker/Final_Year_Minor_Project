@@ -2472,3 +2472,121 @@ def test_a_long_minified_line_over_many_signatures_does_not_halt(tmp_path, monke
 
     assert evidence is not None
     assert evidence.root_evidence == []   # nothing matched; the point is it did not halt
+
+
+# --- SESSION11L4: scan-walk observability (src/static/signatures._traced_files) -
+#
+# The stage line says "static_scan" and nothing about WHERE inside it a run is
+# or stalled. These pin the contract: off by default (the walk is not even
+# wrapped), on = a begin/heartbeat/done triple plus a named slow file, findings
+# byte-identical either way, and a marker records a REACH - never a success
+# claim (status stays "info" for walk markers).
+
+def _walk_sig(tmp_path):
+    sigfile = tmp_path / "sig.yaml"
+    sigfile.write_text(
+        "---\n"
+        "- id: root_su_binary_paths\n"
+        "  category: root\n"
+        "  weight: 0.5\n"
+        "  pattern_type: string_literal\n"
+        "  patterns: ['/system/bin/su']\n"
+        "  evidence_type: bytecode_string\n"
+    )
+    return load_signatures(sigfile)
+
+
+def _walk_tree(tmp_path, files=("Main.java", "Other.java")):
+    src = tmp_path / "src"
+    src.mkdir()
+    for name in files:
+        (src / name).write_text("/system/bin/su\n" if name == "Main.java" else "clean\n",
+                                encoding="utf-8")
+    return src
+
+
+@pytest.fixture
+def trace_on(monkeypatch):
+    import importlib
+    import trace as tracemod
+    monkeypatch.setenv("FYMP_TRACE", "1")
+    monkeypatch.delenv("FYMP_TRACE_VERBOSE", raising=False)
+    importlib.reload(tracemod)
+    yield tracemod
+    # restore the env BEFORE recomputing the tracer's cached flag, so a later
+    # test in the same process does not inherit an enabled cache
+    monkeypatch.undo()
+    importlib.reload(tracemod)
+
+
+def test_scan_walk_not_wrapped_when_tracing_off(tmp_path, monkeypatch):
+    # Zero-overhead contract: with tracing off, scan() iterates the raw file
+    # list and never constructs the tracing generator at all.
+    import static.signatures as sig_mod
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("_traced_files must not be used when tracing is off")
+
+    monkeypatch.setattr(sig_mod, "_traced_files", _boom)
+    evidence = scan(_walk_tree(tmp_path), _walk_sig(tmp_path))
+    assert len(evidence.root_evidence) == 1
+
+
+def test_scan_walk_emits_begin_heartbeat_done_and_swap(tmp_path, trace_on, capsys):
+    xref = tmp_path / "xref.sqlite"
+    evidence = scan(_walk_tree(tmp_path), _walk_sig(tmp_path),
+                    sqlite_path=xref)
+    err = capsys.readouterr().err
+    assert "static.scan.begin info" in err
+    assert "files=2" in err and "signatures=1" in err
+    assert "static.scan.files.done info" in err
+    assert "static.scan.xref.swap ok" in err and "rows=1" in err
+    # findings are untouched by tracing
+    assert [e.signature_id for e in evidence.root_evidence] == ["root_su_binary_paths"]
+
+
+def test_scan_walk_heartbeat_fires_on_the_boundary_only(tmp_path, trace_on, monkeypatch, capsys):
+    import static.signatures as sig_mod
+    monkeypatch.setattr(sig_mod, "_SCAN_HEARTBEAT_FILES", 2)
+    src = _walk_tree(tmp_path, files=tuple("F%d.java" % i for i in range(5)))
+    scan(src, _walk_sig(tmp_path))
+    err = capsys.readouterr().err
+    assert err.count("static.scan.file info") == 2  # files 2 and 4, not 1/3/5
+    assert "n=2" in err and "n=4" in err
+
+
+def test_scan_walk_names_a_slow_file(tmp_path, trace_on, monkeypatch, capsys):
+    # A single file over the slow threshold is named individually - the marker
+    # that turns "the scan is quiet" into "it is on Slow.java".
+    import static.signatures as sig_mod
+    monkeypatch.setattr(sig_mod, "_SCAN_SLOW_FILE_MS", -1.0)  # every file is "slow"
+    src = _walk_tree(tmp_path, files=("Fast.java", "Slow.java"))
+    scan(src, _walk_sig(tmp_path))
+    err = capsys.readouterr().err
+    assert err.count("static.scan.file info") == 2
+    assert "Slow.java" in err
+
+
+def test_scan_walk_verbose_traces_every_file(tmp_path, monkeypatch, capsys):
+    import importlib
+    import trace as tracemod
+    monkeypatch.setenv("FYMP_TRACE", "1")
+    monkeypatch.setenv("FYMP_TRACE_VERBOSE", "1")
+    importlib.reload(tracemod)
+    try:
+        src = _walk_tree(tmp_path, files=tuple("V%d.java" % i for i in range(5)))
+        scan(src, _walk_sig(tmp_path))
+        err = capsys.readouterr().err
+        assert err.count("static.scan.file info") == 5
+    finally:
+        monkeypatch.undo()
+        importlib.reload(tracemod)
+
+
+def test_scan_walk_markers_record_reach_not_success(tmp_path, trace_on, capsys):
+    # Even a walk over a corpus where NOTHING matched must emit walk markers
+    # with the honest "info" status - a marker is a reach, never a verdict.
+    scan(_walk_tree(tmp_path), _walk_sig(tmp_path))
+    err = capsys.readouterr().err
+    assert "static.scan.files.done info" in err
+    assert "scan.files.done ok" not in err

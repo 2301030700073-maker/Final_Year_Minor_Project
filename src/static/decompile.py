@@ -304,6 +304,12 @@ def extract_assets(apk_path: Path, target_dir: Path) -> tuple[int, int | None]:
     """
     if not apk_path.is_file():
         return 0, None
+    # SESSION11L4: extraction of a large asset surface is a silent multi-second
+    # copy; begin/done markers with the APK's own claimed entry count make a
+    # half-extracted surface visible (ASSET-DROP1's loss case) instead of
+    # inferred from a missing directory.
+    from trace import trace as _trace
+    _trace("static", "assets.begin", "info", apk=apk_path.name)
     assets_dir = target_dir / ASSETS_DIRNAME
     written = 0
     entries_in_apk = 0
@@ -336,7 +342,10 @@ def extract_assets(apk_path: Path, target_dir: Path) -> tuple[int, int | None]:
                 written += 1
     except (OSError, zipfile.BadZipFile, KeyError):
         # The archive could not be listed: the entry count is unknown, NOT zero.
+        _trace("static", "assets.done", "info", written=written, entries=None)
         return written, None
+    _trace("static", "assets.done", "info", written=written,
+           entries=entries_in_apk)
     return written, entries_in_apk
 
 
@@ -573,6 +582,8 @@ def _run_secondary_fallback(apk_path: Path, target_dir: Path, log_path: Path) ->
     # flag so a reviewer can tell it was reused, not re-run.
     existing = _count_java_files(cfr_dir)
     if existing > 0:
+        from trace import trace as _trace
+        _trace("static", "decompile.fallback", "info", reused=True, files=existing)
         return {
             "fallback_engine": "cfr", "fallback_unavailable": False,
             "fallback_recovered": True, "fallback_output": str(cfr_dir),
@@ -582,7 +593,9 @@ def _run_secondary_fallback(apk_path: Path, target_dir: Path, log_path: Path) ->
     d2j = shutil.which("d2j-dex2jar.sh")
     cfr_jar = _find_cfr_jar()
     cfr_bin = shutil.which("cfr")
+    from trace import trace as _trace
     if not d2j or not (cfr_jar or cfr_bin):
+        _trace("static", "decompile.fallback", "info", unavailable=True)
         return {
             "fallback_engine": None, "fallback_unavailable": True,
             "fallback_recovered": False, "fallback_output": None,
@@ -610,6 +623,8 @@ def _run_secondary_fallback(apk_path: Path, target_dir: Path, log_path: Path) ->
             # and let the honest "recovered nothing" result below stand.
             logf.write(f"\ndex2jar failed to launch: {exc}\n")
             d2j_rc = -1
+        _trace("static", "tool.d2j-dex2jar", "ok" if d2j_rc == 0 else "failed",
+               rc=d2j_rc)
         if d2j_rc == 0 and recovered_jar.exists():
             cmd = ([cfr_bin, str(recovered_jar), "--outputdir", str(cfr_dir)]
                    if cfr_bin else ["java", "-jar", cfr_jar, str(recovered_jar), "--outputdir", str(cfr_dir)])
@@ -624,8 +639,12 @@ def _run_secondary_fallback(apk_path: Path, target_dir: Path, log_path: Path) ->
                 cfr_rc = -1
         else:
             cfr_rc = -1
+        _trace("static", "tool.cfr", "ok" if cfr_rc == 0 else "failed",
+               rc=cfr_rc)
     recovered_count = _count_java_files(cfr_dir)
     if recovered_count > 0:
+        _trace("static", "decompile.fallback", "info", recovered=True,
+               files=recovered_count)
         return {
             "fallback_engine": "cfr", "fallback_unavailable": False,
             "fallback_recovered": True, "fallback_output": str(cfr_dir),
@@ -648,6 +667,13 @@ def _run_tool_logged(cmd: list[str], log_path: Path, timeout_s: int, what: str) 
     process exit code, or _TIMEOUT_RC if it was killed by the timeout (D1)."""
     log_path = Path(log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    # SESSION11L4: a tool that runs for minutes said nothing until it finished;
+    # these markers give the run's outer view a start/exit pair with the exit
+    # code and the measured duration (a timeout kill is rc=_TIMEOUT_RC, which
+    # _runs_timed_out() maps back to "the budget was too small").
+    from trace import trace as _trace
+    _started = time.monotonic()
+    _trace("static", f"tool.{what}", "start", timeout_s=timeout_s)
     with open(log_path, "w", encoding="utf-8") as logf:
         try:
             proc = subprocess.run(
@@ -657,6 +683,8 @@ def _run_tool_logged(cmd: list[str], log_path: Path, timeout_s: int, what: str) 
         except subprocess.TimeoutExpired:
             logf.write(f"\n[{what} timed out after {timeout_s}s - process killed]\n")
             returncode = _TIMEOUT_RC
+    _trace("static", f"tool.{what}", "ok" if returncode == 0 else "failed",
+           rc=returncode, ms=round((time.monotonic() - _started) * 1000))
     return returncode, _tail_file(log_path)
 
 
@@ -714,11 +742,20 @@ def _run_tool_until_stalled(
         # real process, so the timeout POLICY is unit-testable without sleeping for
         # real seconds or spawning Java. Production never sets this.
         return _STALL_RUNNER(cmd, log_path, ceiling_s, stall_s, what)
+    # SESSION11L4: this loop already measures the only fact that distinguishes
+    # "slow but working" from "hung" - the log is still growing. A heartbeat is
+    # emitted exactly when the tool PROGRESSES, so silence between markers IS
+    # the stall signal, and a healthy 90-minute decode reads as a long row of
+    # "still producing output" markers rather than an unexplained gap.
+    from trace import trace as _trace
+    _trace("static", f"tool.{what}", "start", stall_s=stall_s, ceiling_s=ceiling_s)
     with open(log_path, "w", encoding="utf-8") as logf:
         proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT)
         while True:
             try:
                 proc.wait(timeout=poll)
+                _trace("static", f"tool.{what}", "ok", rc=proc.returncode,
+                       ms=round((time.monotonic() - start) * 1000))
                 return proc.returncode, _tail_file(log_path)
             except subprocess.TimeoutExpired:
                 pass
@@ -736,6 +773,8 @@ def _run_tool_until_stalled(
                 # `continue` made the ceiling unreachable for exactly this case.)
                 last_size = size
                 last_growth = now
+                _trace("static", f"tool.{what}", "info",
+                       log_bytes=size, elapsed_s=round(now - start, 1))
             elapsed = now - start
             stalled_for = now - last_growth
             if elapsed >= ceiling_s:
@@ -752,6 +791,8 @@ def _run_tool_until_stalled(
                     f"longer]\n"
                 )
                 logf.flush()
+                _trace("static", f"tool.{what}", "failed", rc=_TIMEOUT_RC,
+                       why="ceiling", ms=round((time.monotonic() - start) * 1000))
                 return _TIMEOUT_RC, _tail_file(log_path)
             if stalled_for >= stall_s:
                 proc.kill()
@@ -763,6 +804,9 @@ def _run_tool_until_stalled(
                     f"writing and is never killed this way)]\n"
                 )
                 logf.flush()
+                _trace("static", f"tool.{what}", "failed", rc=_TIMEOUT_RC,
+                       why="stalled", silent_s=int(stalled_for),
+                       ms=round((time.monotonic() - start) * 1000))
                 return _TIMEOUT_RC, _tail_file(log_path)
     return _TIMEOUT_RC, _tail_file(log_path)
 
@@ -998,6 +1042,10 @@ def _decompile_dexes(
     hands real, scannable .java to static analysis."""
     jadx_dir = target_dir / "jadx"
     dex_sources = target_dir / "dex_sources"
+    # SESSION11L4: imported once here, before the loop - a function-level import
+    # inside one branch of the loop would leave the name unbound on the paths
+    # that never took that branch.
+    from trace import trace as _trace
     # Read the jadx version once so every DEX key carries it. A toolchain upgrade
     # must orphan the old version's cached output (it may be partial/error-ridden)
     # instead of silently reusing and relabeling it complete - keying on the DEX
@@ -1018,6 +1066,8 @@ def _decompile_dexes(
             # Per-DEX lazy reuse: this exact DEX was already decompiled (same
             # dex-stable identity) - don't re-run jadx over it. A cached unit was
             # proven ok when it was first produced, so it counts as covered.
+            _trace("static", "dex.unit", "info", dex=entry["name"], cached=True,
+                   files=existing)
             units.append({"dex": entry["name"], "status": "cached", "files": existing,
                           "covered": True})
             continue
@@ -1051,6 +1101,11 @@ def _decompile_dexes(
                       "files": files, "exit": rc, "error_tail": log if files == 0 else None,
                       "recovered": False, "recovered_count": 0, "recovery_unavailable": False,
                       "covered": False})
+        # SESSION11L4: one marker per DEX, mirroring the unit's own status - a
+        # multi-dex APK's decompile is now visible unit by unit instead of as
+        # one opaque "decompile" that can run for many minutes.
+        _trace("static", "dex.unit", "ok" if files > 0 else "failed",
+               dex=entry["name"], files=files, exit=rc)
         # Per-DEX recovery: jadx choked on this DEX (exit != 0) - recover the
         # classes it lost with dex2jar+CFR instead of leaving the hole. Cached
         # units were proven ok earlier and are skipped. Recovery is scoped to
@@ -1106,6 +1161,12 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
         # L-M1: mark this hash as just-accessed (LRU bookkeeping) on every entry.
         _touch_registry(output_root, apk_hash)
 
+        # SESSION11L4: the stage line says "decompile" for what can be a 90-minute
+        # apktool decode (measured, PropertyGuru). A begin marker plus a cache-hit
+        # marker make the entry path itself observable.
+        from trace import trace as _trace
+        _trace("static", "decompile.begin", "info", apk=apk_path.name)
+
         cache_was_hollow = False
         jadx = _find_jadx()
         if jadx_dir.exists() and apktool_dir.exists():
@@ -1114,6 +1175,7 @@ def decompile(apk_path: Path, output_root: Path, apk_hash: str) -> StageResult:
             if _has_real_cached_content(jadx_dir, apktool_dir) and _cached_status_is_clean(
                 status_sidecar, _jadx_version(jadx),
             ):
+                _trace("static", "decompile.cache_hit", "info")
                 return _cached_result(start, jadx_dir, apktool_dir, status_sidecar)
             cache_was_hollow = True
         # L-M1: this is the decompile-for-real path (not a valid cache hit) - the

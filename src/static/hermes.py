@@ -242,7 +242,10 @@ def scan_bundle(path: Path) -> dict:
     `kind` in {"hermes","binary","opaque"} means we recovered constants, not full
     JS control flow - the caller must degrade the `js` surface to `partial`.
     """
+    from trace import trace as _trace
+    _trace("static", "bundle.begin", "info", file=path.name)
     if not is_binary_bundle(path):
+        _trace("static", "bundle.done", "skipped", kind="plain")
         return {"kind": "plain", "strings": 0, "matches": []}
     # Only the 4-byte magic decides the "hermes" vs "binary" label here; the two
     # extract_* passes below re-read the file for the actual string recovery. The
@@ -257,6 +260,7 @@ def scan_bundle(path: Path) -> dict:
         with open(path, "rb") as fh:
             magic = fh.read(len(HERMES_MAGIC))
     except OSError:
+        _trace("static", "bundle.done", "info", kind="opaque")
         return {"kind": "opaque", "strings": 0, "matches": []}
     kind = "hermes" if magic == HERMES_MAGIC else "binary"
     # Recover BOTH 1-byte-per-char (ASCII) and UTF-16LE wide strings: a detection
@@ -279,4 +283,6 @@ def scan_bundle(path: Path) -> dict:
     # No recoverable strings at all: genuinely opaque binary blob.
     if not strings:
         kind = "opaque"
+    _trace("static", "bundle.done", "info", kind=kind,
+           strings=len(strings), matches=len(matches))
     return {"kind": kind, "strings": len(strings), "matches": matches}

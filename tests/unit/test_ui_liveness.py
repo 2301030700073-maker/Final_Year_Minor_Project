@@ -661,3 +661,16 @@ def test_wait_for_foreground_is_none_when_the_probe_never_ran(monkeypatch):
                                          adb="adb")
     assert got["foreground"] is None
     assert "not measured" in got["reason"]
+
+
+def test_screen_changed_compares_two_dumps():
+    # SESSION11H: the two-sample progress primitive. True = changed (progress),
+    # False = identical (no progress observed - static OR stuck, not proof of
+    # either), None = a sample was missing (not captured, never guessed).
+    from dynamic.ui_liveness import _screen_changed
+    assert _screen_changed("<a/>", "<a/>") is False
+    assert _screen_changed("<a/>", "<b/>") is True
+    assert _screen_changed(" <a/>\n", "<a/>") is False   # whitespace-only -> same
+    assert _screen_changed("", "<a/>") is None
+    assert _screen_changed("<a/>", "") is None
+    assert _screen_changed(None, "<a/>") is None

@@ -241,6 +241,24 @@ def _classify_screen(text_nodes: list[str], clickable_nodes: int | None) -> str:
     return "content rendered but no tappable widgets (RN/Flutter surface)"
 
 
+def _screen_changed(xml_a: str, xml_b: str) -> bool | None:
+    """Whether the uiautomator hierarchy CHANGED between two samples taken a short
+    interval apart - the only genuine responsiveness/progress signal this module can
+    take WITHOUT driving an app-specific interaction. True => the screen changed, so
+    the app IS rendering/responding (a frozen app cannot redraw). False => the two
+    dumps are identical: NO progress was observed across the interval - consistent
+    with a genuinely static page OR a stuck/loading screen, so it is NOT proof of
+    either (never read 'unchanged' as 'stuck'). None => a sample was missing (either
+    dump failed) - not captured, never guessed.
+
+    Compared on the raw dump text with whitespace normalised (the XML carries no
+    timestamps, but a formatting-only diff must not read as progress). Bounds ARE
+    part of the dump and change when content reflows - exactly the signal wanted."""
+    if not xml_a or not xml_b:
+        return None
+    return " ".join(xml_a.split()) != " ".join(xml_b.split())
+
+
 def _parse_rendered_content(uiautomator_xml: str) -> bool:
     """True when the dump shows a rendered content widget beyond a bare layout
     root. RN/Flutter/WebView screens render into a single container whose
@@ -579,6 +597,30 @@ def check_ui_liveness(serial: str, package: str, adb: str | None = None) -> dict
                 result["text_nodes"] = text_nodes
                 result["text_node_count"] = len(text_nodes)
                 result["screen_state"] = _classify_screen(text_nodes, result["clickable_nodes"])
+                # Two-sample PROGRESS signal (SESSION11H): a second dump a moment
+                # later, so the report can say whether the screen CHANGED (progress
+                # observed - the app is rendering) or stayed identical (no progress
+                # observed - static OR stuck, NOT proof of either). This is what
+                # separates a frozen screen from a healthy one; the single static
+                # snapshot above cannot. Best-effort: a failed second dump is None
+                # (not captured), never a guess.
+                try:
+                    time.sleep(1.5)
+                    dump2 = subprocess.run(
+                        [adb, "-s", serial, "shell", "uiautomator", "dump",
+                         "/sdcard/ui_dump2.xml"],
+                        capture_output=True, text=True, timeout=30,
+                    ).stdout or ""
+                    if "dumped to" in dump2:
+                        xml2 = subprocess.run(
+                            [adb, "-s", serial, "shell", "cat", "/sdcard/ui_dump2.xml"],
+                            capture_output=True, text=True, timeout=30,
+                        ).stdout or ""
+                        result["screen_changed"] = _screen_changed(xml_out, xml2)
+                    else:
+                        result["screen_changed"] = None
+                except Exception:
+                    result["screen_changed"] = None
     except Exception as e:
         # This section's co-sourced signals (clickable_nodes, rendered_content,
         # screen_state) all derive from THIS uiautomator dump + cat. When either

@@ -138,6 +138,21 @@ def _summarize_ui_liveness(ui: dict) -> str:
     state = ui.get("screen_state")
     if state:
         parts.append(f"screen:{state}")
+    # SESSION11H: the ONLY genuine progress/responsiveness signal - did the screen
+    # CHANGE between two samples? True => rendering/responding (a frozen app cannot
+    # redraw). False => no progress observed (static OR stuck, NOT proof of either).
+    # None/absent => not captured. This is what separates a stuck screen from a
+    # healthy one; the static snapshot above cannot.
+    changed = ui.get("screen_changed")
+    if changed is True:
+        parts.append("progress:screen CHANGED between two samples - the app is "
+                     "rendering/responding (a frozen app cannot redraw)")
+    elif changed is False:
+        parts.append("progress:NONE observed - screen identical across two samples "
+                     "(consistent with a static page OR a stuck/loading screen; NOT "
+                     "proof of either)")
+    elif "screen_changed" in ui:
+        parts.append("progress:not captured (second sample failed)")
     ntext = ui.get("text_node_count")
     if ntext is not None:
         parts.append(f"visible text nodes:{ntext}")

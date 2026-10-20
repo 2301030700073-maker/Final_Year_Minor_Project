@@ -632,3 +632,20 @@ def test_absent_and_refused_are_reported_side_by_side():
     assert "not present in the app" in line
     failure_part, absent_part = line.split("not present in the app", 1)
     assert "okhttp3.CertificatePinner" not in failure_part
+
+
+def test_liveness_progress_line_reports_screen_change():
+    # SESSION11H: the ONLY genuine responsiveness signal - did the screen change
+    # between two samples? Changed = rendering (a frozen app cannot redraw);
+    # unchanged = no progress observed (static OR stuck, NOT proof of either).
+    from dynamic.success_checks.technology import _summarize_ui_liveness
+    changed = _summarize_ui_liveness({"screen_changed": True, "clickable_nodes": 2})
+    assert "progress:screen CHANGED" in changed
+    assert "frozen app cannot redraw" in changed
+    unchanged = _summarize_ui_liveness({"screen_changed": False, "clickable_nodes": 2})
+    assert "progress:NONE observed" in unchanged
+    assert "NOT proof of either" in unchanged
+    notcap = _summarize_ui_liveness({"screen_changed": None, "clickable_nodes": 2})
+    assert "progress:not captured" in notcap
+    # absent key (a legacy liveness dict) -> progress omitted entirely, not guessed
+    assert "progress:" not in _summarize_ui_liveness({"clickable_nodes": 2})

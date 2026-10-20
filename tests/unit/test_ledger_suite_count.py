@@ -52,3 +52,27 @@ def test_the_recorded_suite_count_matches_what_the_suite_collects():
         f"ledger records {recorded} tests, the suite collects {collected} - "
         "update the measurement line in the same commit that adds the tests"
     )
+
+
+def test_the_readmes_figure_matches_what_the_suite_collects():
+    """The README states a collected count and claims the guard above enforces
+    it - but this test is what makes that claim true. Measured 2026-10-20: the
+    README's figure had drifted 39 tests behind the tree (2,387 stated against
+    2,426 collected) while the ledger guard stayed green, because nothing read
+    the README. A second hand-maintained figure is a second thing that can rot,
+    so the two figures are pinned to the one measurement.
+    """
+    readme = (_REPO / "README.md").read_text(encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q"],
+        cwd=_REPO, capture_output=True, text=True, timeout=300,
+    )
+    assert proc.returncode == 0, (proc.stdout[-2000:] + proc.stderr[-2000:])
+    m = re.search(r"(\d+) tests? collected", proc.stdout) or re.search(
+        r"collected (\d+) items", proc.stdout
+    )
+    assert m, proc.stdout[-2000:]
+    assert f"{m.group(1)} tests collected" in readme, (
+        f"README states a collected count that disagrees with the tree's "
+        f"{m.group(1)} - update the README figure in the same commit that adds "
+        f"the tests")

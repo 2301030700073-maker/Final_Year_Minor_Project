@@ -51,12 +51,14 @@ def liveness_evidence_lines(
     every target (ADR-0006), and say 'not captured' when the tool was unavailable
     rather than guess.
 
-    `window` names which launch the liveness came from. When it is "capture", the
-    line is rendered as honest PROXY-PRESENCE evidence (was the app there to reach
-    the proxy?) rather than the dynamic stage's self-termination framing - an app
-    that exited the window must not read as "survived the settle window". None
-    keeps the original dynamic-stage wording byte-for-byte."""
-    if window == "capture":
+    `window` names which launch the liveness came from. When it is set (the
+    capture window - the caller passes a human-readable label like "in this run's
+    capture window"), the line is rendered as honest PROXY-PRESENCE evidence (was
+    the app there to reach the proxy?) rather than the dynamic stage's
+    self-termination framing - an app that exited the window must not read as
+    "survived the settle window". None keeps the original dynamic-stage wording
+    byte-for-byte."""
+    if window is not None:
         # Capture-window liveness is about proxy presence, not self-termination.
         running_line = (
             "True (observed running at capture - present to reach the proxy)"
@@ -534,12 +536,25 @@ class TechnologyHooksEngagedCheck:
         # original leading position and "App UI responsiveness ..." lands last,
         # matching the prior inline order (dict insertion order preserved).
         liveness_lines = liveness_evidence_lines(app_still_running, ui_liveness, window)
+        # The helper's running key is window-aware: it returns
+        # "app present during capture window" when `window` is set (the capture
+        # window) and "app still running after bypass" otherwise (the dynamic
+        # stage's own launch). Read that exact key back instead of hardcoding the
+        # dynamic-stage name, so (a) the capture-window evaluation renders the
+        # window-aware proxy-presence line and (b) this construction never
+        # KeyErrors on the capture window - which would otherwise fail the entire
+        # "success-check (capture window)" stage at runtime (it surfaced as
+        # 'app still running after bypass' in a live report). SESSION11L3.
+        _running_key = next(
+            k for k in liveness_lines
+            if k != "App UI state (live, real device data; single static snapshot)"
+        )
         evidence_lines = {
-            # Explicit post-bypass liveness (FR-4.6): the app process survived the
-            # settle window and did not self-terminate on the injected
-            # instrumentation. Stated audibly so a bypass claim is never made
-            # against a dead/self-killed process without it being called out.
-            "app still running after bypass": liveness_lines["app still running after bypass"],
+            # Window-aware post-bypass liveness (FR-4.6) / capture-window proxy
+            # presence: named by `_running_key` above. Stated audibly so a bypass
+            # claim is never made against a dead/self-killed process without it
+            # being called out.
+            _running_key: liveness_lines[_running_key],
             "bypass hooks engaged": (
                 ", ".join(engaged) if engaged
                 else "none (no hook checkpoint observed)"

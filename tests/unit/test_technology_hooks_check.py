@@ -343,6 +343,65 @@ def test_liveness_evidence_lines_renders_true_state():
     assert "not captured" in r2["App UI state (live, real device data; single static snapshot)"]
 
 
+def test_liveness_evidence_lines_capture_window_is_honest_presence():
+    """Over-claim guard: the capture window must NOT reuse the dynamic-stage
+    "survived the settle window / self-terminated" framing. The caller passes a
+    human-readable window label (not the bare string "capture"), so the sentinel
+    is `window is not None`. Regression: an earlier version keyed on
+    `window == "capture"` and silently fell through to the dynamic wording."""
+    r = liveness_evidence_lines(
+        True, {"activity_resumed": True, "window_focused": True,
+               "anr_detected": False, "clickable_nodes": 1, "screen_state": "interactive"},
+        window="in this run's capture window",
+    )
+    assert "app present during capture window" in r
+    # The dynamic-stage self-termination wording must NOT leak into the capture line.
+    assert "survived the settle window" not in r["app present during capture window"]
+    assert "self-terminated on the injected instrumentation" not in r["app present during capture window"]
+    # False (app had exited the window) must read as "not present at capture", not
+    # "self-terminated on the injected instrumentation".
+    r_false = liveness_evidence_lines(False, None, window="in this run's capture window")
+    assert "not present at capture" in r_false["app present during capture window"]
+    assert "self-terminated on the injected instrumentation" not in r_false["app present during capture window"]
+
+
+def test_check_integration_does_not_keyerror_on_capture_window():
+    """SESSION11L3 regression: TechnologyHooksEngagedCheck.check() reads the
+    running-liveness key back out of liveness_evidence_lines(). That helper is
+    window-aware (it emits "app present during capture window" when `window` is
+    set), but check() used to hardcode the dynamic-stage key
+    "app still running after bypass" - so any capture-window evaluation raised
+    KeyError at runtime and failed the entire "success-check (capture window)"
+    stage (it surfaced in a live report as
+    'capture-window hooks-engaged check raised unexpectedly: app still running
+    after bypass'). This test drives the integration path the unit test above
+    does NOT cover."""
+    v = TechnologyHooksEngagedCheck().check(
+        [{"type": "send", "payload": {"hook": "okhttp_certificate_pinner"}}],
+        app_still_running=True,
+        window="in this run's capture window",
+    )
+    # No exception was raised, and the window-aware key is present.
+    assert "app present during capture window" in v.evidence_lines
+    # The dynamic-stage key must NOT leak into the capture-window evaluation.
+    assert "app still running after bypass" not in v.evidence_lines
+    assert v.evidence_lines["app present during capture window"].startswith("True")
+
+
+def test_check_integration_capture_window_false_is_not_present():
+    """The capture-window False (app had exited the window) must read as
+    "not present at capture", not "self-terminated on the injected
+    instrumentation" - and must not KeyError."""
+    v = TechnologyHooksEngagedCheck().check(
+        [{"type": "send", "payload": {"hook": "okhttp_certificate_pinner"}}],
+        app_still_running=False,
+        window="in this run's capture window",
+    )
+    assert "not present at capture" in v.evidence_lines["app present during capture window"]
+    assert "self-terminated on the injected instrumentation" not in \
+        v.evidence_lines["app present during capture window"]
+
+
 def test_ui_liveness_covers_uncommon_evidence_branches():
     # technology.py:80, 94-95, 108, 114, 117: the _fmt non-bool fallthrough, the
     # tls_blocked block-line quote (with >90-char truncation), the visible

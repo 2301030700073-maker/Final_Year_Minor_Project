@@ -1419,3 +1419,32 @@ def test_verify_installed_does_not_retry_a_real_failure(monkeypatch):
     else:
         raise AssertionError("a non-timeout failure must propagate")
     assert calls["n"] == 1, "a real failure must not be retried"
+
+
+def test_install_apk_traces_the_install_duration(monkeypatch, capsys, tmp_path):
+    # SESSION11L4: a 150 MB install is 60-180 s (incl. device dexopt) and ran with
+    # no marker - a slow install and a wedged adb looked identical from outside.
+    import importlib
+    import trace as tracemod
+
+    monkeypatch.setenv("FYMP_TRACE", "1")
+    monkeypatch.delenv("FYMP_TRACE_VERBOSE", raising=False)
+    importlib.reload(tracemod)
+    try:
+        class _Proc:
+            returncode = 0
+
+        monkeypatch.setattr(device, "_require_adb", lambda: "adb")
+        monkeypatch.setattr(device.subprocess, "run", lambda cmd, **kw: _Proc())
+        apk = tmp_path / "big.apk"
+        apk.write_bytes(b"\x7fELF")
+
+        assert device.install_apk("emulator-5554", apk) == {
+            "recovered_from_signature_conflict": False}
+
+        err = capsys.readouterr().err
+        assert "dynamic.adb.install start" in err and "big.apk" in err
+        assert "dynamic.adb.install ok" in err and "recovered=False" in err
+    finally:
+        monkeypatch.undo()
+        importlib.reload(tracemod)

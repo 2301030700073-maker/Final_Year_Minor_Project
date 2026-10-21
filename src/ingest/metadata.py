@@ -149,15 +149,40 @@ def _tool_failure_detail(exc: subprocess.CalledProcessError) -> str:
 
 
 def _run_tool(name: str, error_cls: type, args: list[str], timeout: int = 30) -> str:
+    """Run a build tool (aapt2 / apksigner) and return its stdout.
+
+    SESSION11L4: traced start/ok/failed with the exit code and duration. These are
+    the ingest stage's only subprocesses, and on a large APK `apksigner verify
+    --print-certs` (four signature schemes over a 150 MB file) is the slowest
+    thing between the run starting and the first stage line - minutes of silence
+    that read exactly like a hang from outside. Zero cost when tracing is off:
+    the clock is only read when the tracer is enabled.
+    """
+    from trace import enabled as _trace_on
+    from trace import trace as _trace
+    _tracing = _trace_on()
+    _started = time.monotonic() if _tracing else 0.0
+    if _tracing:
+        _trace("ingest", f"tool.{name}", "start", timeout_s=timeout)
     tool = require_tool(name)
     try:
         result = subprocess.run(
             [tool, *args], capture_output=True, text=True, check=True, timeout=timeout,
         )
+        if _tracing:
+            _trace("ingest", f"tool.{name}", "ok", rc=0, chars=len(result.stdout),
+                   ms=round((time.monotonic() - _started) * 1000))
         return result.stdout
     except subprocess.TimeoutExpired as exc:
+        if _tracing:
+            _trace("ingest", f"tool.{name}", "failed", why="timeout",
+                   timeout_s=timeout,
+                   ms=round((time.monotonic() - _started) * 1000))
         raise error_cls(f"{name} timed out after {timeout}s") from exc
     except subprocess.CalledProcessError as exc:
+        if _tracing:
+            _trace("ingest", f"tool.{name}", "failed", rc=exc.returncode,
+                   ms=round((time.monotonic() - _started) * 1000))
         raise error_cls(
             f"{name} exited {exc.returncode}: {_tool_failure_detail(exc)}"
         ) from exc

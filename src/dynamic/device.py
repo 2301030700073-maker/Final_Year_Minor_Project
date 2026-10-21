@@ -800,10 +800,30 @@ def install_apk(serial: str, apk_path: Path, package_name: str | None = None) ->
     # 5 minutes is far beyond any real install of this project's targets, so it
     # only ever trips on a hang.
     cmd = [adb, "-s", serial, "install", "-r", "-t", str(apk_path)]
+    # SESSION11L4: an install of a 150 MB APK is the longest single adb call in
+    # the pipeline (measured 60-180 s including the device's dexopt), and it ran
+    # with no marker at all - from outside, a slow install and a wedged adb looked
+    # identical. Traced start/ok/failed with the duration and the recovery flag;
+    # zero cost when tracing is off (the clock is only read when enabled).
+    from trace import enabled as _trace_on
+    from trace import trace as _trace
+    _tracing = _trace_on()
+    _started = time.monotonic() if _tracing else 0.0
+    if _tracing:
+        _trace("dynamic", "adb.install", "start", apk=Path(apk_path).name,
+               timeout_s=300)
     try:
         subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=300)
+        if _tracing:
+            _trace("dynamic", "adb.install", "ok", apk=Path(apk_path).name,
+                   recovered=False,
+                   ms=round((time.monotonic() - _started) * 1000))
         return {"recovered_from_signature_conflict": False}
     except subprocess.CalledProcessError as exc:
+        if _tracing:
+            _trace("dynamic", "adb.install", "failed", rc=exc.returncode,
+                   apk=Path(apk_path).name,
+                   ms=round((time.monotonic() - _started) * 1000))
         diagnostic = _install_diagnostic(exc)
         conflict = _signature_conflict_package(diagnostic)
         if conflict is None or package_name is None or conflict != package_name:

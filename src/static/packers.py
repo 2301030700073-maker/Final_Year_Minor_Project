@@ -35,6 +35,7 @@ unreadable - it never silently no-ops (principle 3).
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -103,9 +104,22 @@ def detect_packers(apk_path: Path, signatures: list[PackerSignature]) -> list[Pa
     logging.getLogger("androguard").setLevel(logging.CRITICAL)
     from androguard.core.apk import APK as AndroAPK
 
+    # SESSION11L4: AndroAPK parses the whole APK's zip central directory and
+    # resource table - measured 10-40 s on a 150 MB app, and it sits between the
+    # obfuscation and packers stage lines with nothing in between. Traced so the
+    # gap is attributable; the clock is only read when tracing is on.
+    from trace import enabled as _trace_on
+    from trace import trace as _trace
+    _tracing = _trace_on()
+    _started = time.monotonic() if _tracing else 0.0
+    if _tracing:
+        _trace("static", "packers.parse", "start", apk=apk_path.name)
     a = AndroAPK(str(apk_path))
     manifest_app = a.get_attribute_value("application", "name")
     files = a.get_files()
+    if _tracing:
+        _trace("static", "packers.parse", "ok", apk=apk_path.name,
+               files=len(files), ms=round((time.monotonic() - _started) * 1000))
 
     # Native loader libs: any file under lib/<abi>/*.so -> basename. Matching on
     # the basename keeps the signature readable (libDexHelper.so) while surviving

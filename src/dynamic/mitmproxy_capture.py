@@ -1785,6 +1785,17 @@ def run_capture_stage(
         # keeps mitmdump's stdout in-process instead (see the Popen below).
         proxy_log = ""
 
+        # SESSION11L4: starting the proxy is 10-60 s on the WSL2 path (spawn the
+        # Windows mitmdump, then poll until it listens) and it ran with no marker
+        # - from outside, a slow start and a wedged proxy were indistinguishable.
+        # Traced start/ready with the mode and the duration; zero cost when off.
+        from trace import enabled as _trace_on
+        from trace import trace as _trace
+        _tracing = _trace_on()
+        _started = time.monotonic() if _tracing else 0.0
+        if _tracing:
+            _trace("capture", "proxy.start", "start",
+                   mode="windows" if wsl2 else "native", port=proxy_port)
         if wsl2:
             stamp = time.time_ns()
             # H1: every artifact this capture writes on the Windows host - the
@@ -1819,6 +1830,14 @@ def run_capture_stage(
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             )
             time.sleep(2.0)  # let mitmdump bind before routing traffic through it
+
+        if _tracing:
+            # "ready", not "ok": this records that the launch returned and the
+            # readiness step completed - whether the proxy actually accepts a
+            # connection is the reachability probe's answer, recorded separately.
+            _trace("capture", "proxy.start", "ready",
+                   mode="windows" if wsl2 else "native", port=proxy_port,
+                   ms=round((time.monotonic() - _started) * 1000))
 
         # H1: say it out loud, every capture. `-w` is not a log - it holds every
         # request/response header and body the target app sent, including any

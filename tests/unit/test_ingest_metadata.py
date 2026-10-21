@@ -409,3 +409,53 @@ def test_ingest_preserves_tool_error_type_at_boundary(tmp_path, monkeypatch):
     assert result.status == "failed"
     assert result.error.startswith("Aapt2Error: ")
     assert "exited 1" in result.error
+
+
+# --- SESSION11L4: ingest tool markers ------------------------------------------
+
+@pytest.fixture
+def _trace_on(monkeypatch):
+    import importlib
+    import trace as tracemod
+    monkeypatch.setenv("FYMP_TRACE", "1")
+    monkeypatch.delenv("FYMP_TRACE_VERBOSE", raising=False)
+    importlib.reload(tracemod)
+    yield tracemod
+    monkeypatch.undo()
+    importlib.reload(tracemod)
+
+
+def test_run_tool_traces_start_and_ok_with_duration(_trace_on, monkeypatch, capsys):
+    # SESSION11L4: aapt2/apksigner are the ingest stage's only subprocesses and
+    # apksigner on a 150 MB APK is the slowest thing before the first stage line -
+    # minutes of silence that read exactly like a hang. The shared runner is
+    # traced once, covering both tools.
+    from ingest import metadata as meta
+
+    class _Proc:
+        returncode = 0
+        stdout = "package: name='x'"
+
+    monkeypatch.setattr(meta, "require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(meta.subprocess, "run", lambda cmd, **kw: _Proc())
+
+    assert meta._run_tool("apksigner", meta.ApksignerError, ["verify", "x"]) == "package: name='x'"
+    err = capsys.readouterr().err
+    assert "ingest.tool.apksigner start" in err and "timeout_s=30" in err
+    assert "ingest.tool.apksigner ok" in err and "rc=0" in err
+
+
+def test_run_tool_traces_a_timeout_distinctly(_trace_on, monkeypatch, capsys):
+    import subprocess as sp
+    from ingest import metadata as meta
+
+    def fake_run(cmd, **kw):
+        raise sp.TimeoutExpired(cmd=cmd, timeout=kw["timeout"])
+
+    monkeypatch.setattr(meta, "require_tool", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(meta.subprocess, "run", fake_run)
+
+    with pytest.raises(meta.Aapt2Error):
+        meta._run_tool("aapt2", meta.Aapt2Error, ["dump", "x"])
+    err = capsys.readouterr().err
+    assert "ingest.tool.aapt2 failed" in err and "why=timeout" in err

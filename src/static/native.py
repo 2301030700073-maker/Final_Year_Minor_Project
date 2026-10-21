@@ -1338,6 +1338,17 @@ def extract_native_libs(
         # must not be reported as an APK with no native libraries.
         raise NativeToolError(f"{apk_path} is not a readable APK/zip: {exc}") from None
     if unzip is not None:
+        # SESSION11L4: the extraction of every lib/** and assets/** member. On a
+        # 150 MB app with 100+ .so files this is 5-30 s of the native stage, and
+        # it used to be silent. Traced per pattern with the member count, so a
+        # slow extraction is attributable; the clock is only read when tracing on.
+        from trace import enabled as _trace_on
+        from trace import trace as _trace
+        _tracing = _trace_on()
+        _started = time.monotonic() if _tracing else 0.0
+        if _tracing:
+            _trace("static", "native.extract", "start", apk=apk_path.name,
+                   members=len(shipped), timeout_s=UNZIP_TIMEOUT)
         try:
             for pattern in patterns:
                 subprocess.run(
@@ -1345,7 +1356,15 @@ def extract_native_libs(
                     check=False, capture_output=True, text=True, timeout=UNZIP_TIMEOUT,
                 )
         except subprocess.TimeoutExpired:
+            if _tracing:
+                _trace("static", "native.extract", "failed", why="timeout",
+                       apk=apk_path.name, timeout_s=UNZIP_TIMEOUT,
+                       ms=round((time.monotonic() - _started) * 1000))
             raise NativeToolError(f"unzip timed out after {UNZIP_TIMEOUT:.0f}s extracting {apk_path}") from None
+        if _tracing:
+            _trace("static", "native.extract", "ok", apk=apk_path.name,
+                   members=len(shipped),
+                   ms=round((time.monotonic() - _started) * 1000))
     else:
         # Stdlib fallback: walk the APK as a zip and extract matching members
         # preserving their in-archive paths (so lib/<abi>/ is retained exactly as

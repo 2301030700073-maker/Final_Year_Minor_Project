@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -168,6 +169,16 @@ def parse_manifest_apk(apk_path: Path, resource_root: Path | None = None) -> Man
 
     from pyaxmlparser.axmlprinter import AXMLPrinter
 
+    # SESSION11L4: the binary-manifest parse, including the resource-table load
+    # (APK().get_android_resources(), the slow part on a large app - 5-20 s
+    # measured). Traced so the manifest stage's gap is attributable; the clock is
+    # only read when tracing is on.
+    from trace import enabled as _trace_on
+    from trace import trace as _trace
+    _tracing = _trace_on()
+    _started = time.monotonic() if _tracing else 0.0
+    if _tracing:
+        _trace("static", "manifest.parse", "start", apk=apk_path.name)
     with zipfile.ZipFile(apk_path) as zf:
         data = zf.read("AndroidManifest.xml")
     # get_xml_obj() returns the root lxml element (ElementTree-compatible: find,
@@ -200,7 +211,14 @@ def parse_manifest_apk(apk_path: Path, resource_root: Path | None = None) -> Man
             return "@xml/" + name.rsplit(":xml/", 1)[1]
         return None
 
-    return _parse_manifest_root(root, resource_root, nsc_resolver=nsc_resolver)
+    result = _parse_manifest_root(root, resource_root, nsc_resolver=nsc_resolver)
+    if _tracing:
+        _trace("static", "manifest.parse", "ok", apk=apk_path.name,
+               # whether the resource table was needed tells a slow parse from a
+               # fast one without guessing
+               resource_table="table" in holder,
+               ms=round((time.monotonic() - _started) * 1000))
+    return result
 
 
 def _resource_id_int(raw_nsc: str) -> int:

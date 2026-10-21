@@ -74,6 +74,8 @@ from dynamic import correlation as correlation_module
 from dynamic import device
 from dynamic import frida_runner
 from dynamic import mitmproxy_capture
+from ai import build_evidence_bundle, repair_loop, get_client  # AI augmentation layer
+from ai.repair_loop import RunFeedback
 from dynamic.synthesizer import synthesize
 from dynamic.success_checks.androgoat import AndroGoatSuccessCheck
 from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
@@ -5039,6 +5041,123 @@ def recover(
             "[yellow]recovery completed with warnings - the device may still need "
             "a restart if its internet is not restored.[/yellow]"
         )
+
+
+# ---------------------------------------------------------------------------
+# AI augmentation: per-target root/SSL-pinning bypass generation + self-repair.
+# This is DEVELOPMENT/TARGET augmentation, NOT a verdict/report path. It reuses
+# the existing frida_runner synthesized seam and is authorization-gated.
+# ---------------------------------------------------------------------------
+_AI_ACTION_MAP = {
+    "ROOT_ONLY": Action.ROOT_ONLY,
+    "SSL_ONLY": Action.SSL_ONLY,
+    "BOTH": Action.BOTH,
+}
+_AI_ALLOWED_JUSTIFICATIONS = {
+    "OWN_APP", "CTF", "AUTHORIZED_ENGAGEMENT", "ACADEMIC_TRAINING_TARGET",
+}
+
+
+@app.command("ai-bypass")
+def ai_bypass_cmd(
+    package: str = typer.Option(
+        ..., "--package", help="Target app package name (e.g. sq.rog.owasp.uncrackable1)."),
+    decompile_dir: str = typer.Option(
+        ..., "--decompile-dir",
+        help="Root of the app's decompiled output (jadx sources / smali / cfr)."),
+    device: str = typer.Option(
+        "", "--device", help="Emulator/device serial (defaults to first online)."),
+    action: str = typer.Option(
+        "BOTH", "--action", help="ROOT_ONLY | SSL_ONLY | BOTH."),
+    justification: str = typer.Option(
+        ..., "--justification",
+        help="Authorization context: OWN_APP | CTF | AUTHORIZED_ENGAGEMENT | "
+             "ACADEMIC_TRAINING_TARGET, optionally followed by a note."),
+    max_iter: int = typer.Option(
+        5, "--max-iter", help="Max generate -> run -> revise iterations."),
+) -> None:
+    """Generate a tailored root/SSL-pinning bypass for ONE app, run it on the
+    emulator, capture where it fails, and let the model revise - bounded.
+
+    Authorization-gated: requires AI_ALLOW_AUTHORIZED_TARGET=1 and a valid
+    --justification. Never runs against an unauthorized target. The generated
+    script is saved to src/dynamic/scripts/ai_generated/<pkg>.js and flagged for
+    human review; it is NOT trusted as a permanent verdict."""
+    if os.environ.get("AI_ALLOW_AUTHORIZED_TARGET") != "1":
+        typer.echo(
+            "REFUSED: set AI_ALLOW_AUTHORIZED_TARGET=1 to enable AI bypass "
+            "generation (authorization gate).", err=True)
+        raise typer.Exit(code=2)
+    just_tag = justification.split()[0].upper()
+    if just_tag not in _AI_ALLOWED_JUSTIFICATIONS:
+        typer.echo(
+            f"REFUSED: --justification must start with one of "
+            f"{sorted(_AI_ALLOWED_JUSTIFICATIONS)} (got '{just_tag}').",
+            err=True)
+        raise typer.Exit(code=2)
+    if action not in _AI_ACTION_MAP:
+        typer.echo(f"REFUSED: --action must be one of {list(_AI_ACTION_MAP)}.", err=True)
+        raise typer.Exit(code=2)
+
+    try:
+        client = get_client()
+    except RuntimeError as exc:
+        typer.echo(f"REFUSED: {exc}", err=True)
+        raise typer.Exit(code=2)
+
+    typer.echo(f"Selecting evidence from {decompile_dir} for {package} ...")
+    bundle = build_evidence_bundle(decompile_dir, target=package)
+    if bundle.is_empty():
+        typer.echo(
+            "WARNING: no root/SSL-pinning regions found in the decompiled tree. "
+            "Refusing to generate a script from an empty bundle.", err=True)
+        raise typer.Exit(code=3)
+    typer.echo(
+        f"  found root regions={len(bundle.root_regions)} "
+        f"ssl regions={len(bundle.ssl_regions)} "
+        f"(files scanned={bundle.files_scanned}).")
+
+    action_enum = _AI_ACTION_MAP[action]
+
+    def _run_once(source: str, applied_hooks: list[str]) -> RunFeedback:
+        collected: list[str] = []
+
+        def _on_message(message: dict, _data=None) -> None:
+            mtype = message.get("type")
+            if mtype == "send":
+                payload = message.get("payload")
+                if isinstance(payload, dict):
+                    collected.append(f"{payload.get('type')}: {payload}")
+                else:
+                    collected.append(f"send: {payload}")
+            elif mtype == "error":
+                collected.append(f"error: {message.get('description')}")
+
+        result = frida_runner.run_dynamic_stage(
+            device, package, action_enum, target="ai_generated",
+            settle_seconds=8,
+            synthesized={"source": source, "applied_hooks": applied_hooks},
+            auth_context=None,
+        )
+        ok = (result.status != "failed") and not any(
+            "error" in m.lower() for m in collected)
+        return RunFeedback(
+            ok=ok, messages=list(collected),
+            notes=f"stage_status={result.status}")
+
+    typer.echo(f"Running AI repair loop (max {max_iter} iterations) on {device or 'default device'} ...")
+    res = repair_loop(
+        bundle, client, run_once=_run_once, action=action, max_iter=max_iter)
+
+    typer.echo("=" * 60)
+    typer.echo(f"target           : {res.target}")
+    typer.echo(f"iterations       : {res.iterations}")
+    typer.echo(f"converged        : {res.converged}")
+    typer.echo(f"applied_hooks    : {res.applied_hooks}")
+    typer.echo(f"script saved to  : {res.saved_path}")
+    for h in res.history:
+        typer.echo(f"  - {h}")
+    typer.echo("REMINDER: AI-generated script is flagged for HUMAN REVIEW before use.")
 
 
 if __name__ == "__main__":

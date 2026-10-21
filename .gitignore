@@ -82,3 +82,8 @@ run_logs/
 paper/*.docx
 paper/*.pptx
 paper/__pycache__/
+
+# AI-augmentation output location: generated per-target bypass candidates are
+# run outputs (flagged for human review), not source. Tests must save_dir into a
+# temp tree instead.
+src/dynamic/scripts/ai_generated/

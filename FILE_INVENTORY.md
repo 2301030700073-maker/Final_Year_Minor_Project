@@ -1,7 +1,7 @@
 # Complete File Inventory
 
 Generated: 2026-10-21
-All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 319 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
+All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 326 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
 
 ```
 .gitattributes
@@ -113,6 +113,11 @@ scripts/run_unexecuted_realworld_sweep.sh
 scripts/sample_run_memory.py
 scripts/universal-robust-advanced-root--ssl-pinning-bypass.js
 scripts/verify_all.py
+src/ai/__init__.py
+src/ai/bypass_gen.py
+src/ai/client.py
+src/ai/repair_loop.py
+src/ai/select_evidence.py
 src/audit/__init__.py
 src/audit/attestation.py
 src/calibration/__init__.py
@@ -179,6 +184,7 @@ tests/fixtures/apksigner_3102_propertyguru.txt
 tests/fixtures/apksigner_3400_propertyguru.txt
 tests/unit/_apk_fixtures.py
 tests/unit/conftest.py
+tests/unit/test_ai_bypass.py
 tests/unit/test_androgoat_success_check.py
 tests/unit/test_androguard_scanner.py
 tests/unit/test_attestation.py
@@ -268,6 +274,7 @@ tests/unit/test_pass_through_proxy.py
 tests/unit/test_platform_libs_transparency.py
 tests/unit/test_rasp_signatures.py
 tests/unit/test_realworld_sweep_harness.py
+tests/unit/test_recover_device_network.py
 tests/unit/test_regen_field_coverage.py
 tests/unit/test_regen_reconstructor_field_coverage.py
 tests/unit/test_regen_reports.py

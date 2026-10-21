@@ -11,8 +11,13 @@ import os
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from ai import build_evidence_bundle, repair_loop, get_client, FakeClient
+from ai.bypass_gen import GeneratedBypass, generate_bypass
+from ai.client import _extract_json
 from ai.repair_loop import RunFeedback
+from ai.select_evidence import EvidenceBundle, SelectedRegion
 
 
 def _make_decompile_tree(root: Path) -> None:
@@ -135,3 +140,91 @@ def test_get_client_requires_key(monkeypatch):
         assert False, "expected RuntimeError without AI_API_KEY"
     except RuntimeError as e:
         assert "AI_API_KEY" in str(e)
+
+
+# --- Audit hardening: pure parsing + seam contract + bounded-loop guarantees ---
+
+def test_extract_json_handles_fences_and_garbage():
+    # Plain JSON.
+    assert _extract_json('{"a": 1}') == {"a": 1}
+    # ```json fenced.
+    assert _extract_json('```json\n{"a": 1}\n```') == {"a": 1}
+    # Bare ``` fence.
+    assert _extract_json('```\n{"a": 2}\n```') == {"a": 2}
+    # Prose wrapping a JSON object.
+    assert _extract_json('here you go:\n{"a": 3}\n done') == {"a": 3}
+    # Genuine garbage must raise, never silently return {}.
+    with pytest.raises(ValueError):
+        _extract_json("not json at all")
+
+
+def test_generated_bypass_to_synthesized_locks_frida_runner_seam():
+    # frida_runner.run_dynamic_stage reads synthesized["source"] and
+    # synthesized.get("applied_hooks", []); this pins the contract so the two
+    # modules cannot drift apart silently.
+    gb = GeneratedBypass(
+        script="Java.perform(function(){});",
+        applied_hooks=["X509TrustManager.checkServerTrusted"],
+        skipped=[], notes="n", confidence="low",
+    )
+    synth = gb.to_synthesized()
+    assert set(synth.keys()) == {"source", "applied_hooks"}
+    assert synth["source"] == gb.script
+    assert synth["applied_hooks"] == gb.applied_hooks
+
+
+def test_generate_bypass_rejects_empty_script_from_model():
+    bundle = build_evidence_bundle(_make_decompile_tree_scoped(), target="com.example")
+
+    class EmptyScriptClient:
+        def complete_json(self, system, user, *, temperature=0.2):
+            return {"script": "", "applied_hooks": [], "skipped": [], "notes": "", "confidence": "low"}
+
+    with pytest.raises(ValueError):
+        generate_bypass(bundle, EmptyScriptClient())
+
+
+def test_repair_loop_is_bounded_when_runner_always_fails():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _make_decompile_tree(root)
+        bundle = build_evidence_bundle(root, target="com.example")
+        # error_after=99 -> the fake script never "heals", so the loop must hit
+        # max_iter and report failure rather than spinning forever.
+        client = FakeClient(error_after=99)
+
+        def runner(source, hooks):
+            return RunFeedback(ok=False, messages=["error: boom at runtime"])
+
+        res = repair_loop(
+            bundle, client, run_once=runner, max_iter=4, save_dir=str(root / "out")
+        )
+        assert res.converged is False
+        assert res.iterations == 4
+        assert len(res.history) == 4
+        # The last (still-faulty) script is ALWAYS saved for human review.
+        assert res.saved_path and os.path.exists(res.saved_path)
+
+
+def test_to_prompt_text_truncates_oversized_bundle():
+    bundle = EvidenceBundle(target="big")
+    snippet = "x" * 80
+    for i in range(20):
+        bundle.ssl_regions.append(
+            SelectedRegion(path="/a/b.java", line=i, snippet=snippet, keyword="pin")
+        )
+    # Unbounded render (huge cap) gives the full length to compare against.
+    full = bundle.to_prompt_text(max_chars=1_000_000)
+    capped = bundle.to_prompt_text(max_chars=200)
+    # The cap never blows the context: body is cut to the cap, a marker is
+    # appended, so total stays at cap + marker overhead.
+    assert "truncated" in capped
+    assert len(capped) < len(full)
+    assert len(capped) <= 200 + len("\n... [bundle truncated to fit context window]")
+
+
+def _make_decompile_tree_scoped() -> Path:
+    """Same synthetic tree as _make_decompile_tree but returns the temp root."""
+    root = Path(tempfile.mkdtemp())
+    _make_decompile_tree(root)
+    return root

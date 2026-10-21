@@ -4948,5 +4948,98 @@ def regen_reports_cmd(
     )
 
 
+def _resolve_default_serial() -> str | None:
+    """Pick the first online adb device, preferring an emulator. Returns None when
+    no device is reachable - the caller then asks for an explicit --device."""
+    try:
+        out = subprocess.run(
+            ["adb", "devices", "-l"], capture_output=True, text=True,
+            timeout=30, check=False,
+        ).stdout.splitlines()
+    except Exception:
+        return None
+    serials: list[str] = []
+    for line in out:
+        line = line.strip()
+        if not line or line.startswith("List of devices") or "offline" in line:
+            continue
+        if line.endswith("device"):
+            serials.append(line.split()[0])
+    if not serials:
+        return None
+    for s in serials:
+        if s.startswith("emulator-"):
+            return s
+    return serials[0]
+
+
+@app.command("recover")
+def recover(
+    device_serial: Optional[str] = typer.Option(
+        None, "--device",
+        help="Device/emulator serial to recover (defaults to the first online device)",
+    ),
+    restore_port: Optional[int] = typer.Option(
+        None, "--restore",
+        help=(
+            "WSL2-inside-emulator only: point the device proxy back at the "
+            "pass-through on this port instead of clearing it. Use when the "
+            "emulator lives INSIDE WSL2 with no direct NAT (clearing would leave "
+            "it with no internet path). For the common emulator-on-Windows setup, "
+            "omit this - clearing restores real NAT internet."
+        ),
+    ),
+):
+    """Restore an emulator/device to normal network state after a capture run.
+
+    A capture run automatically sets the device proxy + adb reverse and tears them
+    down again on normal exit (_cleanup, run from a finally). But a run that is
+    hard-killed (SIGKILL, WSL distro restart, terminal killed, machine sleep) never
+    reaches that finally, leaving the device pointing its http_proxy at a dead
+    loopback port - the device 'has no internet' while the host is fine. This
+    command restores the device WITHOUT a full run: clears any leftover global
+    http_proxy, removes every stale adb reverse socket, and on WSL2 stops any
+    stray mitmdump.
+
+    Windows and WSL/Ubuntu HOST networks are never touched - only the device is.
+    (This is the built-in form of scripts/reset_emulator_network.sh.)
+
+    Usage:
+      python -m src.cli recover
+      python -m src.cli recover --device emulator-5556
+      python -m src.cli recover --restore 8081   # inside-WSL2-emulator case
+    """
+    serial = device_serial
+    if not serial:
+        serial = _resolve_default_serial()
+        if not serial:
+            console.print(
+                "[bold red]No online device found - pass --device <serial> "
+                "(see `adb devices`).[/bold red]"
+            )
+            raise typer.Exit(code=1)
+    status = mitmproxy_capture.recover_device_network(serial, restore_port=restore_port)
+    proxy_state = subprocess.run(
+        ["adb", "-s", serial, "shell", "settings", "get", "global", "http_proxy"],
+        capture_output=True, text=True, timeout=15, check=False,
+    ).stdout.strip()
+    reverse_state = subprocess.run(
+        ["adb", "-s", serial, "reverse", "--list"],
+        capture_output=True, text=True, timeout=15, check=False,
+    ).stdout.strip()
+    console.print(f"[bold green]recovered device {serial}[/bold green]")
+    console.print(f"  http_proxy = {proxy_state or '(none)'}")
+    console.print(f"  adb reverse = {reverse_state or '(none)'}")
+    if status["mitmdump"] is not None:
+        console.print(f"  windows mitmdump stopped = {status['mitmdump']}")
+    for w in status["warnings"]:
+        console.print(f"[yellow]  warning: {w}[/yellow]")
+    if status["warnings"]:
+        console.print(
+            "[yellow]recovery completed with warnings - the device may still need "
+            "a restart if its internet is not restored.[/yellow]"
+        )
+
+
 if __name__ == "__main__":
     app()

@@ -1,7 +1,7 @@
 # Complete File Inventory
 
-Generated: 2026-10-20
-All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 316 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
+Generated: 2026-10-21
+All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 319 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
 
 ```
 .gitattributes
@@ -107,6 +107,7 @@ scripts/frida_relay.py
 scripts/gap_hunt_idioms.py
 scripts/ghidra/DumpFunctions.java
 scripts/native_coverage_recheck.py
+scripts/reset_emulator_network.sh
 scripts/rs_certpinning_ab.py
 scripts/run_unexecuted_realworld_sweep.sh
 scripts/sample_run_memory.py
@@ -273,6 +274,7 @@ tests/unit/test_regen_reports.py
 tests/unit/test_regenerate_report.py
 tests/unit/test_report_capture_internet.py
 tests/unit/test_report_generator.py
+tests/unit/test_report_honesty_audit.py
 tests/unit/test_report_md_escape.py
 tests/unit/test_report_signer_verdict.py
 tests/unit/test_report_stage_notes.py
@@ -319,5 +321,6 @@ tools/adb_wrapper.sh
 tools/avd_config/Frida_Test.ini
 tools/avd_config/config.ini
 tools/download_frida_server.sh
+tools/report_honesty_audit.py
 uv.lock
 ```

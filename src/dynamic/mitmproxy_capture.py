@@ -1135,6 +1135,69 @@ def _cleanup(serial: str, proxy_port: int, proc: subprocess.Popen | None) -> lis
     return warnings
 
 
+def recover_device_network(serial: str, restore_port: int | None = None) -> dict:
+    """Standalone, run-free restore of a device's network state - the built-in
+    form of scripts/reset_emulator_network.sh.
+
+    A capture run that is hard-killed before its _cleanup() finally runs (SIGKILL,
+    WSL distro restart, terminal killed, machine sleep) leaves the device pointing
+    its http_proxy at 127.0.0.1:<capture port> with nothing listening, plus a
+    stale adb reverse socket - the device then "has no internet" while the host is
+    fine. This restores the device WITHOUT a full capture run:
+
+      * clears the device global http_proxy (or, with restore_port, points it back
+        at the WSL2 pass-through proxy for the no-direct-NAT inside-WSL2 case);
+      * removes EVERY stale adb reverse socket (`adb reverse --remove-all`);
+      * on WSL2, stops any stray mitmdump still holding the capture port.
+
+    Only the device is touched - Windows and WSL/Ubuntu host networks are never
+    modified. A failure is collected into `warnings` and returned, never swallowed
+    (principle 3: a leaked proxy/reverse must be visible, not silent)."""
+    status: dict = {"serial": serial, "proxy": None, "reverse": None,
+                    "mitmdump": None, "warnings": []}
+    adb = device._require_adb()
+    # 1. device proxy: clear, or restore to the WSL2 pass-through.
+    try:
+        if restore_port is not None:
+            device.set_http_proxy(serial, "127.0.0.1", restore_port)
+            status["proxy"] = f"restored:127.0.0.1:{restore_port}"
+        else:
+            device.clear_http_proxy(serial)
+            # Some Android builds also keep explicit host/port keys; drop them so a
+            # half-set proxy config cannot survive the canonical clear above.
+            for key in ("global_http_proxy_host", "global_http_proxy_port"):
+                try:
+                    subprocess.run(
+                        [adb, "-s", serial, "shell", "settings", "delete",
+                         "global", key],
+                        capture_output=True, text=True, timeout=15, check=False,
+                    )
+                except Exception:
+                    pass
+            status["proxy"] = "cleared"
+    except Exception as exc:
+        status["warnings"].append(f"device proxy restore failed: {exc}")
+    # 2. every stale adb reverse socket.
+    try:
+        res = subprocess.run(
+            [adb, "-s", serial, "reverse", "--remove-all"],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        status["reverse"] = (res.returncode == 0)
+    except Exception as exc:
+        status["warnings"].append(f"adb reverse --remove-all failed: {exc}")
+    # 3. on WSL2, stop any stray mitmdump on the Windows host.
+    if _on_wsl2():
+        try:
+            err = _stop_windows_mitmdump(None)
+            status["mitmdump"] = (err is None)
+            if err is not None:
+                status["warnings"].append(f"windows mitmdump stop: {err}")
+        except Exception as exc:
+            status["warnings"].append(f"windows mitmdump stop raised: {exc}")
+    return status
+
+
 def _on_wsl2() -> bool:
     """True when running on WSL2, where the emulator/adb server live on the
     Windows host and the device reaches that host's localhost - not this WSL2

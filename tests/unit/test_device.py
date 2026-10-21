@@ -1371,3 +1371,51 @@ def test_read_device_environment_raises_when_the_device_cannot_be_queried(monkey
     _fake_getprop(monkeypatch, "", returncode=1, stderr="error: device offline")
     with pytest.raises(RuntimeError, match="could not read the device environment"):
         device.read_device_environment("emulator-5554")
+
+
+def test_verify_installed_retries_once_on_a_pm_timeout(monkeypatch):
+    # Audit finding (2026-10-20): `pm list packages` had a hardcoded 20s timeout and
+    # ran right after a 300s-bounded install, when the package manager can be busy
+    # with dexopt. Measured: spotify's 152MB install blocked it past 20s TWICE,
+    # once on an idle emulator. The timeout is now scaled (_PM_LIST_TIMEOUT_SECONDS)
+    # and one transient timeout is retried; a genuine hang still surfaces.
+    calls = {"n": 0}
+
+    class _Proc:
+        returncode = 0
+        stdout = "package:com.example.app\n"
+
+    def fake_run(cmd, **kw):
+        calls["n"] += 1
+        assert kw["timeout"] == device._PM_LIST_TIMEOUT_SECONDS
+        if calls["n"] == 1:
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=kw["timeout"])
+        return _Proc()
+
+    monkeypatch.setattr(device, "_require_adb", lambda: "adb")
+    monkeypatch.setattr(device.subprocess, "run", fake_run)
+    monkeypatch.setattr(device.time, "sleep", lambda s: None)
+
+    assert device.verify_installed("emulator-5554", "com.example.app") is True
+    assert calls["n"] == 2
+    assert device._PM_LIST_TIMEOUT_SECONDS >= 60, (
+        "the measured 20s was too tight for a large APK's dexopt window")
+
+
+def test_verify_installed_does_not_retry_a_real_failure(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_run(cmd, **kw):
+        calls["n"] += 1
+        raise subprocess.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(device, "_require_adb", lambda: "adb")
+    monkeypatch.setattr(device.subprocess, "run", fake_run)
+
+    try:
+        device.verify_installed("emulator-5554", "com.example.app")
+    except subprocess.CalledProcessError:
+        pass
+    else:
+        raise AssertionError("a non-timeout failure must propagate")
+    assert calls["n"] == 1, "a real failure must not be retried"

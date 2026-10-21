@@ -13,6 +13,7 @@ from cli import (
     _completeness_console_caveat,
     _correlation_from_json,
     _correlation_skip_reason_for_failed_stage,
+    _dynamic_skip_reason,
     _effective_dynamic_action,
     _git_commit_hash,
     _git_last_commit_touching,
@@ -1229,3 +1230,43 @@ def test_correlation_skip_reason_for_failed_stage_names_failure_never_claims_ski
     # failed stage with no reason string still names the failure (no crash on None)
     fallback = _correlation_skip_reason_for_failed_stage(None, "failed", None)
     assert fallback is not None and "see stage status" in fallback
+
+
+def test_dynamic_skip_reason_qualifies_a_coverage_limited_neither():
+    # Audit finding (2026-10-20): propertyguru/aves reports said "not run (NEITHER
+    # classification - no bypass technique to apply)" while their own Decision line
+    # said the governing surface was NOT fully analyzed. A coverage-limited NEITHER
+    # means the classifier could not ATTRIBUTE a technique - not that the app has
+    # none (ADR-0006: unknown is not absent). The runner's reason is qualified, not
+    # replaced, and the override flag is named.
+    from types import SimpleNamespace
+
+    stage = SimpleNamespace(
+        status="skipped",
+        evidence={"reason": "NEITHER classification - no bypass technique to apply"},
+    )
+    classification = SimpleNamespace(unknown_uncovered=["root", "ssl"])
+    reason = _dynamic_skip_reason(stage, classification)
+    assert reason.startswith("NEITHER classification - no bypass technique to apply")
+    assert "COVERAGE-LIMITED" in reason and "root, ssl not fully analyzed" in reason
+    assert "--force-dynamic" in reason
+
+
+def test_dynamic_skip_reason_stays_bare_for_a_confident_neither():
+    from types import SimpleNamespace
+
+    stage = SimpleNamespace(
+        status="skipped",
+        evidence={"reason": "NEITHER classification - no bypass technique to apply"},
+    )
+    classification = SimpleNamespace(unknown_uncovered=[])
+    assert _dynamic_skip_reason(stage, classification) == (
+        "NEITHER classification - no bypass technique to apply")
+
+
+def test_dynamic_skip_reason_is_none_for_a_stage_that_ran():
+    from types import SimpleNamespace
+
+    stage = SimpleNamespace(status="success", evidence={"reason": "x"})
+    classification = SimpleNamespace(unknown_uncovered=["root"])
+    assert _dynamic_skip_reason(stage, classification) is None

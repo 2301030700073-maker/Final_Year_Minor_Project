@@ -190,6 +190,15 @@ if $ALL_OK && ! $SKIP_PIPELINE && ! $CHECK_ONLY; then
         --apk "$APK_FILE" \
         --justification ACADEMIC_TRAINING_TARGET \
         --target "$TARGET" 2>&1
+    # SESSION11L4: the collector exits non-zero when a collected stage failed
+    # (pipeline / unit tests / calibration). It used to always exit 0, so this
+    # script's final "All checks passed" was unconditional: measured 2026-10-20
+    # on a spotify run whose dynamic stage FAILED (adb timeout) - the bundle said
+    # "Exit code: 1 (FAILED)" while this script reported everything passed. The
+    # verdict must come from the checks, not from having reached the end.
+    if [ $? -ne 0 ]; then
+        ALL_OK=false
+    fi
 
     echo ""
     echo "─── 9. Verify results ───"

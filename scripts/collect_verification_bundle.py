@@ -655,7 +655,32 @@ def main() -> int:
 
     print(f"\nBundle written to: {bundle_dir}")
     print("git add, commit, and push this directory (and docs/plans/research/ findings, if written).")
+    failed = _failed_collected_stages(test_result, pipeline_result, calibration_result)
+    if failed:
+        print(f"\nFAILED: {', '.join(failed)} - see SUMMARY.md in {bundle_dir}")
+        return 1
     return 0
+
+
+def _failed_collected_stages(test_result, pipeline_result, calibration_result) -> list[str]:
+    """The collected stages that did not succeed, named for the caller's exit code.
+
+    SESSION11L4: main() used to `return 0` unconditionally while the pipeline's
+    own exit code was only PRINTED into SUMMARY.md, so run.sh's final "All checks
+    passed" was unconditional - measured 2026-10-20 on a spotify run whose
+    dynamic stage FAILED (adb timeout): the bundle recorded "Exit code: 1
+    (FAILED)" while the process told the shell everything passed. The bundle is
+    still written either way (a failed run's evidence is what a reader needs);
+    only the verdict is honest now. A None exit_code (tool not found, or the
+    check timed out) counts as a failure: the check did not run to a result."""
+    failed: list[str] = []
+    if test_result["exit_code"] not in (0,):
+        failed.append("unit tests")
+    if pipeline_result is not None and pipeline_result["exit_code"] not in (0,):
+        failed.append("pipeline run")
+    if calibration_result["exit_code"] not in (0,):
+        failed.append("calibration report")
+    return failed
 
 
 if __name__ == "__main__":

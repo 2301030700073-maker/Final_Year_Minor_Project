@@ -538,6 +538,17 @@ def _require_adb() -> str:
 # How long an `adb devices` result may keep reporting a present-but-offline
 # device before we conclude it is not coming back. See _read_device_lines.
 _DEVICE_SETTLE_TIMEOUT_SECONDS = 20.0
+
+# `pm list packages` right after a large install runs while the device may still
+# be finishing dexopt, and the package manager can block behind that work.
+# Measured 2026-10-20: a 152 MB APK (spotify) timed out at the previous
+# hardcoded 20 s TWICE - the second time on an idle emulator (load average 0.2),
+# so it was not load - and each failure killed the dynamic stage of a run whose
+# static half had just spent 16 minutes producing the report. Scaled on the same
+# "generous but bounded" rule install_apk states above (300 s): 120 s is far
+# beyond any real query and only ever trips on a genuine hang. Env-overridable
+# so a slower host can raise it without editing code.
+_PM_LIST_TIMEOUT_SECONDS = float(os.environ.get("FYMP_PM_LIST_TIMEOUT", "120"))
 _DEVICE_SETTLE_POLL_SECONDS = 1.5
 
 
@@ -855,10 +866,25 @@ def clear_logcat(serial: str) -> None:
 
 def verify_installed(serial: str, package_name: str) -> bool:
     adb = _require_adb()
-    result = subprocess.run(
-        [adb, "-s", serial, "shell", "pm", "list", "packages", package_name],
-        capture_output=True, text=True, check=True, timeout=20,
-    )
+    cmd = [adb, "-s", serial, "shell", "pm", "list", "packages", package_name]
+    # One retry on a timeout: a pm query right after a large install can block
+    # behind the package manager's own dexopt work (measured on spotify's 152 MB
+    # install - see _PM_LIST_TIMEOUT_SECONDS). The timeout is already generous;
+    # the retry covers a transient stall that outlived even that, and a genuine
+    # hang still surfaces on the second attempt rather than being retried
+    # forever. A non-timeout failure (adb gone, non-zero exit) is NOT retried -
+    # that is a real failure, not a slow one.
+    for attempt in (1, 2):
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, check=True,
+                timeout=_PM_LIST_TIMEOUT_SECONDS,
+            )
+            break
+        except subprocess.TimeoutExpired:
+            if attempt == 2:
+                raise
+            time.sleep(2.0)
     # FR-4.2: exact match, not substring. `pm list packages <filter>` filters by
     # substring, and verify used to check `package_name in result.stdout` - so a
     # similarly-prefixed package (com.x.prod) installed without the target

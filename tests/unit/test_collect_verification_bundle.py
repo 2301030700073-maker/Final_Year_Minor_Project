@@ -613,3 +613,18 @@ def test_a_probe_that_saw_no_device_says_so_without_calling_it_a_failure(tmp_pat
     ][0]
     assert "no device attached" in line, line
     assert "FAILED" not in line and "not found" not in line.lower(), line
+
+
+def test_failed_collected_stages_names_each_failure():
+    # Audit finding (2026-10-20): the collector's main() returned 0 unconditionally,
+    # so run.sh's final "All checks passed" was unconditional - measured on a
+    # spotify run whose dynamic stage FAILED while the bundle said "Exit code: 1".
+    ok = {"exit_code": 0}
+    bad = {"exit_code": 1}
+    assert bundle._failed_collected_stages(ok, ok, ok) == []
+    assert bundle._failed_collected_stages(ok, bad, ok) == ["pipeline run"]
+    assert bundle._failed_collected_stages(bad, ok, bad) == ["unit tests", "calibration report"]
+    # no --apk: the pipeline was not run, so it cannot have failed
+    assert bundle._failed_collected_stages(ok, None, ok) == []
+    # a check that never produced a result (tool missing / timed out) is a failure
+    assert bundle._failed_collected_stages({"exit_code": None}, ok, ok) == ["unit tests"]

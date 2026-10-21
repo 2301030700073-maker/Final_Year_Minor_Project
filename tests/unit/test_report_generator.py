@@ -3524,3 +3524,71 @@ def test_generate_report_renders_why_a_match_matched(tmp_path):
 
     assert "- Verdict: MATCH (static and dynamic agree)" in content
     assert content.count("- MATCH: ") == 2
+
+# --- SESSION11L4 audit fix: report honesty for a cached/partial decompile ------
+
+def test_cached_complete_decompile_is_not_narrated_as_this_runs(tmp_path):
+    # Audit finding (2026-10-20): a report rendered BOTH "This run's decompilation
+    # completed successfully" AND "REUSED FROM CACHE ... jadx and apktool were not
+    # re-run for this report" - the first sentence claimed a decompile that did not
+    # happen this run (measured on propertyguru's cached replay). The completeness
+    # sentence must be cache-aware.
+    stage_results = [StageResult(
+        stage="decompile", status="success",
+        evidence={"decompile_completeness": "complete", "jadx_exit_code": 0,
+                  "jadx_file_count": 42, "cached": True},
+        duration_ms=500,
+    )]
+
+    report_path = generate_report(
+        run_id="runC1", apk_hash="cch111", timestamp="2026-10-21T00:00:00",
+        metadata={"hashes": {"sha256": "cch111"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=stage_results, output_dir=tmp_path,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "This run's decompilation completed successfully" not in content
+    assert "The cached decompiled output this report draws on was recorded as COMPLETE" in content
+    assert "REUSED FROM CACHE" in content
+
+
+def test_cached_partial_decompile_is_not_narrated_as_this_runs(tmp_path):
+    stage_results = [StageResult(
+        stage="decompile", status="success",
+        evidence={"decompile_completeness": "partial", "jadx_exit_code": 1,
+                  "jadx_file_count": 1563, "cached": True},
+        duration_ms=500,
+    )]
+
+    report_path = generate_report(
+        run_id="runC2", apk_hash="cch222", timestamp="2026-10-21T00:00:00",
+        metadata={"hashes": {"sha256": "cch222"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=stage_results, output_dir=tmp_path,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "This run's decompilation was INCOMPLETE" not in content
+    assert "The cached decompiled output this report draws on was recorded as INCOMPLETE" in content
+
+
+def test_fresh_complete_decompile_still_says_this_runs(tmp_path):
+    # the fresh path must keep its original wording - the fix is cache-aware, not
+    # a blanket rewording.
+    stage_results = [StageResult(
+        stage="decompile", status="success",
+        evidence={"decompile_completeness": "complete", "jadx_exit_code": 0,
+                  "jadx_file_count": 42, "cached": False},
+        duration_ms=500,
+    )]
+
+    report_path = generate_report(
+        run_id="runC3", apk_hash="cch333", timestamp="2026-10-21T00:00:00",
+        metadata={"hashes": {"sha256": "cch333"}, "package": {"package_name": "test.app"}},
+        classification=_classification(), verification=None, correlation=None,
+        stage_results=stage_results, output_dir=tmp_path,
+    )
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "This run's decompilation completed successfully (42 source files)" in content

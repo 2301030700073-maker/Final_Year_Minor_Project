@@ -929,6 +929,37 @@ def _correlation_skip_reason_for_failed_stage(
     return None
 
 
+def _dynamic_skip_reason(dynamic_stage, classification) -> str | None:
+    """The report's dynamic-skip reason, qualified when the NEITHER is a lower bound.
+
+    ADR-0006, one layer below the Decision line: a NEITHER whose governing
+    surface was not fully analyzed is a LOWER BOUND, and the dynamic stage is
+    skipped because the classifier could not ATTRIBUTE a technique - not because
+    the app has none. The runner's own reason ("NEITHER classification - no
+    bypass technique to apply") is true about the run and false about the app
+    when the NEITHER is coverage-limited: measured on propertyguru (a Hermes
+    bundle the walk could not read) and aves (an unanalyzed SSL governing
+    surface), both reports told the reader there was no technique to test while
+    their own Decision line said the surface was unexamined. The runner's reason
+    is kept and QUALIFIED, never replaced; --force-dynamic is the documented way
+    to run the attempt anyway.
+
+    None for any stage that was not skipped - a failed stage's reason travels the
+    failed-stage path instead (see _correlation_skip_reason_for_failed_stage)."""
+    if dynamic_stage.status != "skipped":
+        return None
+    reason = dynamic_stage.evidence.get("reason", "skipped")
+    uncovered = getattr(classification, "unknown_uncovered", None)
+    if reason and uncovered and "NEITHER" in reason:
+        return (
+            f"{reason} - but this NEITHER is COVERAGE-LIMITED "
+            f"({', '.join(uncovered)} not fully analyzed), so the skip reflects a "
+            "technique the classifier could not attribute, not a confirmed absence "
+            "of one; --force-dynamic runs the attempt anyway"
+        )
+    return reason
+
+
 def _non_java_tls_layers(webview_sites, dart_aot_libs) -> list[str]:
     """The TLS stacks this run has EVIDENCE the app uses which the dynamic stage's
     in-process observers structurally cannot see, named for the empty-capture reason.
@@ -3505,7 +3536,7 @@ def run(
     # apply" (see frida_runner.run_dynamic_stage) - surfaced in the report
     # rather than collapsed into one hardcoded string, so a negative-control
     # run doesn't misleadingly look like someone chose to skip verification.
-    dynamic_skip_reason = dynamic_stage.evidence.get("reason", "skipped") if dynamic_stage.status == "skipped" else None
+    dynamic_skip_reason = _dynamic_skip_reason(dynamic_stage, classification)
 
     # not-attempted != skipped: a FAILED dynamic stage (setup/install/unexpected
     # exception before the success branch) leaves correlation_skip_reason None, so the

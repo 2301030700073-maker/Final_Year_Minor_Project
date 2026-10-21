@@ -24,11 +24,11 @@ uses (OWN_APP / CTF / AUTHORIZED_ENGAGEMENT / ACADEMIC_TRAINING_TARGET). The
 set and a ``--justification`` is supplied, mirroring the H2 authorization intent.
 """
 
-from .client import ChatClient, FakeClient, get_client
+from .client import ChatClient, FakeClient, ClaudeCliClient, get_client
 from .select_evidence import build_evidence_bundle
 from .repair_loop import repair_loop
 
 __all__ = [
-    "ChatClient", "FakeClient", "get_client",
+    "ChatClient", "FakeClient", "ClaudeCliClient", "get_client",
     "build_evidence_bundle", "repair_loop",
 ]

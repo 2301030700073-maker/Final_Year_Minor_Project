@@ -212,11 +212,11 @@ uv run pytest tests/unit
 
 This exercises the signature matcher and decision engine against fixtures only — if this passes, the deterministic core's logic is sound independent of whether the rest of this setup is done yet.
 
-Expected result on WSL2/Linux — **2,458 tests collected, all passing** (a machine missing an optional tool may report one or two skipped instead) (on Windows, expect the handful of POSIX-only failures noted above instead of a fully clean run). This figure is authoritative and is enforced by `tests/unit/test_ledger_suite_count.py` against both `docs/plans/audit/full-project-audit-ledger.md` and this README, so it cannot silently drift:
+Expected result on WSL2/Linux — **2,466 tests collected, all passing** (a machine missing an optional tool may report one or two skipped instead) (on Windows, expect the handful of POSIX-only failures noted above instead of a fully clean run). This figure is authoritative and is enforced by `tests/unit/test_ledger_suite_count.py` against both `docs/plans/audit/full-project-audit-ledger.md` and this README, so it cannot silently drift:
 
 ```
 $ uv run pytest tests/unit --collect-only -q | tail -1
-2458 tests collected in 1.17s
+2466 tests collected in 1.17s
 ```
 
 The count moves whenever a gap is closed; the exact collected number is recorded in `docs/plans/audit/full-project-audit-ledger.md`, which is updated with each change.
@@ -342,6 +342,59 @@ Three maintenance commands round out the CLI (`src/cli.py`):
   ```bash
   PYTHONPATH=src uv run python -m cli regen-reports --justification ACADEMIC_TRAINING_TARGET --dry-run
   ```
+
+## AI augmentation layer (optional, authorization-gated)
+
+`src/ai/` is a *development / per-target* aid — it turns a capped evidence bundle
+from one APK into a **candidate** Frida bypass script, then runs it on the
+emulator, captures the runtime errors, and asks the model to revise (bounded
+iterations). It is **never** in the verdict/report path: the generated script is
+written to `src/dynamic/scripts/ai_generated/<target>.js`, flagged for human
+review, and loaded only through the existing `run_dynamic_stage(synthesized=...)`
+seam. It is gated by the same justification model as the rest of the project —
+`ai-bypass` refuses to run unless `AI_ALLOW_AUTHORIZED_TARGET=1` is set and a
+`--justification` in `{OWN_APP, CTF, AUTHORIZED_ENGAGEMENT, ACADEMIC_TRAINING_TARGET}`
+is supplied.
+
+Two model backends, selected by `AI_BACKEND`:
+
+- **`http` (default)** — OpenAI-compatible `/v1/chat/completions`. Needs
+  `AI_API_KEY` (and usually `AI_BASE_URL` + `AI_MODEL`). This is the
+  TaoToken/agentrouter-style unified-key path.
+- **`claude-cli`** — drives the locally-installed, already-authenticated
+  **Claude Code CLI** non-interactively (`claude -p`). No separate project key is
+  needed: it inherits your existing provider config (e.g. a third-party
+  `deepseek-v4-flash` gateway). The subprocess is locked to `--allowedTools ''`
+  so it can only return text, never touch the filesystem or run commands
+  (ADR-0004 — human review still applies to the saved artifact). For
+  **non-interactive launches** (cron, CI, systemd, `wsl.exe bash -lc`) where your
+  `~/.bashrc` exports are not sourced, the same `ANTHROPIC_BASE_URL` /
+  `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `CLAUDE_ALLOWED_TOOLS` are also
+  read from the project's gitignored `.env`, so the backend self-bootstraps its
+  provider config from any launch context.
+
+Example invocations:
+
+```bash
+# Backend A — HTTP key (default):
+AI_API_KEY=... AI_BASE_URL=https://taotoken.net/api/v1 AI_MODEL=deepseek-v4-flash \
+  AI_ALLOW_AUTHORIZED_TARGET=1 uv run python -m cli ai-bypass \
+  --package com.example.app --decompile-dir /path/to/decompile --justification ACADEMIC_TRAINING_TARGET
+
+# Backend B — reuse your interactive Claude Code auth (no project key):
+export CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1   # your settings.json model is not in CC's catalog
+AI_BACKEND=claude-cli AI_ALLOW_AUTHORIZED_TARGET=1 \
+  uv run python -m cli ai-bypass \
+  --package com.example.app --decompile-dir /path/to/decompile --justification ACADEMIC_TRAINING_TARGET
+```
+
+Headless Claude Code generally (to have Claude *perform tasks* automatically,
+not just generate a script): `claude -p "your task" --dangerously-skip-permissions`
+runs the agent end-to-end with no human in the loop and prints a summary. For a
+model not in Claude Code's catalog (the `deepseek-v4-flash` third-party gateway),
+also export `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1`, and make sure
+`ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` for that gateway are present in the
+shell that launches it.
 
 ## Reporting results back
 

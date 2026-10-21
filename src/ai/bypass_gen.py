@@ -18,7 +18,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from .client import ChatClient, FakeClient
+from .client import ChatClient, FakeClient, ClaudeCliClient
 from .select_evidence import EvidenceBundle
 
 
@@ -79,7 +79,7 @@ def _action_text(action: str) -> str:
 
 def generate_bypass(
     bundle: EvidenceBundle,
-    client: ChatClient | FakeClient,
+    client: ChatClient | FakeClient | ClaudeCliClient,
     action: str = "BOTH",
 ) -> GeneratedBypass:
     """Generate a candidate bypass from an evidence bundle.

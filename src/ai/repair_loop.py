@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from .client import ChatClient, FakeClient
+from .client import ChatClient, FakeClient, ClaudeCliClient
 from .bypass_gen import GeneratedBypass, generate_bypass
 from .select_evidence import EvidenceBundle
 
@@ -63,7 +63,7 @@ RunOnce = Callable[[str, list[str]], RunFeedback]
 
 
 def _revise(
-    client: ChatClient | FakeClient,
+    client: ChatClient | FakeClient | ClaudeCliClient,
     previous: GeneratedBypass,
     feedback: RunFeedback,
     bundle: EvidenceBundle,
@@ -112,7 +112,7 @@ def _save_script(target: str, script: str, base_dir: str | None = None) -> str:
 
 def repair_loop(
     bundle: EvidenceBundle,
-    client: ChatClient | FakeClient,
+    client: ChatClient | FakeClient | ClaudeCliClient,
     *,
     run_once: RunOnce,
     action: str = "BOTH",

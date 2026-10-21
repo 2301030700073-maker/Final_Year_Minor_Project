@@ -1,10 +1,19 @@
 """Provider-agnostic chat client for the AI augmentation layer.
 
-The client speaks the OpenAI-compatible ``/v1/chat/completions`` JSON contract,
-which is what the agentrouter/taotoken-style unified-key routers expose for
-``deepseek-v4-flash`` (and what api.deepseek.com / OpenAI itself use). Nothing
-about the provider is hard-coded: ``AI_BASE_URL``, ``AI_API_KEY`` and ``AI_MODEL``
-all come from the environment so the exact host the operator has just drops in.
+Two backends are supported, selected by ``AI_BACKEND`` (see ``get_client``):
+
+  - ``http`` (default): the OpenAI-compatible ``/v1/chat/completions`` JSON
+    contract, which is what agentrouter/taotoken-style unified-key routers expose
+    for ``deepseek-v4-flash`` (and what api.deepseek.com / OpenAI use). Nothing
+    about the provider is hard-coded: ``AI_BASE_URL``, ``AI_API_KEY`` and
+    ``AI_MODEL`` all come from the environment so the exact host drops in.
+  - ``claude-cli``: drives the locally-installed, already-authenticated Claude
+    Code CLI non-interactively (``claude -p``). No project-level key is required -
+    it inherits the operator's existing provider config (e.g. ANTHROPIC_BASE_URL /
+    ANTHROPIC_AUTH_TOKEN from the shell). For non-interactive launches where the
+    shell's exports are absent (cron, CI, systemd, ``wsl.exe bash -lc``), those
+    provider vars are ALSO read from the project's gitignored ``.env`` so the
+    backend works from any launch context, not just an interactive terminal.
 
 A ``FakeClient`` is provided for tests so the whole generation/repair pipeline can
 be exercised with zero network access and zero token spend.
@@ -12,8 +21,11 @@ be exercised with zero network access and zero token spend.
 
 from __future__ import annotations
 
+import glob
 import json
 import os
+import shutil
+import subprocess
 import urllib.request
 import urllib.error
 from typing import Any
@@ -27,6 +39,84 @@ def _env(name: str, default: str | None = None) -> str | None:
     if v is None or v == "":
         return default
     return v
+
+
+# Provider vars the ``claude-cli`` backend pulls from the project ``.env`` when
+# they are not already present in the process environment. These are exactly the
+# vars an *interactive* shell would export (e.g. from ~/.bashrc) but that are
+# absent in a clean non-interactive launch (cron, CI, systemd,
+# ``wsl.exe bash -lc``). An explicitly-exported shell var always wins.
+_CLI_ENV_VARS = (
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT",
+    "CLAUDE_BIN",
+    "CLAUDE_ALLOWED_TOOLS",
+)
+
+
+def _load_dotenv_file(path: str) -> dict[str, str]:
+    """Parse a minimal KEY=VALUE ``.env`` file (no interpolation, no exports).
+
+    Mirrors the project's existing convention (the ``.env`` is normally
+    ``export``-ed manually). We only extract the handful of provider vars listed
+    in ``_CLI_ENV_VARS`` so the headless backend can self-bootstrap its provider
+    config without a dotenv auto-loader (which would perturb the test suite and
+    ``ChatClient``'s key-required contract).
+    """
+    parsed: dict[str, str] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export "):].strip()
+                if "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip()
+                if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+                    val = val[1:-1]
+                if key in _CLI_ENV_VARS and val:
+                    parsed[key] = val
+    except FileNotFoundError:
+        return parsed
+    return parsed
+
+
+def _find_project_env() -> dict[str, str]:
+    """Locate and parse the project ``.env``, walking up from the cwd. Cached."""
+    cached = getattr(_find_project_env, "_cache", None)
+    if cached is not None:
+        return cached
+    env: dict[str, str] = {}
+    dir_ = os.getcwd()
+    for _ in range(10):
+        cand = os.path.join(dir_, ".env")
+        if os.path.exists(cand):
+            env = _load_dotenv_file(cand)
+            break
+        parent = os.path.dirname(dir_)
+        if parent == dir_:
+            break
+        dir_ = parent
+    _find_project_env._cache = env  # type: ignore[attr-defined]
+    return env
+
+
+def _resolve_env(name: str, default: str | None = None) -> str | None:
+    """Like ``_env`` but also consults the project ``.env`` for provider vars."""
+    v = os.environ.get(name)
+    if v and v != "":
+        return v
+    dotenv = _find_project_env()
+    if name in dotenv and dotenv[name]:
+        return dotenv[name]
+    return default
 
 
 class ChatClient:
@@ -223,10 +313,194 @@ class FakeClient:
         return _extract_json(self.complete(system, user, json_mode=True, temperature=temperature))
 
 
-def get_client() -> ChatClient | FakeClient:
-    """Return a real ``ChatClient`` from env, or raise if no key is configured.
+def _find_claude_binary() -> str | None:
+    """Locate the ``claude`` executable.
 
-    Kept as a single seam so callers never construct the client directly and so
-    the "key not set" failure is uniform and explicit.
+    Order: explicit ``CLAUDE_BIN`` -> ``claude`` on ``PATH`` -> an fnm-managed
+    install (the layout observed on the analysis host) -> a global npm install.
+    Returns ``None`` if nothing plausible is found.
     """
-    return ChatClient.from_env()
+    if explicit := _resolve_env("CLAUDE_BIN"):
+        return explicit
+    if which := shutil.which("claude"):
+        return which
+    home = os.path.expanduser("~")
+    candidates = [
+        # fnm node-version layout (exact version observed in this project)
+        os.path.join(
+            home, ".local", "share", "fnm", "node-versions", "v24.15.0",
+            "installation", "lib", "node_modules", "@anthropic-ai", "claude-code",
+            "node_modules", "@anthropic-ai", "claude-code-linux-x64", "claude",
+        ),
+    ]
+    # Any fnm node version, any arch suffix.
+    candidates.extend(
+        glob.glob(
+            os.path.join(
+                home, ".local", "share", "fnm", "node-versions", "*",
+                "installation", "lib", "node_modules", "@anthropic-ai",
+                "claude-code", "node_modules", "@anthropic-ai",
+                "claude-code-*-x64", "claude",
+            )
+        )
+    )
+    # Global npm install.
+    candidates.append(
+        os.path.join(home, ".npm-global", "lib", "node_modules",
+                     "@anthropic-ai", "claude-code", "cli.js")
+    )
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return None
+
+
+class ClaudeCliClient:
+    """Model backend that drives the locally-installed, already-authenticated
+    Claude Code CLI non-interactively (``claude -p``) instead of calling an HTTP
+    endpoint.
+
+    This is the natural fit for operators who already have Claude Code configured
+    on the analysis host (the same binary they use interactively). It shells out
+    to ``claude``, inheriting the operator's existing auth + provider config
+    (e.g. a third-party OpenAI-compatible gateway serving ``deepseek-v4-flash``),
+    so no separate API key has to be handed to this project.
+
+    Safety / ADR-0004: invoked with ``--dangerously-skip-permissions`` (no human
+    in the loop for the subprocess itself) AND ``--allowedTools ''`` so the child
+    process cannot read, edit, or execute - it is reduced to a pure text
+    generator that returns the Frida-script JSON. The generated artifact is still
+    written by OUR code (``repair_loop._save_script``) and flagged for human
+    review. Only the model call is delegated.
+
+    Select this backend with ``AI_BACKEND=claude-cli``.
+    """
+
+    def __init__(self, binary: str, *, timeout: float = 300.0) -> None:
+        self.binary = binary
+        self.timeout = timeout
+
+    @classmethod
+    def from_env(cls, timeout: float = 300.0) -> "ClaudeCliClient":
+        binary = _find_claude_binary()
+        if not binary:
+            raise RuntimeError(
+                "Claude CLI not found. Set CLAUDE_BIN to the absolute path of the "
+                "claude executable, or install Claude Code so 'claude' is on PATH. "
+                "Headless usage: claude -p '<task>' --dangerously-skip-permissions."
+            )
+        return cls(binary=binary, timeout=timeout)
+
+    # -- subprocess transport ----------------------------------------------
+    def _build_env(self) -> dict[str, str]:
+        """Assemble the environment for the ``claude`` subprocess.
+
+        Starts from the parent process environment, then:
+
+          - forces ``CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1`` so
+            third-party/uncatalogued models (e.g. ``deepseek-v4-flash`` served by
+            a gateway) are honored headlessly, mirroring the operator's working
+            interactive session;
+          - fills any *provider* var (ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN /
+            ANTHROPIC_API_KEY / CLAUDE_ALLOWED_TOOLS) that the process environment
+            lacks from the project ``.env`` (the gitignored secrets store). This
+            is what makes the backend work from a clean non-interactive launch
+            where ``~/.bashrc``'s exports were never sourced. An explicitly
+            exported shell var always wins over ``.env``.
+        """
+        env = os.environ.copy()
+        env["CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"] = "1"
+        dotenv = _find_project_env()
+        for key in _CLI_ENV_VARS:
+            if key == "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT":
+                continue  # always forced above
+            if key not in env and key in dotenv and dotenv[key]:
+                env[key] = dotenv[key]
+        return env
+
+    def _run(self, system: str, user: str) -> str:
+        # Claude Code keeps its own (large) default system prompt; we replace it
+        # with our strict generator instructions and pass the evidence/user text
+        # as the positional prompt. Args are passed as a list (no shell), so the
+        # large, quote-heavy bundle cannot break out or be injected.
+        cmd = [
+            self.binary,
+            "-p", user,
+            "--system-prompt", system,
+            "--output-format", "text",
+            "--no-session-persistence",
+            "--dangerously-skip-permissions",
+            "--allowedTools", _resolve_env("CLAUDE_ALLOWED_TOOLS", ""),
+        ]
+        env = self._build_env()
+        try:
+            proc = subprocess.run(
+                cmd, env=env, capture_output=True, text=True, timeout=self.timeout
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"Claude CLI timed out after {self.timeout}s"
+            ) from exc
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip()
+            raise RuntimeError(f"Claude CLI failed (rc={proc.returncode}): {detail}")
+        return proc.stdout
+
+    # -- the same surface as ChatClient -------------------------------------
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        json_mode: bool = False,
+        temperature: float = 0.2,
+    ) -> str:
+        system = next(
+            (m["content"] for m in messages if m.get("role") == "system"), ""
+        )
+        user = next(
+            (m["content"] for m in reversed(messages) if m.get("role") == "user"), ""
+        )
+        return self._run(system, user)
+
+    def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        json_mode: bool = False,
+        temperature: float = 0.2,
+    ) -> str:
+        return self._run(system, user)
+
+    def complete_json(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.2,
+    ) -> dict[str, Any]:
+        return _extract_json(self._run(system, user))
+
+
+def get_client() -> ChatClient | FakeClient | ClaudeCliClient:
+    """Return the configured model client.
+
+    Backend is selected by ``AI_BACKEND``:
+
+      - ``http`` (default): ``ChatClient`` over the OpenAI-compatible HTTP API,
+        requires ``AI_API_KEY`` (and usually ``AI_BASE_URL``).
+      - ``claude-cli``: ``ClaudeCliClient`` driving the locally-installed,
+        already-authenticated Claude Code CLI non-interactively. No project-level
+        key required - it inherits the operator's existing provider config.
+
+    Kept as a single seam so callers never construct the client directly and the
+    "no backend configured" failure is uniform and explicit.
+    """
+    backend = (_env("AI_BACKEND") or "http").lower()
+    if backend == "claude-cli":
+        return ClaudeCliClient.from_env()
+    if backend in ("http", "openai", "openai-compatible"):
+        return ChatClient.from_env()
+    raise RuntimeError(
+        f"Unknown AI_BACKEND={backend!r}. Use 'http' or 'claude-cli'."
+    )

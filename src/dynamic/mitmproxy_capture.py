@@ -1695,6 +1695,15 @@ def run_capture_stage(
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    # SESSION11L4: the stage's setup - CA prep, device proxy/CA install, confdir
+    # staging - took 14.4 s before the proxy even started on the 152 MB spotify
+    # run, and it was silent. Traced so the pre-proxy wait is attributable.
+    from trace import enabled as _trace_on
+    from trace import trace as _trace_setup
+    _tracing = _trace_on()
+    _setup_started = time.monotonic() if _tracing else 0.0
+    if _tracing:
+        _trace_setup("capture", "setup", "start")
     confdir = out_dir / "mitm-conf"
     frida_script_loaded = False  # True when the Frida-spawn arm runs (ANY script)
     # `bypass_applied` is refined below from what the script itself reports; bound
@@ -1794,6 +1803,8 @@ def run_capture_stage(
         _tracing = _trace_on()
         _started = time.monotonic() if _tracing else 0.0
         if _tracing:
+            _trace("capture", "setup", "ok",
+                   ms=round((time.monotonic() - _setup_started) * 1000))
             _trace("capture", "proxy.start", "start",
                    mode="windows" if wsl2 else "native", port=proxy_port)
         if wsl2:
@@ -1939,8 +1950,17 @@ def run_capture_stage(
         # The device-side question is the answerable one: which uid held a socket
         # aimed at the proxy's port. Sampled repeatedly because a pinned
         # handshake's socket can be gone in a moment.
+        # SESSION11L4: the capture window is a designed sleep (CAPTURE_WINDOW_SECONDS,
+        # ~27 s on the 152 MB spotify run) that sampled the device's socket table -
+        # and it was silent, so the tail of the capture stage looked like a hang
+        # between the last UI marker and the stage's own line. Traced start/end with
+        # the window length and how many client sockets were attributed.
+        from trace import trace as _trace
+        _trace("capture", "window", "start", window_s=capture_window)
         proxy_clients = proxy_attribution.sample_proxy_clients_during(
             serial, proxy_port, capture_window)
+        _trace("capture", "window", "end",
+               clients=len(proxy_clients or []))
         # The end-of-window liveness sample is taken while the window is still open.
         # The attribution below needs it: a False ("the app did not reach the proxy")
         # is only licensed if the app was there to reach it.

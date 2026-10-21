@@ -747,12 +747,19 @@ def run_dynamic_stage(
         ui_liveness = None
         try:
             from dynamic.ui_liveness import check_ui_liveness
-            ui_liveness = check_ui_liveness(device_serial, package_name)
             from trace import trace as _trace
+            # SESSION11L4: the probe itself took 24.7 s on the 152 MB spotify run
+            # (uiautomator dump over a heavy view tree) and only its OUTCOME was
+            # marked - the gap looked like a hang between the checkpoint and the
+            # liveness line. Start marker + duration make the probe attributable.
+            _trace("dynamic", "ui_liveness", "start")
+            _ui_started = time.monotonic()
+            ui_liveness = check_ui_liveness(device_serial, package_name)
             _trace("dynamic", "ui_liveness", "ok",
                    screen=(ui_liveness or {}).get("screen_state"),
                    resumed=(ui_liveness or {}).get("activity_resumed"),
-                   changed=(ui_liveness or {}).get("screen_changed"))
+                   changed=(ui_liveness or {}).get("screen_changed"),
+                   ms=round((time.monotonic() - _ui_started) * 1000))
         except Exception:
             ui_liveness = None
         outcome["result"] = _bypass_success_result(
@@ -856,11 +863,17 @@ def run_dynamic_stage(
             from trace import trace as _trace
             try:
                 from dynamic.ui_liveness import check_ui_liveness
+                # SESSION11L4: start marker + duration - the probe can take ~25 s
+                # on a heavy app (uiautomator dump), and only its outcome was
+                # marked, so the wait looked like a stall.
+                _trace("dynamic", "ui_liveness", "start")
+                _ui_started = time.monotonic()
                 ui_liveness = check_ui_liveness(device_serial, package_name)
                 _trace("dynamic", "ui_liveness", "ok",
                        screen=(ui_liveness or {}).get("screen_state"),
                        resumed=(ui_liveness or {}).get("activity_resumed"),
-                       changed=(ui_liveness or {}).get("screen_changed"))
+                       changed=(ui_liveness or {}).get("screen_changed"),
+                       ms=round((time.monotonic() - _ui_started) * 1000))
             except Exception as _ui_err:
                 ui_liveness = None
                 _trace("dynamic", "ui_liveness", "error", error=repr(_ui_err)[:120])

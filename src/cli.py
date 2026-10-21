@@ -418,9 +418,16 @@ def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
     # that degrades native coverage (see _apply_jni_binding_coverage). Only runs
     # when the decompiled sources are available; otherwise the binding map stays
     # empty and coverage is untouched (the pre-existing behavior).
+    # SESSION11L4: two more full passes over the Java corpus (declared-native
+    # extraction, then the external-load scan) ran after match_native with no
+    # marker - 20.2 s between `native.match ok` and `stage.native_scan success` on
+    # the 152 MB spotify run. Traced together as the stage's java passes.
+    _jp_started = time.monotonic() if (_tracing and java_files) else 0.0
     if java_files:
         declared = extract_declared_natives(java_files)
         result.jni_bindings = resolve_jni_bindings(declared, libraries)
+    else:
+        declared = []
     # Boundary-4: record which explicit System.load/loadLibrary targets are NOT
     # covered by an extracted+analyzed .so (loaded from an absolute path, or
     # loadLibrary("foo") with no libfoo.so bundled). Each is a loaded-but-
@@ -429,6 +436,10 @@ def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
     # assets/*.so are both extracted+analyzed, so an assets-loaded lib is
     # accounted for - only genuinely missing/absolute-path loads surface here.
     _loads = find_external_native_loads(java_files) if java_files else []
+    if _tracing and java_files:
+        _trace("static", "native.java_passes", "ok", files=len(java_files),
+               declared=len(declared), loads=len(_loads),
+               ms=round((time.monotonic() - _jp_started) * 1000))
     # The failed members' basenames join the shipped set: they ARE shipped (the
     # APK's member list says so), and leaving them out would report the app's own
     # loadLibrary for one as a load from outside the APK instead of as the
@@ -2416,15 +2427,28 @@ def run(
     # dynload/webview scans below, leaving java `fully_analyzed`: a confident
     # negative over code the metric already counted as read (ADR-0006). Purely
     # additive - it can only degrade java to partial, never sharpen a negative.
+    # SESSION11L4: three full passes over the decompiled Java corpus run here,
+    # between the manifest_parse and native_scan stage lines - trace analysis of
+    # the 152 MB spotify run showed 87.4 s of silence across them, the largest
+    # unattributed gap in the whole run. Each pass is traced with the corpus size
+    # and duration so a slow one is attributable; zero cost when tracing is off.
+    from trace import enabled as _trace_on
+    from trace import trace as _trace
+    _tracing = _trace_on()
+    _pass_started = time.monotonic() if _tracing else 0.0
     native_java_files = (
         _full_java_corpus([jadx_output, cfr_output]) if jadx_output else []
     )
+    if _tracing:
+        _trace("static", "java.corpus", "ok", files=len(native_java_files),
+               ms=round((time.monotonic() - _pass_started) * 1000))
     # Coverage-limited: dynamic code loading (DexClassLoader/PathClassLoader/
     # Class.forName/DexFile/loadDex) releases and loads a payload DEX at runtime -
     # code we cannot see statically. Detect the loading call sites over the same
     # corpus; when present we degrade the java surface to partial so a java
     # NEITHER is never a confident negative over the dynamically-hidden payload
     # (ADR-0006). Mirrors the boundary-4 unaccounted-loads handling, java surface.
+    _pass_started = time.monotonic() if _tracing else 0.0
     dynamic_loads = (
         find_dynamic_loading(
             native_java_files,
@@ -2434,6 +2458,10 @@ def run(
         )
         if native_java_files else []
     )
+    if _tracing:
+        _trace("static", "java.dynamic_loads", "ok", files=len(native_java_files),
+               sites=len(dynamic_loads),
+               ms=round((time.monotonic() - _pass_started) * 1000))
     # Coverage-limited: WebView JS bridge (gap A2). A WebView that loads JS via
     # addJavascriptInterface / evaluateJavascript / loadUrl("javascript:") /
     # loadDataWithBaseURL may run root/SSL checks in JS. Local HTML/JS containers
@@ -2441,6 +2469,7 @@ def run(
     # are labelled below without degrading coverage; only a *remote* http(s) JS
     # source is JS we cannot read statically and forces the java surface to
     # partial (handled in the apply_dynamic_loading_java fold below, ADR-0006).
+    _pass_started = time.monotonic() if _tracing else 0.0
     webview_sites, webview_has_remote_js = (
         find_webview_js(
             native_java_files,
@@ -2453,6 +2482,10 @@ def run(
         )
         if native_java_files else ([], False)
     )
+    if _tracing:
+        _trace("static", "java.webview_js", "ok", files=len(native_java_files),
+               sites=len(webview_sites), remote_js=webview_has_remote_js,
+               ms=round((time.monotonic() - _pass_started) * 1000))
     native_stage, native_evidence = _wrap_stage(
         "native_scan", _run_native_scan, apk, ANALYSIS_ROOT, apk_hash, native_java_files
     )

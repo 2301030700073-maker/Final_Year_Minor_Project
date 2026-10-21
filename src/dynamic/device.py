@@ -894,14 +894,35 @@ def verify_installed(serial: str, package_name: str) -> bool:
     # hang still surfaces on the second attempt rather than being retried
     # forever. A non-timeout failure (adb gone, non-zero exit) is NOT retried -
     # that is a real failure, not a slow one.
+    # SESSION11L4: the pm query itself is traced - on a 157 MB app it is the last
+    # unattributed stretch between `adb.install ok` and the dynamic stage line
+    # (8.0 s measured on propertyguru, and the same call that timed out twice on
+    # spotify at the old 20 s). The attempt is carried so a retry is visible, not
+    # silently absorbed; zero cost when tracing is off.
+    from trace import enabled as _trace_on
+    from trace import trace as _trace
+    _tracing = _trace_on()
     for attempt in (1, 2):
+        _started = time.monotonic() if _tracing else 0.0
+        if _tracing:
+            _trace("dynamic", "adb.verify", "start", pkg=package_name,
+                   attempt=attempt, timeout_s=_PM_LIST_TIMEOUT_SECONDS)
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, check=True,
                 timeout=_PM_LIST_TIMEOUT_SECONDS,
             )
+            if _tracing:
+                _trace("dynamic", "adb.verify", "ok", pkg=package_name,
+                       attempt=attempt,
+                       ms=round((time.monotonic() - _started) * 1000))
             break
         except subprocess.TimeoutExpired:
+            if _tracing:
+                _trace("dynamic", "adb.verify", "failed", why="timeout",
+                       pkg=package_name, attempt=attempt,
+                       timeout_s=_PM_LIST_TIMEOUT_SECONDS,
+                       ms=round((time.monotonic() - _started) * 1000))
             if attempt == 2:
                 raise
             time.sleep(2.0)

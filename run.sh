@@ -186,17 +186,20 @@ if $ALL_OK && ! $SKIP_PIPELINE && ! $CHECK_ONLY; then
     echo ""
     echo "─── 8. Run pipeline ───"
     uv sync 2>/dev/null
-    uv run python -u scripts/collect_verification_bundle.py \
-        --apk "$APK_FILE" \
-        --justification ACADEMIC_TRAINING_TARGET \
-        --target "$TARGET" 2>&1
     # SESSION11L4: the collector exits non-zero when a collected stage failed
     # (pipeline / unit tests / calibration). It used to always exit 0, so this
     # script's final "All checks passed" was unconditional: measured 2026-10-20
     # on a spotify run whose dynamic stage FAILED (adb timeout) - the bundle said
     # "Exit code: 1 (FAILED)" while this script reported everything passed. The
     # verdict must come from the checks, not from having reached the end.
-    if [ $? -ne 0 ]; then
+    # Written as an `if !` condition ON PURPOSE: this script runs under
+    # `set -euo pipefail`, and a bare failing command would abort the script
+    # before the final status could be printed - the operator would see a silent
+    # death instead of the honest "Some checks failed" line.
+    if ! uv run python -u scripts/collect_verification_bundle.py \
+        --apk "$APK_FILE" \
+        --justification ACADEMIC_TRAINING_TARGET \
+        --target "$TARGET" 2>&1; then
         ALL_OK=false
     fi
 

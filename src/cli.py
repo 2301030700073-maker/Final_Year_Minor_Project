@@ -390,8 +390,27 @@ def _run_native_scan(apk_path, analysis_root, apk_hash, java_files=None):
             # Ghidra-last-resort ones do not, and the report has to identify the
             # library without the reader cross-referencing the scan.
             errors.append(f"{lib.name}: {lib.scan_error}")
+    # SESSION11L4: the post-analysis tail of the native stage - match_native over
+    # every lib x signature, plus the ABI degradation - was the largest remaining
+    # blind gap inside a stage that otherwise reports its duration: trace analysis
+    # of the 152 MB spotify run showed 14.6 s between the last per-lib marker and
+    # `stage.native_scan success`, and 3.8 s on propertyguru, with nothing naming
+    # what was happening. Traced so a slow match is attributable to the matching
+    # itself; zero cost when tracing is off.
+    from trace import enabled as _trace_on
+    from trace import trace as _trace
+    _tracing = _trace_on()
+    _match_started = time.monotonic() if _tracing else 0.0
+    if _tracing:
+        _trace("static", "native.match", "start", libs=len(libraries),
+               signatures=len(signatures))
     result = match_native(libraries, signatures)
     result.abi_coverage = compute_degradation(libraries)
+    if _tracing:
+        _trace("static", "native.match", "ok", libs=len(libraries),
+               root_evidence=len(result.root_evidence),
+               ssl_evidence=len(result.ssl_evidence),
+               ms=round((time.monotonic() - _match_started) * 1000))
     result.errors = errors
     # Boundary-3 static half: reconcile every Java-declared native method against
     # these libraries. A declared method with no Java_* export and no JNI_OnLoad

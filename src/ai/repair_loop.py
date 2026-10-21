@@ -118,18 +118,25 @@ def repair_loop(
     action: str = "BOTH",
     max_iter: int = 5,
     save_dir: str | None = None,
+    echo: Callable[[str], None] = lambda s: None,
 ) -> RepairResult:
     """Run the generate -> run -> revise loop, bounded by ``max_iter``.
 
     ``run_once(source, applied_hooks) -> RunFeedback`` executes one candidate on
     the (real or fake) device. The loop stops at the first ``ok`` feedback or after
     ``max_iter`` attempts, whichever comes first. The last script is always saved.
+
+    ``echo`` receives progress messages (per iteration, model calls, device runs,
+    and the resulting feedback) so a caller can render a *visible* process instead
+    of a silent wait through the slow model calls. It defaults to a no-op so the
+    library stays quiet under tests; the CLI passes a real printer (``typer.echo``).
     """
-    current = generate_bypass(bundle, client, action=action)
+    echo(f"repair loop: up to {max_iter} iterations, action={action}")
+    current: GeneratedBypass | None = None
     result = RepairResult(
         target=bundle.target,
-        script=current.script,
-        applied_hooks=current.applied_hooks,
+        script="",
+        applied_hooks=[],
         iterations=0,
         converged=False,
         saved_path=None,
@@ -137,20 +144,44 @@ def repair_loop(
 
     for i in range(max_iter):
         result.iterations = i + 1
+        if current is None:
+            echo(f"[iter {i + 1}/{max_iter}] generating bypass script via model ...")
+            current = generate_bypass(bundle, client, action=action)
+            result.script = current.script
+            result.applied_hooks = current.applied_hooks
+            echo(
+                f"  model returned {len(current.script)} chars; "
+                f"hooks={current.applied_hooks}; confidence={current.confidence}"
+            )
+        echo(f"[iter {i + 1}/{max_iter}] running script on device ...")
         feedback = run_once(current.script, current.applied_hooks)
         result.history.append(
             f"iter {i + 1}: ok={feedback.ok} hooks={current.applied_hooks} "
+            f"notes={feedback.notes}"
+        )
+        echo(
+            f"  feedback: ok={feedback.ok}; messages={len(feedback.messages)}; "
             f"notes={feedback.notes}"
         )
         if feedback.ok:
             result.converged = True
             result.script = current.script
             result.applied_hooks = current.applied_hooks
+            echo(f"[iter {i + 1}/{max_iter}] converged: script ran cleanly on device.")
             break
         # Revise using the runtime feedback.
+        echo(f"[iter {i + 1}/{max_iter}] revision needed; sending runtime feedback to model ...")
         current = _revise(client, current, feedback, bundle)
         result.script = current.script
         result.applied_hooks = current.applied_hooks
+        echo(
+            f"  revised: {len(current.script)} chars; "
+            f"hooks={current.applied_hooks}; confidence={current.confidence}"
+        )
 
     result.saved_path = _save_script(bundle.target, result.script, save_dir)
+    echo(
+        f"repair loop done: iterations={result.iterations} "
+        f"converged={result.converged}; saved to {result.saved_path}"
+    )
     return result

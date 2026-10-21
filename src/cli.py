@@ -5121,6 +5121,8 @@ def ai_bypass_cmd(
 
     def _run_once(source: str, applied_hooks: list[str]) -> RunFeedback:
         collected: list[str] = []
+        typer.echo(
+            f"  [frida] attaching to {device or 'default device'} / {package} ...")
 
         def _on_message(message: dict, _data=None) -> None:
             mtype = message.get("type")
@@ -5128,10 +5130,13 @@ def ai_bypass_cmd(
                 payload = message.get("payload")
                 if isinstance(payload, dict):
                     collected.append(f"{payload.get('type')}: {payload}")
+                    typer.echo(f"    send: {payload.get('type')} {payload}")
                 else:
                     collected.append(f"send: {payload}")
+                    typer.echo(f"    send: {payload}")
             elif mtype == "error":
                 collected.append(f"error: {message.get('description')}")
+                typer.echo(f"    error: {message.get('description')}")
 
         result = frida_runner.run_dynamic_stage(
             device, package, action_enum, target="ai_generated",
@@ -5139,6 +5144,9 @@ def ai_bypass_cmd(
             synthesized={"source": source, "applied_hooks": applied_hooks},
             auth_context=None,
         )
+        typer.echo(
+            f"  [frida] stage status={result.status}; "
+            f"collected {len(collected)} message(s)")
         ok = (result.status != "failed") and not any(
             "error" in m.lower() for m in collected)
         return RunFeedback(
@@ -5147,7 +5155,8 @@ def ai_bypass_cmd(
 
     typer.echo(f"Running AI repair loop (max {max_iter} iterations) on {device or 'default device'} ...")
     res = repair_loop(
-        bundle, client, run_once=_run_once, action=action, max_iter=max_iter)
+        bundle, client, run_once=_run_once, action=action, max_iter=max_iter,
+        echo=typer.echo)
 
     typer.echo("=" * 60)
     typer.echo(f"target           : {res.target}")

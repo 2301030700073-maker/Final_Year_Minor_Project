@@ -106,3 +106,24 @@ def test_universal_neutralizes_native_boringssl_for_flutter_and_rn():
     src = _src("universal")
     assert "libflutter.so" in src, "universal: no native hook for Flutter's BoringSSL"
     assert "libreactnative.so" in src, "universal: no native hook for React Native's BoringSSL"
+
+
+
+def test_universal_neutralizes_webview_subclass_onreceivedsslerror():
+    # A WebViewClient SUBCLASS that overrides onReceivedSslError (to reject the
+    # capture CA - a common anti-MITM pattern) bypasses a base-class-only hook,
+    # because the subclass's own method runs, not the base's. The recipe must
+    # enumerate loaded classes and neutralize onReceivedSslError on any subclass.
+    src = _src("universal")
+    assert "webview.onReceivedSslError:" in src, (
+        "universal: no WebView-subclass onReceivedSslError neutralization"
+    )
+
+
+def test_synthesizer_universal_ssl_includes_webview_hook():
+    # The synthesized universal SSL arm previously had NO WebView hook at all, so
+    # a WebView app's cert rejection was never neutralized. It must now hook the
+    # base client AND enumerate subclasses.
+    from dynamic.synthesizer import UNIVERSAL_SSL
+    assert "onReceivedSslError" in UNIVERSAL_SSL
+    assert "enumerateLoadedClasses" in UNIVERSAL_SSL

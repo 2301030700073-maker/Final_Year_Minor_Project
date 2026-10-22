@@ -48,6 +48,32 @@ function addUniversalSSLPinningBypass() {
                 handler.proceed();
             };
         });
+        // WebViewClient SUBCLASSES that OVERRIDE onReceivedSslError (to reject the
+        // capture CA - a common anti-MITM pattern) bypass the base-class hook above:
+        // the subclass's own method runs, not the base's. Enumerate loaded classes
+        // and neutralize onReceivedSslError on any that declare it, bounded so the
+        // scan stays cheap. Each install is reported like every other hook.
+        (function () {
+            var _wv = 0;
+            Java.enumerateLoadedClasses({
+                onMatch: function (className) {
+                    if (_wv >= 60) return;
+                    try {
+                        var k = Java.use(className);
+                        if (k.onReceivedSslError) {
+                            k.onReceivedSslError.implementation = function (view, handler, error) {
+                                console.log('[+] WebView onReceivedSslError bypassed: ' + className);
+                                handler.proceed();
+                            };
+                            _wv++;
+                            _ssl_hooks_loaded++;
+                            send({ type: 'hook_loaded', name: 'webview.onReceivedSslError:' + className, ok: true });
+                        }
+                    } catch (e) { send({ type: 'hook_skipped', name: 'webview:' + className, reason: String(e) }); }
+                },
+                onComplete: function () {}
+            });
+        })();
         // OkHttp3
         _ssl_try_hook('okhttp3.internal.tls.OkHostnameVerifier.verify', function() {
             var OkHostnameVerifier = Java.use('okhttp3.internal.tls.OkHostnameVerifier');

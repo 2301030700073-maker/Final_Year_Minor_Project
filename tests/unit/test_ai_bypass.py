@@ -16,7 +16,7 @@ import pytest
 from ai import build_evidence_bundle, repair_loop, get_client, FakeClient
 from ai.bypass_gen import GeneratedBypass, generate_bypass
 from ai.client import _extract_json
-from ai.repair_loop import RunFeedback
+from ai.repair_loop import RunFeedback, classify_dynamic_run_once
 from ai.select_evidence import EvidenceBundle, SelectedRegion
 
 
@@ -228,3 +228,108 @@ def _make_decompile_tree_scoped() -> Path:
     root = Path(tempfile.mkdtemp())
     _make_decompile_tree(root)
     return root
+
+
+# --- defect #1: ai-bypass run_once must read REAL evidence, not a dead callback ---
+class _FakeStageResult:
+    """Minimal duck-typed stand-in for frida_runner.StageResult."""
+
+    def __init__(self, status: str, frida_messages=None):
+        self.status = status
+        self.evidence = {"frida_messages": list(frida_messages or [])}
+
+
+def test_classify_skipped_is_not_ok():
+    res = _FakeStageResult("skipped", [])
+    fb = classify_dynamic_run_once(res)
+    assert fb.ok is False
+    assert "skipped" in fb.notes
+
+
+def test_classify_failed_is_not_ok():
+    res = _FakeStageResult("failed", [])
+    fb = classify_dynamic_run_once(res)
+    assert fb.ok is False
+    assert "failed" in fb.notes
+
+
+def test_classify_success_with_hook_loaded_and_no_errors_is_ok():
+    res = _FakeStageResult("success", [
+        {"type": "send",
+         "payload": {"type": "hook_loaded",
+                     "name": "X509TrustManager.checkServerTrusted"}},
+    ])
+    fb = classify_dynamic_run_once(res)
+    assert fb.ok is True
+
+
+def test_classify_success_without_hook_loaded_is_not_ok():
+    # HONESTY: a process can survive the settle window while the generated
+    # script's hooks never loaded. The old code collapsed this to ok=True and the
+    # repair loop converged on a script that never actually ran cleanly.
+    res = _FakeStageResult("success", [
+        {"type": "send", "payload": {"type": "probeHit", "root": "answered-false"}},
+    ])
+    fb = classify_dynamic_run_once(res)
+    assert fb.ok is False
+    assert fb.notes.endswith("hook_loaded=0; hook_skipped=0; hook_errors=0")
+
+
+def test_classify_success_with_hook_error_is_not_ok():
+    res = _FakeStageResult("success", [
+        {"type": "send", "payload": {"type": "hook_loaded", "name": "x"}},
+        {"type": "error",
+         "description": "TypeError: cannot read property of undefined"},
+    ])
+    fb = classify_dynamic_run_once(res)
+    assert fb.ok is False
+    assert "hook_errors=1" in fb.notes
+
+
+def test_classify_success_with_hook_skipped_does_not_fail():
+    # A hook whose target class/method is ABSENT on the device (a different
+    # HTTP stack, or an R8-obfuscated app that stripped/renamed it) is a
+    # graceful skip, NOT an error. Before the hook_skipped distinction this
+    # was a hook_error and failed the whole loop - jerboa / aves / file-manager
+    # could not converge even though their other hooks loaded cleanly.
+    res = _FakeStageResult("success", [
+        {"type": "send", "payload": {"type": "hook_loaded",
+                                    "name": "TrustManagerImpl.checkTrusted"}},
+        {"type": "send", "payload": {"type": "hook_skipped",
+                                    "name": "okhttp3.CertificatePinner",
+                                    "reason": "not present"}},
+    ])
+    fb = classify_dynamic_run_once(res)
+    assert fb.ok is True
+    assert "hook_skipped=1" in fb.notes
+
+
+def test_classify_success_with_only_hook_skipped_is_not_ok():
+    # Nothing actually loaded -> still not ok, even though nothing errored.
+    res = _FakeStageResult("success", [
+        {"type": "send", "payload": {"type": "hook_skipped",
+                                    "name": "okhttp3.CertificatePinner",
+                                    "reason": "not present"}},
+    ])
+    fb = classify_dynamic_run_once(res)
+    assert fb.ok is False
+    assert "hook_skipped=1" in fb.notes
+
+
+def test_classify_success_with_script_error_payload_is_not_ok():
+    res = _FakeStageResult("success", [
+        {"type": "send", "payload": {"type": "script_error", "error": "boom"}},
+    ])
+    fb = classify_dynamic_run_once(res)
+    assert fb.ok is False
+
+
+def test_cli_run_once_calls_classify_directly_not_via_module_alias():
+    # Regression guard for the name-shadowing bug: ai/__init__.py re-exports the
+    # repair_loop *function* (not the submodule), so cli.py's original
+    # `return repair_loop.classify_dynamic_run_once(result)` raised
+    # AttributeError at the real device step and killed the AI demo. _run_once
+    # must call the imported `classify_dynamic_run_once` directly.
+    cli_src = (Path(__file__).resolve().parents[2] / "src" / "cli.py").read_text()
+    assert "repair_loop.classify_dynamic_run_once" not in cli_src
+    assert "classify_dynamic_run_once(result)" in cli_src

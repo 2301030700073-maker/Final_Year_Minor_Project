@@ -27,17 +27,17 @@ from common import Action, CategoryVerdict, ClassificationResult, StageResult, S
 from static.manifest import ManifestInfo
 
 
-def test_effective_dynamic_action_forces_only_neither():
-    # --force-dynamic (ADR-0005 operator override) deploys the universal bypass on a
-    # NEITHER target by driving synthesis/deployment with Action.BOTH - and must be a
-    # strict no-op for every already-detected action (dynamic already runs there) and
-    # whenever the flag is off. If it ever forced a detected action too it would be a
-    # meaningless relabel; if it forced with the flag off, --force-dynamic would not
-    # be opt-in.
+def test_effective_dynamic_action_forces_both_for_any_action():
+    # --force-dynamic (ADR-0005 operator override) deploys the universal root+SSL
+    # bypass by driving synthesis/deployment with Action.BOTH for ANY static
+    # verdict - not only NEITHER. A coverage-limited static verdict can MISS a
+    # whole category (RS_Vapour: static ROOT_ONLY, SSL score 0.00 coverage-limited,
+    # yet it pins), so driving only the detected arm would leave the undetected
+    # category un-attempted and its pinning rejects the capture CA. With the flag
+    # off it is always identity (--force-dynamic is opt-in).
     assert _effective_dynamic_action(Action.NEITHER, True) == Action.BOTH
-    assert _effective_dynamic_action(Action.NEITHER, False) == Action.NEITHER
-    assert _effective_dynamic_action(Action.ROOT_ONLY, True) == Action.ROOT_ONLY
-    assert _effective_dynamic_action(Action.SSL_ONLY, True) == Action.SSL_ONLY
+    assert _effective_dynamic_action(Action.ROOT_ONLY, True) == Action.BOTH
+    assert _effective_dynamic_action(Action.SSL_ONLY, True) == Action.BOTH
     assert _effective_dynamic_action(Action.BOTH, True) == Action.BOTH
     for a in (Action.NEITHER, Action.ROOT_ONLY, Action.SSL_ONLY, Action.BOTH):
         assert _effective_dynamic_action(a, False) == a  # flag off is always identity

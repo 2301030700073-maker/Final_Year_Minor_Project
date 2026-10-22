@@ -59,6 +59,70 @@ class RepairResult:
     history: list[str] = field(default_factory=list)
 
 
+def classify_dynamic_run_once(result) -> RunFeedback:
+    """HONESTY FIX (defect #1): interpret one ai-bypass attempt from the dynamic
+    stage's REAL evidence, not from an unwired message callback.
+
+    The previous `cli` runner built its `collected` list from an `_on_message`
+    callback that was never passed to `run_dynamic_stage`, so `collected` was
+    always empty and `ok` collapsed to `status != 'failed'`: a NEITHER/skipped
+    stage, or a mere-survival 'success' (the process outlived the settle window
+    but the script's hooks never loaded or threw), both read as ok=True and the
+    repair loop would converge on a script that never actually ran cleanly.
+
+    We now read `result.evidence['frida_messages']` (the stage's actual Frida
+    stream) and require a genuine, error-free observation:
+      * status == 'skipped' -> not run (ok=False)
+      * status == 'failed'  -> ok=False
+      * otherwise ok = (>=1 hook_loaded) AND (0 real errors)
+      * hook_skipped (target class/method absent on the device) is NOT an
+        error - a hook that is not applicable to this app is not a failure.
+
+    `hook_loaded` / `hook_skipped` / `hook_error` / `script_error` are the
+    payload types the
+    generator is instructed to `send` (see bypass_gen.py); a raw
+    `{type:'error'}` envelope is a crashed hook and also fails the run."""
+    evidence = getattr(result, "evidence", None) or {}
+    status = getattr(result, "status", None)
+    msgs = evidence.get("frida_messages") or []
+
+    def _payload_type(m):
+        if isinstance(m, dict) and m.get("type") == "send":
+            p = m.get("payload")
+            if isinstance(p, dict):
+                return p.get("type")
+        return None
+
+    hook_loaded = [m for m in msgs if _payload_type(m) == "hook_loaded"]
+    # A hook whose target class/method is ABSENT on the device is a graceful
+    # skip (a different HTTP stack, or an R8-obfuscated app that stripped or
+    # renamed the method) - NOT a failure. Counted separately so an
+    # inapplicable hook never fails an otherwise-clean run. Before this, such a
+    # hook was reported as hook_error and failed the whole loop, which is why
+    # jerboa / aves / file-manager could not converge even though their other
+    # hooks loaded cleanly.
+    hook_skipped = [m for m in msgs if _payload_type(m) == "hook_skipped"]
+    hook_errors = [
+        m for m in msgs
+        if (isinstance(m, dict) and m.get("type") == "error")
+        or _payload_type(m) in ("hook_error", "script_error")
+    ]
+
+    if status == "skipped":
+        ok = False
+        notes = "stage_status=skipped (dynamic stage did not run)"
+    elif status == "failed":
+        ok = False
+        notes = "stage_status=failed"
+    else:
+        ok = (len(hook_loaded) >= 1) and (len(hook_errors) == 0)
+        notes = (
+            f"stage_status={status}; hook_loaded={len(hook_loaded)}; "
+            f"hook_skipped={len(hook_skipped)}; hook_errors={len(hook_errors)}"
+        )
+    return RunFeedback(ok=ok, messages=[str(m) for m in msgs], notes=notes)
+
+
 RunOnce = Callable[[str, list[str]], RunFeedback]
 
 

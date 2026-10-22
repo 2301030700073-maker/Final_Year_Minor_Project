@@ -165,7 +165,7 @@ def test_ui_action_loop_runs_target_actions_in_order(monkeypatch):
     )
     monkeypatch.setattr(
         "dynamic.frida_runner._wait_for_checkpoint",
-        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False, since=0: None,
     )
 
     result = frida_runner.run_dynamic_stage(
@@ -222,7 +222,7 @@ def test_both_androgoat_runs_two_spawns_one_per_dimension(monkeypatch):
     )
     monkeypatch.setattr(
         "dynamic.frida_runner._wait_for_checkpoint",
-        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False, since=0: None,
     )
 
     result = frida_runner.run_dynamic_stage(
@@ -289,7 +289,7 @@ def test_both_keeps_the_replacement_the_first_attach_performed(monkeypatch):
                         lambda serial, action: None)
     monkeypatch.setattr(
         "dynamic.frida_runner._wait_for_checkpoint",
-        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False, since=0: None,
     )
 
     result = frida_runner.run_dynamic_stage(
@@ -345,7 +345,7 @@ def _run_capture_scripts_applied(monkeypatch, action, target, synthesized):
     monkeypatch.setattr("dynamic.frida_runner.time.sleep", lambda s: None)
     monkeypatch.setattr(
         "dynamic.frida_runner._wait_for_checkpoint",
-        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False, since=0: None,
     )
     result = frida_runner.run_dynamic_stage(
         "emulator-5554", "com.example.app", action, target=target,
@@ -431,7 +431,7 @@ def _run_with_captured_require_evidence(monkeypatch, action, target, synthesized
     monkeypatch.setattr("dynamic.frida_runner._run_ui_action", lambda serial, a: None)
     monkeypatch.setattr("dynamic.frida_runner.time.sleep", lambda s: None)
 
-    def fake_wait(messages, seconds, require_evidence=False, require_both_dimensions=False):
+    def fake_wait(messages, seconds, require_evidence=False, require_both_dimensions=False, since=0):
         captured["require_evidence"] = require_evidence
 
     monkeypatch.setattr(
@@ -472,7 +472,7 @@ def _run_with_captured_settle(monkeypatch, action, target, synthesized, settle_s
     monkeypatch.setattr("dynamic.frida_runner._run_ui_action", lambda serial, a: None)
     monkeypatch.setattr("dynamic.frida_runner.time.sleep", lambda s: None)
 
-    def fake_wait(messages, seconds, require_evidence=False, require_both_dimensions=False):
+    def fake_wait(messages, seconds, require_evidence=False, require_both_dimensions=False, since=0):
         captured["seconds"] = seconds
         captured["require_both_dimensions"] = require_both_dimensions
 
@@ -776,15 +776,17 @@ def test_ui_actions_for_is_action_aware():
 
 
 def test_bypass_success_result_records_liveness_true_for_both_spawn_paths():
-    # FR-4.6 (pure): the SUCCESS builder both spawn paths share must always record
-    # app_still_running=True - reaching a success result means self-termination was
-    # checked and did NOT fire, so the process demonstrably survived the settle
-    # window (the mirror of _self_terminated_result, which records
-    # app_self_terminated=True). Before this shared builder the two-spawn
-    # (AndroGoat) path omitted the key, so its report read "not captured" for a
-    # survival it had actually observed, while single-spawn targets reported it.
+    # FR-4.6 (pure): the SUCCESS builder both spawn paths share records whatever
+    # liveness it is handed. When the caller positively confirmed the process was
+    # alive (process_alive=True), the evidence must say True - reaching a success
+    # result means self-termination was checked and did NOT fire, so the process
+    # demonstrably survived the settle window (the mirror of
+    # _self_terminated_result, which records app_self_terminated=True). Before
+    # this shared builder the two-spawn (AndroGoat) path omitted the key, so its
+    # report read "not captured" for a survival it had actually observed.
     two_spawn = frida_runner._bypass_success_result(
-        4321, [{"payload": {"hook": "x"}}], ["synthesized"], "AndroGoat", 0.0)
+        4321, [{"payload": {"hook": "x"}}], ["synthesized"], "AndroGoat", 0.0,
+        process_alive=True)
     assert two_spawn.status == "success"
     assert two_spawn.evidence["app_still_running"] is True
     assert two_spawn.evidence["pid"] == 4321
@@ -794,9 +796,28 @@ def test_bypass_success_result_records_liveness_true_for_both_spawn_paths():
     # the single-spawn path passes its real-time UI evidence straight through
     single = frida_runner._bypass_success_result(
         9, [], ["synthesized"], "UnCrackable1", 0.0,
+        process_alive=True,
         ui_liveness={"activity_resumed": True, "anr_detected": False})
     assert single.evidence["app_still_running"] is True
     assert single.evidence["ui_liveness"] == {"activity_resumed": True, "anr_detected": False}
+
+
+def test_bypass_success_result_none_liveness_is_not_claimed_as_running():
+    # HONESTY FIX (defect #4): a transient frida/device enumerate error makes
+    # _process_is_alive return None, and classify_self_termination(None) is False,
+    # so a death/liveness-UNKNOWN app still reaches the success builder. We must
+    # NOT upgrade that to "survived the settle window". When the caller passes
+    # process_alive=None, the evidence must stay None so the report renders
+    # "not captured (liveness not recorded this run)" instead of a false pass.
+    res = frida_runner._bypass_success_result(
+        555, [], ["synthesized"], "UnCrackable1", 0.0, process_alive=None)
+    assert res.status == "success"
+    assert res.evidence["app_still_running"] is None
+    # default (no argument) must also be honest, never an implicit True
+    res_default = frida_runner._bypass_success_result(
+        556, [], ["synthesized"], "UnCrackable1", 0.0)
+    assert res_default.evidence["app_still_running"] is None
+
 
 
 # --- M5: a UI step's outcome is RECORDED, not discarded ----------------------
@@ -883,7 +904,7 @@ def test_stage_evidence_carries_one_record_per_ui_action(monkeypatch):
     monkeypatch.setattr("dynamic.frida_runner._run_ui_action", fake_ui)
     monkeypatch.setattr(
         "dynamic.frida_runner._wait_for_checkpoint",
-        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False, since=0: None,
     )
 
     result = frida_runner.run_dynamic_stage(
@@ -918,7 +939,7 @@ def test_stage_records_a_stubbed_ui_runner_as_unobserved(monkeypatch):
                         lambda serial, action: None)
     monkeypatch.setattr(
         "dynamic.frida_runner._wait_for_checkpoint",
-        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False, since=0: None,
     )
 
     result = frida_runner.run_dynamic_stage(
@@ -949,7 +970,7 @@ def test_ui_actions_key_is_present_even_with_no_steps(monkeypatch):
                         lambda session, src, on_message=None: None)
     monkeypatch.setattr(
         "dynamic.frida_runner._wait_for_checkpoint",
-        lambda messages, seconds, require_evidence=False, require_both_dimensions=False: None,
+        lambda messages, seconds, require_evidence=False, require_both_dimensions=False, since=0: None,
     )
 
     result = frida_runner.run_dynamic_stage(

@@ -1,7 +1,7 @@
 # Complete File Inventory
 
-Generated: 2026-10-21
-All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 327 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
+Generated: 2026-10-22
+All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 338 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
 
 ```
 .gitattributes
@@ -99,6 +99,7 @@ paper/paper.md
 pyproject.toml
 run.sh
 scripts/VENDORED.md
+scripts/ai_run_one.sh
 scripts/check_environment.py
 scripts/collect_verification_bundle.py
 scripts/emulator_proxy.py
@@ -111,8 +112,10 @@ scripts/reset_emulator_network.sh
 scripts/rs_certpinning_ab.py
 scripts/run_unexecuted_realworld_sweep.sh
 scripts/sample_run_memory.py
+scripts/sweep_one.sh
 scripts/universal-robust-advanced-root--ssl-pinning-bypass.js
 scripts/verify_all.py
+scripts/verify_one.sh
 src/ai/__init__.py
 src/ai/bypass_gen.py
 src/ai/client.py
@@ -200,6 +203,7 @@ tests/unit/test_calibration_outcomes.py
 tests/unit/test_calibration_report.py
 tests/unit/test_calibration_report_generator.py
 tests/unit/test_capture_artifact_security.py
+tests/unit/test_capture_attribution_honesty.py
 tests/unit/test_capture_not_attempted.py
 tests/unit/test_cause_text_parity.py
 tests/unit/test_claude_cli_client.py
@@ -229,11 +233,14 @@ tests/unit/test_decompile_provenance.py
 tests/unit/test_decompile_sidecar_schema.py
 tests/unit/test_deobfuscate.py
 tests/unit/test_device.py
+tests/unit/test_device_adb_retry.py
+tests/unit/test_dynamic_checkpoint_observed.py
 tests/unit/test_dynamic_skip_reason_status_gate.py
 tests/unit/test_dynload.py
 tests/unit/test_emulator_proxy_teardown.py
 tests/unit/test_emulator_up_startup.py
 tests/unit/test_environment_check.py
+tests/unit/test_failure_dynamic_note.py
 tests/unit/test_file_inventory.py
 tests/unit/test_flow_attribution.py
 tests/unit/test_frida_runner.py
@@ -242,6 +249,7 @@ tests/unit/test_ground_truth.py
 tests/unit/test_handshake_capture_note_coupling.py
 tests/unit/test_hermes.py
 tests/unit/test_hermes_bundle_walk.py
+tests/unit/test_honesty_audit_exit.py
 tests/unit/test_indicator_deobf_view.py
 tests/unit/test_indicators.py
 tests/unit/test_ingest_metadata.py
@@ -299,6 +307,7 @@ tests/unit/test_signatures.py
 tests/unit/test_signer_verdict.py
 tests/unit/test_signing_block.py
 tests/unit/test_smali_package_spelling.py
+tests/unit/test_ssl_bypass_honesty.py
 tests/unit/test_storage_db.py
 tests/unit/test_storage_results.py
 tests/unit/test_string_cache.py
@@ -312,8 +321,10 @@ tests/unit/test_tls_cause_attribution.py
 tests/unit/test_tls_failed_client_marker.py
 tests/unit/test_tool_versions_release.py
 tests/unit/test_trace.py
+tests/unit/test_two_spawn_checkpoint_scope.py
 tests/unit/test_ui_liveness.py
 tests/unit/test_ui_liveness_classify_distinct.py
+tests/unit/test_ui_stuck_verdict.py
 tests/unit/test_unaccounted_platform_libs.py
 tests/unit/test_uncompleted_run_surface.py
 tests/unit/test_uncrackable1_success_check.py

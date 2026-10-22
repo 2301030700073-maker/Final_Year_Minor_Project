@@ -786,7 +786,8 @@ def test_target_running_is_honest_when_app_dies_mid_window():
     assert tr(1234, 0) is False            # ran at launch, gone by capture
     assert tr(0, 0) is False               # never ran
     assert tr(None, 0) is False            # unmeasured launch, absent at capture
-    assert tr(1234, None) is True          # present at launch, capture unmeasured
+    # Finding #10: a launch-only sample does NOT prove capture-window liveness.
+    assert tr(1234, None) is None          # present at launch, capture unmeasured
     assert tr(0, None) is False
     assert tr(None, None) is None          # neither sample measured
 

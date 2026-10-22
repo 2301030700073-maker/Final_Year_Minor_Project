@@ -580,6 +580,9 @@ string in this APK; only its *ownership* is unverified.
 {% if self_termination_note -%}
 - ⚠ **App anti-instrumentation fired (FR-4.6):** `{{ self_termination_note | code }}`. This is a **positive finding** - the app has active anti-tampering that detected the Frida/root instrumentation and self-terminated - not merely an unverified bypass. A bypass could not be confirmed *because* the app's own defenses ended the process first; treat the inconclusive/​not-verified verdict above as a consequence of that defense, not evidence the app lacks the protection.
 {% endif -%}
+{% if ui_stuck_note -%}
+- ⚠ **App UI stuck (ANR/frozen) despite the bypass:** {{ ui_stuck_note | md }} A root/SSL bypass may still have been OBSERVED (the app's own check fired before/around the freeze), but the app is **not usable** - do not read this run as a clean "all OK". The verdict above states what was observed; this line states the app's operational state.
+{% endif -%}
 {% if install_recovery_note -%}
 - ⚠ **Device state changed by this run — a differently-signed copy of the package was uninstalled:** {{ install_recovery_note | md }} This removal was **not** something this run was asked to do, and it is not reversible from here. It does not change any verdict above or below: the target analysed *is* the build installed over that copy, signed with this run's key — but the previous build's on-device data is gone, and any device-side state it held is therefore not part of this run's picture.
 {% endif -%}
@@ -634,7 +637,7 @@ string in this APK; only its *ownership* is unverified.
 | Stage | Status | Duration (ms) | Error |
 |---|---|---|---|
 {% for s in stage_results -%}
-| {{ s.stage }} | {{ s.status }}{% if s.stage == "dynamic" and s.status == "success" and (verification is none or (verification.root_bypassed is none and verification.ssl_bypassed is none)) %} (machinery ran; bypass not confirmed){% endif %}{% if s.stage.startswith("success-check") and s.status == "success" and s.evidence and not s.evidence.get("root_bypassed") and not s.evidence.get("ssl_bypassed") %} (ran; nothing confirmed here{% if s.evidence.get("note") %}, see the note below{% endif %}){% endif %} | {{ s.duration_ms }} | {{ (s.error or "") | md }} |
+| {{ s.stage }} | {{ s.status }}{% if s.stage == "dynamic" and s.status == "success" and (verification is none or (verification.root_bypassed is none and verification.ssl_bypassed is none)) %} (machinery ran; {% if s.evidence and s.evidence.get("bypass_checkpoint_observed") is sameas false %}no hook-install signal observed{% else %}bypass not confirmed{% endif %}){% endif %}{% if s.stage.startswith("success-check") and s.status == "success" and s.evidence and not s.evidence.get("root_bypassed") and not s.evidence.get("ssl_bypassed") %} (ran; nothing confirmed here{% if s.evidence.get("note") %}, see the note below{% endif %}){% endif %} | {{ s.duration_ms }} | {{ (s.error or "") | md }} |
 {% endfor %}
 {% if stage_notes -%}
 Stages whose own recorded result carries a note (the status says the stage ran; the note says what that run of it returned):
@@ -970,6 +973,7 @@ def generate_report(
         **(_capture := _capture_summary(stage_results)),
         handshake_capture_note=_handshake_capture_note(verification, _capture),
         self_termination_note=_self_termination_note(stage_results),
+        ui_stuck_note=_ui_stuck_note(stage_results),
         install_recovery_note=_install_recovery_note(stage_results),
         manifest=manifest,
         expired_pin_sets=_expired_pin_sets(manifest, timestamp),
@@ -1364,6 +1368,64 @@ def _self_termination_note(stage_results: list[StageResult]) -> str | None:
         "target app self-terminated after resume - detected the instrumentation "
         "(Frida/root) and exited before dynamic verification could confirm a bypass"
     )
+
+
+def _ui_stuck_note(stage_results: list[StageResult]) -> str | None:
+    """The app-is-stuck finding, promoted to a verdict-level warning (finding #6).
+
+    `status="success"` means the dynamic machinery ran; a bypass may even have been
+    observed (a root probeHit / SSL pin-check+handshake). Neither says the app is
+    USABLE. `ui_liveness` carries real device facts about the UI: when the app's own
+    UI thread was ANR-frozen, or its activity did not resume, the report's bypassed
+    lines read as a clean "all OK" while the app is in fact stuck - the exact
+    "reports say OK but the app is frozen" gap this project exists to close.
+
+    Gated ONLY on the two DIRECT device facts (anr_detected is True, or
+    activity_resumed is False). `screen_changed is False` is deliberately NOT used:
+    ui_liveness documents it as "consistent with a static page OR a stuck/loading
+    screen; NOT proof of either", so promoting it would over-claim. Returns None
+    when no liveness was captured (None = not measured, never a guessed clean).
+
+    Reads the dynamic stage's own evidence; never inferred."""
+    dynamic_stage = next((s for s in stage_results if s.stage == "dynamic"), None)
+    if dynamic_stage is None:
+        return None
+    ui = (dynamic_stage.evidence or {}).get("ui_liveness")
+    if not isinstance(ui, dict):
+        return None
+    if ui.get("anr_detected") is True:
+        cause = ""
+        lines = ui.get("anr_lines") or []
+        if lines:
+            line = str(lines[0])
+            cause = " Logcat: " + (line[-90:] if len(line) > 90 else line)
+        return (
+            "the app's UI thread was ANR-frozen after the bypass (real device "
+            "logcat ANR / input-dispatch-timeout)." + cause
+        )
+    if ui.get("activity_resumed") is False:
+        return (
+            "the app's activity did not resume after the bypass - it is not "
+            "foreground/usable on the device."
+        )
+    # Functionally-FROZEN: the activity resumed and is focused and the system ANR
+    # detector has NOT fired, yet the app is stuck - its startup TLS was blocked
+    # (a handshake failed) AND the screen made no progress across the two-sample
+    # window. That is the "frozen on a loading/splash screen" an operator sees,
+    # which the ANR scan alone misses (a loading loop has not input-dispatch-
+    # timed-out yet). Neither signal alone proves it - a merely-static page also
+    # shows screen_changed=False - but a BLOCKED network plus NO progress is the
+    # frozen-UI signature, not a static page (seen on propertyguru, a React-Native
+    # app whose startup handshake failed against the capture proxy).
+    if ui.get("tls_blocked") is True and ui.get("screen_changed") is False:
+        return (
+            "the app is functionally FROZEN after the bypass: its activity "
+            "resumed and is focused, but its startup TLS was blocked (a handshake "
+            "failed) AND the screen made no progress across the two-sample window "
+            "- it is stuck on a loading/splash screen, not a usable UI. Do not "
+            "read any bypass verdict above as 'the app works'."
+        )
+    return None
 
 
 def _install_recovery_note(stage_results: list[StageResult]) -> str | None:

@@ -717,10 +717,43 @@ def _target_running(pid_after_launch: int | None,
     if pid_after_capture == 0:
         return False
     if pid_after_launch:
-        return True  # present at launch; capture sample unmeasured
+        # Present at LAUNCH but the capture sample was not measured. The
+        # capture window is the interval attribution is about, and a process
+        # alive at launch may have died before/during it, so the honest answer
+        # to "running during the capture window" is None (not measured) - NOT
+        # True (finding #10: a launch-only sample must not over-claim the
+        # window). "not measured" is not "absent", but it is also not "present".
+        return None
     if pid_after_launch == 0:
         return False
     return None
+
+
+def _success_attribution_note(
+    proxy_attribution_verdict: dict | None, flow_count: int,
+) -> tuple[bool | None, str | None]:
+    """(target_traffic_attributed, note) for the capture SUCCESS path (finding #9).
+
+    A non-empty `flows` list proves the capture machinery decrypted SOME traffic,
+    not that it was the TARGET's. The uid attribution (ADR-0012) is the only fact
+    that distinguishes the two. `reached` is True (the target's uid held a socket
+    to the proxy), False (measured, and it did not), or None (not measured).
+
+    Returns the attribution unchanged and, when it is explicitly False, a note the
+    stage-notes channel can render - so a bare `success` never implies the
+    target's pinning was defeated by traffic that belongs to another process.
+    Pure and unit-testable without a device.
+    """
+    attributed = (proxy_attribution_verdict or {}).get("reached")
+    note = None
+    if attributed is False:
+        note = (
+            f"the capture recorded {flow_count} decrypted flow(s), but the "
+            "target app's uid did NOT reach the proxy during the window - this "
+            "traffic belongs to other device processes and does not by itself "
+            "prove the target's pinning was defeated."
+        )
+    return attributed, note
 
 
 def _parse_flow_detail(text: str) -> list[FlowSummary]:
@@ -2430,11 +2463,21 @@ def run_capture_stage(
                 error=error,
             )
             return result
+        # Finding #9: a non-empty `flows` list proves the capture machinery
+        # decrypted SOME traffic, not that it was the TARGET's. Record the uid
+        # attribution explicitly and, when the target's uid did NOT reach the
+        # proxy, surface a note via the stage-notes channel rather than let a
+        # bare `success` imply the target's pinning was defeated.
+        _target_attributed, _success_note = _success_attribution_note(
+            proxy_attribution_verdict, len(flows),
+        )
         hosts = sorted({f.host for f in flows if f.host})
         result = StageResult(
             stage="capture-traffic", status="success",
             evidence={
                 "flows_count": len(flows),
+                "target_traffic_attributed": _target_attributed,
+                **({"note": _success_note} if _success_note else {}),
                 "hosts": hosts,
                 # Certificate refusals this capture observed, from whichever
                 # source this placement writes (see _count_tls_failed_clients).

@@ -171,7 +171,8 @@ def _wait_for_checkpoint(
     settle_seconds: float,
     require_evidence: bool = False,
     require_both_dimensions: bool = False,
-) -> None:
+    since: int = 0,
+) -> bool:
     """Wait for the bypass scripts to signal that their hooks are installed - or,
     when the flow is UI-triggered, for the app's own bypass EVIDENCE - or the
     settle deadline, whichever comes first (replacing the blind
@@ -195,7 +196,16 @@ def _wait_for_checkpoint(
     probeHit must not cut the SSL window short, or SSL is abandoned before the
     app's own TLS handshake fires (which would defeat the longer settle window).
     Ignored unless require_evidence is set; the two-spawn path (one dimension
-    per spawn) never sets it, so each spawn waits only for its own evidence."""
+    per spawn) never sets it, so each spawn waits only for its own evidence.
+
+    Returns True iff a hook-install/evidence signal was observed before the
+    deadline; False means the window burned with no signal (the stage still ran,
+    but no hook readiness was ever reported).
+
+    `since` scopes the scan to messages appended at/after that index. The
+    two-spawn path passes the pre-spawn length so Phase B cannot return on
+    Phase A's evidence (finding #7: the shared list made Phase B's wait a
+    no-op, so root was reported inconclusive before its own check fired)."""
     from trace import trace as _trace
     _trace("dynamic", "checkpoint", "start", require_evidence=require_evidence,
            require_both=require_both_dimensions, settle=settle_seconds)
@@ -208,14 +218,14 @@ def _wait_for_checkpoint(
         # can raise `RuntimeError: list modified during iteration` under message
         # load. Copying per poll is safe (messages only grows; the next poll
         # re-scans and sees anything new) and costs nothing at these sizes.
-        for m in list(messages):
+        for m in list(messages)[since:]:
             payload = m.get("payload") if isinstance(m, dict) else None
             if not isinstance(payload, dict):
                 continue
             if "hook" in payload and not require_evidence:
                 _found = True
                 _trace("dynamic", "checkpoint", "ok", reason="hook-ready")
-                return
+                return True
             if require_evidence:
                 if "probeHit" in payload:
                     seen_root = True
@@ -225,13 +235,14 @@ def _wait_for_checkpoint(
                     if seen_root and seen_ssl:
                         _found = True
                         _trace("dynamic", "checkpoint", "ok", reason="root+ssl-evidence")
-                        return
+                        return True
                 elif "probeHit" in payload or "bypassEffect" in payload:
                     _found = True
                     _trace("dynamic", "checkpoint", "ok", reason="evidence")
-                    return
+                    return True
         time.sleep(_CHECKPOINT_POLL_INTERVAL)
     _trace("dynamic", "checkpoint", "timeout", found=_found, settle=settle_seconds)
+    return _found
 
 
 def _self_terminated_result(
@@ -263,30 +274,41 @@ def _self_terminated_result(
 
 def _bypass_success_result(
     pid: int, messages: list, scripts_applied: list, target: str, start: float,
-    *, ui_liveness: dict | None = None, instrument: dict | None = None,
+    *, process_alive: bool | None = None,
+    ui_liveness: dict | None = None, instrument: dict | None = None,
+    checkpoint_observed: bool | None = None,
 ) -> StageResult:
     """The FR-4.6 SUCCESS outcome, shared by the single- and two-spawn paths so
     the liveness contract cannot drift - the mirror of _self_terminated_result.
 
-    Reaching a success result means self-termination was already checked and did
-    NOT fire (otherwise classify_self_termination fired and the failed path
-    returned first) - the spawned process survived the settle window - so
-    app_still_running is recorded True here unconditionally. A bypass claim on a
-    process that killed itself would be meaningless, so the success evidence
-    states the app was still running after the bypass scripts, surfaced in the
-    report's Dynamic Verification as an explicit, auditable liveness signal.
-    ui_liveness is the single-spawn path's real-time UI evidence (dumpsys/logcat/
-    uiautomator); the two-spawn path does not gather it, so it stays None ("not
-    captured") - honest, never a guessed pass. Before this shared builder the
-    two-spawn success path omitted app_still_running entirely, so AndroGoat's
-    report read "not captured" for a survival it had actually observed."""
+    `app_still_running` is the ACTUAL liveness tri-state, NOT an unconditional
+    True. Reaching here means self-termination was checked and did NOT fire, but
+    that check is conservative by design: `_process_is_alive` returns None on a
+    transient frida/device enumerate error, and `classify_self_termination(None)`
+    is False, so a death/liveness-UNKNOWN app can still reach this builder. We
+    must NOT record that as "survived the settle window". So:
+      * process_alive is True  -> "True (process survived the settle window...)"
+      * process_alive is False -> should not reach here (the self-terminated path
+                                  returns first); if it ever does, the report
+                                  renders the honest "app self-terminated" line.
+      * process_alive is None  -> "not captured (liveness not recorded this run)"
+                                  instead of a false survival claim.
+
+    The callers pass the real `_process_is_alive` result, so a None liveness is
+    surfaced honestly rather than silently upgraded to a pass. ui_liveness is the
+    single-spawn path's real-time UI evidence (dumpsys/logcat/uiautomator); the
+    two-spawn path does not gather it, so it stays None ("not captured") - honest,
+    never a guessed pass. Before this shared builder the two-spawn success path
+    omitted app_still_running entirely, so AndroGoat's report read "not captured"
+    for a survival it had actually observed."""
     return StageResult(
         stage="dynamic", status="success",
         evidence={
             "scripts_applied": scripts_applied, "pid": pid,
             "frida_messages": messages, "target": target,
-            "app_still_running": True,
+            "app_still_running": process_alive,
             "ui_liveness": ui_liveness,
+            "bypass_checkpoint_observed": checkpoint_observed,
             "instrument": instrument,
         },
         duration_ms=elapsed_ms(start),
@@ -667,6 +689,7 @@ def run_dynamic_stage(
             Shared by both phases of the two-spawn flow so Phase A and Phase B
             cannot drift. Returns (device, pid, instrument) for the caller's
             outcome."""
+            since = len(messages)
             device, session, pid, instrument = attach(device_serial, package_name)
             if script_src is not None:
                 load_script_source(session, script_src, on_message)
@@ -679,8 +702,9 @@ def run_dynamic_stage(
             _record_ui_actions(
                 device_serial, _ui_actions_for(target, ui_kind), ui_action_records,
             )
-            _wait_for_checkpoint(messages, settle_seconds, require_evidence=True)
-            return device, pid, instrument
+            _checkpoint_observed = _wait_for_checkpoint(
+                messages, settle_seconds, require_evidence=True, since=since)
+            return device, pid, instrument, _checkpoint_observed
 
         def _merge_provisioning_records(first: dict, second: dict) -> dict:
             """One record for a run that provisioned twice (ADR-0020).
@@ -712,7 +736,7 @@ def run_dynamic_stage(
             return merged
 
         # Phase A - SSL: a fresh spawn exercising the pinning check.
-        _ssl_device, _ssl_pid, ssl_instrument = _run_one_spawn(
+        _ssl_device, _ssl_pid, ssl_instrument, ssl_ckpt = _run_one_spawn(
             (SCRIPT_DIR / script_names[0]).read_text(encoding="utf-8")
             + "\n\n" + _root_envelope_src,
             Action.SSL_ONLY, messages, settle_seconds,
@@ -722,14 +746,15 @@ def run_dynamic_stage(
         # instrumentation record is the one carried into the stage evidence - it
         # is the provisioning the root confirmation rests on - with Phase A's
         # merged in, so a server the FIRST attach replaced stays visible.
-        root_device, root_pid, instrument = _run_one_spawn(
+        root_device, root_pid, instrument, root_ckpt = _run_one_spawn(
             _root_envelope_src, Action.ROOT_ONLY, messages, settle_seconds,
         )
         instrument = _merge_provisioning_records(ssl_instrument, instrument)
         outcome["instrument"] = instrument
 
         # FR-4.6: a spawned process gone after the settle window self-terminated.
-        if classify_self_termination(_process_is_alive(root_device, root_pid)):
+        root_alive = _process_is_alive(root_device, root_pid)
+        if classify_self_termination(root_alive):
             outcome["result"] = _self_terminated_result(
                 root_pid, messages, scripts_applied, target, start,
                 instrument=instrument,
@@ -764,7 +789,9 @@ def run_dynamic_stage(
             ui_liveness = None
         outcome["result"] = _bypass_success_result(
             root_pid, messages, scripts_applied, target, start,
+            process_alive=root_alive,
             instrument=instrument, ui_liveness=ui_liveness,
+            checkpoint_observed=bool(ssl_ckpt or root_ckpt),
         )
 
     def _run_frida() -> None:
@@ -834,7 +861,7 @@ def run_dynamic_stage(
             outcome["phase"] = (
                 f"settle + checkpoint wait ({settle_seconds:.0f}s window)"
             )
-            _wait_for_checkpoint(
+            checkpoint_observed = _wait_for_checkpoint(
                 messages, settle_seconds,
                 require_evidence=bool(ui_actions) or _root_expected or _ssl_expected,
                 require_both_dimensions=_root_expected and _ssl_expected,
@@ -845,7 +872,8 @@ def run_dynamic_stage(
             # (Frida/root) and exited (System.exit / killProcess). Surface that
             # as a first-class, logged outcome with an explicit reason instead
             # of silently reporting a generic success or an unexplained crash.
-            if classify_self_termination(_process_is_alive(device, pid)):
+            alive = _process_is_alive(device, pid)
+            if classify_self_termination(alive):
                 outcome["result"] = _self_terminated_result(
                     pid, messages, scripts_applied, target, start,
                     instrument=instrument,
@@ -885,6 +913,7 @@ def run_dynamic_stage(
             outcome["result"] = _bypass_success_result(
                 pid, messages, scripts_applied, target, start,
                 ui_liveness=ui_liveness, instrument=instrument,
+                checkpoint_observed=checkpoint_observed,
             )
         except Exception as exc:
             # ADR-0020: a provisioning or handshake failure carries its own

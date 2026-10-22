@@ -75,7 +75,7 @@ from dynamic import device
 from dynamic import frida_runner
 from dynamic import mitmproxy_capture
 from ai import build_evidence_bundle, repair_loop, get_client  # AI augmentation layer
-from ai.repair_loop import RunFeedback
+from ai.repair_loop import RunFeedback, classify_dynamic_run_once
 from dynamic.synthesizer import synthesize
 from dynamic.success_checks.androgoat import AndroGoatSuccessCheck
 from dynamic.success_checks.uncrackable1 import UnCrackable1SuccessCheck
@@ -1168,6 +1168,7 @@ def _failure_dynamic_note(
     dynamic_failed: bool,
     capture_failed: bool,
     verification: "VerificationResult | None",
+    coverage_limited: bool = False,
 ) -> str:
     """What the run RECORDED about the dynamic bypass, for the failure footer.
 
@@ -1181,7 +1182,18 @@ def _failure_dynamic_note(
     dynamic stage while capturing fine was told no traffic was captured.
     """
     if dynamic_status == "skipped":
-        note = "dynamic verification was not attempted (no bypass technique to apply)"
+        if coverage_limited:
+            # Finding #15: a coverage-limited NEITHER is "unknown, not absent".
+            # Saying "no bypass technique to apply" asserts a confident negative
+            # over a surface that was not fully analyzed - the exact promotion the
+            # Decision line forbids. Qualify it instead of claiming an absence.
+            note = (
+                "dynamic verification was not attempted - the static NEITHER is "
+                "COVERAGE-LIMITED (a governing surface was not fully analyzed), so "
+                "this is unknown, not a confirmed absence of a bypass technique"
+            )
+        else:
+            note = "dynamic verification was not attempted (no bypass technique to apply)"
     elif dynamic_failed:
         note = "the dynamic bypass ran but failed"
     else:
@@ -1773,9 +1785,15 @@ def _effective_dynamic_action(action: Action, force_dynamic: bool) -> Action:
     attempt. When the operator explicitly forces it, drive synthesis/deployment
     with Action.BOTH so the universal root+SSL bypass envelope is generated and
     loaded, WITHOUT mutating the static verdict: confidence, calibration, storage,
-    and correlation all keep reading classification.action. No-op when the flag is
-    off and for any already-detected action (those already run the dynamic stage)."""
-    if force_dynamic and action == Action.NEITHER:
+    and correlation all keep reading classification.action. Under the override the
+    operator has explicitly asked for an empirical bypass, so BOTH is deployed for
+    ANY static verdict, not only NEITHER: a coverage-limited static verdict can
+    MISS a whole category (RS_Vapour: static ROOT_ONLY, SSL score 0.00
+    coverage-limited, yet it pins), and driving only the detected arm would leave
+    the undetected category un-attempted so its pinning rejects the capture CA.
+    Deploying BOTH tries both. No-op when the flag is off (then it is always
+    identity)."""
+    if force_dynamic:
         return Action.BOTH
     return action
 
@@ -3794,7 +3812,8 @@ def run(
         # not run - the ROOT_ONLY case runs dynamic (as "machinery ran; bypass not
         # confirmed") and only the capture fails. Say what actually happened.
         dynamic_note = _failure_dynamic_note(
-            dynamic_stage.status, dynamic_failed, capture_failed, verification
+            dynamic_stage.status, dynamic_failed, capture_failed, verification,
+            coverage_limited=bool(getattr(classification, "unknown_uncovered", None)),
         )
         correlation_note = _failure_correlation_note(
             correlation_result, correlation_skip_reason
@@ -5120,38 +5139,26 @@ def ai_bypass_cmd(
     action_enum = _AI_ACTION_MAP[action]
 
     def _run_once(source: str, applied_hooks: list[str]) -> RunFeedback:
-        collected: list[str] = []
         typer.echo(
             f"  [frida] attaching to {device or 'default device'} / {package} ...")
-
-        def _on_message(message: dict, _data=None) -> None:
-            mtype = message.get("type")
-            if mtype == "send":
-                payload = message.get("payload")
-                if isinstance(payload, dict):
-                    collected.append(f"{payload.get('type')}: {payload}")
-                    typer.echo(f"    send: {payload.get('type')} {payload}")
-                else:
-                    collected.append(f"send: {payload}")
-                    typer.echo(f"    send: {payload}")
-            elif mtype == "error":
-                collected.append(f"error: {message.get('description')}")
-                typer.echo(f"    error: {message.get('description')}")
-
         result = frida_runner.run_dynamic_stage(
             device, package, action_enum, target="ai_generated",
             settle_seconds=8,
             synthesized={"source": source, "applied_hooks": applied_hooks},
             auth_context=None,
         )
+        msgs = (result.evidence or {}).get("frida_messages") or []
         typer.echo(
             f"  [frida] stage status={result.status}; "
-            f"collected {len(collected)} message(s)")
-        ok = (result.status != "failed") and not any(
-            "error" in m.lower() for m in collected)
-        return RunFeedback(
-            ok=ok, messages=list(collected),
-            notes=f"stage_status={result.status}")
+            f"collected {len(msgs)} message(s)")
+        for m in msgs:
+            typer.echo(f"    frida: {m}")
+        # HONESTY FIX (defect #1): classify from the stage's real evidence, not
+        # from an `_on_message` callback that was never wired into
+        # run_dynamic_stage (which made `collected` always empty and `ok`
+        # collapse to status != 'failed'). See
+        # classify_dynamic_run_once (imported directly from ai.repair_loop; the name
+        return classify_dynamic_run_once(result)
 
     typer.echo(f"Running AI repair loop (max {max_iter} iterations) on {device or 'default device'} ...")
     res = repair_loop(

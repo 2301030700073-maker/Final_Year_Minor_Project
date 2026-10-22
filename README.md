@@ -212,11 +212,11 @@ uv run pytest tests/unit
 
 This exercises the signature matcher and decision engine against fixtures only — if this passes, the deterministic core's logic is sound independent of whether the rest of this setup is done yet.
 
-Expected result on WSL2/Linux — **2,466 tests collected, all passing** (a machine missing an optional tool may report one or two skipped instead) (on Windows, expect the handful of POSIX-only failures noted above instead of a fully clean run). This figure is authoritative and is enforced by `tests/unit/test_ledger_suite_count.py` against both `docs/plans/audit/full-project-audit-ledger.md` and this README, so it cannot silently drift:
+Expected result on WSL2/Linux — **2,509 tests collected, all passing** (a machine missing an optional tool may report one or two skipped instead) (on Windows, expect the handful of POSIX-only failures noted above instead of a fully clean run). This figure is authoritative and is enforced by `tests/unit/test_ledger_suite_count.py` against both `docs/plans/audit/full-project-audit-ledger.md` and this README, so it cannot silently drift:
 
 ```
 $ uv run pytest tests/unit --collect-only -q | tail -1
-2466 tests collected in 1.17s
+2509 tests collected in 1.17s
 ```
 
 The count moves whenever a gap is closed; the exact collected number is recorded in `docs/plans/audit/full-project-audit-ledger.md`, which is updated with each change.

@@ -31,15 +31,20 @@ and its network traffic can be observed on an authorized test device/emulator.
 
 Hard constraints:
 1. Write a single Frida JavaScript script wrapped in Java.perform(function(){...}).
-2. For EVERY hook you install, wrap it in its own try/catch and emit a structured \
-line so failures are observable:
-   - on success: send({type:'hook_loaded', name:'<method>', ok:true})
-   - on failure: send({type:'hook_error', name:'<method>', error:String(e)})
+2. For EVERY hook you install, GUARD it by first checking the target class/method
+exists on the device (e.g. Java.enumerateLoadedClasses, or a try around the
+class lookup) and emit exactly one structured line:
+   - target PRESENT and hooked: send({type:'hook_loaded', name:'<method>', ok:true})
+   - target ABSENT (different HTTP stack, or R8 stripped/renamed it):
+     send({type:'hook_skipped', name:'<class>', reason:'not present on device'}) and
+     MOVE ON - this is NOT an error. A hook that does not apply to this app is not a
+     failure, and treating it as one fails the whole run.
+   - target present but the hook THREW: send({type:'hook_error', name:'<method>', error:String(e)})
 3. Wrap the whole body in a top-level try/catch that sends \
 {type:'script_error', error:String(e)} before rethrowing.
 4. Hook ONLY the methods/classes present in the evidence bundle. Do NOT invent \
-class names not listed. If a class is not present, skip it and list it under \
-'skipped'.
+class names not listed. If a class is not present on the device, emit \
+hook_skipped (NOT hook_error) and list it under 'skipped'.
 5. Prefer the least invasive override: for SSL pinning, neutralize \
 X509TrustManager.checkServerTrusted / TrustManagerImpl and OkHttp \
 CertificatePinner.check; for root, neutralize the specific isDeviceRooted/RootBeer \

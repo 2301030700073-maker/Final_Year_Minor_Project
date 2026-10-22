@@ -21,6 +21,12 @@ re-analysis, no re-run):
   5. a coverage-limited NEITHER must carry the Coverage-limited caveat on the
      Decision line, and its dynamic skip must carry the COVERAGE-LIMITED clause;
   6. "Root bypassed: True" must be accompanied by probe evidence lines.
+  7. a confirmed bypass ("Root/SSL bypassed: True") must not contradict the
+     stage's own "no hook-install signal observed" annotation.
+
+Matching is case-insensitive throughout (a report may render `True`/`true`),
+and the process exits NON-ZERO when any finding is present, so CI can fail on
+a lying report instead of always succeeding.
 
 This is a read-only audit harness. It is also imported by
 `tests/unit/test_report_honesty_audit.py`, which asserts that NO report
@@ -64,9 +70,10 @@ def stage_rows(text: str) -> dict[str, list[tuple[str, str]]]:
 def audit(path: Path) -> list[str]:
     """Return a list of honesty findings for one report (empty = honest)."""
     text = path.read_text(encoding="utf-8", errors="replace")
+    low = text.lower()
     findings: list[str] = []
     rows = stage_rows(text)
-    dec = "REUSED FROM CACHE" in text
+    dec = "reused from cache" in low
 
     # 1. failed dynamic narrated as success anywhere
     dyn = rows.get("dynamic", [])
@@ -80,16 +87,16 @@ def audit(path: Path) -> list[str]:
     # 2. dynamic success without the qualifier - only a problem when the report
     # itself confirms NOTHING (both dimensions inconclusive/False/not-run); a
     # confirmed bypass legitimately renders a bare `success`.
-    if any(s == "success" and "machinery ran" not in extra for s, extra in dyn):
-        m = re.search(r"## Dynamic Verification(.*?)(?=\n## |\Z)", text, re.S)
+    if any(s == "success" and "machinery ran" not in extra.lower() for s, extra in dyn):
+        m = re.search(r"## Dynamic Verification(.*?)(?=\n## |\Z)", text, re.S | re.I)
         section = m.group(1) if m else ""
-        root_line = re.search(r"Root bypassed:\s*(\w+)", section)
-        ssl_line = re.search(r"SSL bypassed:\s*(\w+)", section)
+        root_line = re.search(r"Root bypassed:\s*(\w+)", section, re.I)
+        ssl_line = re.search(r"SSL bypassed:\s*(\w+)", section, re.I)
         vals = {
             (root_line.group(1) if root_line else ""),
             (ssl_line.group(1) if ssl_line else ""),
         }
-        if "True" not in vals:
+        if "True" not in vals and "true" not in vals:
             findings.append(
                 "dynamic success row lacks the 'machinery ran' qualifier "
                 "and no dimension is confirmed"
@@ -97,20 +104,30 @@ def audit(path: Path) -> list[str]:
     # 3. capture skipped with no recorded reason sentence
     cap = rows.get("capture-traffic", [])
     if cap and all(s == "skipped" for s, _ in cap):
-        if "No traffic was captured" not in text and "not attempted" not in text.lower():
+        if "no traffic was captured" not in low and "not attempted" not in low:
             findings.append("capture skipped with no recorded reason")
     # 4. cached decompile narrated as this run's
-    if dec and "This run's decompilation" in text:
+    if dec and "this run's decompilation" in low:
         findings.append("cached decompile narrated as 'This run's decompilation'")
     # 5. coverage-limited NEITHER without the caveat
-    if "Decision:** NEITHER" in text and "not fully analyzed" in text:
-        if "Coverage-limited" not in text:
+    if "decision:** neither" in low and "not fully analyzed" in low:
+        if "coverage-limited" not in low:
             findings.append("coverage-limited NEITHER missing the Decision caveat")
-        if "no bypass technique to apply" in text and "COVERAGE-LIMITED" not in text:
+        if "no bypass technique to apply" in low and "coverage-limited" not in low:
             findings.append("coverage-limited skip reason lacks the COVERAGE-LIMITED clause")
     # 6. root bypassed True with no probe evidence
-    if "Root bypassed: True" in text and "probe" not in text.lower():
+    if "root bypassed: true" in low and "probe" not in low:
         findings.append("Root bypassed: True with no probe evidence line")
+    # 7. a confirmed bypass contradicting the stage's own "no hook-install
+    # signal observed" annotation. A report from the fixed generator cannot hit
+    # this (a confirmed bypass implies the hooks fired), so it only fires on a
+    # genuinely contradictory report.
+    if ("root bypassed: true" in low or "ssl bypassed: true" in low) and (
+        "no hook-install signal observed" in low
+    ):
+        findings.append(
+            "confirmed bypass contradicts the stage's 'no hook-install signal observed'"
+        )
     return findings
 
 
@@ -153,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
         for x in fs:
             print(f"  * {x}")
     print(f"\nreports_with_findings={len(findings)} findings={total}")
-    return 0
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

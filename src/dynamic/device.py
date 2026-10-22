@@ -577,9 +577,35 @@ def _read_device_lines(adb: str, timeout: float | None = None) -> tuple[list[str
     deadline = time.monotonic() + timeout
     online: list[str] = []
     offline: list[str] = []
+    last_error: str | None = None
     while True:
-        result = subprocess.run([adb, "devices"], capture_output=True, text=True,
-                                check=True, timeout=30)
+        try:
+            result = subprocess.run([adb, "devices"], capture_output=True, text=True,
+                                    check=True, timeout=30)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            # WSL2 cold-server race, the non-zero half (the docstring above covers
+            # the 'offline' half). The first `adb devices` after the Windows adb
+            # server starts/restarts can exit non-zero ("cannot connect to daemon")
+            # while the server comes up. `check=True` used to raise that
+            # immediately, so a healthy device was reported as 'no usable device'
+            # and the dynamic stage died at setup - every target of the 2026-10-22
+            # sweep hit this. The settle window exists to absorb exactly this, so
+            # retry within it instead of failing on the first transient error.
+            if isinstance(exc, subprocess.CalledProcessError):
+                last_error = (
+                    (exc.stderr or exc.stdout or "").strip()
+                    or f"adb devices exited {exc.returncode}"
+                )
+            else:
+                last_error = "adb devices timed out"
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"'adb devices' kept failing for {timeout:.0f}s ({last_error}) - "
+                    "the adb server is not reachable; run 'adb kill-server && "
+                    "adb start-server' and retry"
+                ) from exc
+            time.sleep(_DEVICE_SETTLE_POLL_SECONDS)
+            continue
         online = []
         offline = []
         for line in result.stdout.splitlines()[1:]:

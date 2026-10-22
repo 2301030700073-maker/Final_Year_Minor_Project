@@ -1,7 +1,7 @@
 # Complete File Inventory
 
 Generated: 2026-10-22
-All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 339 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
+All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 340 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
 
 ```
 .gitattributes
@@ -115,6 +115,7 @@ scripts/sample_run_memory.py
 scripts/sweep_one.sh
 scripts/universal-robust-advanced-root--ssl-pinning-bypass.js
 scripts/verify_all.py
+scripts/verify_debug.sh
 scripts/verify_one.sh
 src/ai/__init__.py
 src/ai/bypass_gen.py

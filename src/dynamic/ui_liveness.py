@@ -324,6 +324,36 @@ def _parse_tap_targets(uiautomator_xml: str) -> list[dict]:
     return targets
 
 
+def _parse_input_fields(uiautomator_xml: str) -> list[dict]:
+    """Editable input fields (EditText / AutoCompleteTextView) in a dump, each
+    with its own bounds centre. Pure over the XML.
+
+    A form-gated app (type a value -> submit) makes its network request only
+    AFTER a field is filled, so a tap-only drive cannot reach it - this is what
+    lets the exploratory drive fill a form before pressing submit. Same
+    device-geometry discipline as _parse_tap_targets (centre from the node's own
+    bounds, degenerate bounds skipped)."""
+    inputs: list[dict] = []
+    for m in re.finditer(r"<node[^>]*>", uiautomator_xml):
+        node = m.group(0)
+        cls = re.search(r'class="([^"]+)"', node)
+        if not cls or ("EditText" not in cls.group(1)
+                       and "AutoCompleteTextView" not in cls.group(1)):
+            continue
+        b = re.search(r'bounds="\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]"', node)
+        if not b:
+            continue
+        x1, y1, x2, y2 = (int(v) for v in b.groups())
+        if x2 <= x1 or y2 <= y1:
+            continue
+        inputs.append({
+            "label": _node_label(node),
+            "class": cls.group(1),
+            "center": [(x1 + x2) // 2, (y1 + y2) // 2],
+        })
+    return inputs
+
+
 def _hierarchy_census(uiautomator_xml: str) -> dict:
     """How much hierarchy the dump contained: the node count, and how many nodes
     carried each tap-relevant attribute. Pure over the XML.
@@ -446,6 +476,7 @@ def dump_ui_targets(serial: str, adb: str | None = None) -> dict:
                               f"be read back ({len(xml_out)} bytes retrieved), so "
                               "nothing here says what was on screen"}
         return {"targets": _parse_tap_targets(xml_out), "measured": True,
+                "inputs": _parse_input_fields(xml_out),
                 "hierarchy": _hierarchy_census(xml_out), "reason": None}
     except Exception as e:
         return {"targets": [], "measured": False, "hierarchy": None,
@@ -459,6 +490,19 @@ def tap(serial: str, x: int, y: int, adb: str | None = None) -> None:
     caller records the failure as the drive's outcome (principle 3)."""
     adb = adb or _adb_wrapper()
     subprocess.run([adb, "-s", serial, "shell", "input", "tap", str(int(x)), str(int(y))],
+                   capture_output=True, text=True, check=True, timeout=20)
+
+
+def type_text(serial: str, text: str, adb: str | None = None) -> None:
+    """Type `text` into the currently-focused field.
+
+    `adb shell input text` treats a space as an argument separator, so spaces are
+    %s-escaped; the sample the drive types is deliberately alphanumeric to avoid
+    shell-metacharacter breakage. check=True: a fill that did not happen must not
+    be recorded as one (principle 3)."""
+    adb = adb or _adb_wrapper()
+    escaped = text.replace(" ", "%s")
+    subprocess.run([adb, "-s", serial, "shell", "input", "text", escaped],
                    capture_output=True, text=True, check=True, timeout=20)
 
 

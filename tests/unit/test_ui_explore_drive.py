@@ -51,3 +51,49 @@ def test_returns_none_when_every_target_already_tapped():
 def test_empty_targets():
     t, how = _choose_explore_target([], set())
     assert t is None
+
+
+
+def test_parse_input_fields_finds_edittext_with_centre():
+    from dynamic.ui_liveness import _parse_input_fields
+    xml = (
+        '<hierarchy>'
+        '<node class="android.widget.EditText" text="Name" '
+        'bounds="[100,200][300,260]" focusable="true"/>'
+        '<node class="android.widget.Button" text="Submit" '
+        'bounds="[100,300][300,360]" clickable="true"/>'
+        '<node class="android.widget.EditText" bounds="[100,400][300,460]"/>'
+        '</hierarchy>'
+    )
+    inputs = _parse_input_fields(xml)
+    assert len(inputs) == 2
+    assert inputs[0]["center"] == [200, 230]
+    assert inputs[0]["label"] == "Name"
+    assert all("EditText" in i["class"] for i in inputs)
+
+
+def test_drive_fills_form_field_then_taps_submit(monkeypatch):
+    """A form-gated app (type a value -> submit) only makes its request after a
+    field is filled. The exploratory drive must fill the EditText (focus + type)
+    and THEN tap submit - a tap-only drive never reaches the request."""
+    from dynamic import mitmproxy_capture, ui_liveness
+    monkeypatch.setattr(ui_liveness, "wait_for_foreground",
+                        lambda *a, **k: {"foreground": True, "reason": "ok"})
+    calls = []
+    dump = {"measured": True,
+            "inputs": [{"label": "", "center": [200, 230],
+                        "class": "android.widget.EditText"}],
+            "targets": [{"label": "Submit", "center": [200, 330]}],
+            "reason": None}
+    monkeypatch.setattr(ui_liveness, "dump_ui_targets", lambda *a, **k: dump)
+    monkeypatch.setattr(ui_liveness, "tap", lambda s, x, y: calls.append(("tap", x, y)))
+    monkeypatch.setattr(ui_liveness, "type_text", lambda s, t: calls.append(("type", t)))
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    rec = mitmproxy_capture._drive_ui_explore("serial", "pkg", max_taps=4)
+    # The field was focused, filled with the sample, and THEN submit was tapped.
+    assert ("tap", 200, 230) in calls
+    assert ("type", "fympprobe123") in calls
+    assert ("tap", 200, 330) in calls
+    assert calls.index(("type", "fympprobe123")) < calls.index(("tap", 200, 330))
+    assert rec["filled_fields"] and rec["filled_fields"][0]["ok"] is True
+    assert rec["tap_count"] == 1

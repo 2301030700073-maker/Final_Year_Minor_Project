@@ -1770,14 +1770,37 @@ def _drive_ui_explore(serial: str, package: str, max_taps: int = 4) -> dict:
                           + f" ({fg['reason']}) - refusing to tap a screen the app "
                             "does not own"}
     taps: list[dict] = []
+    filled_fields: list[dict] = []
     tapped_centers: set = set()
     reason = None
+    # Sample text typed into form fields. Alphanumeric so it survives
+    # `adb shell input text` (no shell metacharacters); type_text %s-escapes
+    # spaces. A form-gated app (type a value -> submit) only makes its request
+    # after a field is filled, so a tap-only drive never reaches it.
+    sample = "fympprobe123"
     for _ in range(max(1, max_taps)):
         dump = ui_liveness.dump_ui_targets(serial)
         if not dump["measured"]:
-            if not taps:
+            if not taps and not filled_fields:
                 reason = dump["reason"]
             break
+        # Fill each not-yet-filled editable field (focus + type), bounded to two,
+        # then let the next iteration press submit. The field's centre joins
+        # tapped_centers so it is neither re-filled nor chosen as a tap target.
+        unfilled = [f for f in (dump.get("inputs") or [])
+                    if tuple(f["center"]) not in tapped_centers]
+        if unfilled and len(filled_fields) < 2:
+            field = unfilled[0]
+            try:
+                ui_liveness.tap(serial, *field["center"])
+                ui_liveness.type_text(serial, sample)
+                filled_fields.append({"target": field, "ok": True, "reason": None})
+                tapped_centers.add(tuple(field["center"]))
+                time.sleep(0.8)
+                continue
+            except Exception as e:
+                reason = f"input fill failed: {e}"
+                break
         target, how = ui_liveness._choose_explore_target(
             dump["targets"], tapped_centers)
         if target is None:
@@ -1799,6 +1822,7 @@ def _drive_ui_explore(serial: str, package: str, max_taps: int = 4) -> dict:
         "tapped": any(t["ok"] for t in taps),
         "tap_count": len(taps),
         "taps": taps,
+        "filled_fields": filled_fields,
         # Back-compat with the single-tap report fields: the first successful tap.
         "target": next((t["target"] for t in taps if t["ok"]), None),
         "selected_by": next((t["selected_by"] for t in taps if t["ok"]), None),

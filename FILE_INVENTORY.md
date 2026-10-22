@@ -1,7 +1,7 @@
 # Complete File Inventory
 
 Generated: 2026-10-22
-All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 338 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
+All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 339 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
 
 ```
 .gitattributes
@@ -322,6 +322,7 @@ tests/unit/test_tls_failed_client_marker.py
 tests/unit/test_tool_versions_release.py
 tests/unit/test_trace.py
 tests/unit/test_two_spawn_checkpoint_scope.py
+tests/unit/test_ui_explore_drive.py
 tests/unit/test_ui_liveness.py
 tests/unit/test_ui_liveness_classify_distinct.py
 tests/unit/test_ui_stuck_verdict.py

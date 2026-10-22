@@ -1743,6 +1743,69 @@ def _drive_ui(serial: str, package: str) -> dict:
             "selected_by": how, "reason": None}
 
 
+def _drive_ui_explore(serial: str, package: str, max_taps: int = 4) -> dict:
+    """Bounded exploratory UI drive: tap through several SAFE controls so the app
+    exercises its network path, then return the record (a `taps` list + provenance).
+
+    The single-tap `_drive_ui` refuses to guess when no label names a network
+    action, so an app that gates its request behind a tab / menu item / list row
+    leaves the path un-exercised and the capture empty (app-silence) - which is
+    why RS_Vapour's pinned request never fired. This drive walks the screen
+    instead: it taps a safe, not-yet-tapped control, re-dumps (the screen
+    changed), and taps the next, up to `max_taps`. Every tap is recorded with how
+    it was chosen, so the traffic is PARTLY traffic the tool's own taps caused -
+    provenance recorded, never implied. Destructive controls are never tapped and
+    an already-pressed center is never re-tapped (ui_liveness._choose_explore_target
+    owns that policy)."""
+    import time
+    from dynamic import ui_liveness
+    fg = ui_liveness.wait_for_foreground(serial, package)
+    if fg["foreground"] is not True:
+        return {"attempted": False, "tapped": False, "taps": [], "tap_count": 0,
+                "target": None, "selected_by": None, "foreground": fg,
+                "reason": ("the app never became the resumed activity, so the "
+                           "hierarchy on screen is not the app's"
+                           if fg["foreground"] is False else
+                           "the app's foreground ownership could not be measured")
+                          + f" ({fg['reason']}) - refusing to tap a screen the app "
+                            "does not own"}
+    taps: list[dict] = []
+    tapped_centers: set = set()
+    reason = None
+    for _ in range(max(1, max_taps)):
+        dump = ui_liveness.dump_ui_targets(serial)
+        if not dump["measured"]:
+            if not taps:
+                reason = dump["reason"]
+            break
+        target, how = ui_liveness._choose_explore_target(
+            dump["targets"], tapped_centers)
+        if target is None:
+            reason = how
+            break
+        cx, cy = target["center"]
+        try:
+            ui_liveness.tap(serial, cx, cy)
+        except Exception as e:
+            taps.append({"target": target, "selected_by": how, "ok": False,
+                         "reason": f"input tap failed: {e}"})
+            reason = f"input tap failed: {e}"
+            break
+        taps.append({"target": target, "selected_by": how, "ok": True, "reason": None})
+        tapped_centers.add(tuple(target["center"]))
+        time.sleep(1.5)  # let the screen settle / the app react before the next dump
+    return {
+        "attempted": True,
+        "tapped": any(t["ok"] for t in taps),
+        "tap_count": len(taps),
+        "taps": taps,
+        # Back-compat with the single-tap report fields: the first successful tap.
+        "target": next((t["target"] for t in taps if t["ok"]), None),
+        "selected_by": next((t["selected_by"] for t in taps if t["ok"]), None),
+        "reason": reason,
+    }
+
+
 def run_capture_stage(
     serial: str,
     package: str,
@@ -1753,6 +1816,7 @@ def run_capture_stage(
     bypass_script: str | None = None,
     bypass_source: str | None = None,
     drive_ui: bool = True,
+    drive_ui_max_taps: int = 4,
 ) -> StageResult:
     """Run a mitmproxy capture of `package`'s traffic and return a StageResult.
 
@@ -2034,7 +2098,8 @@ def run_capture_stage(
         # spent. Deliberately after the launch pid sample (so that sample reflects
         # the launch, not the tap) and before the window sleep (so whatever the tap
         # triggers lands inside the window).
-        ui_drive = (_drive_ui(serial, package) if drive_ui else
+        ui_drive = (_drive_ui_explore(serial, package, max_taps=drive_ui_max_taps)
+                    if drive_ui else
                     {"attempted": False, "tapped": False, "target": None,
                      "selected_by": None,
                      "reason": "UI drive disabled for this run"})

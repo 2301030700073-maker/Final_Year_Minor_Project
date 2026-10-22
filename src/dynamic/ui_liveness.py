@@ -364,6 +364,49 @@ def _choose_tap_target(targets: list[dict]) -> tuple[dict | None, str]:
         "network path")
 
 
+# Labels whose tap would destroy state or leave the app. An exploratory drive
+# exists to make the app exercise its network path; it must never sign the
+# operator out, delete data, or spend money, whatever the label happens to be.
+_EXPLORE_DENY = ("delete", "remove", "uninstall", "logout", "log out", "sign out",
+                 "signout", "pay", "purchase", "buy", "checkout", "reset", "clear",
+                 "erase", "factory", "deactivate", "cancel", "send money", "transfer",
+                 "withdraw")
+
+
+def _choose_explore_target(
+    targets: list[dict], tapped_centers: set,
+) -> tuple[dict | None, str]:
+    """The next SAFE target to tap during an exploratory drive, or (None, reason).
+
+    Unlike `_choose_tap_target` (a single, conservative tap that refuses to guess),
+    an exploratory drive MAY tap a control whose label does not name a network
+    action - that is the whole point: many apps gate their request behind a tab, a
+    menu item, or a list row whose label says nothing about the network. It is
+    still bounded and safe: it prefers a forward/intent label, NEVER taps a
+    destructive one (`_EXPLORE_DENY`), and never re-taps a center already pressed
+    (the screen would not have changed, or the drive would loop). Pure policy; the
+    driver owns the device and records every tap it makes."""
+    if not targets:
+        return None, "no tappable widget in the hierarchy"
+    fresh = [t for t in targets if tuple(t["center"]) not in tapped_centers]
+    if not fresh:
+        return None, "every tappable widget has already been tapped this drive"
+    safe = [
+        t for t in fresh
+        if not any(d in t["label"].strip().lower() for d in _EXPLORE_DENY)
+    ]
+    if not safe:
+        return None, ("the only un-tapped widgets name a destructive action "
+                      "(delete/logout/pay/...) - refusing to tap them")
+    for t in safe:
+        lbl = t["label"].strip().lower()
+        if lbl in _INTENT_LABELS or any(w in lbl for w in _INTENT_LABELS):
+            return t, "label-match"
+    # No intent label: take the first safe, un-tapped target in the dump's
+    # document order (deterministic for a given screen).
+    return safe[0], "explore"
+
+
 def dump_ui_targets(serial: str, adb: str | None = None) -> dict:
     """A FRESH uiautomator dump's tap targets: {"targets", "measured", "reason",
     "hierarchy"} - `hierarchy` being the census of what was read, or None when

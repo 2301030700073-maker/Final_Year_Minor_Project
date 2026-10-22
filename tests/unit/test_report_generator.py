@@ -3278,13 +3278,15 @@ def test_generate_report_unmeasured_liveness_claims_nothing_about_the_app(tmp_pa
 # --- ADR-0011: the deterministic UI drive's record reaches the report ---------
 
 
-def _drive_record(tapped, reason=None, label="START", attempted=None):
-    """Mirrors the three records _drive_ui actually returns: a landed tap, a tap
-    that was issued and failed, and a refusal that was never issued at all."""
+def _drive_record(tapped, reason=None, label="START", attempted=None, tap_count=1):
+    """Mirrors the records _drive_ui_explore returns: a landed tap, a tap that was
+    issued and failed, and a refusal that was never issued at all. `tap_count` is
+    how many controls the exploratory drive pressed (1 for a single-tap record)."""
     if attempted is None:
         attempted = tapped
     if tapped:
         return {"attempted": True, "tapped": True, "selected_by": "intent label `start`",
+                "tap_count": tap_count,
                 "target": {"label": label, "bounds": "[600,2200][840,2418]",
                            "center": (720, 2309)}, "reason": None}
     if attempted:
@@ -3373,9 +3375,17 @@ def test_a_tap_is_named_as_the_cause_of_part_of_the_captured_traffic(tmp_path):
     """A driven run's flows are partly flows the tool itself caused. The report
     says so rather than implying the app produced them all on its own."""
     body = _render_liveness(tmp_path, _flows_stage(_drive_record(True)), "tapped")
-    assert "drove the app with **one tap**" in body
-    assert "**the tool's own tap caused**" in body
+    assert "drove the app with **1 tap(s)**" in body
+    assert "**the tool's own taps caused**" in body
     assert "`START`" in body
+
+
+def test_a_multi_tap_drive_names_the_count(tmp_path):
+    """An exploratory drive that walked several controls says how many it pressed,
+    so the reader knows the traffic is partly several tool-caused taps."""
+    body = _render_liveness(tmp_path, _flows_stage(_drive_record(True, tap_count=4)), "tapped")
+    assert "drove the app with **4 tap(s)**" in body
+    assert "**the tool's own taps caused**" in body
 
 
 def test_an_empty_capture_after_a_tap_says_the_gated_screen_was_reached(tmp_path):

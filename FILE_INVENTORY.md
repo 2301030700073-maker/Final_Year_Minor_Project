@@ -1,7 +1,7 @@
 # Complete File Inventory
 
 Generated: 2026-10-22
-All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 340 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
+All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 341 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
 
 ```
 .gitattributes
@@ -189,6 +189,7 @@ tests/fixtures/apksigner_3400_propertyguru.txt
 tests/unit/_apk_fixtures.py
 tests/unit/conftest.py
 tests/unit/test_ai_bypass.py
+tests/unit/test_ai_bypass_apk.py
 tests/unit/test_androgoat_success_check.py
 tests/unit/test_androguard_scanner.py
 tests/unit/test_attestation.py

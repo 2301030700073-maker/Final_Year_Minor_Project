@@ -26,6 +26,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import urllib.request
 import urllib.error
 from typing import Any
@@ -355,6 +356,23 @@ def _find_claude_binary() -> str | None:
     return None
 
 
+# Markers of a TRANSIENT gateway outage (not a real failure): a third-party router
+# (e.g. AgentRouter serving deepseek-v4-flash) returns these when its upstream
+# channel for the model is briefly unavailable - "503 ... 无可用渠道" observed live.
+_TRANSIENT_GATEWAY_MARKERS = (
+    "503", "429", "无可用渠道", "no available channel", "rate limit",
+    "overloaded", "temporarily unavailable", "service unavailable",
+    "try again", "attempt ",
+)
+
+
+def _is_transient_gateway_error(detail: str) -> bool:
+    """True when a ``claude -p`` failure is a transient gateway outage worth
+    retrying, not a permanent auth/script error (which must still raise)."""
+    low = detail.lower()
+    return any(m in low for m in _TRANSIENT_GATEWAY_MARKERS)
+
+
 class ClaudeCliClient:
     """Model backend that drives the locally-installed, already-authenticated
     Claude Code CLI non-interactively (``claude -p``) instead of calling an HTTP
@@ -433,18 +451,30 @@ class ClaudeCliClient:
             "--allowedTools", _resolve_env("CLAUDE_ALLOWED_TOOLS", ""),
         ]
         env = self._build_env()
-        try:
-            proc = subprocess.run(
-                cmd, env=env, capture_output=True, text=True, timeout=self.timeout
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(
-                f"Claude CLI timed out after {self.timeout}s"
-            ) from exc
-        if proc.returncode != 0:
+        # A third-party gateway (e.g. AgentRouter serving deepseek-v4-flash) returns
+        # a transient 503/429 "no available channel" when its upstream channel is
+        # briefly unavailable - observed live. That is NOT a script/auth failure, so
+        # it must not abort a whole ai-bypass run. Retry bounded with backoff; a
+        # permanent error (401/400/...) or an exhausted retry still raises.
+        last_err = ""
+        for attempt in range(3):
+            try:
+                proc = subprocess.run(
+                    cmd, env=env, capture_output=True, text=True, timeout=self.timeout
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError(
+                    f"Claude CLI timed out after {self.timeout}s"
+                ) from exc
+            if proc.returncode == 0:
+                return proc.stdout
             detail = (proc.stderr or proc.stdout).strip()
-            raise RuntimeError(f"Claude CLI failed (rc={proc.returncode}): {detail}")
-        return proc.stdout
+            last_err = f"Claude CLI failed (rc={proc.returncode}): {detail}"
+            if attempt < 2 and _is_transient_gateway_error(detail):
+                time.sleep(3 * (attempt + 1))
+                continue
+            raise RuntimeError(last_err)
+        raise RuntimeError(last_err)
 
     # -- the same surface as ChatClient -------------------------------------
     def chat(

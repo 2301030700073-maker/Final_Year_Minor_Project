@@ -5080,10 +5080,16 @@ _AI_ALLOWED_JUSTIFICATIONS = {
 @app.command("ai-bypass")
 def ai_bypass_cmd(
     package: str = typer.Option(
-        ..., "--package", help="Target app package name (e.g. sq.rog.owasp.uncrackable1)."),
+        "", "--package",
+        help="Target app package name. Optional when --apk is given (derived from the APK)."),
     decompile_dir: str = typer.Option(
-        ..., "--decompile-dir",
-        help="Root of the app's decompiled output (jadx sources / smali / cfr)."),
+        "", "--decompile-dir",
+        help="Root of an ALREADY-decompiled app (jadx sources / smali / cfr). "
+             "Omit it and pass --apk to decompile from scratch."),
+    apk: str = typer.Option(
+        "", "--apk",
+        help="APK path: decompile it from scratch (no sha256 folder to hunt for) and "
+             "derive --package automatically. This is the 'use AI from scratch' path."),
     device: str = typer.Option(
         "", "--device", help="Emulator/device serial (defaults to first online)."),
     action: str = typer.Option(
@@ -5116,6 +5122,46 @@ def ai_bypass_cmd(
         raise typer.Exit(code=2)
     if action not in _AI_ACTION_MAP:
         typer.echo(f"REFUSED: --action must be one of {list(_AI_ACTION_MAP)}.", err=True)
+        raise typer.Exit(code=2)
+
+    # --use-ai from scratch: --apk decompiles the app itself (no opaque sha256
+    # folder for the operator to hunt for) and derives the package name. Passing
+    # --decompile-dir + --package still works for an already-decompiled tree.
+    if apk and not decompile_dir:
+        apk_path = Path(apk)
+        if not apk_path.exists():
+            typer.echo(f"ERROR: --apk not found: {apk_path}", err=True)
+            raise typer.Exit(code=2)
+        typer.echo(f"Decompiling {apk_path.name} from scratch (no sha256 folder needed) ...")
+        try:
+            prehashed = compute_hashes(apk_path)
+            sha = prehashed.sha256
+            jadx_dir = Path(ANALYSIS_ROOT) / sha / "jadx"
+            if not jadx_dir.exists():
+                existing = existing_metadata(ANALYSIS_ROOT, sha)
+                ingest(apk_path, reuse_metadata=existing, precomputed_hashes=prehashed)
+                dec = decompile(apk_path, ANALYSIS_ROOT, sha)
+                if dec.status == "failed":
+                    typer.echo(f"ERROR: decompile failed: {dec.error}", err=True)
+                    raise typer.Exit(code=1)
+                jadx_dir = Path(dec.evidence["jadx_output"])
+            decompile_dir = str(jadx_dir)
+            if not package:
+                existing = existing_metadata(ANALYSIS_ROOT, sha)
+                ingest_result = ingest(apk_path, reuse_metadata=existing,
+                                       precomputed_hashes=prehashed)
+                package = ingest_result.evidence["package"]["package_name"]
+        except typer.Exit:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            typer.echo(
+                f"ERROR: decompile/ingest failed: {type(exc).__name__}: {exc}", err=True)
+            raise typer.Exit(code=1)
+        typer.echo(f"  app={package}  decompiled={decompile_dir}")
+    if not decompile_dir or not package:
+        typer.echo(
+            "REFUSED: provide --apk (decompile from scratch) OR both "
+            "--decompile-dir and --package.", err=True)
         raise typer.Exit(code=2)
 
     try:
@@ -5161,9 +5207,27 @@ def ai_bypass_cmd(
         return classify_dynamic_run_once(result)
 
     typer.echo(f"Running AI repair loop (max {max_iter} iterations) on {device or 'default device'} ...")
-    res = repair_loop(
-        bundle, client, run_once=_run_once, action=action, max_iter=max_iter,
-        echo=typer.echo)
+    try:
+        res = repair_loop(
+            bundle, client, run_once=_run_once, action=action, max_iter=max_iter,
+            echo=typer.echo)
+    except RuntimeError as exc:
+        # Surface the EXACT model/gateway error so the operator knows why it
+        # failed - this is NOT a bypass result, and must never look like one.
+        typer.echo("=" * 60, err=True)
+        typer.echo(
+            "AI BACKEND ERROR - the model/gateway call failed (NOT a bypass result):",
+            err=True)
+        typer.echo(f"  {exc}", err=True)
+        typer.echo("Common causes:", err=True)
+        typer.echo(
+            "  - AgentRouter '503 ... 无可用渠道' (model channel temporarily down) -> retry",
+            err=True)
+        typer.echo(
+            "  - 401 'unauthorized client' (wrong ANTHROPIC_AUTH_TOKEN / base URL)",
+            err=True)
+        typer.echo("  - 'timed out' (gateway slow) -> retry", err=True)
+        raise typer.Exit(code=4)
 
     typer.echo("=" * 60)
     typer.echo(f"target           : {res.target}")

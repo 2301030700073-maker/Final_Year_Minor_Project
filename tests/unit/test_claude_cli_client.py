@@ -161,3 +161,68 @@ def test_claude_cli_client_shell_env_wins_over_dotenv(monkeypatch):
     client = ClaudeCliClient(binary="/opt/claude")
     client.complete_json("SYS", "USER")
     assert captured["env"]["ANTHROPIC_AUTH_TOKEN"] == "sk-from-shell"
+
+
+
+def test_is_transient_gateway_error():
+    from ai.client import _is_transient_gateway_error
+    # A third-party router's transient outage - worth retrying.
+    assert _is_transient_gateway_error("503 \u5f53\u524d\u5206\u7ec4 core \u4e0b\u5bf9\u4e8e\u6a21\u578b deepseek-v4-flash \u65e0\u53ef\u7528\u6e20\u9053")
+    assert _is_transient_gateway_error("429 rate limit exceeded")
+    assert _is_transient_gateway_error("overloaded, please try again")
+    # Permanent auth/script errors - must NOT be retried.
+    assert not _is_transient_gateway_error("401 unauthorized client")
+    assert not _is_transient_gateway_error("400 bad request")
+    assert not _is_transient_gateway_error("model not recognized")
+
+
+def test_claude_cli_client_retries_transient_gateway_error(monkeypatch):
+    import ai.client as ac
+    calls = {"n": 0}
+
+    def fake_run(cmd, **kw):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return _FakeCompleted(stdout="", stderr="503 no available channel", returncode=1)
+        return _FakeCompleted(stdout=_GOOD_JSON)
+
+    monkeypatch.setattr(ac.subprocess, "run", fake_run)
+    monkeypatch.setattr(ac.time, "sleep", lambda s: None)
+    client = ClaudeCliClient(binary="/opt/claude", timeout=10)
+    data = client.complete_json("SYS", "USER")
+    assert calls["n"] == 3
+    assert data["script"] == "Java.perform(function(){});"
+
+
+def test_claude_cli_client_raises_after_exhausting_retries(monkeypatch):
+    import ai.client as ac
+    calls = {"n": 0}
+
+    def fake_run(cmd, **kw):
+        calls["n"] += 1
+        return _FakeCompleted(stdout="", stderr="503 no available channel", returncode=1)
+
+    monkeypatch.setattr(ac.subprocess, "run", fake_run)
+    monkeypatch.setattr(ac.time, "sleep", lambda s: None)
+    client = ClaudeCliClient(binary="/opt/claude", timeout=10)
+    import pytest
+    with pytest.raises(RuntimeError):
+        client.complete_json("SYS", "USER")
+    assert calls["n"] == 3  # bounded: 3 attempts, then raise
+
+
+def test_claude_cli_client_does_not_retry_permanent_error(monkeypatch):
+    import ai.client as ac
+    calls = {"n": 0}
+
+    def fake_run(cmd, **kw):
+        calls["n"] += 1
+        return _FakeCompleted(stdout="", stderr="401 unauthorized client", returncode=1)
+
+    monkeypatch.setattr(ac.subprocess, "run", fake_run)
+    monkeypatch.setattr(ac.time, "sleep", lambda s: None)
+    client = ClaudeCliClient(binary="/opt/claude", timeout=10)
+    import pytest
+    with pytest.raises(RuntimeError):
+        client.complete_json("SYS", "USER")
+    assert calls["n"] == 1  # a permanent error raises immediately, no retry

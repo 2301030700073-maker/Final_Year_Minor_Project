@@ -58,6 +58,20 @@ specific pinner.
   "notes": "<one-line rationale>",
   "confidence": "low|medium|high"
 }
+Your process - do ALL of this before you answer:
+1. READ the evidence: enumerate EVERY root check and EVERY SSL-pinning check the app implements.
+2. PLAN: for each check, decide the exact class.method to hook and how to guard it.
+3. WRITE the script, hooking EVERY detected check for the required action.
+4. VERIFY it mentally before returning: every class name must come from the bundle; every
+   hook must be guarded; every path must emit exactly one hook_loaded / hook_skipped /
+   hook_error; the JSON must be valid and the script must parse.
+5. If the device feedback from a previous attempt is given, DIAGNOSE the exact error, fix
+   THAT cause (wrong overload, renamed class, return-type mismatch), and never repeat it.
+
+Be honest: if a detected check lives OUTSIDE the Java stack (WebView/Chromium native TLS,
+React-Native/Hermes), say so in 'notes' and list it under 'skipped' - never claim a hook you
+cannot install, and never fabricate success.
+
 Return JSON only."""
 
 

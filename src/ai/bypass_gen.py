@@ -49,6 +49,16 @@ hook_skipped (NOT hook_error) and list it under 'skipped'.
 layer, NOT the platform/system trust manager:
    - okhttp3.CertificatePinner.check -> return (accept any pinned host)
    - okhttp3.internal.tls.OkHostnameVerifier.verify -> return true
+   - ALWAYS also install a permissive X509TrustManager via javax.net.ssl.SSLContext.init \
+so the app accepts the capture proxy's mitmproxy CA even when it uses a CUSTOM/limited \
+trust store (a custom store rejects the system-CA install; VERIFIED on PropertyGuru, \
+which decrypted ONLY after this catch-all): Java.registerClass implementing \
+javax.net.ssl.X509TrustManager with no-op checkServerTrusted/checkClientTrusted and an \
+empty getAcceptedIssuers, then in the SSLContext.init(km,tm,sr) overload call this.init(km, \
+Java.array('javax.net.ssl.TrustManager',[permissive.$new()]), sr). This is a CUSTOM \
+TrustManager (NOT the system Conscrypt one), so it is SAFE - no native handshake path, no \
+return-type crash - and it is what makes the app's real TLS DECRYPT through the proxy. \
+Hook the pinner/hostname layer AND this catch-all together.
    - Only if the bundle shows the app implements its OWN X509TrustManager, hook THAT \
 class. Do NOT blanket-patch the platform's com.android.org.conscrypt.TrustManagerImpl: \
 it is the SYSTEM trust manager (standard cert validation), so a TRUSTED test CA already \

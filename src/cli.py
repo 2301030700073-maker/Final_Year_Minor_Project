@@ -5100,6 +5100,11 @@ def ai_bypass_cmd(
              "ACADEMIC_TRAINING_TARGET, optionally followed by a note."),
     max_iter: int = typer.Option(
         5, "--max-iter", help="Max generate -> run -> revise iterations."),
+    verify_traffic: bool = typer.Option(
+        False, "--verify-traffic",
+        help="After the AI converges on hooks, run the capture stage with its script to "
+             "PROVE the app's real traffic decrypts (the FULL bypass). Reports honestly when "
+             "the traffic does not decrypt (pinning not bypassed / app-silent / WebView TLS)."),
 ) -> None:
     """Generate a tailored root/SSL-pinning bypass for ONE app, run it on the
     emulator, capture where it fails, and let the model revise - bounded.
@@ -5238,6 +5243,34 @@ def ai_bypass_cmd(
     for h in res.history:
         typer.echo(f"  - {h}")
     typer.echo("REMINDER: AI-generated script is flagged for HUMAN REVIEW before use.")
+
+    # --verify-traffic: the FULL-bypass proof. "converged" above only means the script's hooks
+    # LOADED. This step routes the app's real traffic through mitmproxy WITH that script and
+    # checks whether the request actually DECRYPTS. Decrypted -> the bypass is fully proven;
+    # not -> say so honestly (hooks loaded but the real TLS path was not neutralized: pinning
+    # elsewhere, app-silent, or WebView/Chromium-native TLS).
+    if verify_traffic and res.converged and res.saved_path:
+        typer.echo("=" * 60)
+        typer.echo("VERIFY TRAFFIC - running the capture stage with the AI script ...")
+        try:
+            src = Path(res.saved_path).read_text(encoding="utf-8")
+            out = Path(decompile_dir).parent / "ai_capture"
+            cap = mitmproxy_capture.run_capture_stage(
+                serial=device, package=package, out_dir=out,
+                bypass_source=src, drive_ui=True,
+            )
+            flows = (cap.evidence or {}).get("flows_count", 0)
+            typer.echo(f"  capture status={cap.status}; flows={flows}")
+            if flows and int(flows) > 0:
+                typer.echo(
+                    f"  RESULT: TRAFFIC DECRYPTED ({flows} flow(s)) - FULL bypass verified on-device.")
+            else:
+                typer.echo(
+                    "  RESULT: NO TRAFFIC DECRYPTED - the script's hooks LOADED but the app's "
+                    "real request did not decrypt (pinning not bypassed / app-silent / "
+                    "WebView-native TLS). This is NOT a full bypass - reported honestly.")
+        except Exception as exc:  # noqa: BLE001
+            typer.echo(f"  VERIFY-TRAFFIC ERROR: {type(exc).__name__}: {exc}", err=True)
 
 
 if __name__ == "__main__":

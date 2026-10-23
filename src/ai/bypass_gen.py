@@ -42,9 +42,11 @@ class lookup) and emit exactly one structured line:
    - target present but the hook THREW: send({type:'hook_error', name:'<method>', error:String(e)})
 3. Wrap the whole body in a top-level try/catch that sends \
 {type:'script_error', error:String(e)} before rethrowing.
-4. Hook ONLY the methods/classes present in the evidence bundle. Do NOT invent \
-class names not listed. If a class is not present on the device, emit \
-hook_skipped (NOT hook_error) and list it under 'skipped'.
+4. Hook the app-specific checks from the evidence bundle. ADDITIONALLY, ALWAYS hook the \
+STANDARD Android SSL/TLS stack listed in constraint 5 (SSLContext, HttpsURLConnection, \
+okhttp3, com.android.okhttp, conscrypt) - these exist on every device, so hook them GUARDED \
+even if not named in the bundle, emitting hook_skipped for any that are absent. Do NOT \
+invent any OTHER class names not listed.
 5. Prefer the least invasive override. For SSL pinning hook the APP's own pinning \
 layer, NOT the platform/system trust manager:
    - okhttp3.CertificatePinner.check -> return (accept any pinned host)
@@ -59,6 +61,18 @@ Java.array('javax.net.ssl.TrustManager',[permissive.$new()]), sr). This is a CUS
 TrustManager (NOT the system Conscrypt one), so it is SAFE - no native handshake path, no \
 return-type crash - and it is what makes the app's real TLS DECRYPT through the proxy. \
 Hook the pinner/hostname layer AND this catch-all together.
+   - The app may use the ANDROID PLATFORM HTTP/TLS stack instead of standalone okhttp3 \
+(production apps such as Spotify do - its okhttp3 hooks were skipped and it stayed at 0 \
+flows). So ALSO hook, GUARDED (try/Java.use, emit hook_skipped if absent): \
+com.android.okhttp.internal.tls.OkHostnameVerifier.verify -> return true, and \
+javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier -> a HostnameVerifier whose \
+verify returns true.
+   - If the app talks to Conscrypt DIRECTLY (SSLContext.init alone is then insufficient - \
+the Spotify 0-flow case), ALSO hook Conscrypt RETURN-TYPE-SAFE (constraint 6 is mandatory \
+here): the VOID com.android.org.conscrypt.TrustManagerImpl.checkServerTrusted overload -> \
+return (no-op); .checkTrusted and .checkTrustedRecursive -> return an empty \
+java.util.ArrayList. Keep these minimal and return-type-correct - they sit on the native \
+TLS handshake path, so a wrong return type crashes the app.
    - Only if the bundle shows the app implements its OWN X509TrustManager, hook THAT \
 class. Do NOT blanket-patch the platform's com.android.org.conscrypt.TrustManagerImpl: \
 it is the SYSTEM trust manager (standard cert validation), so a TRUSTED test CA already \

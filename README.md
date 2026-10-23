@@ -363,38 +363,167 @@ Two model backends, selected by `AI_BACKEND`:
   TaoToken/agentrouter-style unified-key path.
 - **`claude-cli`** — drives the locally-installed, already-authenticated
   **Claude Code CLI** non-interactively (`claude -p`). No separate project key is
-  needed: it inherits your existing provider config (e.g. a third-party
-  `deepseek-v4-flash` gateway). The subprocess is locked to `--allowedTools ''`
-  so it can only return text, never touch the filesystem or run commands
-  (ADR-0004 — human review still applies to the saved artifact). For
-  **non-interactive launches** (cron, CI, systemd, `wsl.exe bash -lc`) where your
-  `~/.bashrc` exports are not sourced, the same `ANTHROPIC_BASE_URL` /
-  `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `CLAUDE_ALLOWED_TOOLS` are also
-  read from the project's gitignored `.env`, so the backend self-bootstraps its
-  provider config from any launch context.
+  needed: it inherits your existing provider config (e.g. a third-party gateway
+  such as `deepseek-flash` configured in your Claude Code `settings.json`). The
+  subprocess is locked to `--allowedTools ''` so it can only return text, never
+  touch the filesystem or run commands (ADR-0004 — human review still applies to
+  the saved artifact). The CLI it launches is resolved in this order: the explicit
+  `CLAUDE_BIN` env var → `claude` on `PATH` → an fnm-managed install. On this
+  reference box the executable is vendored at
+  `/mnt/c/home/ubuntu/.local/node_modules/@anthropic-ai/claude-code/bin/claude.exe`,
+  so `CLAUDE_BIN` is set explicitly. For **non-interactive launches**
+  (`wsl.exe bash -lc`, cron, CI) where `~/.bashrc` exports are not sourced, the
+  same `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` /
+  `CLAUDE_ALLOWED_TOOLS` are also read from the project's gitignored `.env`, so
+  the backend self-bootstraps its provider config from any launch context.
 
-Example invocations:
+### One-time environment (per shell) for the `claude-cli` backend
 
 ```bash
-# Backend A — HTTP key (default):
-AI_API_KEY=... AI_BASE_URL=https://taotoken.net/api/v1 AI_MODEL=deepseek-v4-flash \
-  AI_ALLOW_AUTHORIZED_TARGET=1 uv run python -m cli ai-bypass \
-  --package com.example.app --decompile-dir /path/to/decompile --justification ACADEMIC_TRAINING_TARGET
-
-# Backend B — reuse your interactive Claude Code auth (no project key):
-export CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1   # your settings.json model is not in CC's catalog
-AI_BACKEND=claude-cli AI_ALLOW_AUTHORIZED_TARGET=1 \
-  uv run python -m cli ai-bypass \
-  --package com.example.app --decompile-dir /path/to/decompile --justification ACADEMIC_TRAINING_TARGET
+cd /home/ubuntu/Testing/Final_Year_Minor_Project
+export AI_BACKEND=claude-cli
+export CLAUDE_BIN=/mnt/c/home/ubuntu/.local/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+export AI_ALLOW_AUTHORIZED_TARGET=1
+export PYTHONPATH=src
+# The model itself comes from your Claude Code settings.json (validated runs used
+# `deepseek-flash` via the AgentRouter gateway); nothing else to export.
 ```
+
+### Example invocations (real values, validated on this reference box)
+
+```bash
+# 1) AI bypass from scratch — no pre-decompiled folder needed; decompiles the APK,
+#    generates a tailored Frida script, runs it on the emulator, self-repairs:
+.venv/bin/python3 src/cli.py ai-bypass \
+  --apk APK_Test/jerboa.apk \
+  --justification ACADEMIC_TRAINING_TARGET \
+  --action SSL_ONLY \
+  --device emulator-5554
+
+# 2) Same, but PROVE the real traffic decrypts (the full bypass) with --verify-traffic:
+.venv/bin/python3 src/cli.py ai-bypass \
+  --apk APK_Test/jerboa.apk \
+  --justification ACADEMIC_TRAINING_TARGET \
+  --action SSL_ONLY --device emulator-5554 --verify-traffic
+
+# 3) If you already have a package id + pre-decompiled dir (outputs/analysis/<sha256>/jadx):
+.venv/bin/python3 src/cli.py ai-bypass \
+  --package com.jerboa --decompile-dir outputs/analysis/<sha256>/jadx \
+  --justification ACADEMIC_TRAINING_TARGET --action SSL_ONLY --device emulator-5554
+```
+
+(`uv run python -m cli ai-bypass …` works identically — add `PYTHONPATH=src`
+and the `AI_*` / `CLAUDE_BIN` exports above.)
+
+### What `ai-bypass` actually does — the agentic, self-repairing loop
+
+It is not a one-shot code emitter. The system prompt in `src/ai/bypass_gen.py`
+forces a disciplined agentic process, and the orchestration in `src/ai/repair_loop.py`
+runs it as a bounded generate → run → diagnose → revise loop:
+
+1. **READ** — `build_evidence_bundle` pulls the APK's *own* root/SSL-pinning code
+   from the decompile (regions + files scanned).
+2. **PLAN + WRITE** — the model writes a Frida script hooking exactly those
+   checks (one `hook_loaded`/`hook_skipped`/`hook_error` send per path).
+3. **RUN on device** — `run_dynamic_stage` cold-starts the app under Frida and
+   collects `hook_loaded / hook_skipped / hook_error` + any runtime error strings.
+4. **DECIDE from device evidence** — `classify_dynamic_run_once` sets
+   `ok = (≥1 hook loaded) AND (0 real errors)`. It does **not** trust the model's
+   own `confidence` field.
+5. **DIAGNOSE-AND-REPAIR** — on a non-`ok` run, the *exact* device errors are
+   fed back to the model and it revises (bounded by `--max-iter`, default 5).
+   This is where "the model solves itself" lives: e.g. a bad return-type hook or
+   a wrong method signature is corrected on the next iteration, not reported as a
+   success.
+6. **RE-VERIFY (optional, `--verify-traffic`)** — once hooks load, the capture
+   stage routes the app's **real** TLS traffic through mitmproxy *with that
+   script* and checks whether it actually **decrypts**. Decrypted → the bypass
+   is fully proven; not → reported honestly (never faked).
+
+The generated script is written to `src/dynamic/scripts/ai_generated/<package>.js`
+and flagged for human review — it is never silently trusted in a verdict.
+
+### `--verify-traffic`: the full bypass proof
+
+Without it, `ai-bypass` only proves the script's hooks *loaded*. With it, the run
+continues into `mitmproxy_capture.run_capture_stage(bypass_source=…, drive_ui=True)`
+and reports one of:
+
+- `TRAFFIC DECRYPTED (N flow(s)) — FULL bypass verified on-device.` (real proof)
+- `NO TRAFFIC DECRYPTED — the script's hooks LOADED but the app's real request
+  did not decrypt (pinning not bypassed / app-silent / WebView-native TLS). This
+  is NOT a full bypass — reported honestly.`
+
+The capture stage never fabricates a flow list (principle 3): zero flows is
+always reported with its recorded reason.
+
+### Validated on real apps (this reference box, `deepseek-flash`, emulator-5554)
+
+| App | converged | iter | hooks loaded | self-repair seen | `--verify-traffic` result |
+|---|---|---|---|---|---|
+| `RS_Vapour.apk` | ✅ | 1 | 2 | — | honest `NO TRAFFIC DECRYPTED` (training app makes no server call) |
+| `jerboa` (Lemmy client) | ✅ | 1 | 2 (2 skipped) | (earlier iter1→iter2 fix) | ✅ **`TRAFFIC DECRYPTED` — 4 flows** |
+| `spotify-9.1.84.apk` | ✅ | 1 | 4 | — | (capture not run) |
+| `AndroGoat.apk` | ✅ | — | 5 | — | (capture not run) |
+| `InsecureBankv2.apk` | ✅ | — | 5 (1 skipped) | — | (capture not run) |
+| `propertyguru-2026-5-4.apk` | ✅ | — | — | ✅ return-type error → fixed | (capture not run) |
+| `RS_CertPinning.apk` | ✅ | 2 | 4 (1 skipped) | ✅ iter1 fail → iter2 fix | (capture not run) |
+| `UnCrackable-Level1.apk` | ✅ | 1 | 1 | — | (capture not run) |
+| `file-manager-13-foss-release.apk` | ✅ | 3 | 2 (1 skipped) | ✅ iter1→iter3 self-repair | (capture not run) |
+| `deckers.thibault.aves.libre` (image viewer) | ✅ | 2 | 2 (1 skipped) | ✅ iter1→iter2 fix | (capture not run) |
+| `UnCrackable-Level2.apk` | ⚠️ | 2 | 3 installed + fired | iter1→iter2 fix attempt | model gateway timed out at iter-2 revision; hooks had already neutralized the checks on-device |
+| `UnCrackable-Level3.apk` | ⚠️ | 2 | 8 (all fired/neutralized) | iter1 fail → iter2 fix | model gateway timed out at iter-2 revision; not a clean converge — retry likely passes |
+| `kisoku-release.apk` | ⚠️ refused | — | — | — | honest refusal: no root/SSL-pinning regions found in the decompile; script generation refused (correct) |
+
+All runs: `hook_errors=0`. The two ⚠️ UnCrackable rows are **transient
+model-gateway timeouts** (Claude CLI 300 s), not logic failures — at the moment of
+timeout the AI's hooks had already loaded and *fired* (neutralized the checks) on
+the device; a retry would most likely converge. `jerboa` is the canonical
+end-to-end proof that the AI generates a working script **and** the app's real TLS
+traffic decrypts with it; `RS_Vapour` proves the honest negative path;
+`kisoku` proves the honest refusal when there is nothing to bypass.
 
 Headless Claude Code generally (to have Claude *perform tasks* automatically,
 not just generate a script): `claude -p "your task" --dangerously-skip-permissions`
 runs the agent end-to-end with no human in the loop and prints a summary. For a
-model not in Claude Code's catalog (the `deepseek-v4-flash` third-party gateway),
+model not in Claude Code's catalog (the `deepseek-flash` third-party gateway),
 also export `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1`, and make sure
 `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` for that gateway are present in the
 shell that launches it.
+
+## Workflow modes at a glance
+
+Every mode is a single command. Pick the one that matches what you are demonstrating.
+
+| Mode | Command (essentials) | Device needed | What it proves |
+|---|---|---|---|
+| **Static only** | `run --apk … --justification … --skip-dynamic` | No | Signature/decision-engine verdict (root/SSL detected). No bypass attempted. |
+| **Static + dynamic** | `run --apk … --justification … --device emulator-5554` | Yes (root) | The hand-authored/synthesized script's hooks fire on-device → `bypassed=True`. |
+| **Static + dynamic + capture** | `run … --device emulator-5554 --capture-traffic` | Yes (root + mitmproxy on Windows host) | The app's **real** TLS traffic decrypts through mitmproxy (SSL-bypass evidence in the report). |
+| **AI bypass** | `ai-bypass --apk … --justification … --action SSL_ONLY --device emulator-5554` | Yes (root) | The model writes a *tailored* script from the APK's own code, runs it, **self-repairs** until hooks load (`converged`). |
+| **AI bypass + full proof** | `ai-bypass … --verify-traffic` | Yes (root + mitmproxy) | Same as AI bypass, then the capture stage proves the app's real traffic **decrypts** with the AI script. |
+
+Combination notes:
+- `run` (deterministic) and `ai-bypass` (model-generated) are **separate entry points**. `run` uses hand-authored/synthesized bypass scripts; `ai-bypass` generates a new one per APK and is gated behind `AI_ALLOW_AUTHORIZED_TARGET=1`.
+- `--capture-traffic` (on `run`) and `--verify-traffic` (on `ai-bypass`) are the *same* capture stage; the latter additionally loads the AI-generated script into the capture window, so it proves the AI's bypass specifically.
+- The AI script from `ai-bypass` is saved to `src/dynamic/scripts/ai_generated/<package>.js` and is flagged for human review; the two layers compose.
+
+Real end-to-end example (jerboa, `deepseek-flash` via the `claude-cli` backend, emulator-5554):
+
+```
+$ .venv/bin/python3 src/cli.py ai-bypass --apk APK_Test/jerboa.apk \
+    --justification ACADEMIC_TRAINING_TARGET --action SSL_ONLY \
+    --device emulator-5554 --verify-traffic
+...
+[iter 1/5] generating bypass script via model ...
+  model returned 2885 chars; hooks=[...]; confidence=medium
+[iter 1/5] running script on device ...
+  feedback: ok=True; hook_loaded=2; hook_skipped=2; hook_errors=0
+[iter 1/5] converged: script ran cleanly on device.
+VERIFY TRAFFIC - running the capture stage with the AI script ...
+  capture status=success; flows=4
+  RESULT: TRAFFIC DECRYPTED (4 flow(s)) - FULL bypass verified on-device.
+```
 
 ## Reporting results back
 

@@ -4,7 +4,7 @@
 set -u
 cd /home/ubuntu/Testing/Final_Year_Minor_Project
 export AI_BACKEND=claude-cli
-export CLAUDE_BIN=/mnt/c/home/ubuntu/.local/node_modules/@anthropic-ai/claude-code-win32-x64/claude.exe
+export CLAUDE_BIN=/mnt/c/home/ubuntu/.local/node_modules/@anthropic-ai/claude-code/bin/claude.exe
 export AI_ALLOW_AUTHORIZED_TARGET=1
 export PYTHONPATH=src
 PKG="$1"

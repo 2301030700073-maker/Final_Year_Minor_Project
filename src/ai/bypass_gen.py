@@ -45,12 +45,26 @@ class lookup) and emit exactly one structured line:
 4. Hook ONLY the methods/classes present in the evidence bundle. Do NOT invent \
 class names not listed. If a class is not present on the device, emit \
 hook_skipped (NOT hook_error) and list it under 'skipped'.
-5. Prefer the least invasive override: for SSL pinning, neutralize \
-X509TrustManager.checkServerTrusted / TrustManagerImpl and OkHttp \
-CertificatePinner.check; for root, neutralize the specific isDeviceRooted/RootBeer \
-checks found. Do not disable all TLS globally unless the bundle shows no \
-specific pinner.
-6. Respond with STRICT JSON only, no prose, no markdown fence:
+5. Prefer the least invasive override. For SSL pinning hook the APP's own pinning \
+layer, NOT the platform/system trust manager:
+   - okhttp3.CertificatePinner.check -> return (accept any pinned host)
+   - okhttp3.internal.tls.OkHostnameVerifier.verify -> return true
+   - Only if the bundle shows the app implements its OWN X509TrustManager, hook THAT \
+class. Do NOT blanket-patch the platform's com.android.org.conscrypt.TrustManagerImpl: \
+it is the SYSTEM trust manager (standard cert validation), so a TRUSTED test CA already \
+passes with no hook at all, AND it sits on the native TLS handshake path where a bad \
+hook CRASHES the app (frida-agent SIGSEGV, or a return-type throw). For root, \
+neutralize the specific isDeviceRooted/RootBeer checks found. Do not disable all TLS \
+globally unless the bundle shows no specific pinner.
+6. RETURN TYPES MUST MATCH, PER OVERLOAD. When you replace a method, your implementation \
+must return exactly that overload's declared return type. A mismatch is a RUNTIME crash, \
+not a no-op: frida-java-bridge throws "Implementation for <method> expected return value \
+compatible with <type>" the first time the app calls it (e.g. a void `return;` for a \
+Conscrypt checkServerTrusted/checkTrusted that returns java.util.List). Inspect each \
+overload's returnType and return a matching value (void->nothing, boolean->true, \
+java.util.List->an empty java.util.ArrayList, etc.). Prefer a helper that passes the \
+overload into your implementation factory so it can branch on returnType.
+7. Respond with STRICT JSON only, no prose, no markdown fence:
 {
   "script": "<full frida js as one string, escaped>",
   "applied_hooks": ["<method or class hooked>"],
@@ -67,6 +81,12 @@ Your process - do ALL of this before you answer:
    hook_error; the JSON must be valid and the script must parse.
 5. If the device feedback from a previous attempt is given, DIAGNOSE the exact error, fix
    THAT cause (wrong overload, renamed class, return-type mismatch), and never repeat it.
+   In particular: "expected return value compatible with <type>" means your replacement
+   returned the WRONG type for that overload - fix the return type or drop that hook; and
+   a frida-agent SIGSEGV / app crash during a real HTTPS call means you hooked the platform
+   Conscrypt TrustManagerImpl in the handshake path - move to the OkHttp CertificatePinner /
+   OkHostnameVerifier layer instead. Never keep a hook whose device error shows it kills the
+   app; a crashed app is a FAILED attempt, not a partial success.
 
 Be honest: if a detected check lives OUTSIDE the Java stack (WebView/Chromium native TLS,
 React-Native/Hermes), say so in 'notes' and list it under 'skipped' - never claim a hook you

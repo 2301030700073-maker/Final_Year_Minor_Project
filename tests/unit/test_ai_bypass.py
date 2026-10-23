@@ -333,3 +333,32 @@ def test_cli_run_once_calls_classify_directly_not_via_module_alias():
     cli_src = (Path(__file__).resolve().parents[2] / "src" / "cli.py").read_text()
     assert "repair_loop.classify_dynamic_run_once" not in cli_src
     assert "classify_dynamic_run_once(result)" in cli_src
+
+
+def test_system_prompt_encodes_crash_and_capture_lessons():
+    # Regression guard for the two real on-device defects fixed by hardening the
+    # generator prompt (SYSTEM_PROMPT). Both were reproduced this session:
+    #  (1) CRASH - a generated script replaced Conscrypt's
+    #      TrustManagerImpl.checkServerTrusted (which RETURNS java.util.List)
+    #      with a void no-op; frida-java-bridge threw "Implementation for
+    #      checkServerTrusted expected return value compatible with java.util.List"
+    #      inside the TLS handshake and killed the app (PropertyGuru "frozen on
+    #      login / not responding"). The prompt must (a) forbid blanket-patching
+    #      the platform Conscrypt system trust manager and (b) require per-
+    #      overload return-type matching, and the repair loop must treat the
+    #      frida-agent SIGSEGV as a self-repair signal.
+    #  (2) 0-FLOW CAPTURE - a pinner-only generated script left a custom-trust-
+    #      store app (PropertyGuru) rejecting the mitmproxy CA, so the capture
+    #      got 0 flows. The prompt must MANDATE the permissive SSLContext.init
+    #      X509TrustManager catch-all that makes such an app decrypt.
+    from ai.bypass_gen import SYSTEM_PROMPT
+    # (1a) never blanket-patch the platform Conscrypt system trust manager
+    assert "Do NOT blanket-patch the platform's com.android.org.conscrypt.TrustManagerImpl" in SYSTEM_PROMPT
+    # (1b) per-overload return-type matching (the exact crash signature)
+    assert "RETURN TYPES MUST MATCH, PER OVERLOAD" in SYSTEM_PROMPT
+    assert "expected return value compatible with" in SYSTEM_PROMPT
+    # (1c) the frida-agent SIGSEGV is a hard self-repair signal
+    assert "a frida-agent SIGSEGV / app crash during a real HTTPS call" in SYSTEM_PROMPT
+    # (2) always install the permissive SSLContext.init TrustManager catch-all
+    assert "ALWAYS also install a permissive X509TrustManager via javax.net.ssl.SSLContext.init" in SYSTEM_PROMPT
+    assert "javax.net.ssl.X509TrustManager" in SYSTEM_PROMPT

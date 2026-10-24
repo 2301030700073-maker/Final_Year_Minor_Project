@@ -1,7 +1,7 @@
 # Complete File Inventory
 
-Generated: 2026-10-22
-All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 341 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
+Generated: 2026-10-24
+All files tracked in git, excluding the 672 generated verification-bundle artifacts under `docs/plans/handoff/bundles/` (point-in-time evidence dumps, not source - listing them here added ~61k lines of noise and drowned the 346 real project files). Regenerate with: `git ls-files | grep -v '^docs/plans/handoff/bundles/' | sort`.
 
 ```
 .gitattributes
@@ -23,6 +23,11 @@ config/signatures/native_detection.yaml
 config/signatures/packers.yaml
 config/signatures/root_detection.yaml
 config/signatures/ssl_pinning.yaml
+deliverables/1_Review1_Presentation_Android_Root_SSL.pptx
+deliverables/2_Review1_Report_Android_Root_SSL.docx
+deliverables/3_Review1_Report_Android_Root_SSL.pdf
+deliverables/4_Research_Paper_IEEE_Format_Android_Root_SSL.docx
+deliverables/5_Research_Paper_IEEE_Format_Android_Root_SSL.pdf
 docs/execution_changes/phase-1-changes-and-lessons.md
 docs/execution_changes/phase-1-complete-system-inventory.md
 docs/execution_changes/session-2026-07-28-wsl-setup-and-frida-bridge.md

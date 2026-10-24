@@ -212,11 +212,11 @@ uv run pytest tests/unit
 
 This exercises the signature matcher and decision engine against fixtures only — if this passes, the deterministic core's logic is sound independent of whether the rest of this setup is done yet.
 
-Expected result on WSL2/Linux — **2,528 tests collected, all passing** (a machine missing an optional tool may report one or two skipped instead) (on Windows, expect the handful of POSIX-only failures noted above instead of a fully clean run). This figure is authoritative and is enforced by `tests/unit/test_ledger_suite_count.py` against both `docs/plans/audit/full-project-audit-ledger.md` and this README, so it cannot silently drift:
+Expected result on WSL2/Linux — **2,564 tests collected, all passing** (a machine missing an optional tool may report one or two skipped instead) (on Windows, expect the handful of POSIX-only failures noted above instead of a fully clean run). This figure is authoritative and is enforced by `tests/unit/test_ledger_suite_count.py` against both `docs/plans/audit/full-project-audit-ledger.md` and this README, so it cannot silently drift:
 
 ```
 $ uv run pytest tests/unit --collect-only -q | tail -1
-2528 tests collected in 1.17s
+2564 tests collected in 1.17s
 ```
 
 The count moves whenever a gap is closed; the exact collected number is recorded in `docs/plans/audit/full-project-audit-ledger.md`, which is updated with each change.
@@ -490,6 +490,196 @@ model not in Claude Code's catalog (the `deepseek-flash` third-party gateway),
 also export `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1`, and make sure
 `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` for that gateway are present in the
 shell that launches it.
+
+## Verified on review day — 2026-10-24
+
+This section exists because "it should work" and "it worked, here is what it printed" are
+different claims. Everything below was executed on this reference box in one sitting, on a
+freshly booted `Frida_Test_API34`, using **only** the commands documented above — no extra
+scripts, no hand-built bridges, no edited configuration. Where something refused to work, it
+is recorded as a defect rather than smoothed over.
+
+### The setup that was actually in place
+
+Windows hosted the emulator; WSL2 held the repo. The bridge between them is the project's own,
+not something invented for the test:
+
+- `~/.local/bin/adb` is a small wrapper that shells out to the **Windows** `adb.exe`. This
+  matters because the Windows ADB server owns the emulator's transport, and a WSL2 process
+  cannot reach a server bound only to the Windows `127.0.0.1`. Without this shim `adb devices`
+  in WSL2 prints an empty list and every dynamic stage fails at its first step.
+- `scripts/emulator_up.sh` puts the plain `:8080` proxy in place, and `run.sh` starts the
+  Frida relay (`172.22.32.1:27043`) because `frida.get_usb_device()` cannot enumerate a
+  Windows-hosted emulator from inside WSL2.
+
+`bash run.sh --check-only` is the single gate that proves all of that at once. It passed every
+check:
+
+```
+git          clean (8a9ab9a)
+device       emulator-5554  userdebug, debuggable
+frida        client 16.7.19 (locked)
+frida-server 16.7.19 on device
+listen       0.0.0.0:27042
+forward      27044 -> 27042
+relay        OK (172.22.32.1:27043)
+```
+
+If any one of those is not ✅, stop there. A dynamic run started on a broken relay produces a
+timeout whose message blames the target, not the wiring.
+
+### What each command did, and what it printed
+
+| Command | Verdict | The evidence |
+|---|---|---|
+| `run --apk APK_Test/UnCrackable-Level1.apk --justification ACADEMIC_TRAINING_TARGET` | ✅ | 15/15 stages `success`. `Decision: ROOT_ONLY`; root **1.00 → DETECTED** with 13 signatures cited to file and line (e.g. `root_su_via_path_env_check` at `sg/vantagepoint/a/c.java:10`); SSL **0.00 → Inconclusive**, correctly bounded by `java=partial`. Dynamic stage `61898ms`, `Root bypassed: True`, `hooks_installed: all three hooked`. Report written to `outputs/reports/1da8bf57…/4de2175f….md`. |
+| `verify-device` | ✅ | `device present`, `1080x2340`, `FRIDA_OK connected, 121 process(es)`. |
+| `calibration-report` | ✅ | Tier 1 root **1.00 (122 observations)**, SSL **1.00 (10)**. Tier 2 precision/recall/F1 **1.00** on n=7 root and n=4 SSL. Report: `outputs/reports/calibration/20261024T020941Z.md`. The report prints its own caveat ("skeleton, not statistically robust") and names the one known miss. |
+| `regen-reports --dry-run` | ✅ | `would regenerate 591 report(s); 6 refused (unreproducible — left exactly as they are); 0 failed`. |
+| `recover` | ✅ | `http_proxy none`, `adb reverse none`, `windows mitmdump stopped`. |
+| `verify-audit-log` | ❌ *(honest failure)* | `FAILED — audit_log.jsonl.20261020T154830Z line 185: prev_hash forks the chain`. See defect 3. |
+| `ai-bypass` without `AI_ALLOW_AUTHORIZED_TARGET=1` | ✅ *(refused, as designed)* | `REFUSED: set AI_ALLOW_AUTHORIZED_TARGET=1…` |
+| `ai-bypass --justification hello` | ✅ *(refused, as designed)* | `REFUSED: --justification must start with one of ['ACADEMIC_TRAINING_TARGET', 'AUTHORIZED_ENGAGEMENT', 'CTF', 'OWN_APP']` |
+| `ai-bypass --apk APK_Test/UnCrackable-Level1.apk --action ROOT_ONLY` | ✅ | Converged in **1 iteration**, `hook_loaded=9; hook_skipped=2; hook_errors=0`, with one printed line per hook. |
+| unit suite (`uv run pytest tests/unit`) | ✅ | **2,564 collected, 2,562 passed, 2 skipped, 0 failed** in 56s. (An earlier reading in this session said 2,530 collected / 2,528 passed - that was the broken-venv figure, defect 4.) |
+
+Two honest notes on those numbers. First, the Run ID `4de2175f…` line in the report is the
+authoritative artefact — a rerun produces a different ID, so cite the directory, not the ID.
+Second, `passed` sits two below `collected` because two tests skip on a machine without an attached device - and, as defect 4 shows, `collected` is only trustworthy when every declared dependency is actually importable.
+
+The report from UnCrackable-1 also carried a warning the platform chose to print rather than
+hide:
+
+```
+⚠ App UI stuck (ANR/frozen) despite the bypass
+```
+
+The hooks all fired and the root check was defeated, but the app then failed to draw. The
+report says so, quotes the logcat evidence, and describes the app as "not usable" — instead of
+reporting a clean bypass because the process was still alive. That is the intended behaviour,
+and it is the same bug class the AI layer's success classifier was fixed for (an artefact
+surviving is not an artefact working).
+
+### Issues found, and what was done about them
+
+**1. `ai-bypass` refused to run on a machine whose `.env` was populated — fixed.**
+
+The documented flow is: put your key in `.env`, run `ai-bypass`. On this box it printed
+`AI_API_KEY is not set` even though `.env` held a valid key. Two separate faults combined:
+
+- `_load_dotenv_file` parsed the project `.env` and then discarded most of it, because the
+  allowlist it filtered against (`_CLI_ENV_VARS`) listed only the `ANTHROPIC_*`/`CLAUDE_*`
+  variables. `AI_API_KEY`, `AI_BASE_URL` and `AI_MODEL` were read and thrown away.
+- `ChatClient.from_env` used `_env()` — process environment only — while the other backend used
+  `_resolve_env()`, which falls back to `.env`. So the two backends disagreed about where
+  configuration lives, and the one the docs point at was the one that ignored `.env`.
+
+Fixed by adding the three variables to the allowlist and switching `from_env` to `_resolve_env`.
+An explicitly exported shell variable still wins; `.env` is only the fallback, which is what a
+`.env` is for. `test_get_client_requires_key` was rewritten to isolate itself from any `.env`
+(it now runs from an empty temp directory), because "requires a key" must mean *no key
+anywhere*, not *no key in the process environment*.
+
+**2. A failed dynamic stage gave the repair loop no diagnosis — fixed.**
+
+`ai-bypass` on UnCrackable-Level2 burned two iterations producing byte-identical scripts
+(5,372 characters each) and then gave up. The cause was one line: the failed branch built its
+feedback with `notes = "stage_status=failed"` and dropped `result.error`. The model was told
+"that failed" with no reason, so it had nothing to revise and re-emitted the same script.
+
+Fixed by carrying the stage's error text into the feedback (plus the fact that N hooks had
+already loaded, which tells the model the fault is *after* hook installation). The same run now
+reports the true cause in one line:
+
+```
+error=app self-terminated due to detected instrumentation (FR-4.6); hook_loaded=7 before failure
+```
+
+That is the correct answer for UnCrackable-Level2 — it detects instrumentation and exits — and
+the loop now correctly refuses to call it convergence instead of silently looping. Two
+regression tests pin both branches.
+
+**3. `verify-audit-log` failed on a rotated archive with no next step — fixed.**
+
+`outputs/audit_log.jsonl.20261020T154830Z` line 185 has a `prev_hash` that belongs to line 181.
+That is a genuine concurrent-write fork: two appends read the same stale tail.
+
+It is **not** live. The current log verifies clean (143 records, 0 forks), and the code has
+carried the `fcntl.flock` + "read the tail *inside* the lock" fix since 2026-10-18 — two days
+before that archive was written, which makes the archive a pre-fix artefact rather than
+evidence of a current race. Two concurrency probes confirm it: 6 processes × 40 appends
+produced 240 records and **0 forks**, and 25 rounds × 4 processes on a fresh log produced
+**0 failures**.
+
+The real defect was that the command printed `FAILED` and stopped. The next person sees a
+failure on a historical file and has no way to tell pre-fix history from live corruption, and
+no idea what to do. `_print_fork_guidance` now fires when every error is a fork, and prints
+what a fork means, which rotated archives sit beside the log, how to tell an archive-confined
+fork from an active-log one, and the one thing not to do — edit the archived record or
+re-derive its hashes, because a rewritten chain is worth less than a chain with a documented
+break. **The failure itself is unchanged**: the exit code stays non-zero and no record is
+tolerated. Only the dead end was removed.
+
+**4. `capstone` was installed as metadata only, and 32 tests vanished silently — fixed.**
+
+CI reported `ledger records 2528 tests, the suite collects 2562`. That gap was not a stale
+number: the suite on this box genuinely collected **2,530** while CI collected **2,562**. The
+difference was `tests/unit/test_native_body_sweep.py`, which opens with
+`pytest.importorskip("capstone")` — and on this box `import capstone` raised
+`ModuleNotFoundError`.
+
+The cause was a half-installed wheel. `capstone-5.0.9.dist-info` was present and listed all 58
+of its files in `RECORD`, and **none of those files were on disk** — no `capstone/` package
+directory, no `libcapstone.so`. `uv sync --locked` could not repair it because it does not
+look at the filesystem: the dist-info is its proof that a package is installed, so it reported
+*Checked 73 packages* and exited 0. `uv pip list` also showed `capstone 5.0.9` quite happily.
+
+The dangerous part is what the skip cost. `importorskip` is the right tool for an optional
+dependency, but it made a **broken environment indistinguishable from a machine that
+legitimately lacks the library**: 32 tests collected as nothing, the suite still reported green,
+and every count derived from it — the ledger's measurement, this README, the calibration
+narrative — was quietly 32 tests short. A skip is invisible by design, and that is exactly why
+nobody noticed.
+
+Fixed two ways:
+
+- `uv pip install --force-reinstall --no-deps "capstone>=5.0.9"` repaired the environment.
+  Collection went 2,530 → 2,564 (+32 recovered, +2 the new AI regression tests).
+- `scripts/check_environment.py` no longer trusts `uv sync`'s exit code. It now reads
+  `pyproject.toml`, maps each declared distribution to its import name (including the
+  non-obvious ones — `pyyaml`→`yaml`, `pyelftools`→`elftools`), and actually imports all
+  eleven. A metadata-only install is now a named failure with the fix in the message, next to
+  the command that would have hidden it.
+
+`uv`'s behaviour here is worth knowing about generally: `uv sync` converging is a statement
+about the lockfile, not about what is importable.
+
+### The capture stage — run live, three targets, all honest
+
+`--capture-traffic` was exercised for real on this box (it had not been, before this session).
+The mitmproxy leg itself works: the stage launched `mitmdump.exe` on the Windows host, routed
+the device through it, ran its 60-70 second window, and exited cleanly each time. What varied
+was whether the *app* made a request — and the platform reported each outcome with its own
+recorded reason rather than a fabricated flow list:
+
+| Target | Capture result | The recorded reason |
+|---|---|---|
+| `AndroGoat.apk` | `SKIPPED capture-traffic (71371ms)` | *"app did not exercise its network/SSL path (no in-process SSL signal … 0 bypassEffect and no pinned-connection hook fired for a host; interactive capture needed) — not a proxy failure"*. Matches recipe C's documented behaviour exactly: AndroGoat makes no request until a screen is tapped. |
+| `jerboa` (`--force-dynamic`) | `SKIPPED capture-traffic (72602ms)` | Same classification. Jerboa is a Lemmy client with no instance configured, so it renders a blank shell and fetches nothing. |
+| `RS_CertPinning.apk` | `SKIPPED capture-traffic` | A *different and sharper* reason: this app has a network path outside the Java stack (WebView / Chromium's own TLS), so the in-process observers' silence is **uninformative** — the run "cannot say the app did not exercise its network/SSL path; the empty capture is evidence neither way". Cites ADR-0006. |
+
+That third case is the most interesting result of the session. The platform did not report
+"no traffic" — it reported that its own instrumentation **cannot see** that app's TLS stack,
+and therefore has no opinion. That is a coverage bound being enforced at the reporting layer,
+not a pass or a fail dressed up as one.
+
+So the honest status of capture is: **the stage is verified working, the positive decrypt is
+not reproduced in this session.** The documented `TRAFFIC DECRYPTED (4 flows)` for jerboa
+(section above) required a configured instance; with none, there is nothing to decrypt.
+Producing a real `flows=N` needs either an interactive target tapped through during the window,
+or jerboa pointed at a live Lemmy instance first. Until then, treat "decrypts real traffic" as
+documented-but-now-unreproduced, and treat "reports the absence honestly" as verified three
+times over.
 
 ## Workflow modes at a glance
 

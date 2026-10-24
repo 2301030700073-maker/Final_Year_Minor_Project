@@ -4659,6 +4659,36 @@ def _audit_log_absent_reason(log_path: Path) -> str | None:
     return f"the audit log at {log_path} is empty - nothing was verified."
 
 
+FORK_MARKER = "prev_hash forks the chain"
+
+
+def _print_fork_guidance(log_path: Path) -> None:
+    """Explain a fork and name the two legitimate responses.
+
+    A fork means a record chained onto an earlier record's hash instead of the
+    on-disk tail - the signature of two appends that both read a stale tail. The
+    current writer reads the tail inside an flock (see attestation.py), so this
+    shape should no longer be produced; a fork found today therefore almost always
+    sits in a rotated archive written before that fix. That distinction is exactly
+    what the operator cannot infer from the error line, which is why it is printed.
+    """
+    archives = sorted(p.name for p in log_path.parent.glob(log_path.name + ".*"))
+    console.print()
+    console.print("[yellow]What this means:[/yellow] two appends read the same tail and "
+                  "both chained from it. The active writer now reads the tail inside "
+                  "an exclusive lock, so new records should not fork.")
+    if archives:
+        console.print(f"[yellow]Rotated archives alongside this log:[/yellow] "
+                      f"{', '.join(archives)}")
+    console.print("[yellow]What to check:[/yellow] whether the fork is in the ACTIVE "
+                  f"log ([bold]{log_path.name}[/bold]) or in a rotated archive. A fork "
+                  "confined to an archive is a pre-fix artefact, not live corruption - "
+                  "verify by re-running this command after moving that archive aside.")
+    console.print("[yellow]What not to do:[/yellow] do not edit the archived record or "
+                  "re-derive its hashes to make the check pass. A chain that has been "
+                  "rewritten is worth less than a chain with a documented break.")
+
+
 @app.command("verify-audit-log")
 def verify_audit_log_cmd(
     audit_log: Optional[Path] = typer.Option(
@@ -4704,6 +4734,12 @@ def verify_audit_log_cmd(
         console.print("[bold red]Audit log integrity FAILED:[/bold red]")
         for err in result["errors"]:
             console.print(f"  [red]{err}[/red]")
+        # A fork is the one failure whose cause is not visible in the message: a
+        # reader cannot tell a pre-fix archive from live corruption, and has no
+        # idea what to do next. Name both, without softening the failure - the
+        # exit code stays non-zero either way.
+        if all(FORK_MARKER in e for e in result["errors"]):
+            _print_fork_guidance(log_path)
     else:
         console.print(
             f"[green]Audit log OK[/green] - {result['total']} record(s), "

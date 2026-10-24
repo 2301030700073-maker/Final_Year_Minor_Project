@@ -192,6 +192,56 @@ print("\n[2/6] Python dependencies")
 r = run(["uv", "sync"])
 check("uv sync", r and r.returncode == 0)
 
+# `uv sync` exiting 0 does NOT mean the packages are importable. Measured
+# 2026-10-24 on this box: capstone-5.0.9.dist-info was present with all 58 files
+# in its RECORD absent from disk, and `uv sync --locked` reported "Checked 73
+# packages" and exited 0 - uv treats the dist-info as proof of installation. The
+# cost was invisible: tests/unit/test_native_body_sweep.py guards with
+# pytest.importorskip("capstone"), so 32 tests silently collected as nothing and
+# the ledger's suite count read 2,530 against CI's 2,562. Import each declared
+# dependency by its real module name, so a metadata-only install is a named
+# failure here instead of a shrunken suite somewhere else.
+_IMPORT_NAMES = {
+    "pyyaml": "yaml",
+    "pyaxmlparser": "pyaxmlparser",
+    "sqlalchemy": "sqlalchemy",
+    "pyelftools": "elftools",
+}
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
+    tomllib = None
+
+_declared = []
+if tomllib is not None:
+    with open(Path(__file__).resolve().parents[1] / "pyproject.toml", "rb") as _fh:
+        _declared = tomllib.load(_fh).get("project", {}).get("dependencies", [])
+
+_import_ok = True
+for _req in _declared:
+    _dist = re.split(r"[<>=!~\[; ]", _req.strip(), maxsplit=1)[0].strip()
+    if not _dist:
+        continue
+    _mod = _IMPORT_NAMES.get(_dist.lower(), _dist.replace("-", "_"))
+    _probe = run(["uv", "run", "python", "-c", f"import {_mod}"])
+    _ok = bool(_probe and _probe.returncode == 0)
+    _import_ok = _import_ok and _ok
+    if _ok:
+        check(f"import {_mod}", True, _dist)
+    else:
+        check(
+            f"import {_mod}", False,
+            f"{_dist} - metadata present but files missing? "
+            f"try: uv pip install --force-reinstall --no-deps {_dist}",
+        )
+
+if not _import_ok:
+    # A dependency that cannot be imported is not a warning: the tests that need
+    # it importorskip away, so the suite silently shrinks and every count taken
+    # from it is wrong. Say so where the remedy is obvious.
+    print("\n  ! a declared dependency is not importable - the suite will silently")
+    print("    skip the tests that need it, so any count taken from it is wrong.")
+
 # ── 3. Android toolchain ──────────────────────
 print("\n[3/6] Android toolchain")
 

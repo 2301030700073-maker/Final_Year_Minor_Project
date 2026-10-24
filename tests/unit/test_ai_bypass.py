@@ -133,8 +133,48 @@ def calls_count(client):
     return len(client.calls)
 
 
-def test_get_client_requires_key(monkeypatch):
+def test_classify_failed_carries_stage_error_into_feedback():
+    """A failed stage must tell the model WHY it failed.
+
+    Regression: notes was the bare string "stage_status=failed", so result.error
+    - the only place the attach/hook/timeout cause is recorded - never reached the
+    revision prompt. The model therefore had nothing to act on and re-emitted an
+    identical script (observed on UnCrackable-2: two iterations, 5372 chars each,
+    5 hooks loaded, status=failed both times).
+    """
+    from types import SimpleNamespace
+
+    result = SimpleNamespace(
+        status="failed",
+        error="frida attach timed out after 120s",
+        evidence={"frida_messages": [
+            {"type": "send", "payload": {"type": "hook_loaded", "name": "x"}},
+        ]},
+    )
+    fb = classify_dynamic_run_once(result)
+    assert fb.ok is False
+    assert "frida attach timed out after 120s" in fb.notes
+    assert "hook_loaded=1" in fb.notes
+
+
+def test_classify_failed_without_error_still_notes_status():
+    from types import SimpleNamespace
+
+    result = SimpleNamespace(status="failed", error=None,
+                             evidence={"frida_messages": []})
+    fb = classify_dynamic_run_once(result)
+    assert fb.ok is False
+    assert fb.notes == "stage_status=failed"
+
+
+def test_get_client_requires_key(monkeypatch, tmp_path):
+    # "Requires a key" must mean no key ANYWHERE. The http backend now
+    # consults the project .env as a fallback (matching the claude-cli
+    # backend), so deleting the env var alone no longer models the
+    # no-configuration host - run from a directory with no .env in it.
     monkeypatch.delenv("AI_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("ai.client._find_project_env", lambda: {})
     try:
         get_client()
         assert False, "expected RuntimeError without AI_API_KEY"

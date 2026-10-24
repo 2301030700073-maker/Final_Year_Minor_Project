@@ -54,6 +54,13 @@ _CLI_ENV_VARS = (
     "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT",
     "CLAUDE_BIN",
     "CLAUDE_ALLOWED_TOOLS",
+    # The http backend's own provider config. Without these three the parser
+    # read them and then dropped them on the allowlist filter, so `ai-bypass`
+    # refused with "AI_API_KEY is not set" on a host whose .env was populated:
+    # the documented flow could not work from a clean non-interactive launch.
+    "AI_API_KEY",
+    "AI_BASE_URL",
+    "AI_MODEL",
 )
 
 
@@ -143,9 +150,15 @@ class ChatClient:
 
     @classmethod
     def from_env(cls, timeout: float = 120.0) -> "ChatClient":
-        base_url = _env("AI_BASE_URL")
-        api_key = _env("AI_API_KEY")
-        model = _env("AI_MODEL", DEFAULT_MODEL)
+        # _resolve_env, not _env: an explicitly exported shell var still wins,
+        # but the project .env is consulted as a fallback. The claude-cli backend
+        # already worked this way (_resolve_env for CLAUDE_BIN/CLAUDE_ALLOWED_TOOLS),
+        # so the http backend silently ignoring the very .env the project ships was
+        # an inconsistency: the documented `ai-bypass` flow refused with
+        # "AI_API_KEY is not set" on a host whose .env had a valid key.
+        base_url = _resolve_env("AI_BASE_URL")
+        api_key = _resolve_env("AI_API_KEY")
+        model = _resolve_env("AI_MODEL", DEFAULT_MODEL)
         if not api_key:
             raise RuntimeError(
                 "AI_API_KEY is not set. Export AI_API_KEY (and, if your provider "

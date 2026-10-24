@@ -113,7 +113,21 @@ def classify_dynamic_run_once(result) -> RunFeedback:
         notes = "stage_status=skipped (dynamic stage did not run)"
     elif status == "failed":
         ok = False
+        # Carry the stage's own error text into the feedback. Without it the
+        # revision prompt contained no diagnosis at all ("stage_status=failed"
+        # only), so the model had nothing to act on and re-emitted the same
+        # script: two identical iterations, 5372 chars each, on UnCrackable-2.
+        # The exception message is the ONLY channel that says why the stage
+        # died (attach failure, device gone, hook crash, timeout).
+        err = getattr(result, "error", None)
         notes = "stage_status=failed"
+        if err:
+            notes += f"; error={err}"
+        if hook_loaded:
+            notes += (
+                f"; hook_loaded={len(hook_loaded)} before failure "
+                "(the hooks installed, so the fault is after installation)"
+            )
     else:
         ok = (len(hook_loaded) >= 1) and (len(hook_errors) == 0)
         notes = (
@@ -121,6 +135,44 @@ def classify_dynamic_run_once(result) -> RunFeedback:
             f"hook_skipped={len(hook_skipped)}; hook_errors={len(hook_errors)}"
         )
     return RunFeedback(ok=ok, messages=[str(m) for m in msgs], notes=notes)
+
+
+def _describe_hook_message(raw) -> tuple[str | None, str]:
+    """Render one Frida message from ``RunFeedback.messages`` as (kind, label).
+
+    ``messages`` are stringified dicts (see classify_dynamic_run_once), so this
+    parses them back rather than re-reading the stage. Anything that is not a
+    recognisable hook event returns (None, "") and is skipped by the caller -
+    the raw envelope ``{type:'error'}`` case is rendered as a FAILED line
+    instead, because a crashed hook is exactly what an operator needs to see.
+    """
+    import ast
+
+    try:
+        msg = ast.literal_eval(raw) if isinstance(raw, str) else raw
+    except (ValueError, SyntaxError):
+        return None, ""
+    if not isinstance(msg, dict):
+        return None, ""
+
+    if msg.get("type") == "error":
+        return "FAILED", str(msg.get("stack") or msg.get("description") or msg)[:160]
+
+    payload = msg.get("payload")
+    if not isinstance(payload, dict):
+        return None, ""
+
+    kind = payload.get("type")
+    name = str(payload.get("name") or "")
+    if kind == "hook_loaded":
+        return "LOADED", name
+    if kind == "hook_skipped":
+        reason = payload.get("reason") or "not present on device"
+        return "SKIPPED", f"{name}  ({reason})"
+    if kind in ("hook_error", "script_error"):
+        detail = payload.get("error") or payload.get("message") or ""
+        return "ERROR", f"{name}  ({str(detail)[:140]})"
+    return None, ""
 
 
 RunOnce = Callable[[str, list[str]], RunFeedback]
@@ -227,6 +279,15 @@ def repair_loop(
             f"  feedback: ok={feedback.ok}; messages={len(feedback.messages)}; "
             f"notes={feedback.notes}"
         )
+        # Per-hook detail, one line each. A summary count ("hook_loaded=7; "
+        # hook_errors=1") tells an operator a number but not WHICH hook failed,
+        # so a hand-run could not be read back against the device log. Printed
+        # from the same Frida stream the classifier reads, so the lines shown
+        # and the verdict reached cannot disagree.
+        for _m in feedback.messages:
+            _kind, _label = _describe_hook_message(_m)
+            if _kind is not None:
+                echo(f"      {_kind:12s} {_label}")
         if feedback.ok:
             result.converged = True
             result.script = current.script

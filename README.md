@@ -491,6 +491,267 @@ also export `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1`, and make s
 `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` for that gateway are present in the
 shell that launches it.
 
+## Fresh-start argument walkthrough — every flag, one continuous run
+
+This is the single "boot a cold machine and drive the whole platform" path. It
+uses **only** the project's own CLI arguments (no bespoke scripts) and the APKs
+that ship in the repo (`APK_Test/UnCrackable-Level1.apk` … `Level3.apk`). Every
+argument of every command is named here with its default and a real-world
+invocation. The companion section `## Verified on review day` is the transcript
+of this exact walkthrough executed end-to-end — read that after this to see what
+each step printed.
+
+> Invocation style: every command runs from the **WSL2 Ubuntu** terminal (the
+> repo, `uv`, and `adb` live there). Windows only boots the emulator. The bare
+> command form is `PYTHONPATH=src uv run python -m cli <command> …`; `bash
+> run.sh` is a thin convenience wrapper around the same pipeline (its own flags
+> are listed at the end of this section).
+
+---
+
+### Step 0 — Verify the documented setup (cold boot gate)
+
+```bash
+bash run.sh --check-only
+```
+
+`run.sh` flags used here:
+- `--check-only` — run the environment preflight **only**; do not install the APK or run the pipeline.
+- (siblings, not used here) `--skip-pipeline` (set up the environment but skip the run) and `--target uncrackable1|2|3` (select which reference APK the wrapper will install/analyse — default `uncrackable1`).
+- Two env overrides, only when your host differs from the reference box:
+  `FRIDA_RELAY_WIN_PATH='C:\Users\me\AppData\Local\Temp\frida_relay.py'` and
+  `WIN_HOST_IP=172.20.0.1`.
+
+A clean `--check-only` prints `git clean`, `device emulator-5554 userdebug,
+debuggable`, `frida client 16.x (locked)`, `frida-server 16.x on device`,
+`listen 0.0.0.0:27042`, `forward 27044 -> 27042`, and `relay OK`. If any line is
+not ✅, stop — a dynamic run on broken wiring times out blaming the target, not
+the bridge.
+
+---
+
+### Step 1 — Static analysis only (no device, root, or frida needed)
+
+```bash
+PYTHONPATH=src uv run python -m cli run \
+  --apk APK_Test/UnCrackable-Level1.apk \
+  --target owasp.mstg.uncrackable1 \
+  --justification ACADEMIC_TRAINING_TARGET \
+  --skip-dynamic
+```
+
+`run` arguments exercised:
+- `--apk` (**required**, path must exist) — the APK under analysis.
+- `--target` (optional, auto-derived from the APK's manifest package when omitted) — selects the Frida success-check/bypass module. `owasp.mstg.uncrackable1` is one of the known reference apps; any other package routes to the synthesized-bypass path and still runs the full pipeline.
+- `--justification` (**required**, audited) — authorization context written to the append-only audit log. Accepted forms: `OWN_APP` | `CTF` | `AUTHORIZED_ENGAGEMENT:<id>` | `ACADEMIC_TRAINING_TARGET`.
+- `--skip-dynamic` (default `False`) — run the static pipeline only; skip the on-device dynamic stage.
+
+Expected: stages run through `decision_engine`, prints `Decision: ROOT_ONLY`, then **stops before `dynamic`** — verdict tier `deterministic_matched` (static match, not dynamically confirmed).
+
+---
+
+### Step 2 — Static + dynamic bypass (the default full run)
+
+```bash
+PYTHONPATH=src uv run python -m cli run \
+  --apk APK_Test/UnCrackable-Level1.apk \
+  --target owasp.mstg.uncrackable1 \
+  --justification ACADEMIC_TRAINING_TARGET
+```
+
+Same arguments as Step 1 **without** `--skip-dynamic`. Additional `run` arguments now in play (all at their defaults):
+- `--force-dynamic` (default `False`) — operator override (ADR-0005): deploy the universal root+SSL bypass even on a `NEITHER` target that would normally skip the dynamic stage (for coverage-limited misses such as RN/Hermes root checks). **No-op** when a category was already detected; **rejected** together with `--skip-dynamic`.
+- `--debug` (default `False`) — emit ordered `[TRACE]` markers at each pipeline stage to stderr (and `$FYMP_TRACE_FILE` if set) so a run can be replayed step by step. Never changes a verdict.
+- `--device` (default `None` → first online device) — pin a specific emulator/device serial.
+
+Expected: `Decision: ROOT_ONLY`, then `OK dynamic (…ms)`; the three UnCrackable root hooks fire → `bypassed=True`, promoting root from `deterministic_matched` to `dynamically_confirmed`. Report written to `outputs/reports/<apk_sha256>/<run_id>.md`.
+
+---
+
+### Step 3 — Live traffic capture (real SSL-bypass proof)
+
+```bash
+PYTHONPATH=src uv run python -m cli run \
+  --apk APK_Test/AndroGoat.apk \
+  --target owasp.sat.agoat \
+  --justification ACADEMIC_TRAINING_TARGET \
+  --capture-traffic
+```
+
+New `run` argument:
+- `--capture-traffic` (default `False`) — opt-in mitmproxy stage: route the target app through `mitmdump`, decrypt its TLS, and record the captured flows in the report as SSL-bypass evidence. `mitmproxy`/`mitmdump.exe` must be installed on the **Windows host**. With `--skip-dynamic` (or an action that never attempts an SSL bypass) it runs as an **un-hooked cold-start** window instead.
+- `--drive-ui` / `--no-drive-ui` (default `True`, only meaningful with `--capture-traffic`) — make at most **one** deterministic tap, read from the device's live UI hierarchy (never stored coordinates), so a button-gated pinned request can be exercised inside the window. Pass `--no-drive-ui` to tap through the app yourself. It refuses an ambiguous target rather than guessing.
+
+Expected: `Decision: BOTH` (AndroGoat has both a 14-path root check and a real `CertificatePinner`); the capture stage decrypts and records flows as evidence. **An empty capture is a possible, honestly-reported outcome** for interactive apps — AndroGoat makes no network request until a screen is tapped, and the single automatic tap is not a walkthrough. The report prints the recorded reason (route probe UP / 0 client connections / pinned request observed) and never fabricates a flow list.
+
+Forced-bypass variant on a real app whose root checks live in a Hermes bundle the signature engine can't attribute (PropertyGuru):
+
+```bash
+PYTHONPATH=src uv run python -m cli run \
+  --apk APK_Test/propertyguru-2026-5-4.apk \
+  --target com.allproperty.android.consumer.my \
+  --justification AUTHORIZED_ENGAGEMENT:pentest-2026 \
+  --force-dynamic --capture-traffic
+```
+
+Static root stays `0.20`/`NEITHER` (a documented false negative, unchanged by the flag); `--force-dynamic` deploys the bypass anyway; SSL is confirmed only on a real pin-check + handshake over the capture proxy, else reported honestly as `UNVERIFIED`.
+
+---
+
+### Step 4 — Use the AI augmentation layer
+
+```bash
+AI_ALLOW_AUTHORIZED_TARGET=1 \
+PYTHONPATH=src uv run python -m cli ai-bypass \
+  --apk APK_Test/UnCrackable-Level1.apk \
+  --action ROOT_ONLY \
+  --justification ACADEMIC_TRAINING_TARGET \
+  --max-iter 5
+```
+
+The `ai-bypass` command is **authorization-gated**: it refuses to run unless the
+environment variable `AI_ALLOW_AUTHORIZED_TARGET=1` is set **and** a valid
+`--justification` is supplied. Every `ai-bypass` argument:
+- `--package` (default `""`) — target package name; optional when `--apk` is given (derived from the APK).
+- `--decompile-dir` (default `""`) — root of an already-decompiled app (jadx/smali/cfr); omit and pass `--apk` to decompile from scratch.
+- `--apk` (default `""`) — APK path; decompile from scratch and derive `--package` automatically (the "use AI from scratch" path).
+- `--device` (default `""` → first online device) — emulator/device serial.
+- `--action` (default `BOTH`) — `ROOT_ONLY` | `SSL_ONLY` | `BOTH`.
+- `--justification` (**required**) — `OWN_APP` | `CTF` | `AUTHORIZED_ENGAGEMENT` | `ACADEMIC_TRAINING_TARGET` (optionally followed by a note).
+- `--max-iter` (default `5`) — max generate → run → revise iterations.
+- `--verify-traffic` (default `False`) — after convergence, run the capture stage with the generated script to **prove** the app's real traffic decrypts (the full bypass), reporting honestly when it does not (pinning not bypassed / app-silent / WebView TLS).
+
+Refusal is part of the design — both of these print a clear `REFUSED:` and exit non-zero:
+- `ai-bypass` with no `AI_ALLOW_AUTHORIZED_TARGET=1` → `REFUSED: set AI_ALLOW_AUTHORIZED_TARGET=1 …`
+- `ai-bypass --justification hello` → `REFUSED: --justification must start with one of […]` (BOTH)
+
+---
+
+### Step 5 — Preflight the device before a dynamic scan
+
+```bash
+PYTHONPATH=src uv run python -m cli verify-device
+# or, pinned to a serial:
+PYTHONPATH=src uv run python -m cli verify-device --device emulator-5554
+```
+
+`verify-device` argument:
+- `--device` (default `emulator-5554`) — device/emulator serial to preflight (device present, resolution, Frida connected).
+
+---
+
+### Step 6 — Calibration report (over already-audited history)
+
+```bash
+PYTHONPATH=src uv run python -m cli calibration-report
+# point at a different registry:
+PYTHONPATH=src uv run python -m cli calibration-report --ground-truth config/ground_truth.yaml
+```
+
+`calibration-report` argument:
+- `--ground-truth` (default `config/ground_truth.yaml`) — path to the independently-sourced ground-truth registry used for precision/recall/F1 and the confidence-calibration curve.
+
+Note the requirement split: `calibration-report` takes **no** `--justification` (it only reads already-audited history), whereas `run` **requires** `--justification` and refuses to start without it (ADR-0005).
+
+---
+
+### Step 7 — Regenerate stored reports
+
+```bash
+PYTHONPATH=src uv run python -m cli regen-reports --justification ACADEMIC_TRAINING_TARGET
+# preview without writing:
+PYTHONPATH=src uv run python -m cli regen-reports --justification ACADEMIC_TRAINING_TARGET --dry-run
+# only rows whose recorded signature corpus is missing:
+PYTHONPATH=src uv run python -m cli regen-reports --justification ACADEMIC_TRAINING_TARGET --missing-corpus
+```
+
+`regen-reports` arguments:
+- `--justification` (**required**) — authorization for rewriting stored reports in bulk (must be `OWN_APP` | `CTF` | `ACADEMIC_TRAINING_TARGET` | `AUTHORIZED_ENGAGEMENT:<id>`).
+- `--dry-run` (default `False`) — render every selected report into a temporary tree and write no report file.
+- `--missing-corpus` (default `False`) — restrict the sweep to rows whose recorded signature corpus is `None` (a run rendered before ADR-0022); default sweeps every stored row.
+
+---
+
+### Step 8 — Recover / tear down the device proxy
+
+```bash
+PYTHONPATH=src uv run python -m cli recover
+# pinned serial / WSL2-inside-emulator restore:
+PYTHONPATH=src uv run python -m cli recover --device emulator-5554 --restore 27042
+```
+
+`recover` arguments:
+- `--device` (default `None` → first online device) — device/emulator to recover.
+- `--restore` (default `None`) — WSL2-inside-emulator only: point the device proxy back at the pass-through on this port instead of clearing it. Use when the emulator lives inside WSL2 with no direct NAT (clearing would leave the proxy dangling).
+
+---
+
+### Step 9 — Verify the audit log integrity
+
+```bash
+PYTHONPATH=src uv run python -m cli verify-audit-log
+# a specific log / accept a legacy (pre-hash-chain) log:
+PYTHONPATH=src uv run python -m cli verify-audit-log --audit-log outputs/audit_log.jsonl --allow-legacy
+```
+
+`verify-audit-log` arguments:
+- `--audit-log` (default `outputs/audit_log.jsonl`, resolved from the **project root**, not the CWD) — path to the audit log to verify. A missing/empty log is a **failure**, never an "OK — 0 records".
+- `--allow-legacy` (default `False`) — accept a log whose records **all** lack a hash chain (a genuinely pre-chain archive). A single forked record is still a failure.
+
+---
+
+### Step 10 — Re-attribute stored runs
+
+```bash
+PYTHONPATH=src uv run python -m cli re-attribute --justification ACADEMIC_TRAINING_TARGET
+# recompute every row, including ones that already carry attribution:
+PYTHONPATH=src uv run python -m cli re-attribute --justification ACADEMIC_TRAINING_TARGET --force
+```
+
+`re-attribute` arguments:
+- `--justification` (**required**) — authorization for mutating stored attribution (same accepted forms as `run`); required because it writes consumer-visible state and must be as traceable as the run that produced it.
+- `--force` (default `False`) — recompute attribution for **every** stored run, including rows that already carry it (default re-runs only fill rows still missing it).
+
+---
+
+### Complete argument reference
+
+| Command | Argument | Default | Required? | Purpose |
+|---|---|---|---|---|
+| `run` | `--apk` | — | ✅ | APK to analyze (must exist) |
+| `run` | `--justification` | — | ✅ | Auth context, written to audit log (`OWN_APP`\|`CTF`\|`AUTHORIZED_ENGAGEMENT:<id>`\|`ACADEMIC_TRAINING_TARGET`) |
+| `run` | `--skip-dynamic` | `False` | | Static-only; no device/frida |
+| `run` | `--capture-traffic` | `False` | | mitmproxy TLS capture stage (needs Windows `mitmdump.exe`) |
+| `run` | `--drive-ui`/`--no-drive-ui` | `True` | | One deterministic tap in capture window (only with `--capture-traffic`) |
+| `run` | `--force-dynamic` | `False` | | Deploy bypass on a `NEITHER` target; rejected with `--skip-dynamic`; no-op if already detected |
+| `run` | `--debug` | `False` | | Ordered `[TRACE]` markers per stage |
+| `run` | `--device` | `None` (first online) | | Pin device/emulator serial |
+| `run` | `--target` | `None` (auto from manifest) | | Success-check/bypass module package id |
+| `ai-bypass` | `--package` | `""` | | Target package (derived from `--apk` if omitted) |
+| `ai-bypass` | `--decompile-dir` | `""` | | Pre-decompiled app root |
+| `ai-bypass` | `--apk` | `""` | | APK to decompile from scratch |
+| `ai-bypass` | `--device` | `""` (first online) | | Device serial |
+| `ai-bypass` | `--action` | `BOTH` | | `ROOT_ONLY`\|`SSL_ONLY`\|`BOTH` |
+| `ai-bypass` | `--justification` | — | ✅ | Auth context (gated by `AI_ALLOW_AUTHORIZED_TARGET=1`) |
+| `ai-bypass` | `--max-iter` | `5` | | Max generate→run→revise iterations |
+| `ai-bypass` | `--verify-traffic` | `False` | | Prove real traffic decrypts post-convergence |
+| `verify-device` | `--device` | `emulator-5554` | | Serial to preflight |
+| `calibration-report` | `--ground-truth` | `config/ground_truth.yaml` | | Ground-truth registry path |
+| `regen-reports` | `--justification` | — | ✅ | Auth for bulk report rewrite |
+| `regen-reports` | `--dry-run` | `False` | | Render only, write nothing |
+| `regen-reports` | `--missing-corpus` | `False` | | Only rows with missing corpus |
+| `recover` | `--device` | `None` (first online) | | Serial to recover |
+| `recover` | `--restore` | `None` | | Restore proxy to port (WSL2-inside-emulator) |
+| `verify-audit-log` | `--audit-log` | `outputs/audit_log.jsonl` | | Log path (project root) |
+| `verify-audit-log` | `--allow-legacy` | `False` | | Accept pre-hash-chain log |
+| `re-attribute` | `--justification` | — | ✅ | Auth for mutating attribution |
+| `re-attribute` | `--force` | `False` | | Recompute all rows, not just missing |
+
+`run.sh` wrapper flags (not Typer options): `--check-only`, `--skip-pipeline`,
+`--target uncrackable1|2|3` (default `uncrackable1`), plus the env overrides
+`FRIDA_RELAY_WIN_PATH` and `WIN_HOST_IP`.
+
+
 ## Verified on review day — 2026-10-24
 
 This section exists because "it should work" and "it worked, here is what it printed" are
